@@ -1,0 +1,12 @@
+# Native addon build artifacts — ABI-specific, produced locally by install.sh / `npm run build:addon`.
+src/mouse-forward-back/build/
+src/mouse-forward-back/node_modules/
+node_modules/
+
+# vmd backup files (only ever created inside vmd's package dir, but guard anyway).
+*.vv.bak
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~

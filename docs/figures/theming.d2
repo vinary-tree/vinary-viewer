@@ -1,0 +1,22 @@
+# Theming: a CSS-variable palette decouples colors (theme files) from structure (style.css).
+# Colors: selection amber · injection amber · theme values green · structural css blue.
+direction: right
+
+sel: "Theme selection (first match wins)" {
+  style.fill: "#fdf3da"; style.stroke: "#b1951d"; style.font-color: "#7a6410"
+  env: "VV_THEME env var" { style.fill: "#fff8e8"; style.stroke: "#b1951d" }
+  cfg: "~/.config/vinary-viewer/theme" { style.fill: "#fff8e8"; style.stroke: "#b1951d" }
+  def: "default: spacemacs-dark" { style.fill: "#fff8e8"; style.stroke: "#b1951d" }
+}
+
+sb: "sidebar.js injectTheme()\nreads themes/<name>.css" { style.fill: "#fff8e8"; style.stroke: "#b1951d" }
+theme: "<style id=vv-theme>\n:root { --vv-bg1, --vv-head1, … }" { shape: page; style.fill: "#edf7f1"; style.stroke: "#2d9574" }
+css: "style.css (structural)\ncolor: var(--vv-head1) …" { shape: page; style.fill: "#eef6fb"; style.stroke: "#4f97d7" }
+paint: "Themed preview" { shape: oval; style.fill: "#e1f3ea"; style.stroke: "#2d9574" }
+
+sel.env -> sb: "1st"
+sel.cfg -> sb: "2nd"
+sel.def -> sb: "fallback"
+sb -> theme: "inject at top of <head>"
+theme -> paint: "defines the variables"
+css -> paint: "references the variables"

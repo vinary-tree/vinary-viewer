@@ -1,0 +1,21 @@
+{
+  "name": "vinary-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enhancements that turn the vmd Markdown previewer into a full reading environment: a git file-tree sidebar, Files/Contents tabs with a scroll-spy table of contents, an in-page find bar, automatic SVG figure font-matching, a dedicated image view, history navigation (keyboard + mouse thumb buttons), a file-search filter, and named color themes (Spacemacs dark/light).",
+  "keywords": ["vmd", "markdown", "preview", "electron", "sidebar", "table-of-contents", "theme", "spacemacs"],
+  "license": "Apache-2.0",
+  "author": "Vinary Tree",
+  "homepage": "https://github.com/vinary-tree/vinary-viewer#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/vinary-tree/vinary-viewer.git" },
+  "bugs": { "url": "https://github.com/vinary-tree/vinary-viewer/issues" },
+  "os": ["linux"],
+  "engines": { "node": ">=10" },
+  "scripts": {
+    "test": "node test/test-sidebar.js",
+    "lint": "node test/lint.js",
+    "check": "npm run lint && npm test",
+    "build:addon": "bash scripts/build-addon.sh",
+    "apply": "bash src/apply.sh"
+  }
+}

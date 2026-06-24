@@ -1,0 +1,18 @@
+# File-history navigation: four independent input paths converge on vmd's native history.
+# Colors: keyboard/standard paths blue · the native thumb-button path red · vv-owned plumbing amber/green.
+direction: down
+
+kbd: "Alt+Left / Alt+Right\n(menu accelerator)" { style.fill: "#eef6fb"; style.stroke: "#4f97d7" }
+appcmd: "OS app-command\nbrowser-backward / -forward" { style.fill: "#eef6fb"; style.stroke: "#4f97d7" }
+dommouse: "DOM mouse back/forward\n(button 3/4, where delivered)" { style.fill: "#eef6fb"; style.stroke: "#4f97d7" }
+thumb: "Mouse thumb buttons\nX11 buttons 8/9 (Electron 3 swallows)" { style.fill: "#f8dada"; style.stroke: "#e0211d"; style.font-color: "#8a1512" }
+
+ipc: "history-back / history-forward\nIPC → renderer" { shape: hexagon; style.fill: "#fff8e8"; style.stroke: "#b1951d" }
+hist: "vmd hist.back() / hist.forward()\n[vmd-hist] keeps history populated" { style.fill: "#edf7f1"; style.stroke: "#2d9574" }
+nav: "navigateTo → setFilePath\n→ re-render document" { style.fill: "#e1f3ea"; style.stroke: "#2d9574" }
+
+kbd -> ipc
+appcmd -> ipc: "[vmd-nav]"
+dommouse -> ipc: "sidebar.js"
+thumb -> ipc: "[vmd-mfb] native addon"
+ipc -> hist -> nav

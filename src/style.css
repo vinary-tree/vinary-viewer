@@ -1,0 +1,421 @@
+/* vinary-viewer — style.css (STRUCTURAL / theme-agnostic). Every color is a CSS custom property
+   (--vv-*) supplied by the active THEME in src/themes/<name>.css, which sidebar.js injects as
+   <style id="vv-theme"> (default: spacemacs-dark). This file never hardcodes a color — it only
+   references var(--vv-*). Add a theme by copying a theme file and changing values; select one with
+   the VV_THEME env var or ~/.config/vinary-viewer/theme. The palette every theme must define:
+     backgrounds  --vv-bg1 (page) · --vv-bg2 (panels/pre/zebra) · --vv-bg-code (inline code, hover) · --vv-bg-quote
+     text         --vv-fg (base) · --vv-fg-dim (muted) · --vv-fg-strong (on accents) · --vv-fg-inverse (on bright)
+     structure    --vv-border · --vv-highlight (selection / current item) · --vv-disabled
+     headings     --vv-head1 · --vv-head2 · --vv-head3 · --vv-head4 · --vv-meta
+     accents      --vv-const · --vv-func · --vv-em · --vv-var · --vv-comment · --vv-error · --vv-code
+     find         --vv-find-hit-bg · --vv-find-hit-fg · --vv-find-active-bg
+   §1–9 = Markdown/syntax chrome · §10–19 = layout & the sidebar/find/TOC/image-view features. */
+
+/* 1. Global reset — html/body AND vmd's .markdown-body container */
+html, body, .markdown-body {
+    background-color: var(--vv-bg1) !important; /* Spacemacs bg1 */
+    color: var(--vv-fg) !important;            /* Spacemacs base */
+    font-family: "Noto Sans", sans-serif !important;
+}
+
+/* Ensure all standard text elements inherit the soft foreground */
+.markdown-body p,
+.markdown-body li,
+.markdown-body div,
+.markdown-body span,
+.markdown-body td,
+.markdown-body th {
+    color: var(--vv-fg) !important; /* Spacemacs base */
+}
+
+/* 2. Headers — Spacemacs per-level palette (blue → teal → green → yellow → tan → muted) */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    border-bottom: 1px solid var(--vv-border) !important; /* Spacemacs border */
+    margin-top: 24px !important;
+    margin-bottom: 16px !important;
+}
+
+.markdown-body h1 { color: var(--vv-head1) !important; } /* Spacemacs head1 — blue */
+.markdown-body h2 { color: var(--vv-head2) !important; } /* Spacemacs head2 — teal */
+.markdown-body h3 { color: var(--vv-head3) !important; } /* Spacemacs head3 — green */
+.markdown-body h4 { color: var(--vv-head4) !important; } /* Spacemacs head4 — yellow */
+.markdown-body h5 { color: var(--vv-meta) !important; } /* Spacemacs meta — tan */
+.markdown-body h6 { color: var(--vv-fg-dim) !important; } /* Spacemacs base-dim */
+
+/* 3. Bold and Italics */
+.markdown-body strong {
+    color: var(--vv-const) !important; /* Spacemacs const — purple-magenta */
+}
+
+.markdown-body em {
+    color: var(--vv-em) !important; /* Spacemacs mat — bright green */
+}
+
+/* 4. Links */
+.markdown-body a {
+    color: var(--vv-head1) !important; /* Spacemacs keyword — blue */
+    text-decoration: underline;
+}
+
+/* 5. Code Blocks & Inline Code */
+.markdown-body code {
+    background-color: var(--vv-bg-code) !important; /* Spacemacs cblk-bg — slightly lighter than bg1 */
+    color: var(--vv-head4) !important;            /* Spacemacs head4 — yellow */
+    padding: 0.2em 0.4em !important;
+    border-radius: 3px !important;
+    font-family: "Fira Code Retina", monospace !important;
+}
+
+.markdown-body pre {
+    background-color: var(--vv-bg2) !important; /* Spacemacs bg2 — slightly darker than bg1 */
+    border: 1px solid var(--vv-border) !important; /* Spacemacs border */
+    padding: 16px !important;
+}
+
+.markdown-body pre code {
+    background-color: transparent !important;
+    color: var(--vv-code) !important;            /* Spacemacs cblk — code block default text */
+}
+
+/* 6. Blockquotes */
+.markdown-body blockquote {
+    border-left: 0.25em solid var(--vv-head2) !important; /* Spacemacs head2 — teal */
+    background-color: var(--vv-bg-quote) !important;         /* Spacemacs head2-bg */
+    color: var(--vv-fg) !important;                    /* Spacemacs base */
+    padding: 10px 20px !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+/* 7. Tables — clean borders and zebra striping */
+.markdown-body table tr {
+    background-color: var(--vv-bg1) !important;        /* Spacemacs bg1 */
+    border-top: 1px solid var(--vv-border) !important;    /* Spacemacs border */
+}
+
+.markdown-body table tr:nth-child(2n) {
+    background-color: var(--vv-bg2) !important;        /* Spacemacs bg2 — zebra */
+}
+
+.markdown-body table th,
+.markdown-body table td {
+    border: 1px solid var(--vv-border) !important;        /* Spacemacs border */
+    color: var(--vv-fg) !important;                   /* Spacemacs base */
+}
+
+/* 8. Spacemacs overrides for highlight.js (replaces bundled `github` theme) */
+.markdown-body .hljs {
+    background: var(--vv-bg2) !important;              /* matches pre bg (Spacemacs bg2) */
+    color: var(--vv-code) !important;                   /* Spacemacs cblk */
+}
+
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+    color: var(--vv-comment) !important;                   /* Spacemacs comment — teal */
+    font-style: italic;
+}
+
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-tag {
+    color: var(--vv-head1) !important;                   /* Spacemacs keyword — blue */
+}
+
+.markdown-body .hljs-name,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-selector-class,
+.markdown-body .hljs-selector-id {
+    color: var(--vv-func) !important;                   /* Spacemacs func — magenta */
+}
+
+.markdown-body .hljs-string,
+.markdown-body .hljs-doctag,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-template-tag {
+    color: var(--vv-head2) !important;                   /* Spacemacs str — teal-green */
+}
+
+.markdown-body .hljs-title,
+.markdown-body .hljs-section,
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-function .hljs-title {
+    color: var(--vv-func) !important;                   /* Spacemacs func — magenta */
+}
+
+.markdown-body .hljs-number,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet {
+    color: var(--vv-const) !important;                   /* Spacemacs const — purple */
+}
+
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-type,
+.markdown-body .hljs-class .hljs-title,
+.markdown-body .hljs-params {
+    color: var(--vv-var) !important;                   /* Spacemacs var — blue-purple */
+}
+
+.markdown-body .hljs-meta,
+.markdown-body .hljs-meta-keyword {
+    color: var(--vv-meta) !important;                   /* Spacemacs meta — tan */
+}
+
+.markdown-body .hljs-meta-string {
+    color: var(--vv-head2) !important;                   /* Spacemacs str */
+}
+
+.markdown-body .hljs-deletion {
+    color: var(--vv-error) !important;                   /* Spacemacs err — red */
+}
+
+.markdown-body .hljs-addition {
+    color: var(--vv-head3) !important;                   /* Spacemacs head3 — green */
+}
+
+.markdown-body .hljs-emphasis {
+    font-style: italic;
+}
+
+.markdown-body .hljs-strong {
+    font-weight: bold;
+}
+
+/* 9. UI Tweaks */
+::selection {
+    background: var(--vv-highlight) !important;              /* Spacemacs highlight — muted purple */
+    color: var(--vv-fg-strong) !important;
+}
+
+hr {
+    background-color: var(--vv-border) !important;        /* Spacemacs border */
+    height: 2px !important;
+    border: none !important;
+}
+
+/* 10. Full-width layout — fill the window with vmd's standard 45px side margins,
+   overriding vmd's default centered `max-width: 888px` column (hardcoded in the
+   package's renderer/vmd.html). This extra stylesheet is injected after that
+   default block, so it wins by source order; `!important` matches this file's
+   convention and removes all doubt. */
+.markdown-body {
+    max-width: none !important;   /* remove the 888px cap → content fills the window */
+    padding: 45px !important;     /* keep vmd's standard 45px gutter on all sides */
+}
+
+/* 11. Center figures horizontally at their natural size (do NOT resize them).
+   All committed figures are vector SVG embedded via Markdown image syntax
+   `![alt](figures/foo.svg)` → <img src="…svg">. vmd's github-markdown-css already
+   caps oversized images at max-width:100%, so we only center; we never stretch.
+   Emoji images (src "emoji://…", sized 20×20 inline by vmd) are excluded via
+   :not([src^="emoji"]) so inline emoji stay inline. */
+.markdown-body img:not([src^="emoji"]) {
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    height: auto !important;   /* keep height proportional if a too-wide figure is shrunk to fit */
+}
+
+/* 12. File-tree sidebar (paired with sidebar.js). <nav id="vmd-sidebar"> is
+   appended to <body>, OUTSIDE .page-content, so it survives vmd's in-place re-render.
+   Themed to the Spacemacs palette above. The content shift is gated on the
+   body.vmd-has-sidebar class that sidebar.js adds ONLY when it finds a git repo and
+   renders the tree — so a non-repo document reserves no space (layout == stock). */
+:root { --vmd-sidebar-w: 300px; }
+
+#vmd-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: var(--vmd-sidebar-w);
+    overflow-y: auto; overflow-x: hidden;
+    background-color: var(--vv-bg2) !important;            /* Spacemacs bg2 */
+    border-right: 1px solid var(--vv-border) !important;       /* Spacemacs border */
+    color: var(--vv-fg) !important;                         /* base */
+    font-family: "Noto Sans", sans-serif !important;
+    font-size: 13px; line-height: 1.5;
+    z-index: 9999; box-sizing: border-box;
+    -webkit-user-select: none; user-select: none;
+}
+#vmd-sidebar .vmd-sidebar-header {
+    position: sticky; top: 0; padding: 10px 12px; font-weight: bold;
+    color: var(--vv-head1) !important;                         /* head1 blue */
+    background-color: var(--vv-bg2) !important;              /* bg2 */
+    border-bottom: 1px solid var(--vv-border) !important;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#vmd-sidebar .vmd-sidebar-body { padding: 6px 0 24px; }
+#vmd-sidebar ul.vmd-tree-list { list-style: none; margin: 0; padding-left: 14px; }
+#vmd-sidebar .vmd-sidebar-body > ul.vmd-tree-list { padding-left: 4px; }
+#vmd-sidebar li { margin: 0; padding: 0; }
+#vmd-sidebar summary {
+    cursor: pointer; padding: 2px 6px; color: var(--vv-meta) !important;   /* meta tan — folders */
+    white-space: nowrap; outline: none; list-style-position: inside;
+}
+#vmd-sidebar summary:hover { background-color: var(--vv-bg-code) !important; }   /* cblk-bg */
+#vmd-sidebar summary::-webkit-details-marker { color: var(--vv-fg-dim); }       /* base-dim triangle */
+#vmd-sidebar a {
+    display: block; padding: 2px 6px 2px 18px;
+    color: var(--vv-fg) !important;                         /* markdown files: base */
+    text-decoration: none !important;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#vmd-sidebar a:hover { background-color: var(--vv-bg-code) !important; color: var(--vv-head1) !important; }
+#vmd-sidebar a.vmd-current { background-color: var(--vv-highlight) !important; color: var(--vv-fg-strong) !important; font-weight: bold; }
+#vmd-sidebar a:hover::before { content: none !important; display: none !important; }  /* suppress vmd's href tooltip */
+
+/* Shift the document container right to clear the fixed panel — only when the sidebar
+   rendered. Shifting .page-content (not just .markdown-body) covers BOTH markdown and
+   raw-HTML documents. §10 forces .markdown-body padding:45px!important, untouched here;
+   the 300px panel + that 45px padding give a 45px gutter between panel and text. */
+body.vmd-has-sidebar .page-content { margin-left: var(--vmd-sidebar-w); }
+
+@media print {
+    #vmd-sidebar { display: none !important; }
+    body.vmd-has-sidebar .page-content { margin-left: 0 !important; }
+}
+
+/* 13. (Q1) Figure font-matching lives in sidebar.js (scaleFigures): each embedded SVG is sized so
+   its internal text equals the body font — width = docFont × viewBoxWidth ⁄ svgFontSize, read from
+   the .svg file — scaling DOWN as well as up. (A d2/PlantUML SVG often has only a viewBox and no
+   width/height, so the <img> is intrinsic-size-less and the browser otherwise stretches it to the
+   full column, magnifying its text.) If the matched width would exceed the column it falls back to
+   the natural viewBox width, capped — never wider. The old blanket CSS `zoom: 1.14` was removed:
+   with §11's inherited max-width:100% it MAXIMIZED near-column SVGs to full width. Raster images
+   stay natural (centered by §11); full width is reserved for the dedicated image view (§15). This
+   needs per-file geometry, hence JS rather than CSS. */
+
+/* 14. Center rendered tables horizontally. github-markdown-css makes tables
+   display:block; width:100% (a full-width block), so margin:auto alone won't center
+   them. Shrink the block to its content (fit-content) and center it, keeping
+   overflow:auto so wide tables still scroll instead of overflowing the page. */
+.markdown-body table {
+    display: block;
+    width: -webkit-fit-content;
+    width: fit-content;            /* shrink block to table content width */
+    max-width: 100% !important;    /* cap wide tables → internal h-scroll */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    overflow: auto;
+}
+
+/* 15. Dedicated single-image view (clicking an SVG/PNG/… file opens just that image). Fill the
+   pane width. The container is a bare <div class="vmd-image-view"> — NOT .markdown-body — so vmd's
+   onContent markdown path (which reuses the existing .markdown-body) can't inherit the
+   vmd-image-view class and force the NEXT document's embedded figures full-width. Keep the 45px
+   gutter that .markdown-body used to provide. */
+.vmd-image-view { padding: 45px; box-sizing: border-box; }
+.vmd-image-view img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: none;
+    margin: 0;
+}
+
+/* Figures embedded in a rendered doc are clickable → open their dedicated image view (§Feature 1). */
+.markdown-body img { cursor: pointer; }
+
+/* 16. In-page find bar (#vmd-find, paired with sidebar.js's custom .markdown-body highlighter —
+   see §18). vmd's bundled electron-in-page-search <webview> is hidden and replaced. */
+.electron-in-page-search-window { display: none !important; }   /* suppress vmd's broken search */
+
+#vmd-find {
+    position: fixed; top: 8px; right: 8px; z-index: 10001;
+    display: none; align-items: center; gap: 8px;
+    padding: 5px 8px; border: 1px solid var(--vv-border);          /* Spacemacs border */
+    background-color: var(--vv-bg2);                            /* bg2 */
+    border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    font-family: "Noto Sans", sans-serif;
+}
+#vmd-find.vmd-find-open { display: flex; }
+#vmd-find .vmd-find-input {
+    background-color: var(--vv-bg1);                            /* bg1 */
+    color: var(--vv-fg);                                       /* base */
+    border: 1px solid var(--vv-border); border-radius: 3px;
+    padding: 3px 6px; width: 220px; outline: none;
+    font-family: "Noto Sans", sans-serif; font-size: 13px;
+}
+#vmd-find .vmd-find-input:focus { border-color: var(--vv-head1); }   /* head1 blue */
+#vmd-find .vmd-find-count { color: var(--vv-meta); font-size: 12px; min-width: 42px; text-align: right; }
+
+/* 17. Tabbed sidebar: Files | Contents (TOC). #vmd-sidebar becomes a flex column — a fixed tab
+   bar on top and the active panel scrolling below. Selectors are scoped under #vmd-sidebar /
+   .vmd-panel-toc so they out-specify §12's generic `#vmd-sidebar a` rules. */
+#vmd-sidebar { display: flex; flex-direction: column; overflow: hidden; }   /* override §12 overflow:auto */
+
+#vmd-sidebar .vmd-tabs {
+    display: flex; flex: 0 0 auto;
+    background-color: var(--vv-bg2);                            /* bg2 */
+    border-bottom: 1px solid var(--vv-border);                    /* border */
+}
+#vmd-sidebar .vmd-tab {
+    flex: 1 1 0; padding: 8px 6px;
+    background: transparent; border: none; outline: none; cursor: pointer;
+    color: var(--vv-fg-dim);                                      /* base-dim (inactive) */
+    font-family: "Noto Sans", sans-serif; font-size: 12px; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 2px solid transparent;
+}
+#vmd-sidebar .vmd-tab:hover { color: var(--vv-fg); background-color: var(--vv-bg-code); }
+#vmd-sidebar[data-tab="files"] .vmd-tab[data-tab="files"],
+#vmd-sidebar[data-tab="toc"]   .vmd-tab[data-tab="toc"] {
+    color: var(--vv-head1);                                      /* head1 blue (active) */
+    background-color: var(--vv-bg1);                           /* bg1 */
+    border-bottom-color: var(--vv-head1);
+}
+#vmd-sidebar.vmd-toc-disabled .vmd-tab[data-tab="toc"] {
+    color: var(--vv-disabled); opacity: 0.5; cursor: default; pointer-events: none;   /* disabled */
+}
+
+#vmd-sidebar .vmd-panel { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#vmd-sidebar[data-tab="files"] .vmd-panel-toc { display: none; }
+#vmd-sidebar[data-tab="toc"]   .vmd-panel-files { display: none; }
+
+#vmd-sidebar .vmd-panel-toc { padding: 4px 0 24px; -webkit-user-select: none; user-select: none; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-item {
+    display: block; padding: 2px 8px; text-decoration: none !important;
+    color: var(--vv-fg) !important;                            /* base */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer; font-size: 13px; line-height: 1.5;
+}
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-item:hover { background-color: var(--vv-bg-code) !important; color: var(--vv-head1) !important; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-current { background-color: var(--vv-highlight) !important; color: var(--vv-fg-strong) !important; font-weight: bold; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h1 { padding-left: 8px; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h2 { padding-left: 20px; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h3 { padding-left: 32px; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h4 { padding-left: 44px; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h5 { padding-left: 56px; }
+#vmd-sidebar .vmd-panel-toc a.vmd-toc-h6 { padding-left: 68px; }
+#vmd-sidebar .vmd-panel-toc .vmd-toc-empty { padding: 12px; color: var(--vv-fg-dim); font-style: italic; font-size: 12px; }
+
+/* 18. In-page find highlights — custom highlighter in .markdown-body (see sidebar.js Feature 3).
+   <mark.vmd-find-mark> = every hit (muted amber on the dark theme); .vmd-find-active = current hit. */
+.markdown-body mark.vmd-find-mark {
+    background-color: var(--vv-find-hit-bg);                            /* muted amber */
+    color: var(--vv-find-hit-fg); border-radius: 2px; padding: 0;
+}
+.markdown-body mark.vmd-find-mark.vmd-find-active {
+    background-color: var(--vv-find-active-bg);                            /* bright amber (current match) */
+    color: var(--vv-fg-inverse);
+}
+
+/* 19. File-search filter box in the Files tab (sidebar.js filterTree). Sticky just under the repo
+   header; filters the tree to files whose repo-relative path matches the query. */
+#vmd-sidebar .vmd-tree-filter {
+    position: sticky; top: 0; z-index: 1;
+    display: block; box-sizing: border-box; width: 100%;
+    margin: 0; padding: 5px 8px;
+    background-color: var(--vv-bg1);                            /* bg1 */
+    color: var(--vv-fg);                                       /* base */
+    border: none; border-bottom: 1px solid var(--vv-border);      /* border */
+    outline: none;
+    font-family: "Noto Sans", sans-serif; font-size: 12px;
+}
+#vmd-sidebar .vmd-tree-filter::placeholder { color: var(--vv-fg-dim); }   /* base-dim */
+#vmd-sidebar .vmd-tree-filter:focus { background-color: var(--vv-bg-code); color: var(--vv-head1); }   /* cblk-bg / head1 */

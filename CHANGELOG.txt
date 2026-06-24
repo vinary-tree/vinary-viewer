@@ -1,0 +1,48 @@
+Changelog
+=========
+
+All notable changes to vinary-viewer are documented in this file.
+The format is based on Keep a Changelog (https://keepachangelog.com/en/1.1.0/),
+and this project adheres to Semantic Versioning (https://semver.org/spec/v2.0.0.html).
+
+
+[0.1.0] - 2026-06-23
+--------------------
+Initial release. vinary-viewer packages a set of enhancements that turn the vmd
+Markdown previewer into a full reading environment. It installs by patching vmd's
+package in place; the patches survive vmd npm upgrades via a transparent vmd()
+shell wrapper that re-applies them on launch.
+
+Added
+  Reading environment
+    - Git file-tree sidebar of the repository containing the open document, with the
+      current file highlighted; hidden entirely when the document is not in a repo.
+    - Tabbed sidebar (Files | Contents). The Contents tab is a scroll-spy table of
+      contents of the previewed Markdown (click-navigable; disabled for non-Markdown).
+    - File-search filter box that narrows the tree to paths matching a query.
+    - In-page find bar (Ctrl/Cmd+F): a custom highlighter scoped to the document body
+      with match cycling (Enter / Shift+Enter), replacing vmd's broken search webview.
+  Layout & figures
+    - Full-width layout (removes vmd's 888px centered column; keeps a 45px gutter).
+    - Automatic SVG figure font-matching: each embedded SVG is sized so its internal
+      text matches the document font (width = docFont x viewBoxWidth / svgFontSize),
+      scaling down as well as up; raster images are centered at their natural size.
+    - Centered tables.
+    - Dedicated full-width image view: opening an image file (or clicking an embedded
+      figure) shows just that image.
+  Navigation
+    - File-history navigation across every open: Alt+Left / Alt+Right (keyboard),
+      OS app-command back/forward, and the mouse back/forward thumb buttons.
+    - A native X11 addon (mouse-forward-back) grabs mouse buttons 8/9, which Electron 3
+      on Linux otherwise swallows before the renderer, and routes them to vmd's history.
+  Theming
+    - Named color themes via a CSS-variable palette (--vv-*). Bundled: spacemacs-dark
+      (default) and spacemacs-light. Select with the VV_THEME environment variable or
+      the ~/.config/vinary-viewer/theme file.
+  Tooling
+    - install.sh / uninstall.sh, the transparent vmd() wrapper, npm scripts (test,
+      lint, check, build:addon), a headless test harness, and a theme-completeness lint.
+
+Notes
+    - Platform: Linux + X11 (the native addon uses XGrabButton; targets Electron 3 / vmd).
+    - vmd is patched in place and is not redistributed; install it separately.

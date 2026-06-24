@@ -1,0 +1,60 @@
+# vinary-viewer architecture — how the enhancements attach to vmd's two Electron processes.
+# Colors: vmd blue · main-process pale-blue · renderer pale-green · vv-injected amber · native addon red.
+direction: right
+
+install: "vinary-viewer install\n(~/.local/share/vinary-viewer)" {
+  style.fill: "#fdf3da"
+  style.stroke: "#b1951d"
+  style.font-color: "#7a6410"
+  files: "sidebar.js · style.css · themes/*.css\napply.sh · patch-*.js · mouse-forward-back/" {
+    shape: page
+    style.fill: "#fff8e8"
+    style.stroke: "#b1951d"
+  }
+}
+
+vmd: "vmd  (Electron)" {
+  style.fill: "#eef6fb"
+  style.stroke: "#4f97d7"
+  style.font-color: "#27496b"
+
+  main: "Main process" {
+    style.fill: "#d6e9f8"
+    style.stroke: "#4f97d7"
+    cw: "create-window.js\n[vmd-img] image view\n[vmd-nav] app-command nav\n[vmd-mfb] addon hook" {
+      style.fill: "#eef6fb"
+    }
+    addon: "mouse-forward-back\nnative X11 · XGrabButton(8/9)" {
+      shape: hexagon
+      style.fill: "#f8dada"
+      style.stroke: "#e0211d"
+      style.font-color: "#8a1512"
+    }
+  }
+
+  rend: "Renderer process" {
+    style.fill: "#e1f3ea"
+    style.stroke: "#2d9574"
+    boot: "vmd.html\ninline require() bootstrap" {
+      style.fill: "#edf7f1"
+    }
+    sb: "sidebar.js\ntree · tabs/TOC · find · figures · theme" {
+      style.fill: "#fff8e8"
+      style.stroke: "#b1951d"
+    }
+    rm: "renderer/main.js\n[vmd-hist] grow file history" {
+      style.fill: "#edf7f1"
+    }
+    css: "style.css  var(--vv-*)\n+ injected <style id=vv-theme>" {
+      style.fill: "#fff8e8"
+      style.stroke: "#b1951d"
+    }
+  }
+}
+
+install.files -> vmd.main.cw: "apply.sh patches\n(marker-guarded, backed up)" { style.stroke: "#b1951d" }
+install.files -> vmd.rend.boot: "injects bootstrap" { style.stroke: "#b1951d" }
+vmd.rend.boot -> vmd.rend.sb: "require()s"
+vmd.rend.sb -> vmd.rend.css: "injects active theme"
+vmd.main.cw -> vmd.main.addon: "register(win handle)"
+vmd.main.addon -> vmd.rend.rm: "history-back / -forward (IPC)" { style.stroke: "#e0211d" }

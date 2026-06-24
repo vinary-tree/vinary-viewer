@@ -1,0 +1,19 @@
+# vinary-viewer load sequence: from `vmd file.md` to a themed, tree-decorated preview.
+shape: sequence_diagram
+
+user: "User"
+wrapper: "vmd() wrapper"
+main: "vmd main process"
+rend: "Renderer (vmd.html)"
+sb: "sidebar.js"
+
+user -> wrapper: "vmd file.md"
+wrapper -> wrapper: "apply.sh (re-patch if vmd was upgraded)"
+wrapper -> main: "command vmd file.md"
+main -> rend: "create window; inject stylesheets (incl. style.css)"
+rend -> sb: "inline require('…/sidebar.js')"
+sb -> sb: "injectTheme(): <style id=vv-theme>"
+sb -> rend: "observe body[data-filepath]"
+main -> rend: "send markdown (onContent sets data-filepath)"
+rend -> sb: "MutationObserver fires → tick()"
+sb -> sb: "build tree · refresh TOC · scale figures"

@@ -1,0 +1,43 @@
+/* vinary-viewer theme: spacemacs-light.
+   The official light variant of the Spacemacs colorscheme (`spacemacs-theme`, light). Pairs with the
+   default spacemacs-dark. Select it with VV_THEME=spacemacs-light (or write `spacemacs-light` into
+   ~/.config/vinary-viewer/theme), then relaunch vmd. Defines the full --vv-* palette. */
+:root {
+  /* backgrounds */
+  --vv-bg1: #fbf8ef;            /* page / main background (light cream, bg1) */
+  --vv-bg2: #efeae9;            /* panels, <pre>, table zebra (bg2) */
+  --vv-bg-code: #e8e3e3;        /* inline code background; hover (cblk-bg) */
+  --vv-bg-quote: #edf2e9;       /* blockquote background (head2-bg, faint green) */
+
+  /* text */
+  --vv-fg: #655370;             /* base foreground (muted purple-grey) */
+  --vv-fg-dim: #a094a2;         /* muted foreground (base-dim) */
+  --vv-fg-strong: #2c2434;      /* strong text on the light highlight background */
+  --vv-fg-inverse: #1c1c1c;     /* dark text on a bright background (active find hit) */
+
+  /* structure */
+  --vv-border: #b3b9be;         /* rules, borders, header underlines (border) */
+  --vv-highlight: #d3d3e7;      /* text selection; current tree/TOC item (highlight) */
+  --vv-disabled: #b3aebb;       /* disabled control text */
+
+  /* headings + meta */
+  --vv-head1: #3a81c3;          /* h1 / links / keyword / active accent (blue) */
+  --vv-head2: #2d9574;          /* h2 / blockquote rule / strings (green) */
+  --vv-head3: #67b11d;          /* h3 / diff addition (green) */
+  --vv-head4: #b1951d;          /* h4 / inline code (yellow) */
+  --vv-meta:  #da8b55;          /* h5 / folders / meta / find count (orange-tan) */
+
+  /* syntax + emphasis */
+  --vv-const:   #4e3163;        /* strong / numbers, literals (const — deep purple) */
+  --vv-func:    #6c3163;        /* function / tag names (func — dark magenta) */
+  --vv-em:      #ba2f59;        /* emphasis / <em> (mat — rose) */
+  --vv-var:     #715ab1;        /* variables, types (var — violet) */
+  --vv-comment: #2aa1ae;        /* comments (comment — teal) */
+  --vv-error:   #e0211d;        /* errors / diff deletion (err — red) */
+  --vv-code:    #655370;        /* default code-block text (cblk = base) */
+
+  /* in-page find highlights */
+  --vv-find-hit-bg: #f6e9a0;    /* every match (soft yellow) */
+  --vv-find-hit-fg: #5c4d00;    /* match text (dark amber) */
+  --vv-find-active-bg: #f0a500; /* current match (strong amber; fg = --vv-fg-inverse) */
+}

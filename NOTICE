@@ -1,0 +1,31 @@
+vinary-viewer
+Copyright 2026 Vinary Tree
+
+This product is licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+================================================================================
+Third-party components
+================================================================================
+
+1. mouse-forward-back  (vendored — src/mouse-forward-back/)
+   The native X11 thumb-button hook is derived from "mouse-forward-back" by
+   Justin Ostrander, used under the MIT License. The MIT license text is retained
+   alongside the sources at src/mouse-forward-back/LICENSE.
+   Upstream: https://github.com/jostrander/mouse-forward-back
+
+2. vmd  (NOT redistributed)
+   vinary-viewer enhances vmd (https://github.com/yoshuawuyts/vmd, MIT) by patching
+   its installed npm package in place on the end user's own machine. vmd is neither
+   bundled nor redistributed by this project; it must be installed separately
+   (npm install -g vmd). The patches back up every file they touch and are reverted
+   by uninstall.sh.
+
+3. Spacemacs color palette  (inspiration)
+   The bundled themes (src/themes/spacemacs-dark.css and spacemacs-light.css)
+   reproduce the color *values* of the Spacemacs theme
+   (https://github.com/nashamri/spacemacs-theme) so the previewer matches the
+   Spacemacs editor. No Spacemacs source code is included.
+
+4. github-markdown-css and highlight.js  (NOT redistributed)
+   vmd supplies github-markdown-css and highlight.js. vinary-viewer's stylesheet
+   overrides their appearance at runtime; it does not bundle either library.

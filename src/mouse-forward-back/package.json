@@ -1,0 +1,11 @@
+{
+  "name": "vmd-mouse-forward-back",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native X11 hook for vmd: grabs mouse buttons 8/9 (back/forward) on the vmd window and reports them, since Electron 3 on Linux swallows those buttons before the renderer. Vendored from jostrander/mouse-forward-back (MIT).",
+  "main": "index.js",
+  "os": ["linux"],
+  "dependencies": {
+    "nan": "2.14.0"
+  }
+}
