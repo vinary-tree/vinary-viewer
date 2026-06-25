@@ -1,0 +1,63 @@
+@startuml seq-link-click-scroll
+'' PlantUML over Mermaid because clicking an in-document link is an ordered handshake that (1) is intercepted
+'' to stay IN the pane (not window-replace), (2) saves the leaving scroll into per-tab history, and (3)
+'' restores the destination scroll after layout. Activation lifetimes + the cofx/fx hops matter, so a
+'' PlantUML sequence is the right tool.
+!include _vv-theme.iuml
+
+title In-document link click — open in the pane + per-tab scroll restore
+
+autonumber "<b>[0]"
+
+actor User #9F8766
+participant "markdown-body\nclick listener" as V #2D9574
+participant ":doc/open (reg-event-fx)\n[+ :content-scroll cofx]" as RF #4F97D7
+collections "app-db active tab\n:hist [{:uri :scroll}…]" as DB #7590DB
+participant "load + render\n(:vv/open → content)" as LOAD #B1951D
+participant "scroll restore\n(renderer.scroll)" as SC #4F97D7
+
+== click (the bug fix: open IN the pane) ==
+User -> V : click <a href> (a relative .md link)
+activate V
+V -> V : link/classify(href) → {:kind :file :path}\n.preventDefault — do NOT let Electron replace the window
+V -> RF : [:doc/open path]
+deactivate V
+activate RF
+RF -> RF : :content-scroll cofx reads .vv-content scrollTop\n(the position being left behind)
+RF -> DB : nav-active — save the leaving :scroll on the current\nentry, push {:uri new :scroll 0}
+RF -> LOAD : (fx) load the target document
+RF -> SC : (fx) [:scroll/restore 0]  (a new entry → top)
+deactivate RF
+activate LOAD
+LOAD --> V : new :doc/html → markdown-body did-update
+deactivate LOAD
+activate V
+V -> SC : scroll/apply! @node  (next frame + short settle)
+activate SC
+SC -> V : set .vv-content scrollTop
+deactivate SC
+deactivate V
+
+== later: Back (Alt+← / mouse button 3) ==
+User -> RF : [:history/back]
+activate RF
+RF -> DB : step −1 — save the leaving scroll,\nreturn [uri, saved-scroll]
+RF -> SC : (fx) [:scroll/restore saved-scroll]
+deactivate RF
+
+note over DB, SC #FFF6D6
+  Each history entry is {:uri :scroll}, so Back restores BOTH the document and
+  the exact scroll position it had when you left it. The restore is deferred one
+  frame (+ a short settle) so a tall document does not clamp the target against a
+  not-yet-complete scroll height. HTTP tabs scroll themselves — no pane restore.
+end note
+
+legend right
+  |= Colour |= Participant / concept |
+  |<#9F8766>| User |
+  |<#2D9574>| markdown-body (view) |
+  |<#4F97D7>| re-frame event + scroll fx |
+  |<#7590DB>| app-db per-tab history {:uri :scroll} |
+  |<#B1951D>| load / render the document |
+endlegend
+@enduml

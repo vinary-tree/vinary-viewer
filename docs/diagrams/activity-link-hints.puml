@@ -1,0 +1,46 @@
+@startuml activity-link-hints
+'' PlantUML over Mermaid because the hint flow is a DECISION pipeline (collect to label to type to match?)
+'' with three outcomes (follow / cancel / keep filtering); a coloured PlantUML activity shows the path
+'' end-to-end, with the per-keystroke filtering loop called out in the note.
+!include _vv-theme.iuml
+
+title Vimium link hints — f then a label then follow\n[:ui :hints] = active? + targets + typed
+
+skinparam activity {
+  BackgroundColor #EAF6FF
+  BorderColor #4C66AE
+  DiamondBackgroundColor #FFF6D6
+  DiamondBorderColor IPC_BORDER
+  FontColor #1A1A1A
+}
+
+start
+#2D9574:press f (resolver, Vim normal) then dispatch hint/start;
+#BC6EC5:hints/collect — every visible link in the content pane,\nclassify (file / http / dir / anchor) + viewport position;
+#BC6EC5:hints/with-labels — uniform-length unique labels\nfrom a home-row alphabet (SADFJKLEWCMPGH);
+#7590DB:ui-hints state becomes active; overlay drawn;
+#2D9574:overlay draws a label badge over each link;
+#7590DB:type a label character; typed grows;\nmatches = targets whose label starts-with typed;
+if (how many labels still match?) then (exactly 1)
+  #B1951D:follow — file to doc/open · http to web view\n· dir to open-path · anchor to scroll-into-view;
+else (zero, or Esc)
+  #7590DB:clear the hints (cancel);
+endif
+stop
+
+note right #FFF6D6
+  Per-keystroke loop: the type step repeats while two or more labels match — non-matching badges hide and
+  filtering continues; Backspace pops a char; the decision above resolves the typing. A capture-phase window
+  key listener owns the keyboard ONLY while hints are active (pre-empting the global resolver), so f itself
+  still reaches the resolver to START hinting. PDF pages are excluded (Chromium's plugin viewer cannot be
+  script-injected); HTTP pages run their own self-contained f-hint mode injected by web-preload.js.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>| renderer UI (resolver, overlay) |
+  |<#BC6EC5>| hints engine (collect + labels) |
+  |<#7590DB>| app-db [:ui :hints] |
+  |<#B1951D>| follow the link (navigation fx) |
+endlegend
+@enduml

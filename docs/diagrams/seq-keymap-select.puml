@@ -1,0 +1,59 @@
+@startuml seq-keymap-select
+'' PlantUML over Mermaid because selecting a keymap set is an ordered handshake: one menu click drives a
+'' re-frame event that BOTH installs the set into the live keymap atom AND writes the registry back across
+'' the IPC seam to disk. Activation lifetimes + the two fan-out effects matter, so a PlantUML sequence
+'' (autonumber + activation + per-concept colour) is the right tool.
+!include _vv-theme.iuml
+
+title Settings ▸ Key Bindings ▸ Vim Mode — live install + persist\n[:ui :keymaps] {:active :order :sets}
+
+autonumber "<b>[0]"
+
+actor User #9F8766
+participant "menubar\nradio submenu" as UI #2D9574
+participant ":keymap/select\n(reg-event-fx)" as RF #4F97D7
+collections "app-db\n[:ui :keymaps]" as DB #7590DB
+participant ":keymap/install-active\n(fx)" as IA #BC6EC5
+database "live keymap atom\n(resolver reads it)" as ATOM #BC6EC5
+participant ":keymap/persist\n(fx, debounced)" as PER #B1951D
+participant "main config.cljs\nsave! → keybindings.edn" as MAIN #B1951D
+
+User -> UI : click ● Vim Mode
+UI -> RF : [:keymap/select "vim"]
+activate RF
+RF -> DB : registry/select →\n:active ← "vim"
+RF -> IA : (fx) install the active set
+activate IA
+IA -> DB : read active entry\n(builtin? → preset | custom → :extends ⊕ :keymaps)
+IA -> ATOM : keymap/install! :vim\n(or install-user! for a custom set)
+IA -> RF : dispatch [:input/set-mode (initial-mode)]\n(vim → :normal)
+deactivate IA
+RF -> PER : (fx) registry/->edn db'
+deactivate RF
+activate PER
+note right of PER
+  Debounced ~400 ms: editor edits stream fast,
+  so the writes coalesce into a single save.
+end note
+PER -> MAIN : window.vv.saveKeymap(edn)\n(vv:keymap-save channel)
+activate MAIN
+MAIN -> MAIN : mkdir + writeFile\n~/.config/vinary-viewer/keybindings.edn
+deactivate MAIN
+deactivate PER
+
+note over DB, ATOM #FFF6D6
+  Two stores stay in sync: [:ui :keymaps] is the persisted source of truth;
+  the keymap atom is the live copy the resolver reads on each keydown.
+  install-active! is the one-way bridge  db → atom.
+end note
+
+legend right
+  |= Colour |= Participant / concept |
+  |<#9F8766>| User |
+  |<#2D9574>| view (radio submenu) |
+  |<#4F97D7>| re-frame event (:keymap/select) |
+  |<#7590DB>| app-db registry [:ui :keymaps] |
+  |<#BC6EC5>| keymap install + live atom |
+  |<#B1951D>| IPC seam → main → disk |
+endlegend
+@enduml

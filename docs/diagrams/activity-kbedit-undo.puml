@@ -1,0 +1,58 @@
+@startuml activity-kbedit-undo
+'' PlantUML over Mermaid because the undo/redo model is a CONTROL FLOW over two stacks with a clear
+'' do / undo / redo branch and the apply-cmd ⟷ invert duality; a coloured PlantUML activity expresses the
+'' decision and the stack moves end-to-end.
+!include _vv-theme.iuml
+
+title Key-binding editor — undo / redo as a data-command lifecycle\n[:ui :kbedit] {:undo [] :redo []}
+
+skinparam activity {
+  BackgroundColor #EAF6FF
+  BorderColor #4C66AE
+  DiamondBackgroundColor #FFF6D6
+  DiamondBorderColor IPC_BORDER
+  FontColor #1A1A1A
+}
+
+start
+:user edits a binding / set\n(capture C-x C-f, delete, rename, reorder, clone);
+:build a data-command  cmd = {:op …};
+#BC6EC5:apply-cmd db cmd  →  db';
+#7590DB:push cmd onto :undo,  clear :redo;
+#B1951D:install-active (live) + persist (debounced);
+
+if (Ctrl+Z  /  ↶ Undo?) then (yes)
+  if (:undo non-empty?) then (yes)
+    #BC6EC5:cmd ← peek :undo\napply-cmd db (invert cmd) → db';
+    #7590DB:pop :undo,  push cmd onto :redo;
+    #B1951D:install-active + persist;
+  else (empty)
+    :no-op;
+  endif
+elseif (Ctrl+Shift+Z  /  ↷ Redo?) then (yes)
+  if (:redo non-empty?) then (yes)
+    #BC6EC5:cmd ← peek :redo\napply-cmd db cmd → db';
+    #7590DB:pop :redo,  push cmd onto :undo;
+    #B1951D:install-active + persist;
+  else (empty)
+    :no-op;
+  endif
+else (no history key)
+  :idle;
+endif
+stop
+
+note right #FFF6D6
+  Because :insert-set / :remove-set are mutual inverses that carry the removed set's
+  cfg + index, **undoing a delete restores the set at its original position**.
+  A real Ctrl+Shift+Z arrives as chord **C-Z** (Shift uppercases z); the redo
+  listener accepts C-Z / C-S-z / C-y.
+end note
+
+legend right
+  |= Colour |= Step concept |
+  |<#BC6EC5>| apply-cmd / invert (kbedit-history) |
+  |<#7590DB>| app-db :undo / :redo stacks |
+  |<#B1951D>| live install + persist |
+endlegend
+@enduml

@@ -21,6 +21,9 @@
 !define MARKDOWN_BORDER #487E12
 !define ERROR_COLOR     #E0211D
 !define ERROR_BORDER    #9C1614
+'' keymap-set registry / key-binding editor / link hints (magenta — also the running app's hint-label colour)
+!define KEYMAP_COLOR    #BC6EC5
+!define KEYMAP_BORDER   #8E4F96
 !define PLANNED_COLOR   #DDDDDD
 !define PLANNED_BORDER  #999999
 

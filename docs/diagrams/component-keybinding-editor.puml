@@ -1,0 +1,49 @@
+@startuml component-keybinding-editor
+'' PlantUML over Mermaid because the editor is a COMPONENT assembly (two panes + a registry + an undo
+'' command model + the commit bridge) where each box belongs to a fixed concept colour and the data flows
+'' both ways (read effective bindings / write commands). PlantUML shares the per-concept palette and the
+'' bidirectional wiring in one picture.
+!include _vv-theme.iuml
+
+title Key-binding editor — two panes over the registry; edits are undoable data-commands
+
+package "vinary.ui.keybindings-editor  (the dialog)" #E8F5F0 {
+  rectangle "LEFT pane — sets\nbuilt-ins (read-only, cloneable)\n+ custom (drag-reorder,\nin-place rename, +/−, context menu)" as LEFT #2D9574
+  rectangle "RIGHT pane — actions\ncommands grouped by category\n· binding chips (× = unbind)\n· Capture + modifier-chip builder" as RIGHT #2D9574
+  rectangle "capture overlay\nwindow keydown (capture phase)\nchord-SEQUENCE accumulator" as CAP #2D9574
+}
+
+rectangle "command registry\nvinary.app.commands\n(the bindable-action catalog)" as CMD #4F97D7
+rectangle "app-db [:ui :kbedit]\n{:open? :sel :editing\n :capture :undo :redo}" as KBE #7590DB
+rectangle "app-db [:ui :keymaps]\nregistry {:active :order :sets}" as REG #7590DB
+rectangle "vinary.input.kbedit-history\ndata-command {:op …}\napply-cmd · invert" as HIST #BC6EC5
+rectangle "vinary.input.keymaps-registry\neffective-modes · action-index\ninstall-active!" as RY #BC6EC5
+rectangle ":keymap/install-active (live)\n+ :keymap/persist (debounced)" as COMMIT #B1951D
+
+RIGHT --> CMD : group-by :category\n(:mode/* hidden for non-modal sets)
+RIGHT --> RY  : action-index (effective bindings → chips)
+LEFT  --> REG : list built-ins + :order
+CAP   --> HIST : :kbedit/set-binding → {:op :put …}
+LEFT  --> HIST : add / delete / rename / reorder / clone → {:op …}
+HIST  --> REG  : apply-cmd mutates [:ui :keymaps :sets]
+HIST  --> KBE  : push :undo / clear :redo (undo↔redo move commands)
+HIST  --> COMMIT : after each committed edit
+COMMIT --> RY  : install the active set into the live atom
+COMMIT --> REG : persist the registry → keybindings.edn
+
+note bottom #FFF6D6
+  Every edit is a pure DATA command (Command pattern): apply-cmd (db→db') paired with invert (cmd→inverse).
+  **:put** sets/clears a binding; **:insert-set / :remove-set** are mutual inverses (carry the set's cfg +
+  index); **:rename-set / :reorder** swap their fields. Undo applies the inverse; redo re-applies the
+  original. Built-in sets are read-only — **Clone** snapshots one into a new editable custom set.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>| editor UI (panes + capture) |
+  |<#4F97D7>| command registry (action catalog) |
+  |<#7590DB>| app-db ([:ui :kbedit], [:ui :keymaps]) |
+  |<#BC6EC5>| undo command model + registry helpers |
+  |<#B1951D>| live install + persist |
+endlegend
+@enduml

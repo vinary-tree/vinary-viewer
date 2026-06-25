@@ -233,3 +233,18 @@ Three related fixes ship alongside:
 - **Mouse thumb buttons** — button 3 → Back, button 4 → Forward (a capture-phase `mousedown` listener that
   `preventDefault`s Chromium's own navigation).
 - **A web (HTTP) tab** still scrolls itself; the content-pane restore is requested only for local files.
+
+**Diagram — link click → in-pane open + scroll restore:**
+[`../diagrams/seq-link-click-scroll.puml`](../diagrams/seq-link-click-scroll.puml). The click is intercepted
+(`link/classify` + `.preventDefault`), the `:content-scroll` cofx captures the leaving `scrollTop`, the new
+entry pushes `{:uri :scroll 0}`, and `scroll/apply!` restores the destination position after layout; Back
+mirrors it by restoring the entry's saved scroll.
+
+```plantuml
+'' Source: docs/diagrams/seq-link-click-scroll.puml
+'' Render to SVG with:  plantuml -tsvg docs/diagrams/seq-link-click-scroll.puml
+```
+
+Palette: **tan** = the User, **teal** = the `markdown-body` view, **blue** = the re-frame event + scroll fx,
+**blue-violet** = the per-tab history entries `{:uri :scroll}`, **amber** = loading/rendering the document.
+See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).

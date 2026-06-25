@@ -13,8 +13,12 @@ refresh.** A standalone ClojureScript / re-frame / Electron application, *inspir
   changes on disk, preserving your scroll position and UI state.
 - **Browser-like navigation** — tabs are independent views with **per-tab history**: left-click a tree
   entry or link to navigate the active tab, **Ctrl+click** to open a new tab. A **URI bar** with
-  back/forward shows the current document's address, and you can **follow HTTP links** (e.g. citations)
-  in an in-app web view.
+  back/forward (plus `Alt+←/→` and the **mouse thumb buttons**) shows the current document's address;
+  back/forward restore the document **and its scroll position**. Hovering a link shows its URL bottom-left.
+  You can **follow HTTP links** (e.g. citations) in an in-app web view.
+- **Tab management** — **drag to reorder** tabs, **right-click** for *Close / Close Others / Close to the
+  Right / View Source / Copy path*, a per-tab **View Source** toggle (raw Markdown in the pane), and a
+  vertical **Tabs** sidebar panel that mirrors the strip's order (reordering either reorders both).
 - **Markdown** — GitHub-flavored (remark/unified) with slugged headings and syntax-highlighted code,
   **full-width** layout, centered images + tables, and **figure font-matching** (embedded SVGs are sized
   so their text matches the document font). Relative image/link paths resolve against the document.
@@ -32,8 +36,10 @@ refresh.** A standalone ClojureScript / re-frame / Electron application, *inspir
   `settings.edn`); **named themes** (Spacemacs dark/light) with live switching.
 - **In-page find** (`Ctrl+F`), **image view**, **command palette**, and an empty-tab **Vinary Tree
   logo** watermark.
-- **Custom keybindings** — `default` / **vim** / **emacs** keymaps, fully configurable in
-  `~/.config/vinary-viewer/keybindings.edn` (live-reloaded).
+- **Custom keybindings** — `default` / **vim** / **emacs** keymaps, switchable live from **Settings ▸ Key
+  Bindings**, plus a two-pane visual **editor** (`Customize…`) with key capture, emacs-style modifier
+  chips, clone / rename / drag-reorder, and **undo/redo**. Vim mirrors **Vimium**: `h`/`l` scroll, **`f`**
+  link hints, `/` find. Sets persist to `~/.config/vinary-viewer/keybindings.edn` (live-reloaded).
 
 ## Install
 
@@ -49,7 +55,9 @@ them. Requires Node.js (with `npx`) and a JDK (for shadow-cljs). Development: `n
 
 Under `~/.config/vinary-viewer/`:
 
-- `keybindings.edn` — `{:extends :vim}` (or `:emacs` / `:default`) + per-binding overrides.
+- `keybindings.edn` — the keymap-set registry (`{:active … :order … :sets …}`), usually managed by the
+  **Settings ▸ Key Bindings** menu + editor; a legacy single delta (`{:extends :vim}` + overrides) is still
+  accepted and auto-wrapped.
 - `grammars/<lang>/` — drop a tree-sitter `grammar.wasm` + `highlights.scm` to highlight `<lang>`.
 - the in-app theme selector switches Spacemacs dark/light live.
 

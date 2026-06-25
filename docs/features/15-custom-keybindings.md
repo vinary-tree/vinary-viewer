@@ -244,6 +244,52 @@ The `vim` keymap now mirrors Vimium for Chrome:
   their own self-contained `f`-hint mode injected by `web-preload.js` (the web view is a separate page).
 - **`/`** opens the in-page find bar (already bound).
 
+**The hint-label algorithm (literate).** Let `Σ` be the home-row alphabet (`Σ = "SADFJKLEWCMPGH"`, so
+`|Σ| = 14`) and let `n` be the number of links visible in the viewport. Labels are kept **uniform length**
+so that no label is a prefix of another — the typing sub-mode is then unambiguous (a label is recognized
+the instant its full length is typed, with no disambiguation timeout):
+
+```text
+⟨assign n hint labels⟩ ≡
+    if n = 0          : labels ← [ ]
+    else if n ≤ |Σ|   : labels ← the first n single characters of Σ          ⟨1-char labels⟩
+    else              : labels ← the first n strings of the product Σ × Σ     ⟨2-char labels⟩
+```
+
+Two characters suffice for any realistic page because `|Σ|² = 196 ≥ n` once `n > |Σ| = 14`. The trade-off
+versus Vimium (which mixes 1- and 2-char labels and disambiguates with a short delay) is a few extra
+keystrokes on dense pages in exchange for **zero ambiguity** and no timing dependence — e.g. `f` then `s`
+then `a` follows the link labelled `SA` immediately.
+
+### 6.5 Diagrams
+
+Four diagrams (PlantUML, sharing the app's per-concept palette via
+[`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml) — magenta `#BC6EC5` = the keymap/editor/hints
+concept, matching the running app's hint-label colour):
+
+- **Sequence — selecting a keymap set:**
+  [`../diagrams/seq-keymap-select.puml`](../diagrams/seq-keymap-select.puml). The `:keymap/select` event
+  installs the set into the live atom **and** writes the registry back to disk (debounced).
+- **Component — the editor:**
+  [`../diagrams/component-keybinding-editor.puml`](../diagrams/component-keybinding-editor.puml). The two
+  panes over the registry, the command catalog, the undo command model, and the commit bridge.
+- **Activity — undo / redo:**
+  [`../diagrams/activity-kbedit-undo.puml`](../diagrams/activity-kbedit-undo.puml). The do / undo / redo
+  control flow over the `:undo` / `:redo` stacks via `apply-cmd` ⟷ `invert`.
+- **Activity — Vimium link hints:**
+  [`../diagrams/activity-link-hints.puml`](../diagrams/activity-link-hints.puml). `f` → collect + classify
+  → label → type-to-filter → follow / cancel.
+
+```plantuml
+'' Sources: docs/diagrams/{seq-keymap-select,component-keybinding-editor,activity-kbedit-undo,activity-link-hints}.puml
+'' Render to SVG with, e.g.:  plantuml -tsvg docs/diagrams/component-keybinding-editor.puml
+'' (each .puml declares @startuml/@enduml — render it directly; do not re-wrap)
+```
+
+Palette (all four): **teal** = renderer/editor UI · **blue** = re-frame events / command registry ·
+**blue-violet** = app-db (`[:ui :keymaps]`, `[:ui :kbedit]`, `[:ui :hints]`) · **magenta** = the keymap
+install + undo-command + hints engine · **amber** = the IPC seam / persist / navigation fx.
+
 ## 7. Limitations & notes
 
 - **PDF hints are excluded.** Chromium's built-in PDF viewer renders in an isolated plugin process that
@@ -253,3 +299,17 @@ The `vim` keymap now mirrors Vimium for Chrome:
   because the files are inlined via `shadow.resource/inline` (§3.3) — no cache-clearing rebuild needed.
 - **`h`/`l` only move a pane that actually overflows horizontally.** A normal Markdown document fits the
   pane width (a wide `<pre>` carries its own scroller), so there `h`/`l` are correctly inert.
+
+## 8. References
+
+The design vocabulary used throughout this page is drawn from two well-known sources (neither carries a
+DOI — a 1994 textbook and an open-source project — so the canonical ISBN / repository is given):
+
+1. E. Gamma, R. Helm, R. Johnson, J. Vlissides ("the Gang of Four"). *Design Patterns: Elements of Reusable
+   Object-Oriented Software.* Addison-Wesley, 1994. ISBN 0-201-63361-2. — the **Command** pattern reifies
+   each editor edit as data (`kbedit_history`) and each bindable action (`commands.cljs`); the engine also
+   uses **Strategy** (keymap-per-mode), **Interpreter** (the trie-walking resolver), **State** (the modal
+   FSM), **Mediator** (the `window.vv` IPC seam), and **Observer** (the re-frame subscriptions).
+2. P. Crowther et al. *Vimium — The Hacker's Browser.* Open-source browser extension.
+   <https://github.com/philc/vimium> — the model for the `f` **link-hint** interaction and the `h`/`j`/`k`/`l`
+   + `/` keys mirrored by the `vim` keymap.
