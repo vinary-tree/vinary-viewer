@@ -1,0 +1,51 @@
+@startuml system-context
+'' ============================================================================
+'' vinary-viewer — System Context (C4 Level 1)
+''
+'' PlantUML over Mermaid because: C4-PlantUML gives first-class `Person`/`System`/
+'' `System_Ext` actors with a trust-boundary `enclosure` and a self-contained
+'' `legend` keyed to our per-concept palette — Mermaid's flowchart has no native
+'' C4 vocabulary and cannot reproduce the colour-means-one-concept discipline that
+'' the rest of this suite relies on.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title vinary-viewer — System Context
+
+skinparam actorStyle awesome
+skinparam rectangle {
+  BorderThickness 1.6
+  FontColor #1A1A1A
+}
+
+actor "User\n(reads docs, edits\nin a separate editor)" as User #white
+
+rectangle "vinary-viewer\n(Electron desktop app)\n— reactive document previewer" as App RENDERER_COLOR {
+}
+
+rectangle "External Editor\n(Emacs, VS Code, Vim …)" as Editor <<actor>> FS_COLOR
+rectangle "Filesystem\n(Markdown / images / text\non disk)" as FS FS_COLOR
+rectangle "git repository\n(`git ls-files` →\nfile-tree sidebar)" as Git FS_COLOR
+
+User --> App : launches `vv README.md`,\nclicks tabs / tree / TOC,\nfinds, switches theme
+Editor --> FS : saves the file\nthe user is editing
+App --> FS : **reads** file content;\n**watches** each open path\n(chokidar)
+FS ..> App : `change` / `add` events\n⟶ live refresh
+App --> Git : `git rev-parse` +\n`git ls-files`
+Git ..> App : repo root + tracked files
+
+note right of App
+  vinary-viewer is **read-only** with respect to
+  user content: it never writes the documents it
+  previews. Editing happens in the user's own editor;
+  the viewer reflects every save automatically.
+end note
+
+legend right
+  |= Colour |= Concept |
+  | <#2D9574> | the vinary-viewer application |
+  | <#9F8766> | filesystem · external editor · git |
+  | <#FFFFFF> | human actor |
+  Solid arrow = request / command · Dashed = asynchronous event
+endlegend
+@enduml

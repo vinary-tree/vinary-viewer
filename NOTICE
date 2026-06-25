@@ -4,28 +4,46 @@ Copyright 2026 Vinary Tree
 This product is licensed under the Apache License, Version 2.0 (see the LICENSE file).
 
 ================================================================================
-Third-party components
+Attribution & third-party components (v0.2 — the standalone application)
 ================================================================================
 
-1. mouse-forward-back  (vendored — src/mouse-forward-back/)
-   The native X11 thumb-button hook is derived from "mouse-forward-back" by
-   Justin Ostrander, used under the MIT License. The MIT license text is retained
-   alongside the sources at src/mouse-forward-back/LICENSE.
-   Upstream: https://github.com/jostrander/mouse-forward-back
+1. vmd  (inspiration; NOT vendored)
+   vinary-viewer is a NEW application *inspired by* vmd
+   (https://github.com/yoshuawuyts/vmd, MIT, © Yoshua Wuyts). No vmd source code is
+   copied, vendored, or redistributed. vinary-viewer reimplements a Markdown
+   previewer from scratch in ClojureScript using the same public npm libraries
+   (remark/unified) that vmd uses.
 
-2. vmd  (NOT redistributed)
-   vinary-viewer enhances vmd (https://github.com/yoshuawuyts/vmd, MIT) by patching
-   its installed npm package in place on the end user's own machine. vmd is neither
-   bundled nor redistributed by this project; it must be installed separately
-   (npm install -g vmd). The patches back up every file they touch and are reverted
-   by uninstall.sh.
+2. Architecture & conventions  (credit)
+   The reactive architecture and namespace layout are credited to LightningBug
+   (f1r3fly's ClojureScript editor reference) and the pgmcp "webui" design. The
+   read-only source view adapts the tree-sitter highlighting approach from
+   LightningBug's lib/editor/syntax.cljs.
 
-3. Spacemacs color palette  (inspiration)
-   The bundled themes (src/themes/spacemacs-dark.css and spacemacs-light.css)
-   reproduce the color *values* of the Spacemacs theme
+3. Bundled tree-sitter grammar  (Rholang)
+   The bundled Rholang grammar (resources/public/grammars/rholang/grammar.wasm)
+   is @f1r3fly-io/tree-sitter-rholang-js-with-comments; its highlights query
+   (highlights.scm) is taken from LightningBug. Used under their respective licenses.
+
+4. Spacemacs color palette  (inspiration)
+   The bundled themes reproduce the color *values* of the Spacemacs theme
    (https://github.com/nashamri/spacemacs-theme) so the previewer matches the
    Spacemacs editor. No Spacemacs source code is included.
 
-4. github-markdown-css and highlight.js  (NOT redistributed)
-   vmd supplies github-markdown-css and highlight.js. vinary-viewer's stylesheet
-   overrides their appearance at runtime; it does not bundle either library.
+5. Libraries & tools  (under their own licenses; via npm / Maven / the system)
+   - remark / unified / rehype-* (Markdown pipeline)
+   - web-tree-sitter, CodeMirror 6 (@codemirror/*) (source highlighting)
+   - reagent, re-frame, re-com, DataScript, RxJS (the reactive UI stack)
+   - Electron, chokidar (the desktop + file-watch runtime)
+   - the d2, PlantUML, Mermaid (mmdc), and Graphviz (dot) command-line tools, invoked
+     to render diagram source files to SVG (not bundled; must be installed separately)
+
+================================================================================
+Legacy (v0.1.0) — retained in the tree
+================================================================================
+
+6. mouse-forward-back  (vendored — src/mouse-forward-back/)
+   The native X11 thumb-button hook from the v0.1.0 vmd-patching tool is derived from
+   "mouse-forward-back" by Justin Ostrander (MIT). It is retained for the v0.1.0
+   tooling (preserved at git tag v0.1.0) and is not used by the v0.2 application.
+   Upstream: https://github.com/jostrander/mouse-forward-back

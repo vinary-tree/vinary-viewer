@@ -1,0 +1,76 @@
+@startuml activity-live-refresh-spine
+'' PlantUML over Mermaid because this view emphasises WHICH layer owns each step (FS|Main|IPC|Renderer|
+'' Stores|DOM swimlanes) and a kind-of branch with a converging "UI untouched" note; PlantUML activity
+'' partitions render ownership + the decision diamond + a coloured note Mermaid flowcharts cannot lane.
+'' Swimlane colours are literal palette hexes (tan #9F8766 FS, slate #3A5BA0 Main, amber #B1951D IPC,
+'' teal #2D9574 Renderer, purple #A45BAD Stores, blue-violet/grey for DOM).
+!include _vv-theme.iuml
+
+title Live-refresh spine — layer ownership of one file-change → re-render
+
+|#9F8766|Filesystem|
+start
+:editor writes file;
+:chokidar watcher (per open path)\nfires "change"/"add"\nafter awaitWriteFinish (80ms);
+
+|#3A5BA0|Main (Node)|
+:kind-of path;
+if (kind) then (image)
+  :send vv:content {:path :kind}\n(no :text — binary);
+else (markdown / text)
+  :fs.readFileSync utf8;
+  if (read ok?) then (yes)
+    :send vv:content {:path :kind :text};
+  else (throws)
+    :send vv:error {:path :message};
+    note right #FFCCCC: error path (red)
+  endif
+endif
+
+|#B1951D|IPC seam|
+:preload contextBridge\nwebContents.send → ipcRenderer.on;
+:window.vv.onContent / onError;
+
+|#2D9574|Renderer (re-frame)|
+:rf/dispatch [:content/received] / [:content/error];
+:event handler (PURE) builds tx\n(cond-> omit nil :doc/text; retract stale :doc/error);
+
+|#A45BAD|Stores|
+:**:ds/transact** {:doc/path :doc/kind :doc/text :doc/open? :doc/order};
+:bridge → [:ds/changed] → :ds/rev inc;
+if (kind = markdown?) then (yes)
+  |#2D9574|Renderer (re-frame)|
+  :fx :markdown/render (async unified pipeline);
+  :.then → [:content/rendered path html];
+  |#A45BAD|Stores|
+  :**:ds/transact** {:doc/path :doc/html html};
+elseif (kind = text?) then (yes)
+  |#A45BAD|Stores|
+  :**:ds/transact** {:doc/html <pre vv-plain escaped>};
+else (image)
+  :no :doc/html\n(view renders <img file://> directly);
+endif
+:bridge → [:ds/changed] → :ds/rev inc\n(:doc/active sub recomputes);
+
+|#7590DB|DOM|
+:content-view Strategy picks the body by :doc/kind;
+:markdown-body component-did-update\nset! innerHTML html (no VDOM diff);
+floating note
+  **UI untouched.** :ui/find ranges, scroll offset,
+  :ui/theme, :ui/history all live in app-db and are
+  never written by a :ds/* transaction — so the
+  refresh leaves the reader exactly where they were.
+end note
+stop
+
+legend right
+  |= Colour |= Swimlane / concept |
+  |<#9F8766>| Filesystem (editor + chokidar) |
+  |<#3A5BA0>| Main process (Node IO) |
+  |<#B1951D>| IPC seam (preload / contextBridge) |
+  |<#2D9574>| Renderer (re-frame events + fx) |
+  |<#A45BAD>| Stores (DataScript transactions) |
+  |<#7590DB>| DOM (imperative innerHTML body) |
+  |<#E0211D>| error path (vv:error) |
+endlegend
+@enduml

@@ -1,0 +1,74 @@
+@startuml component-main-service
+'' ============================================================================
+'' vinary-viewer — Component view of the MAIN process (core + service)
+''
+'' PlantUML over Mermaid because: we mix *concrete* components (slate) with
+'' «planned» ones (dashed grey stereotype) in one diagram, plus an amber band of
+'' ipcMain handlers that bridge to the renderer. PlantUML's `component<<planned>>`
+'' skinparam (defined in _vv-theme.iuml) makes Forthcoming ports visually obvious;
+'' Mermaid has no per-node stereotype styling.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title MAIN process — components (`vinary.main.*`)  ·  dashed = Forthcoming
+
+skinparam component {
+  BorderThickness 1.5
+}
+
+component "vinary.main.core" as Core MAIN_COLOR {
+}
+note bottom of Core
+  `main` — app bootstrap
+  `create-window!` — BrowserWindow
+    (contextIsolation, preload)
+  `initial-file` — parse argv
+end note
+
+component "vinary.main.service" as Svc MAIN_COLOR
+note bottom of Svc
+  `kind-of` — md / image / text
+  `send-content!` — read + push
+  `repo-tree` / `send-tree!` — git
+  `open!` / `close!` — chokidar watch
+  `init!` — register ipcMain handlers
+end note
+
+component "ipcMain handlers" as Ipc IPC_COLOR {
+  portin "vv:open" as POpen
+  portin "vv:close" as PClose
+}
+
+cloud "Node built-ins\n(fs · path · child_process)" as Node FS_COLOR
+cloud "chokidar\n(per-path watcher)" as Chk FS_COLOR
+cloud "git CLI\n(rev-parse · ls-files)" as Git FS_COLOR
+
+component "preload\ncontextBridge `window.vv`" as Preload IPC_COLOR
+
+'' ---- Forthcoming ports (planned, not built) ----
+component "PDF port\n(BrowserView)" as Pdf <<planned>>
+component "Diagram port\n(d2 / plantuml / mermaid → SVG)" as Dia <<planned>>
+component "Grammar registry\n(~/.config/vinary-viewer)" as Reg <<planned>>
+
+Core --> Svc          : `service/init!`,\n`service/open!`
+Core --> Preload      : `webPreferences.preload`
+Svc  --> Node         : read file · dirname
+Svc  --> Chk          : watch open path
+Svc  --> Git          : repo tree
+Svc  --> Ipc          : `init!` registers
+POpen --> Svc         : `open!` (read + watch)
+PClose --> Svc        : `close!` (stop watcher)
+Svc ..> Preload       : `webContents.send`\n(amber: vv:content / vv:error / vv:tree)
+
+Svc ..> Pdf  : «planned»
+Svc ..> Dia  : «planned»
+Svc ..> Reg  : «planned»
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN / Node IO component |
+  | <#B1951D> | IPC seam (ipcMain / preload) |
+  | <#9F8766> | external resource (fs · git · chokidar) |
+  | <#DDDDDD> | Forthcoming (planned, dashed) |
+endlegend
+@enduml

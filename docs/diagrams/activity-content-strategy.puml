@@ -1,0 +1,62 @@
+@startuml activity-content-strategy
+'' PlantUML over Mermaid because the content-view Strategy is an ORDERED cond (first matching arm wins),
+'' so a top-to-bottom decision cascade with dashed «planned» future branches is the right shape; PlantUML
+'' activity if/elseif preserves the precedence order and lets planned arms be drawn dashed/grey.
+'' Literal palette hexes: teal #2D9574 renderer outputs, green #67B11D markdown, red #E0211D error,
+'' grey #DDDDDD «planned».
+!include _vv-theme.iuml
+
+title content-view Strategy — selecting the document body by precedence (first match wins)\n(vinary.ui.views/content-view)
+
+start
+:render content-view\n(doc = @[:doc/active], tabs = @[:tabs]);
+
+if (tabs empty?) then (yes)
+  #2D9574:[watermark]\n.vv-watermark / .vv-shield;
+  stop
+else (no)
+endif
+
+if (:doc/error present?) then (yes)
+  #E0211D:[:div.vv-error "Error: …"];
+  stop
+else (no)
+endif
+
+if (:doc/kind = "image"?) then (yes)
+  #2D9574:[:div.vv-image-view\n[:img {:src "file://"+path}]];
+  stop
+else (no)
+endif
+
+if (:doc/html present?) then (yes)
+  #67B11D:[markdown-body html]\n(form-3; set! innerHTML);
+  stop
+else (no — render in flight)
+  #DDDDDD:[:div.vv-empty "Rendering…"];
+  stop
+endif
+
+'' ----- Forthcoming branches (planned): drawn detached + dashed/grey -----
+partition "Forthcoming (planned) registry arms" #line.dashed;line:999999 {
+  #DDDDDD:«planned» kind = "pdf"\n→ native BrowserView;
+  #DDDDDD:«planned» kind = "diagram"\n→ d2/PlantUML/Mermaid → SVG;
+  #DDDDDD:«planned» kind = "source"\n→ tree-sitter view;
+  note right #EEEEEE
+    Today the Strategy is a fixed cond; the planned
+    "registry as data" replaces these arms with a
+    {kind → render-fn} table (open for extension,
+    closed for modification).
+  end note
+  detach
+}
+
+legend right
+  |= Colour |= Branch / concept |
+  |<#2D9574>| renderer view output (watermark, image) |
+  |<#67B11D>| Markdown body (rendered :doc/html) |
+  |<#E0211D>| error view (:doc/error) |
+  |<#DDDDDD>| "Rendering…" placeholder + «planned» future arms |
+  Arms are tried top-to-bottom; the FIRST matching condition wins.
+endlegend
+@enduml

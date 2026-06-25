@@ -1,0 +1,67 @@
+'' vinary-viewer — shared PlantUML theme (per-concept color palette).
+'' !include ../diagrams/_vv-theme.iuml at the top of every diagram so a color always means one concept.
+'' Palette is drawn from the app's own Spacemacs --vv-* tokens, so diagrams match the running UI.
+
+'' ---- per-concept colors (a color ALWAYS means the same concept across all diagrams) ----
+!define MAIN_COLOR      #3A5BA0
+!define MAIN_BORDER     #27406F
+!define RENDERER_COLOR  #2D9574
+!define RENDERER_BORDER #1F6B53
+!define IPC_COLOR       #B1951D
+!define IPC_BORDER      #7F6B14
+!define DATASCRIPT_COLOR #A45BAD
+!define DATASCRIPT_BORDER #743F7B
+!define APPDB_COLOR     #7590DB
+!define APPDB_BORDER    #4C66AE
+!define REFRAME_COLOR   #4F97D7
+!define REFRAME_BORDER  #336699
+!define FS_COLOR        #9F8766
+!define FS_BORDER       #6F5E47
+!define MARKDOWN_COLOR  #67B11D
+!define MARKDOWN_BORDER #487E12
+!define ERROR_COLOR     #E0211D
+!define ERROR_BORDER    #9C1614
+!define PLANNED_COLOR   #DDDDDD
+!define PLANNED_BORDER  #999999
+
+skinparam backgroundColor #FBF8EF
+skinparam defaultFontName "Inter, Helvetica, sans-serif"
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam ArrowColor #555555
+skinparam ArrowThickness 1.2
+
+skinparam component {
+  BorderThickness 1.4
+  FontColor #1A1A1A
+}
+skinparam sequence {
+  LifeLineBorderColor #888888
+  LifeLineBackgroundColor #EFEAD9
+  ParticipantBorderThickness 1.4
+  ArrowThickness 1.3
+  GroupBorderColor #888888
+  DividerBackgroundColor #EFEAD9
+  DividerFontStyle bold
+}
+skinparam state {
+  BorderThickness 1.4
+  FontColor #1A1A1A
+}
+skinparam note {
+  BackgroundColor #FFF6D6
+  BorderColor IPC_BORDER
+}
+
+'' A reusable «planned» stereotype style for Forthcoming components (dashed grey).
+skinparam component<<planned>> {
+  BackgroundColor PLANNED_COLOR
+  BorderColor PLANNED_BORDER
+  BorderStyle dashed
+  FontColor #555555
+}
+skinparam rectangle<<planned>> {
+  BackgroundColor PLANNED_COLOR
+  BorderColor PLANNED_BORDER
+  BorderStyle dashed
+}

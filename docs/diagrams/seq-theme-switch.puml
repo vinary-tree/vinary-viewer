@@ -1,0 +1,50 @@
+@startuml seq-theme-switch
+'' ============================================================================
+'' vinary-viewer — Sequence: live theme switch (no reload, no recompute).
+''
+'' PlantUML over Mermaid because: the punch-line of this flow is that the theme
+'' swap is a *single DOM mutation* (the <link href>) that triggers a CSS cascade
+'' re-evaluation — NOT a re-render. A `note` over the document lifeline plus an
+'' activation bar on the browser style engine conveys "everything below the line
+'' is browser-native, zero re-frame work"; Mermaid cannot annotate the cascade.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Switch theme — `:theme/set` → `:theme/apply` (live, no reload)
+
+autonumber "0:"
+
+actor User #white
+participant "ui.views\n(<select>)" as Sel RENDERER_COLOR
+participant "re-frame\nevents/fx" as RF REFRAME_COLOR
+participant "app.db\n(:ui :theme)" as Db APPDB_COLOR
+participant "<link id=\n vv-theme-link>" as Link RENDERER_COLOR
+participant "Chromium\nstyle engine" as CSS RENDERER_COLOR
+
+User -> Sel : choose "Spacemacs Light"
+Sel -> RF : dispatch `[:theme/set "spacemacs-light"]`
+activate RF
+RF -> Db : `assoc-in [:ui :theme] "spacemacs-light"`\n(so the <select> stays in sync)
+RF -> RF : `:fx [[:theme/apply "spacemacs-light"]]`
+RF -> Link : `set! (.-href link)`\n`"css/themes/spacemacs-light.css"`
+deactivate RF
+activate CSS
+Link -> CSS : new stylesheet → `:root` `--vv-*`\ntokens change
+CSS -> CSS : recompute cascade: every\n`var(--vv-*)` in `app.css` re-resolves
+CSS --> User : repaint (new palette)\n— **no component re-render**
+deactivate CSS
+
+note over Link, CSS
+  `app.css` is structural and references **only** `var(--vv-*)`.
+  Themes are pure CSS-variable palettes on `:root`. Swapping the
+  one <link> is O(1) and leaves the DOM, the re-frame loop, and
+  DataScript untouched. (Default = `spacemacs-dark`.)
+end note
+
+legend right
+  |= Colour |= Concept |
+  | <#2D9574> | Renderer / UI / DOM |
+  | <#4F97D7> | re-frame |
+  | <#7590DB> | app-db (selected theme) |
+endlegend
+@enduml

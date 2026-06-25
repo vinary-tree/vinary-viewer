@@ -1,0 +1,83 @@
+@startuml seq-live-refresh
+'' PlantUML over Mermaid because this is THE flagship round trip across six processes/modules whose message
+'' ORDER, async hops, and activation lifetimes are the whole story; PlantUML sequence gives autonumber,
+'' activation bars, == phase == dividers and per-participant concept colour that Mermaid cannot colour.
+'' Colour macros in _vv-theme.iuml expand only in skinparam/<<#…>>; participant colours are the literal
+'' palette hexes (slate #3A5BA0 main, amber #B1951D IPC, teal #2D9574 renderer, blue #4F97D7 re-frame,
+'' green #67B11D markdown, purple #A45BAD DataScript).
+!include _vv-theme.iuml
+
+title Live refresh — editor save ⟶ painted DOM (one full round trip)\nINVARIANT: only :doc/* is mutated; :ui/* (scroll, find, theme) is untouched
+
+autonumber "<b>[0]"
+
+actor "User /\neditor" as ED #9F8766
+participant "chokidar\nwatcher" as CK #9F8766
+participant "main service\n(Node)" as SVC #3A5BA0
+participant "preload\nwindow.vv" as PL #B1951D
+participant "renderer.core\n bridge!" as BR #2D9574
+participant "re-frame\nevents/fx" as RF #4F97D7
+participant "unified\nremark/rehype" as MD #67B11D
+database "DataScript\nconn" as DS #A45BAD
+participant "views\nmarkdown-body" as V #2D9574
+
+== detect (filesystem) ==
+ED -> ED : save README.md
+CK -> CK : awaitWriteFinish\n(stabilityThreshold 80ms)
+CK -[#9F8766]-> SVC : "change" event (path)
+activate SVC
+SVC -> SVC : kind-of path → "markdown"\nfs.readFileSync utf8
+SVC -[#B1951D]-> PL : webContents.send\n**vv:content** {:path :kind "markdown" :text}
+deactivate SVC
+activate PL
+PL -[#B1951D]-> BR : ipcRenderer.on("vv:content")\n→ window.vv.onContent(cb)
+deactivate PL
+activate BR
+BR -> RF : rf/dispatch\n**[:content/received {…}]**
+deactivate BR
+
+== transact (DataScript SSOT) ==
+activate RF
+RF -> RF : handler (PURE): build base via cond->\n(omit :doc/text if nil; retract stale :doc/error)
+RF -> DS : fx **:ds/transact**\n{:doc/path :doc/kind :doc/text :doc/open? :doc/order}
+activate DS
+DS -[#B1951D]-> RF : tx-report → [:ds/changed]\n(:ds/rev inc)  — subs :tabs/:doc/active recompute
+deactivate DS
+
+== render (Markdown, async) ==
+RF -> MD : fx **:markdown/render** {:text :path :on-done}
+deactivate RF
+activate MD
+MD -> MD : unified()\n.use parse·gfm·rehype·slug·highlight·stringify
+MD -->> RF : Promise<html> .then\n→ rf/dispatch **[:content/rendered path html]**
+deactivate MD
+activate RF
+RF -> DS : fx :ds/transact {:doc/path :doc/html html}
+activate DS
+DS -[#B1951D]-> RF : [:ds/changed] → :ds/rev inc
+deactivate DS
+deactivate RF
+
+== paint (DOM, no VDOM diff) ==
+DS --> V : :doc/active sub recomputes (new :doc/html)
+activate V
+V -> V : component-did-update →\n**set! (.-innerHTML node) html**
+note right of V #FFF6D6
+  Only the .markdown-body innerHTML changes.
+  :ui/find ranges, scroll position, active theme,
+  and history are in app-db — NOT touched by any
+  :ds/* transaction, so they survive the refresh.
+end note
+deactivate V
+
+legend right
+  |= Colour |= Participant / concept |
+  |<#9F8766>| filesystem / editor / chokidar |
+  |<#3A5BA0>| main process (Node IO service) |
+  |<#B1951D>| IPC seam (preload, contextBridge) — all amber arrows |
+  |<#2D9574>| renderer / reagent view |
+  |<#4F97D7>| re-frame events + effects |
+  |<#67B11D>| Markdown (unified/remark/rehype) |
+  |<#A45BAD>| DataScript SSOT |
+endlegend
+@enduml

@@ -1,0 +1,58 @@
+@startuml seq-toc
+'' ============================================================================
+'' PlantUML over Mermaid because: this flow has THREE distinct temporal phases
+'' (extract on render, scroll-spy on every scroll, click-to-scroll) plus a
+'' rAF self-message and re-entrant re-frame dispatches. PlantUML sequence gives
+'' us `== phase ==` dividers, activation bars, `autonumber`, and self-messages
+'' with per-participant lifeline coloring keyed to the concept palette — none of
+'' which Mermaid sequence renders with stable per-actor color semantics.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Scroll-spy TOC — extract on render, spy on scroll, scroll on click
+
+autonumber
+
+participant "DataScript\n:doc/html"            as DS   #A45BAD
+participant ":doc/toc sub\n(toc/extract)"        as SUB  #4F97D7
+participant ".vv-toc panel\n(views/toc-panel)"   as PANEL #2D9574
+participant ".vv-content\n(scroll container)"    as CONTENT #2D9574
+participant "toc/spy!\n(renderer/toc)"           as SPY  #2D9574
+participant "re-frame\nevent loop"               as RF   #4F97D7
+
+== 1 · build the TOC (derived view, runs when rendered HTML changes) ==
+DS  -> SUB   : :doc/html changes\n(:ds/rev bumps)
+activate SUB
+SUB -> SUB   : DOMParser.parseFromString(html)\nquerySelectorAll("h1..h6")\nkeep nodes with non-empty id\n→ [{:level :text :id}]
+SUB --> PANEL : ordered headings (ids from rehype-slug)
+deactivate SUB
+PANEL -> PANEL : render <a.vv-toc-item .vv-toc-l{level}>\nper heading
+
+== 2 · scroll-spy (rAF-throttled, on every content scroll) ==
+CONTENT -> SPY : :on-scroll → toc/spy!(currentTarget)
+activate SPY
+SPY -> SPY : if spy-pending? → drop (coalesce)\nelse set spy-pending, requestAnimationFrame(…)
+SPY -> SPY : **rAF tick**: ctop ≔ content.getBoundingClientRect().top\nfor each heading h:\n  if (h.top − ctop) ≤ 100px → active ≔ h.id\n  else → stop (keep last)
+SPY -> RF : dispatch [:toc/active-heading active]
+deactivate SPY
+RF -> PANEL : :ui/active-heading updates →\nactive item gets .vv-toc-active\n(left border + head1 color)
+
+== 3 · click a TOC entry → smooth-scroll the heading ==
+PANEL -> RF : on-click → dispatch [:toc/goto id]
+activate RF
+RF -> RF : :toc/scroll fx\ngetElementById(id)
+RF -> CONTENT : el.scrollIntoView({block:"start", behavior:"smooth"})
+deactivate RF
+note over CONTENT, SPY
+  The smooth scroll re-fires :on-scroll, so phase 2 re-runs and the
+  clicked heading naturally becomes the active highlight. **One source of
+  truth** (the rendered headings); the active id is the only extra state.
+end note
+
+legend right
+  |= color |= concept |
+  | <#A45BAD> | DataScript SSOT (:doc/html) |
+  | <#4F97D7> | re-frame machinery (sub / event loop) |
+  | <#2D9574> | renderer (Chromium UI + DOM measurement) |
+endlegend
+@enduml

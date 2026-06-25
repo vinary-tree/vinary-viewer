@@ -1,0 +1,52 @@
+@startuml component-native-pdf-planned
+'' ============================================================================
+'' PlantUML over Mermaid because: this is a CROSS-PROCESS component diagram with
+'' a security/IPC seam, where the entire feature is «planned». PlantUML's
+'' component stereotype styling (the shared <<planned>> dashed-grey skin defined
+'' in _vv-theme.iuml) lets us mark not-yet-built parts uniformly while keeping
+'' the already-built process frames solid, and color the IPC arrows amber per
+'' the palette. Mermaid cannot apply a reusable "planned" stereotype skin.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Native PDF (Forthcoming / «planned») — a BrowserView positioned over the active tab
+
+rectangle "Electron MAIN process" as MAIN #3A5BA0 {
+  component "main.service\n(existing)" as SVC #3A5BA0
+  component "PdfService" as PDF <<planned>>
+  component "BrowserView\nnavigated to file://…pdf\n(Chromium PDF viewer)" as BV <<planned>>
+  component "chokidar watcher\n(existing — reused)" as WATCH #9F8766
+}
+
+rectangle "preload (contextBridge seam)" as PRE #B1951D {
+  component "window.vv.pdfBounds(rect)\nwindow.vv.onPdfReload(cb)" as BRIDGE <<planned>>
+}
+
+rectangle "Electron RENDERER (Chromium)" as REND #2D9574 {
+  component "content-view\nStrategy (existing)" as CV #2D9574
+  component "pdf placeholder div\n(measured each layout)" as PH <<planned>>
+}
+
+CV -[#B1951D,dashed,thickness=2]-> BRIDGE : (1) report placeholder bounds\n(getBoundingClientRect) over IPC
+BRIDGE -[#B1951D,dashed,thickness=2]-> PDF  : (2) {x,y,w,h}
+PDF -[#999999,dashed,thickness=2]-> BV      : (3) setBounds(rect)\n+ attach over the window
+WATCH -[#9F8766,dashed,thickness=2]-> PDF   : (4) file change →\nBV.webContents.reload()
+PDF -[#B1951D,dashed,thickness=2]-> BRIDGE  : (5) onPdfReload notify
+PH .[#999999,dashed]. BV : visually occupies\nthe same rectangle
+
+note bottom of REND
+  The renderer keeps the **tab/scroll/find** state in app-db; the BrowserView is
+  a separate native surface owned by MAIN, kept aligned to the placeholder by IPC
+  bounds messages. Live-refresh reuses the **same chokidar watcher per open path**
+  as Markdown — only the action (reload the BrowserView) differs.
+end note
+
+legend right
+  |= color/style |= concept |
+  | <#3A5BA0> | MAIN process (Node IO) — solid = existing |
+  | <#B1951D> | IPC seam (contextBridge) — all IPC arrows amber |
+  | <#2D9574> | renderer (Chromium UI) — solid = existing |
+  | <#9F8766> | filesystem watcher (reused) |
+  | dashed grey <<planned>> | NOT yet built (Forthcoming) |
+endlegend
+@enduml

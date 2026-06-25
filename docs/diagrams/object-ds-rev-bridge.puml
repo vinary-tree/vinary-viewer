@@ -1,0 +1,65 @@
+@startuml object-ds-rev-bridge
+'' PlantUML over Mermaid because this is a precise message-ordered handshake between five collaborators
+'' (effect → conn → listener → event → subs) where the *order* and the activation lifetimes are the point;
+'' PlantUML sequence gives autonumber, activation bars, phase dividers, and per-participant colour that a
+'' Mermaid sequenceDiagram cannot colour per concept.
+!include _vv-theme.iuml
+
+title The :ds/rev bridge — one DataScript transaction makes the right subscriptions recompute
+
+autonumber "<b>[0]"
+
+participant ":ds/transact\n(re-frame fx)" as FX #4F97D7
+database "DataScript\nconn" as CONN #A45BAD
+participant "conn listener\n::reframe" as LIS #A45BAD
+participant ":ds/changed\n(reg-event-db)" as EV #4F97D7
+collections "app-db\n{:ds/rev n}" as DB #7590DB
+participant ":tabs / :doc/active\nsubscriptions" as SUB #7590DB
+participant "reagent\nviews" as VIEW #2D9574
+
+== Mutate the source of truth ==
+FX -> CONN : **d/transact!** conn tx\n(e.g. {:doc/path p :doc/html h})
+activate CONN
+CONN -> CONN : apply datoms\n(upsert by :doc/path identity)
+
+== Bridge fires (amber seam) ==
+CONN -[#B1951D]-> LIS : tx-report
+activate LIS
+LIS -[#B1951D]-> EV : **rf/dispatch [:ds/changed]**
+deactivate LIS
+deactivate CONN
+activate EV
+EV -> DB : (update db :ds/rev inc)\n  n → n+1
+deactivate EV
+activate DB
+
+== Observer graph recomputes (only :ds/rev-dependent subs) ==
+DB --> SUB : :ds/rev changed → invalidate\nsubs that declared :<- [:ds/rev]
+deactivate DB
+activate SUB
+SUB -> CONN : re-query @conn\n(ds/open-docs / ds/active-doc)
+activate CONN
+CONN --> SUB : fresh tabs / active doc
+deactivate CONN
+SUB --> VIEW : new derived value
+deactivate SUB
+activate VIEW
+VIEW -> VIEW : re-render (view ≔ f(state))
+deactivate VIEW
+
+note over SUB
+  Subs that read ONLY app-db slices (e.g. :ui/find,
+  :ui/theme) do NOT list :<- [:ds/rev], so they are
+  untouched by this transaction — that is why a content
+  refresh never disturbs find/scroll/theme.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#4F97D7>| re-frame machinery (fx + event) |
+  |<#A45BAD>| DataScript SSOT (conn + listener) |
+  |<#7590DB>| app-db ephemeral (:ds/rev + subs) |
+  |<#2D9574>| reagent view |
+  |<#B1951D>| the bridge hop (listener → [:ds/changed]) |
+endlegend
+@enduml

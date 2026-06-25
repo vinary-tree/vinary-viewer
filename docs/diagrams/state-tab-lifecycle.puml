@@ -1,0 +1,65 @@
+@startuml state-tab-lifecycle
+'' PlantUML over Mermaid because a tab's life is a composite state machine: a Loaded super-state with
+'' kind sub-states, an orthogonal Active/Inactive focus, a live-refresh self-loop, and a red error
+'' substate; PlantUML supports composite states, self-transitions, and per-state colour that Mermaid
+'' stateDiagram cannot colour per concept. Literal palette hexes: purple #A45BAD = DataScript :doc entity
+'' lifecycle, green #67B11D markdown, teal #2D9574 image view, tan #9F8766 plain text, red #E0211D error.
+!include _vv-theme.iuml
+
+title Tab / document lifecycle — one :doc entity in DataScript (keyed by :doc/path)
+
+[*] --> Opening
+
+state "Opening" as Opening #7590DB : [:doc/open path] → :vv/open\nmain reads + sends vv:content
+
+state "Loaded" as Loaded #A45BAD {
+  state "Markdown" as MD #67B11D : :doc/kind "markdown"\n:doc/html = rendered HTML
+  state "Image" as IMG #2D9574 : :doc/kind "image"\n<img file://path> (no :doc/text)
+  state "Text" as TXT #9F8766 : :doc/kind "text"\n:doc/html = <pre vv-plain> (escaped)
+
+  [*] --> MD  : kind = markdown
+  [*] --> IMG : kind = image
+  [*] --> TXT : kind = text
+
+  state "Error" as ERR #E0211D : :doc/error = message\n(content-view shows .vv-error)
+  MD  --> ERR : render/read fails → [:content/error]
+  TXT --> ERR : read fails
+  ERR --> MD  : next good content\nretract stale :doc/error
+}
+
+Opening --> Loaded : vv:content arrives\n[:content/received] → :ds/transact
+
+'' orthogonal focus dimension (which tab is active)
+state "Active"   as Active   #line:1F6B53 : :ui/active-path = this path\n(vv-tab-active; body shown)
+state "Inactive" as Inactive #DDDDDD : open but not focused\n(:doc/open? true, not active)
+
+Loaded   --> Active   : [:tab/activate] / opened
+Active   --> Inactive : another tab activated
+Inactive --> Active   : [:tab/activate] this path
+
+'' LIVE-REFRESH self-loop on the loaded document
+Loaded --> Loaded : **live refresh** (file changed)\nvv:content → re-transact :doc/html\n(only :doc/*; :ui/* preserved)
+
+'' teardown
+Active   --> Closed : [:tab/close]
+Inactive --> Closed : [:tab/close]
+state "Closed" as Closed #DDDDDD : :db/retractEntity\n+ :vv/close (stop watcher)
+Closed --> [*]
+
+note bottom of Loaded #FFF6D6
+  ONE entity per path (`:doc/path` is :db.unique/identity), so
+  re-opening the same file upserts rather than duplicating, and a
+  live edit updates this very entity in place (LWW by path).
+end note
+
+legend right
+  |= Colour |= State / concept |
+  |<#7590DB>| Opening (request in flight) |
+  |<#A45BAD>| Loaded — the DataScript :doc entity (super-state) |
+  |<#67B11D>| Markdown body |
+  |<#2D9574>| Image view |
+  |<#9F8766>| Plain text view |
+  |<#E0211D>| Error substate (:doc/error) |
+  |<#DDDDDD>| Inactive / Closed |
+endlegend
+@enduml

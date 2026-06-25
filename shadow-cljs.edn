@@ -1,0 +1,29 @@
+{:deps {:aliases []}
+ ;; Java 26 needs this for some deps that touch sun.misc.Unsafe (matches LightningBug).
+ :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]
+ :builds
+ ;; Electron MAIN process (Node). :node-script uses :js-provider :require, so `require("electron")`
+ ;; and node built-ins stay runtime requires (resolved by the Electron runtime) — no bundling.
+ {:main {:target    :node-script
+         :main      vinary.main.core/main
+         :output-to "dist/main/main.js"}
+  ;; Electron RENDERER (Chromium). Browser target; Node fs/path/url are stubbed — the renderer talks
+  ;; to the main process over the contextBridge IPC seam (added in P1), never the filesystem directly.
+  :renderer {:target     :browser
+             :output-dir "resources/public/js"
+             :asset-path "js"
+             :modules    {:main {:init-fn vinary.renderer.core/init}}
+             :devtools   {:after-load vinary.renderer.core/reload
+                          :preloads   [devtools.preload
+                                       day8.re-frame-10x.preload.react-18
+                                       re-frisk.preload]}
+             ;; trace is a dev-only re-frame-10x feature; in :release it defaults to goog.DEBUG (false)
+             :dev {:compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}}
+             ;; :simple (not :advanced) for release — advanced property-renaming breaks the re-frame /
+             ;; DataScript / unified-remark interop; :simple still minifies + strips devtools.
+             :release {:compiler-options {:optimizations :simple}}
+             :js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false}}}
+  ;; Unit tests for the pure, DOM-free logic (node). Run: npx shadow-cljs compile test && node dist/test/test.js
+  :test {:target    :node-test
+         :output-to "dist/test/test.js"
+         :ns-regexp "-test$"}}}

@@ -1,0 +1,71 @@
+@startuml flow-unidirectional-dataflow
+'' PlantUML over Mermaid because this is a single closed control loop with swimlane ownership (who runs
+'' each step) and a re-entrant "fx dispatch a new event" back-edge; PlantUML's activity (swimlane) syntax
+'' draws partitions + the loop-closing arrow cleanly, and lets each lane carry its concept colour.
+!include _vv-theme.iuml
+
+title re-frame's six dominoes — the closed unidirectional loop\n(view ≔ f(state); state only changes by dispatching events)
+
+|#9F8766|World / DOM|
+start
+:User acts\n(Ctrl+F, click tab, edit+save file);
+:Browser event fires\n→ rf/dispatch [:event ...];
+note right: ① EVENT — a reified Command (data, not a call)
+
+|#4F97D7|re-frame loop|
+:② Coeffects gathered\n(:db = current app-db snapshot);
+:③ Event handler runs (PURE)\n(db, fx)  ≔  handler(coeffects, event);
+note right
+  Handlers return *data*: a new :db and/or
+  a vector of effects. No IO happens here —
+  that is what makes replay/time-travel possible.
+end note
+
+|#7590DB|app-db (ephemeral UI)|
+:④a New app-db committed\n(:ui/find, :ui/history, :ui/theme, :ds/rev);
+
+|#4F97D7|re-frame loop|
+:④b Effects handed to fx handlers;
+
+|#A45BAD|effect world (edge)|
+:⑤ Effects execute (IMPURE)\n:ds/transact, :markdown/render,\n:find/run, :theme/apply, :vv/open;
+note right
+  Some effects dispatch a NEW event when their
+  async work completes (e.g. :markdown/render
+  → [:content/rendered …]). That is the
+  back-edge that closes the loop.
+end note
+
+|#4F97D7|re-frame loop|
+:⑥ Subscriptions recompute (memoised)\nthe Observer signal graph;
+note right
+  Only subs whose inputs changed re-run.
+  Conn-reading subs list :<- [:ds/rev], so a
+  DataScript transaction (via :ds/changed)
+  invalidates exactly them.
+end note
+
+|#2D9574|view (reagent)|
+:Components re-render from subscriptions\n(view ≔ f(state));
+:DOM reflects new state;
+
+|#9F8766|World / DOM|
+if (effect dispatched a follow-up event?) then (yes — back-edge)
+  -[#B1951D]-> closes the loop;
+  :next [:event ...];
+  detach
+else (no)
+  stop
+endif
+
+legend right
+  |= Colour |= Lane / concept |
+  |<#9F8766>| World / DOM / filesystem (user + browser events) |
+  |<#4F97D7>| re-frame machinery (dominoes ①②③④b⑥) |
+  |<#7590DB>| app-db — ephemeral UI state (domino ④a) |
+  |<#A45BAD>| DataScript SSOT effect (:ds/transact) |
+  |<#2D9574>| reagent view (the f in view ≔ f(state)) |
+  |<#B1951D>| async fx → follow-up event (the back-edge) |
+  Data flows ONE way: event → handler → effect → state → sub → view → (event).
+endlegend
+@enduml

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- vinary-viewer empty-tab watermark: the Vinary Tree emblem — a heraldic shield enclosing a sunset,
+     mountains, and a tree-of-life, with the "VINARY TREE" wordmark. Drawn monochrome via currentColor
+     so the watermark CSS (mask + opacity) tints it to the active theme. A complete, purpose-built
+     watermark asset (the corporate crest can be dropped in here to replace it). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" fill="none"
+     stroke="currentColor" color="currentColor" aria-label="Vinary Tree">
+  <defs>
+    <clipPath id="vv-shield-clip">
+      <path d="M40,34 Q40,23 51,23 L189,23 Q200,23 200,34 L200,154 Q200,244 120,274 Q40,244 40,154 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- shield border (double line) -->
+  <path d="M40,34 Q40,23 51,23 L189,23 Q200,23 200,34 L200,154 Q200,244 120,274 Q40,244 40,154 Z" stroke-width="3.5"/>
+  <path d="M49,42 Q49,33 57,33 L183,33 Q191,33 191,42 L191,151 Q191,233 120,261 Q49,233 49,151 Z"
+        stroke-width="1.2" opacity="0.55"/>
+
+  <!-- everything inside is clipped to the shield -->
+  <g clip-path="url(#vv-shield-clip)">
+    <!-- sunset: sun disc + radiating rays -->
+    <circle cx="120" cy="104" r="20" stroke-width="1.6" opacity="0.65"/>
+    <g stroke-width="1.4" stroke-linecap="round" opacity="0.5">
+      <path d="M120,68 V58"/>   <path d="M150,74 L157,66"/>  <path d="M90,74 L83,66"/>
+      <path d="M163,104 H173"/> <path d="M77,104 H67"/>
+      <path d="M150,134 L157,142"/> <path d="M90,134 L83,142"/>
+    </g>
+    <!-- mountains across the lower shield -->
+    <g stroke-width="1.8" stroke-linejoin="round" opacity="0.8">
+      <path d="M40,206 L78,170 L104,200 L138,162 L176,206"/>
+      <path d="M150,206 L182,178 L200,200"/>
+    </g>
+    <!-- river hint -->
+    <path d="M104,206 Q116,224 110,250" stroke-width="1.4" opacity="0.45"/>
+  </g>
+
+  <!-- tree-of-life: trunk + 7 fanning branches ending in leaf-pods (in front of the sunset) -->
+  <path d="M120,206 C118,176 122,150 120,118" stroke-width="3.6" stroke-linecap="round"/>
+  <g stroke-width="2.4" stroke-linecap="round">
+    <path d="M120,118 Q90,104 62,80"/>  <path d="M120,118 Q94,92 80,62"/>
+    <path d="M120,118 Q105,86 100,54"/> <path d="M120,118 Q120,84 120,50"/>
+    <path d="M120,118 Q135,86 140,54"/> <path d="M120,118 Q146,92 160,62"/>
+    <path d="M120,118 Q150,104 178,80"/>
+  </g>
+  <g fill="currentColor" stroke="none">
+    <circle cx="62" cy="80" r="6.5"/>  <circle cx="80" cy="62" r="6.5"/>
+    <circle cx="100" cy="54" r="6.5"/> <circle cx="120" cy="50" r="7.5"/>
+    <circle cx="140" cy="54" r="6.5"/> <circle cx="160" cy="62" r="6.5"/>
+    <circle cx="178" cy="80" r="6.5"/>
+  </g>
+  <!-- roots -->
+  <g stroke-width="2" stroke-linecap="round" opacity="0.85">
+    <path d="M120,206 Q104,220 92,234"/> <path d="M120,206 Q120,224 120,240"/>
+    <path d="M120,206 Q136,220 148,234"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="120" y="252" text-anchor="middle" fill="currentColor" stroke="none"
+        font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="700"
+        letter-spacing="1.6">VINARY TREE</text>
+</svg>

@@ -1,0 +1,48 @@
+@startuml component-grammar-registry-planned
+'' ============================================================================
+'' PlantUML over Mermaid because: this shows a registry ATOM fed from two
+'' sources (compile-time bundled base64 + a user config directory), validated by
+'' clojure.spec, with the whole feature «planned». PlantUML's reusable dashed
+'' <<planned>> stereotype marks every node Forthcoming uniformly; the filesystem
+'' tan and DataScript-purple (registry = stateful single owner) colors keep
+'' their fixed palette meaning. Mermaid lacks reusable stereotypes + record nodes.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Grammar registry (Forthcoming / «planned») — bundled + user grammars [Strategy/Interpreter]
+
+rectangle "registry atom\n(name → grammar config)" as REG <<planned>> {
+  card "{ :rholang {…} :metta {…}\n  :markdown {…} … }\nvalidated by clojure.spec\n(:grammar/name :wasm :highlights\n :extensions :scope)" as ATOMBODY
+}
+
+rectangle "bundled grammars\n(compile-time)" as BUNDLED #9F8766 {
+  component "embed-base64\n<name>.wasm + highlights.scm\n→ inlined into the build" as EMBED <<planned>>
+}
+
+rectangle "user grammars\n~/.config/vinary-viewer/grammars/" as USER #9F8766 {
+  component "<name>.wasm\n+ highlights.scm\n+ config map (.edn)" as USERFILES <<planned>>
+}
+
+rectangle "consumer" as CONS #2D9574 {
+  component "source-view\nresolve grammar by\nfile extension / scope" as RESOLVE <<planned>>
+}
+
+EMBED     -[#999999,dashed,thickness=2]-> REG : (1) register bundled\n(base names: Rholang, MeTTa, …)
+USERFILES -[#999999,dashed,thickness=2]-> REG : (2) main scans the dir,\nsends configs over IPC →\nregister at startup
+REG       -[#2D9574,dashed,thickness=2]-> RESOLVE : (3) lookup by extension\n→ {:wasm :highlights}
+
+note bottom of REG
+  A **user** can teach vinary-viewer a new language without rebuilding: drop a
+  compiled `.wasm`, a `highlights.scm`, and an `.edn` config into the grammars
+  directory. clojure.spec validates each config before it enters the atom, so a
+  malformed entry is rejected rather than corrupting the registry.
+end note
+
+legend right
+  |= color/style |= concept |
+  | <#9F8766> | grammar source (bundled asset / user config dir) |
+  | <#A45BAD> | registry = single stateful owner (the atom) |
+  | <#2D9574> | renderer consumer (source-view) |
+  | dashed grey <<planned>> | NOT yet built (Forthcoming) |
+endlegend
+@enduml

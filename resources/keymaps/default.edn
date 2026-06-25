@@ -1,0 +1,30 @@
+;; vinary-viewer default keymap (non-modal). Generalizes the original Ctrl+F / Alt+←→ behavior.
+;; Keys are canonical chord tokens (see vinary.input.keys); a nested map = a key sequence (prefix);
+;; a keyword or {:id … :when …} = a command in vinary.app.commands/registry.
+{:name :default
+ :initial-mode :insert            ; non-modal: bare keys reach inputs normally
+ :timeout-ms 1000
+ :leader nil
+ :modes
+ {:all
+  {"C-f"     :search/start
+   "M-left"  :history/back
+   "M-right" :history/forward
+   "C-tab"   :tab/next
+   "C-S-tab" :tab/prev
+   "C-w"     :tab/close
+   "C-o"     :file/open-dialog
+   "C-r"     :doc/reload
+   "C-p"     :palette/files
+   "C-S-p"   :palette/open
+   "C-b"     :sidebar/toggle
+   "C-t"     :theme/cycle
+   "C-0"     :view/zoom-reset
+   "C-="     :view/zoom-in
+   "C-+"     :view/zoom-in
+   "C--"     :view/zoom-out
+   "C-S-i"   :view/devtools
+   "C-g"     :input/escape
+   "f3"      :search/next
+   "S-f3"    :search/prev
+   "escape"  :input/escape}}}

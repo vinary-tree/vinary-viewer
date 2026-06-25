@@ -1,0 +1,77 @@
+@startuml object-history-stack
+'' ============================================================================
+'' PlantUML over Mermaid because: this illustrates the EVOLUTION of one mutable
+'' value ({:stack :idx}) across a sequence of operations, with the forward
+'' branch being TRUNCATED on a divergent navigation. PlantUML objects let each
+'' snapshot be a typed record with the active index highlighted; ordered arrows
+'' between snapshots narrate the Command-pattern transitions. Mermaid lacks
+'' record objects with per-field highlighting and snapshot-to-snapshot arrows.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title :ui/history evolution — A → B → C → back → D truncates the forward branch
+
+'' Each object is one snapshot of {:stack [...] :idx n}. The bracketed «idx»
+'' marks the entry the current active-path points at.
+
+object "S0 · initial" as S0 #7590DB {
+  stack = []
+  idx   = -1
+  active = (none)
+}
+
+object "S1 · nav A" as S1 #7590DB {
+  stack = [ **A«0»** ]
+  idx   = 0
+  active = A
+}
+
+object "S2 · nav B" as S2 #7590DB {
+  stack = [ A, **B«1»** ]
+  idx   = 1
+  active = B
+}
+
+object "S3 · nav C" as S3 #7590DB {
+  stack = [ A, B, **C«2»** ]
+  idx   = 2
+  active = C
+}
+
+object "S4 · back" as S4 #4F97D7 {
+  stack = [ A, **B«1»**, C ]
+  idx   = 1
+  active = B
+  --
+  (C retained;\n idx moved left)
+}
+
+object "S5 · nav D (divergent)" as S5 #E0211D {
+  stack = [ A, B, **D«2»** ]
+  idx   = 2
+  active = D
+  --
+  (forward branch C\n **truncated**)
+}
+
+S0 -[#A45BAD,thickness=2]-> S1 : nav-to A\nrecord-nav: conj A
+S1 -[#A45BAD,thickness=2]-> S2 : nav-to B\nrecord-nav: conj B
+S2 -[#A45BAD,thickness=2]-> S3 : nav-to C\nrecord-nav: conj C
+S3 -[#4F97D7,thickness=2]-> S4 : :history/back\nidx ← idx−1   (stack unchanged)
+S4 -[#E0211D,thickness=2]-> S5 : nav-to D\nrecord-nav truncates:\nstack' ≔ (conj (vec (take (inc idx) stack)) D)\n      = (conj [A B] D)
+
+note bottom of S5
+  **record-nav** keeps only `take (inc idx)` of the old stack before appending
+  the new path, then sets `idx ≔ (dec (count stack'))`. This is exactly the
+  browser-history rule: navigating after a Back **discards** the forward branch.
+  Navigating to the path you are already on is a no-op (no duplicate entry).
+end note
+
+legend right
+  |= color |= concept |
+  | <#7590DB> | app-db ephemeral UI state (a history snapshot) |
+  | <#A45BAD> | a forward navigation (record-nav appends) |
+  | <#4F97D7> | back/forward move (idx slides, stack frozen) |
+  | <#E0211D> | divergent nav — forward branch truncated |
+endlegend
+@enduml

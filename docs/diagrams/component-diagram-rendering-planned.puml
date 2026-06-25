@@ -1,0 +1,56 @@
+@startuml component-diagram-rendering-planned
+'' ============================================================================
+'' PlantUML over Mermaid because: this shows a Strategy registry gaining new
+'' entries (d2/plantuml/mermaid → SVG) that are «planned», alongside the
+'' existing markdown/image/text strategies. PlantUML's reusable <<planned>>
+'' stereotype skin marks the new entries dashed-grey while existing strategies
+'' stay solid + palette-colored. The amber IPC arrow and the green markdown/
+'' unified color carry their fixed meaning. Mermaid lacks reusable stereotypes.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Diagram rendering (Forthcoming / «planned») — new Strategy entries: source → SVG
+
+rectangle "content-view — Renderer Registry [Strategy]\n(views/content-view, keyed by :doc/kind)" as REG #2D9574 {
+  component "markdown\n(unified/remark — existing)" as MD #67B11D
+  component "image\n(<img file://> — existing)" as IMG #2D9574
+  component "text\n(<pre> — existing)" as TXT #2D9574
+  component "diagram-svg" as DG <<planned>>
+}
+
+rectangle "Electron MAIN — diagram service" as MAIN #3A5BA0 {
+  component "d2\n→ SVG" as D2 <<planned>>
+  component "plantuml\n→ SVG" as PUML <<planned>>
+  component "mermaid\n→ SVG" as MER <<planned>>
+  component "chokidar watcher\n(existing — reused)" as WATCH #9F8766
+}
+
+rectangle "preload (contextBridge seam)" as PRE #B1951D {
+  component "window.vv.renderDiagram(src, engine)\n→ Promise<svg string>" as BRIDGE <<planned>>
+}
+
+DG -[#B1951D,dashed,thickness=2]-> BRIDGE : (1) on :doc/kind = diagram,\nrequest render(src, engine)
+BRIDGE -[#999999,dashed,thickness=2]-> D2
+BRIDGE -[#999999,dashed,thickness=2]-> PUML
+BRIDGE -[#999999,dashed,thickness=2]-> MER
+D2   -[#B1951D,dashed,thickness=2]-> BRIDGE : (2) SVG string back
+PUML -[#B1951D,dashed,thickness=2]-> BRIDGE
+MER  -[#B1951D,dashed,thickness=2]-> BRIDGE
+WATCH -[#9F8766,dashed,thickness=2]-> DG : (3) source edited →\nre-request render (live-refresh)
+
+note bottom of REG
+  Each entry is one Strategy keyed by detected kind. SVG output is injected the
+  same way Markdown is (imperative innerHTML on a body node) and benefits from
+  the **same live-refresh spine** — only the transform (engine) changes per kind.
+end note
+
+legend right
+  |= color/style |= concept |
+  | <#67B11D> | markdown / unified pipeline (existing) |
+  | <#2D9574> | renderer Strategy entries (existing) |
+  | <#3A5BA0> | MAIN process render engines |
+  | <#B1951D> | IPC seam (contextBridge) |
+  | <#9F8766> | filesystem watcher (reused) |
+  | dashed grey <<planned>> | NOT yet built (Forthcoming) |
+endlegend
+@enduml

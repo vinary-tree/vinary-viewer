@@ -1,0 +1,65 @@
+@startuml seq-history
+'' PlantUML over Mermaid because navigation history is an ordered handshake where a pure app-db index move
+'' drives a DataScript-backed body swap; the activation lifetimes and the :ds/rev recompute hop matter, so
+'' PlantUML sequence (autonumber + activation + concept colour) is the right tool. Literal palette hexes:
+'' teal #2D9574 view, blue #4F97D7 re-frame, blue-violet #7590DB app-db history, purple #A45BAD DataScript.
+!include _vv-theme.iuml
+
+title Navigation history — Alt+← (Back) ⟶ body swap (Command replay)\n:ui/history {:stack :idx}
+
+autonumber "<b>[0]"
+
+actor User #9F8766
+participant "toolbar /\nkeybindings" as UI #2D9574
+participant ":history/back\n(reg-event-db)" as RF #4F97D7
+collections "app-db\n:ui/history" as DB #7590DB
+participant ":doc/active\nsubscription" as SUB #7590DB
+database "DataScript\nconn" as DS #A45BAD
+participant "views\nmarkdown-body" as V #2D9574
+
+== guard ==
+User -> UI : Alt+←  (or click ←)
+UI -> RF : [:history/back]
+activate RF
+RF -> DB : read {:stack :idx}
+alt idx > 0  (can go back)
+  RF -> DB : :idx ← (dec idx)\n:active-path ← (get stack (dec idx))
+  note right of DB
+    History is a Command stack: each visited path is a
+    reified entry. Back/forward just move :idx; the stack
+    itself is unchanged (no re-navigation side effects).
+  end note
+else idx = 0  (at oldest)
+  RF -> RF : no-op (history/can-back? = false\n→ ← button disabled)
+end
+deactivate RF
+
+== recompute + swap ==
+DB --> SUB : :ui/active-path changed →\n:doc/active sub re-runs (:<- [:ui/active-path])
+activate SUB
+SUB -> DS : ds/active-doc @conn for new path\n(pull :doc/path :doc/kind :doc/html :doc/error)
+activate DS
+DS --> SUB : the prior document entity (already open)
+deactivate DS
+SUB --> V : new :doc/html
+deactivate SUB
+activate V
+V -> V : component-did-update →\nset! innerHTML html
+deactivate V
+
+note over SUB, DS #FFF6D6
+  Back/forward never re-read the file or re-render Markdown:
+  the target doc is already a :doc entity in DataScript, so
+  switching is a pure index move + a sub recompute. Forward
+  (Alt+→) is the mirror: idx < count-1 → (inc idx).
+end note
+
+legend right
+  |= Colour |= Participant / concept |
+  |<#9F8766>| User |
+  |<#2D9574>| view (toolbar, body) |
+  |<#4F97D7>| re-frame event (:history/back) |
+  |<#7590DB>| app-db :ui/history (Command stack + idx) |
+  |<#A45BAD>| DataScript (the already-open :doc entity) |
+endlegend
+@enduml

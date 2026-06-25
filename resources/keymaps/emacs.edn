@@ -1,0 +1,28 @@
+;; vinary-viewer emacs keymap (non-modal; C-x prefix maps; M-x palette; C-s isearch).
+;; Nested map = key sequence (e.g. C-x C-f). {:id … :when …} = a gated command.
+{:name :emacs
+ :initial-mode :insert
+ :timeout-ms 1200
+ :leader nil
+ :modes
+ {:all
+  {"C-x" {"C-f" :file/open
+          "4"   {"C-f" :file/open-in-new-tab "f" :file/open-in-new-tab}
+          "k"   :tab/close
+          "b"   :palette/files
+          "C-b" :sidebar/toggle
+          "o"   :focus/toggle
+          "1"   :focus/content
+          "t"   :theme/pick}
+   "M-x" :palette/open
+   "C-s" :search/start
+   "C-r" :search/start
+   "C-n" {:id :nav/scroll-down :when :not-in-input?}
+   "C-p" {:id :nav/scroll-up   :when :not-in-input?}
+   "C-v" :nav/page-down
+   "M-v" :nav/page-up
+   "M-f" {:id :tab/next :when :not-in-input?}
+   "M-b" {:id :tab/prev :when :not-in-input?}
+   "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
+   "C-g" :input/escape
+   "escape" :input/escape}}}

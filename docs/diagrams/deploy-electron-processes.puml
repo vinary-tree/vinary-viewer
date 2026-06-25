@@ -1,0 +1,65 @@
+@startuml deploy-electron-processes
+'' ============================================================================
+'' vinary-viewer — Deployment view: Electron processes, artifacts, and the
+'' filesystem volume across the trust boundary.
+''
+'' PlantUML over Mermaid because: deployment semantics (nodes, artifacts,
+'' a storage volume, and a dashed trust boundary that encloses one process but
+'' not the other) are native to PlantUML's deployment diagram. Mermaid has no
+'' `node`/`artifact`/`database` deployment vocabulary and cannot render the
+'' contextIsolation boundary as an enclosure.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Deployment — Electron processes & artifacts
+
+skinparam node {
+  BorderThickness 1.6
+}
+skinparam artifact {
+  BorderThickness 1.3
+}
+
+node "Electron runtime\n(`electron .`)" as Runtime #white {
+
+  node "MAIN process\n(Node)" as MainNode MAIN_COLOR {
+    artifact "dist/main/main.js\n(`:node-script`)" as MainArt MAIN_COLOR
+    artifact "node_modules\n(chokidar · electron)" as Nm FS_COLOR
+  }
+
+  artifact "resources/preload.js\n(contextBridge `window.vv`)" as PreloadArt IPC_COLOR
+
+  node "RENDERER process\n(Chromium · BrowserWindow)\ncontextIsolation = true\nnodeIntegration = false" as RendNode #line.dashed;line:B1951D {
+    artifact "resources/public/index.html" as Html RENDERER_COLOR
+    artifact "resources/public/js/main.js\n(`:browser`)" as RendArt RENDERER_COLOR
+    artifact "resources/public/css/\napp.css + themes/*.css" as Css RENDERER_COLOR
+    artifact "node_modules\n(unified · remark · rehype)\n[bundled into js/main.js]" as Nm2 MARKDOWN_COLOR
+  }
+}
+
+database "Filesystem volume\n(user's documents · git repo)" as Vol FS_COLOR
+
+MainNode --> PreloadArt : `webPreferences.preload`
+PreloadArt ..> RendNode : injected before page scripts
+MainArt --> Nm : runtime `require`
+MainArt --> Vol : **read** content · **watch** paths
+MainArt --> Vol : `git ls-files` (tree)
+RendArt --> PreloadArt : `window.vv.*`
+RendArt --> Nm2 : (compiled-in)
+
+note bottom of RendNode
+  The renderer has **no Node access**: `fs`/`path`/`url` are
+  resolved to `false` at build time, so the bundle cannot
+  reach the filesystem. All IO crosses the amber preload seam.
+end note
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN / Node IO |
+  | <#2D9574> | Renderer / Chromium UI |
+  | <#B1951D> | IPC seam (preload) |
+  | <#67B11D> | markdown / unified (bundled) |
+  | <#9F8766> | filesystem volume · node_modules |
+  Dashed border = trust boundary (sandboxed renderer)
+endlegend
+@enduml

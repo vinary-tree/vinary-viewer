@@ -1,0 +1,282 @@
+/* vinary-viewer — structural stylesheet. Colors come from the active theme's --vv-* palette
+   (resources/public/css/themes/<name>.css); this file references var(--vv-*) only. */
+
+/* font preferences (Settings ▸ Preferences overrides these on :root via JS) */
+:root { --vv-font-variable: "Inter", system-ui, sans-serif;
+  --vv-font-fixed: "Fira Code", "JetBrains Mono", monospace;
+  --vv-font-size: 15px; --vv-code-font-size: 13px; }
+html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv-fg);
+  font-family: var(--vv-font-variable); }
+#app { height: 100%; }
+::selection { background: var(--vv-highlight); color: var(--vv-fg-strong); }
+
+/* ----- App shell ----- */
+.vv-root { display: flex; flex-direction: column; height: 100%; }
+.vv-app { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
+.vv-pane { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.vv-content { flex: 1 1 auto; overflow: auto; padding: 32px 45px; box-sizing: border-box; }
+.vv-error { color: var(--vv-error); }
+.vv-empty { color: var(--vv-fg-dim); }
+/* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
+.vv-image-view img { display: block; width: 100%; max-width: none; height: auto; }
+/* PDF / web hosts: empty boxes a native WebContentsView is positioned over (it sits on top) */
+.vv-pdf-host { width: 100%; height: 100%; min-height: 400px; }
+.vv-web-host { width: 100%; height: 100%; min-height: 400px; }
+/* rendered diagram (SVG from d2/plantuml/mermaid/graphviz) */
+.vv-diagram { display: flex; justify-content: center; }
+.vv-diagram svg { max-width: 100%; height: auto; }
+
+/* read-only source view (CodeMirror 6 + tree-sitter highlighting) */
+.vv-source { height: 100%; font-size: var(--vv-code-font-size); }
+.vv-source .cm-editor { height: 100%; background: var(--vv-bg1); color: var(--vv-code); outline: none; }
+.vv-source .cm-scroller { font-family: var(--vv-font-fixed); line-height: 1.5; }
+.vv-source .cm-gutters { background: var(--vv-bg2); color: var(--vv-fg-dim); border-right: 1px solid var(--vv-border); }
+.vv-source .cm-activeLine, .vv-source .cm-activeLineGutter { background: transparent; }
+.vv-source .cm-content { caret-color: transparent; }
+.vv-source .cm-cursor { display: none; }
+.vv-source .cm-keyword     { color: var(--vv-head1); }
+.vv-source .cm-operator    { color: var(--vv-head1); }
+.vv-source .cm-variable    { color: var(--vv-var); }
+.vv-source .cm-number      { color: var(--vv-const); }
+.vv-source .cm-string      { color: var(--vv-head2); }
+.vv-source .cm-boolean     { color: var(--vv-const); }
+.vv-source .cm-comment     { color: var(--vv-comment); font-style: italic; }
+.vv-source .cm-type        { color: var(--vv-func); }
+.vv-source .cm-constant    { color: var(--vv-const); }
+.vv-source .cm-function    { color: var(--vv-func); }
+.vv-source .cm-property    { color: var(--vv-head4); }
+.vv-source .cm-punctuation { color: var(--vv-fg-dim); }
+.vv-source .cm-bracket     { color: var(--vv-fg); }
+.vv-source .cm-label       { color: var(--vv-meta); }
+
+/* ----- Sidebar: tabbed (Files / Contents), collapsible, resizable ----- */
+.vv-sidebar { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 140px;
+  background: var(--vv-bg2); border-right: 1px solid var(--vv-border); user-select: none; }
+.vv-sidebar-tabs { display: flex; align-items: stretch; flex: 0 0 auto;
+  border-bottom: 1px solid var(--vv-border); }
+.vv-sidebar-tab { padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--vv-fg-dim);
+  cursor: pointer; border-bottom: 2px solid transparent; }
+.vv-sidebar-tab:hover { color: var(--vv-fg); background: var(--vv-bg-code); }
+.vv-sidebar-tab-active { color: var(--vv-head1); border-bottom-color: var(--vv-head1); }
+.vv-sidebar-tabs-spacer { flex: 1 1 auto; }
+.vv-sidebar-collapse { padding: 4px 10px; color: var(--vv-fg-dim); cursor: pointer; font-size: 14px; }
+.vv-sidebar-collapse:hover { color: var(--vv-head1); background: var(--vv-bg-code); }
+.vv-sidebar-body { flex: 1 1 auto; overflow: auto; }
+.vv-sidebar-empty { padding: 10px 12px; color: var(--vv-fg-dim); font-size: 12px; }
+.vv-sidebar-resize { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; z-index: 5;
+  cursor: col-resize; }
+.vv-sidebar-resize:hover { background: var(--vv-head1); opacity: 0.35; }
+.vv-sidebar-rail { flex: 0 0 16px; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 8px; background: var(--vv-bg2); border-right: 1px solid var(--vv-border);
+  color: var(--vv-fg-dim); cursor: pointer; }
+.vv-sidebar-rail:hover { color: var(--vv-head1); background: var(--vv-bg-code); }
+
+/* file tree (Files tab) — one collapsible <details> per project, rooted at its directory name */
+.vv-tree { font-size: 13px; padding-bottom: 24px; }
+.vv-tree-filter { display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 5px 8px;
+  background: var(--vv-bg1); color: var(--vv-fg); border: none; border-bottom: 1px solid var(--vv-border);
+  outline: none; font-size: 12px; font-family: inherit; }
+.vv-tree-filter::placeholder { color: var(--vv-fg-dim); }
+.vv-tree-filter:focus { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-project-name { padding: 4px 8px; font-weight: 700; color: var(--vv-head1); cursor: pointer;
+  white-space: nowrap; list-style-position: inside; outline: none; position: sticky; top: 0; z-index: 1;
+  background: var(--vv-bg2); }
+.vv-project-name:hover { background: var(--vv-bg-code); }
+.vv-dir { padding-left: 12px; }
+.vv-dir-name { cursor: pointer; padding: 2px 6px; color: var(--vv-meta); white-space: nowrap;
+  list-style-position: inside; outline: none; }
+.vv-dir-name:hover { background: var(--vv-bg-code); }
+.vv-file { display: block; padding: 2px 6px 2px 20px; color: var(--vv-fg); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.vv-file:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-file-active { background: var(--vv-highlight); color: var(--vv-fg-strong); font-weight: 600; }
+
+/* Contents (TOC) outline (Contents tab; scroll-spy highlights the active heading) */
+.vv-toc-list { padding: 6px 0; font-size: 12px; }
+.vv-toc-item { display: block; padding: 2px 12px; color: var(--vv-fg-dim); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  border-left: 2px solid transparent; }
+.vv-toc-item:hover { color: var(--vv-fg); background: var(--vv-bg-code); }
+.vv-toc-active { color: var(--vv-head1); border-left-color: var(--vv-head1); background: var(--vv-bg-code); }
+.vv-toc-l1 { padding-left: 12px; } .vv-toc-l2 { padding-left: 22px; }
+.vv-toc-l3 { padding-left: 32px; } .vv-toc-l4 { padding-left: 42px; }
+.vv-toc-l5 { padding-left: 52px; } .vv-toc-l6 { padding-left: 62px; }
+
+/* command palette / fuzzy finder */
+.vv-palette-overlay { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: center;
+  align-items: flex-start; padding-top: 12vh; background: rgba(0,0,0,0.35); }
+.vv-palette { width: 560px; max-width: 90%; max-height: 60vh; display: flex; flex-direction: column;
+  background: var(--vv-bg2); border: 1px solid var(--vv-border); border-radius: 6px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5); overflow: hidden; }
+.vv-palette-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
+  border-bottom: 1px solid var(--vv-border); }
+.vv-palette-prefix { color: var(--vv-head2); font-weight: 700; font-family: "Fira Code", monospace; }
+.vv-palette-input { flex: 1 1 auto; background: var(--vv-bg1); color: var(--vv-fg);
+  border: 1px solid var(--vv-border); border-radius: 4px; padding: 6px 8px; font-size: 14px;
+  font-family: inherit; outline: none; }
+.vv-palette-list { overflow-y: auto; }
+.vv-palette-item { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 12px; cursor: pointer; color: var(--vv-fg); }
+.vv-palette-item:hover { background: var(--vv-bg-code); }
+.vv-palette-selected { background: var(--vv-highlight); color: var(--vv-fg-strong); }
+.vv-palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-palette-cat { color: var(--vv-fg-dim); font-size: 11px; flex: 0 0 auto; }
+
+/* mode-line (vim/emacs modal indicator + pending key-sequence) */
+.vv-modeline { position: absolute; bottom: 0; right: 0; z-index: 9; display: flex; gap: 8px;
+  padding: 2px 10px; font-size: 12px; background: var(--vv-bg2); border-top: 1px solid var(--vv-border);
+  border-left: 1px solid var(--vv-border); border-top-left-radius: 4px; }
+.vv-modeline-mode { color: var(--vv-head1); font-weight: 700; }
+.vv-modeline-seq { color: var(--vv-head2); font-family: "Fira Code", monospace; }
+
+/* toolbar */
+.vv-toolbar { display: flex; align-items: center; flex: 0 0 auto; padding: 4px 10px;
+  background: var(--vv-bg1); border-bottom: 1px solid var(--vv-border); }
+.vv-toolbar-spacer { flex: 1 1 auto; }
+.vv-nav-btn { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 3px; padding: 1px 9px; margin-right: 4px; cursor: pointer; font-size: 14px; line-height: 1.4; }
+.vv-nav-btn:hover:not(:disabled) { color: var(--vv-head1); background: var(--vv-bg-code); }
+.vv-nav-btn:disabled { opacity: 0.4; cursor: default; }
+.vv-theme-select { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 3px; padding: 2px 6px; font-size: 12px; font-family: inherit; outline: none; }
+
+/* URI / nav bar (browser-style: back / forward / reload + address bar + theme) */
+.vv-uribar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding: 4px 8px;
+  background: var(--vv-bg1); border-bottom: 1px solid var(--vv-border); }
+.vv-uribar .vv-nav-btn { margin-right: 0; }
+.vv-uri-input { flex: 1 1 auto; min-width: 0; background: var(--vv-bg2); color: var(--vv-fg);
+  border: 1px solid var(--vv-border); border-radius: 4px; padding: 3px 9px; font-size: 12px;
+  font-family: "Fira Code", "JetBrains Mono", monospace; outline: none; }
+.vv-uri-input:focus { background: var(--vv-bg-code); border-color: var(--vv-head1); }
+.vv-uri-input::placeholder { color: var(--vv-fg-dim); }
+
+/* in-page find (floats over the content; matches painted via the CSS Custom Highlight API) */
+.vv-find { position: absolute; top: 8px; right: 22px; z-index: 10; display: flex; align-items: center;
+  gap: 3px; padding: 4px 6px; background: var(--vv-bg2); border: 1px solid var(--vv-border);
+  border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+.vv-find-input { background: var(--vv-bg1); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 3px; padding: 3px 6px; font-size: 13px; font-family: inherit; outline: none; width: 180px; }
+.vv-find-count { color: var(--vv-fg-dim); font-size: 12px; min-width: 40px; text-align: center; }
+.vv-find-btn { background: transparent; color: var(--vv-fg); border: none; cursor: pointer;
+  padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+.vv-find-btn:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+::highlight(vv-find) { background-color: var(--vv-highlight); color: var(--vv-fg-strong); }
+::highlight(vv-find-current) { background-color: var(--vv-head2); color: var(--vv-bg1); }
+
+/* tab strip */
+.vv-tabs { display: flex; flex: 0 0 auto; background: var(--vv-bg2);
+  border-bottom: 1px solid var(--vv-border); overflow-x: auto; user-select: none; }
+.vv-tab { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
+  color: var(--vv-fg-dim); border-right: 1px solid var(--vv-border); white-space: nowrap;
+  border-bottom: 2px solid transparent; font-size: 13px; }
+.vv-tab:hover { color: var(--vv-fg); background: var(--vv-bg-code); }
+.vv-tab-active { color: var(--vv-head1); background: var(--vv-bg1); border-bottom-color: var(--vv-head1); }
+.vv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.vv-tab-close { color: var(--vv-fg-dim); border-radius: 3px; padding: 0 5px; line-height: 1; }
+.vv-tab-close:hover { color: var(--vv-error); background: var(--vv-bg2); }
+
+/* watermark on empty tabs — the Vinary Tree logo, grayscale + faint */
+.vv-watermark { display: flex; align-items: center; justify-content: center; height: 100%; }
+.vv-watermark-logo { width: 40%; max-width: 360px; height: auto; opacity: 0.08;
+  filter: grayscale(1); user-select: none; pointer-events: none; }
+
+/* ----- Rendered Markdown ----- */
+.markdown-body { color: var(--vv-fg); line-height: 1.6;
+  font-family: var(--vv-font-variable); font-size: var(--vv-font-size); }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  border-bottom: 1px solid var(--vv-border); margin: 24px 0 16px; padding-bottom: 4px; }
+.markdown-body h1 { color: var(--vv-head1); }
+.markdown-body h2 { color: var(--vv-head2); }
+.markdown-body h3 { color: var(--vv-head3); }
+.markdown-body h4 { color: var(--vv-head4); }
+.markdown-body h5 { color: var(--vv-meta); }
+.markdown-body h6 { color: var(--vv-fg-dim); }
+.markdown-body strong { color: var(--vv-const); }
+.markdown-body em { color: var(--vv-em); }
+.markdown-body a { color: var(--vv-head1); text-decoration: underline; }
+.markdown-body code { background: var(--vv-bg-code); color: var(--vv-head4);
+  padding: 0.2em 0.4em; border-radius: 3px; font-family: var(--vv-font-fixed); font-size: 0.92em; }
+.markdown-body pre { background: var(--vv-bg2); border: 1px solid var(--vv-border);
+  padding: 16px; border-radius: 4px; overflow: auto; }
+.markdown-body pre code { background: transparent; color: var(--vv-code); padding: 0; }
+.markdown-body blockquote { border-left: 0.25em solid var(--vv-head2);
+  background: var(--vv-bg-quote); color: var(--vv-fg); padding: 8px 16px; margin: 0 0 16px; }
+/* center tables; wide ones shrink-to-fit and scroll internally rather than overflow the page */
+.markdown-body table { display: block; width: fit-content; max-width: 100%; overflow: auto;
+  margin: 0 auto 16px; border-collapse: collapse; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--vv-border); padding: 6px 12px; }
+.markdown-body tr:nth-child(2n) { background: var(--vv-bg2); }
+.markdown-body hr { border: none; height: 2px; background: var(--vv-border); }
+/* center figures at natural size (width owned by figures/scale-figures! for SVGs, max-width for rasters);
+   emoji stay inline */
+.markdown-body img:not([src^="emoji"]) { display: block; margin-left: auto; margin-right: auto;
+  max-width: 100%; height: auto; }
+.markdown-body .vv-plain { white-space: pre-wrap; color: var(--vv-fg); }
+
+/* ----- highlight.js classes (rehype-highlight), Spacemacs palette ----- */
+.hljs { color: var(--vv-code); background: transparent; }
+.hljs-comment, .hljs-quote { color: var(--vv-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-tag { color: var(--vv-head1); }
+.hljs-name, .hljs-attr, .hljs-attribute, .hljs-selector-class, .hljs-selector-id,
+.hljs-title, .hljs-section, .hljs-built_in { color: var(--vv-func); }
+.hljs-string, .hljs-doctag, .hljs-regexp { color: var(--vv-head2); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-bullet { color: var(--vv-const); }
+.hljs-variable, .hljs-template-variable, .hljs-type, .hljs-params { color: var(--vv-var); }
+.hljs-meta { color: var(--vv-meta); }
+.hljs-deletion { color: var(--vv-error); }
+.hljs-addition { color: var(--vv-head3); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+
+/* ----- Menu bar (custom, themed) ----- */
+.vv-menubar { display: flex; align-items: stretch; flex: 0 0 auto; position: relative; z-index: 50;
+  background: var(--vv-bg2); border-bottom: 1px solid var(--vv-border); user-select: none; }
+.vv-menu { position: relative; }
+.vv-menu-label { padding: 5px 12px; font-size: 13px; color: var(--vv-fg); cursor: pointer; }
+.vv-menu-label:hover, .vv-menu-label-open { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-menu-overlay { position: fixed; inset: 0; z-index: 49; }
+.vv-menu-dropdown { position: absolute; top: 100%; left: 0; z-index: 51; min-width: 220px;
+  background: var(--vv-bg2); border: 1px solid var(--vv-border); border-radius: 0 0 5px 5px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.45); padding: 4px 0; }
+.vv-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  padding: 5px 14px; font-size: 13px; color: var(--vv-fg); cursor: pointer; white-space: nowrap; }
+.vv-menu-item:hover { background: var(--vv-highlight); color: var(--vv-fg-strong); }
+.vv-menu-item-accel { color: var(--vv-fg-dim); font-size: 11px; }
+.vv-menu-item:hover .vv-menu-item-accel { color: var(--vv-fg-strong); }
+.vv-menu-sep { height: 1px; margin: 4px 0; background: var(--vv-border); }
+
+/* ----- Context menu ----- */
+.vv-ctx-overlay { position: fixed; inset: 0; z-index: 120; }
+.vv-ctx-menu { position: absolute; min-width: 200px; background: var(--vv-bg2);
+  border: 1px solid var(--vv-border); border-radius: 5px; box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+  padding: 4px 0; }
+
+/* ----- Modal dialogs (Preferences, About) ----- */
+.vv-modal-overlay { position: fixed; inset: 0; z-index: 130; display: flex; justify-content: center;
+  align-items: center; background: rgba(0,0,0,0.4); }
+.vv-modal { width: 460px; max-width: 92%; max-height: 84vh; overflow: auto; background: var(--vv-bg2);
+  border: 1px solid var(--vv-border); border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+  padding: 20px 22px; }
+.vv-modal-title { font-size: 17px; font-weight: 700; color: var(--vv-head1); margin-bottom: 14px; }
+.vv-modal-body { font-size: 13px; color: var(--vv-fg); }
+.vv-modal-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+.vv-btn { background: var(--vv-bg1); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 4px; padding: 5px 16px; font-size: 13px; font-family: inherit; cursor: pointer; }
+.vv-btn:hover { background: var(--vv-bg-code); color: var(--vv-head1); border-color: var(--vv-head1); }
+.vv-pref-section { font-weight: 700; color: var(--vv-head2); margin: 6px 0 10px; }
+.vv-pref-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.vv-pref-label { color: var(--vv-fg-dim); flex: 0 0 auto; }
+.vv-pref-input { flex: 1 1 auto; min-width: 0; background: var(--vv-bg1); color: var(--vv-fg);
+  border: 1px solid var(--vv-border); border-radius: 4px; padding: 5px 8px; font-size: 13px;
+  font-family: inherit; outline: none; }
+.vv-pref-input:focus { border-color: var(--vv-head1); }
+.vv-pref-num { flex: 0 0 80px; }
+
+/* About dialog */
+.vv-about { text-align: center; }
+.vv-about-logo { width: 96px; height: auto; display: block; margin: 0 auto 12px; }
+.vv-about-version { color: var(--vv-fg-dim); font-size: 12px; margin-bottom: 12px; }
+.vv-about-summary { font-size: 13px; line-height: 1.6; color: var(--vv-fg); text-align: left; }
+.vv-about-link { display: inline-block; margin-top: 8px; color: var(--vv-head1); font-size: 12px;
+  text-decoration: underline; cursor: pointer; word-break: break-all; }

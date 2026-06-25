@@ -1,0 +1,84 @@
+@startuml seq-open-file
+'' ============================================================================
+'' vinary-viewer — Sequence: launch `vv README.md` → first paint (full round trip)
+''
+'' PlantUML over Mermaid because: this flow spans two OS processes plus the
+'' preload seam, needs activation bars to show where the watcher stays live after
+'' the call returns, and `== phase ==` dividers to separate boot / content / tree.
+'' PlantUML sequence diagrams give all three with `autonumber`; Mermaid omits the
+'' divider concept and renders weaker lifelines.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Open a file — `vv README.md` → first render
+
+autonumber "0:"
+
+actor User #white
+participant "main.core" as Core MAIN_COLOR
+participant "main.service" as Svc MAIN_COLOR
+participant "Filesystem\n+ chokidar" as FS FS_COLOR
+participant "preload `window.vv`" as Vv IPC_COLOR
+participant "renderer.core\n`bridge!`" as RCore RENDERER_COLOR
+participant "re-frame\nevents/fx" as RF REFRAME_COLOR
+participant "DataScript\nconn" as DS DATASCRIPT_COLOR
+participant "unified\npipeline" as MD MARKDOWN_COLOR
+participant "reagent UI" as UI RENDERER_COLOR
+
+== boot ==
+User -> Core : `vv README.md`
+activate Core
+Core -> Core : `create-window!`\n(contextIsolation, preload)
+Core -> Svc : `service/init!`\n(register ipcMain)
+Core -> Core : `loadFile index.html`
+RCore -> RCore : `init`: dispatch-sync `[:db/init]`,\n`install-bridge!`, `bridge!`, `mount!`
+Core -> Svc : on **did-finish-load**:\n`service/open! wc "README.md"`
+deactivate Core
+activate Svc
+
+== content ==
+Svc -> FS : `readFileSync` (utf8)
+FS --> Svc : text
+Svc -> Vv : `webContents.send`\n**vv:content** {path, kind:"markdown", text}
+Vv -> RCore : `onContent` cb
+RCore -> RF : dispatch `[:content/received …]`
+activate RF
+RF -> DS : `:ds/transact`\n{:doc/path :doc/kind :doc/open? :doc/order [:doc/text]}
+RF -> MD : `:markdown/render {text path on-done}`
+deactivate RF
+activate MD
+MD --> RF : Promise resolves → dispatch\n`[:content/rendered path html]`
+deactivate MD
+activate RF
+RF -> DS : `:ds/transact {:doc/path :doc/html}`
+deactivate RF
+DS -> RF : `d/listen!` → `[:ds/changed]`\n(`:ds/rev` ++)
+RF -> UI : `:tabs` / `:doc/active` recompute
+UI -> UI : `content-view` → `markdown-body`\n`set! innerHTML html`
+
+== tree ==
+Svc -> Svc : `repo-tree` (`git rev-parse` + `ls-files`)
+Svc -> Vv : `webContents.send`\n**vv:tree** {root, files}
+Vv -> RF : `onTree` → `[:tree/received]`
+RF -> UI : `:ui/tree` → `file-tree` renders
+
+== watch (stays live) ==
+Svc -> FS : `chokidar.watch path`\n(ignoreInitial, awaitWriteFinish)
+note over Svc, FS
+  The watcher persists after `open!` returns.
+  Every later `change` / `add` re-runs the
+  **content** phase (see seq-live-refresh).
+end note
+deactivate Svc
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN / Node IO |
+  | <#2D9574> | Renderer / UI |
+  | <#B1951D> | IPC seam |
+  | <#A45BAD> | DataScript SSOT |
+  | <#4F97D7> | re-frame |
+  | <#67B11D> | markdown pipeline |
+  | <#9F8766> | filesystem / chokidar |
+endlegend
+@enduml

@@ -1,0 +1,86 @@
+@startuml seq-find
+'' PlantUML over Mermaid because in-page find is a strict message sequence (toggle → type → fx → paint →
+'' count back) spanning re-frame and a DOM-painting module, where activations and the count-return arrow
+'' matter; PlantUML sequence gives autonumber + activation + concept colour. Literal palette hexes:
+'' teal #2D9574 view, blue #4F97D7 re-frame, blue-violet #7590DB app-db, green #67B11D the DOM/highlight.
+!include _vv-theme.iuml
+
+title In-page find — Ctrl+F ⟶ highlighted matches (CSS Custom Highlight API)
+
+autonumber "<b>[0]"
+
+actor User #9F8766
+participant "find-bar /\nkeybindings" as UI #2D9574
+participant "re-frame\nevents" as RF #4F97D7
+collections "app-db\n:ui/find" as DB #7590DB
+participant "re-frame\nfx" as FX #4F97D7
+participant "finder\n(renderer.find)" as F #67B11D
+participant "CSS.highlights\n+ DOM Ranges" as H #67B11D
+
+== open the find bar ==
+User -> UI : Ctrl+F
+UI -> RF : [:find/toggle]
+activate RF
+RF -> DB : assoc :ui/find :visible? true
+deactivate RF
+DB --> UI : :ui/find sub → render <input auto-focus>
+
+== type a query ==
+User -> UI : type "needle"
+UI -> RF : [:find/set-query "needle"]
+activate RF
+RF -> DB : assoc :ui/find :query "needle"
+RF -> FX : fx **:find/run "needle"**
+deactivate RF
+activate FX
+FX -> F : **finder/search! "needle"**
+activate F
+F -> F : collect-ranges:\nTreeWalker(SHOW_TEXT) over .vv-content\ncase-insensitive indexOf in each text node
+F -> H : Highlight.add(range) ∀ matches\nCSS.highlights.set "vv-find" / "vv-find-current"
+F -> H : scrollIntoView {block:center} first match
+F --> FX : return count = n
+deactivate F
+FX -> RF : rf/dispatch [:find/count n]
+deactivate FX
+activate RF
+RF -> DB : :ui/find :count n, :idx (if n>0 then 1 else 0)
+deactivate RF
+DB --> UI : render "idx/n"
+
+== cycle matches ==
+User -> UI : Enter (Shift+Enter = prev)
+UI -> RF : [:find/cycle +1]  (or -1)
+RF -> FX : fx :find/cycle dir
+activate FX
+FX -> F : **finder/cycle! dir**
+activate F
+F -> F : idx ≔ (idx + dir) mod n
+F -> H : repaint "vv-find-current"\n+ scrollIntoView
+F --> FX : return (inc idx)  [1-based]
+deactivate F
+FX -> RF : [:find/idx i]
+deactivate FX
+RF -> DB : assoc :ui/find :idx i
+
+== close ==
+User -> UI : Escape
+UI -> RF : [:find/close]
+RF -> DB : :visible? false
+RF -> FX : fx :find/clear → finder/clear!\n(delete both highlights)
+
+note over F, H #FFF6D6
+  No DOM mutation: matches are painted as live Ranges via the
+  CSS Custom Highlight API, styled by ::highlight(vv-find) /
+  ::highlight(vv-find-current). If unsupported (supported? = false)
+  find degrades to no-op — the document is never altered.
+end note
+
+legend right
+  |= Colour |= Participant / concept |
+  |<#9F8766>| User |
+  |<#2D9574>| view (find-bar, keybindings) |
+  |<#4F97D7>| re-frame events + effects |
+  |<#7590DB>| app-db :ui/find slice |
+  |<#67B11D>| finder + CSS.highlights painting (DOM) |
+endlegend
+@enduml

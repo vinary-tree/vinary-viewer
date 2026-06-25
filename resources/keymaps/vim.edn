@@ -1,0 +1,45 @@
+;; vinary-viewer vim keymap (modal: normal/insert/visual; leader = SPC; ":" ex; "/" search).
+;; Nested map = key sequence; "SPC" normalizes to the space token at load.
+{:name :vim
+ :initial-mode :normal
+ :timeout-ms 1000
+ :leader "SPC"
+ :modes
+ {:normal
+  {"j"   :nav/scroll-down
+   "k"   :nav/scroll-up
+   "C-d" :nav/half-page-down
+   "C-u" :nav/half-page-up
+   "C-f" :nav/page-down
+   "C-b" :nav/page-up
+   "g"   {"g" :nav/scroll-top "t" :tab/next "T" :tab/prev}
+   "G"   :nav/scroll-bottom
+   "C-w" {"h" :focus/sidebar "l" :focus/content "w" :focus/toggle "q" :tab/close}
+   "C-o" :history/back
+   "C-i" :history/forward
+   "H"   :history/back
+   "L"   :history/forward
+   "/"   :search/start
+   "n"   :search/next
+   "N"   :search/prev
+   ":"   :mode/ex
+   "C-n" :tree/down
+   "C-p" :tree/up
+   "i"   :mode/insert
+   "v"   :mode/visual
+   "escape" :input/escape
+   "SPC" {"f" {"f" :file/open "t" :file/open-in-new-tab "r" :file/reveal-in-tree}
+          "b" {"d" :tab/close "n" :tab/next "p" :tab/prev "b" :palette/files}
+          "w" {"d" :tab/close}
+          "t" {"t" :theme/cycle "s" :sidebar/toggle}
+          "s" {"s" :search/start}
+          "SPC" :palette/open}}
+  :visual
+  {"escape" :mode/normal
+   "j" :nav/scroll-down
+   "k" :nav/scroll-up
+   ":" :mode/ex}
+  :insert
+  {"escape" :input/escape}
+  :all
+  {"escape" :input/escape}}}

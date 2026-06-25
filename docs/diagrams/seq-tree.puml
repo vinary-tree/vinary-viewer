@@ -1,0 +1,58 @@
+@startuml seq-tree
+'' ============================================================================
+'' vinary-viewer — Sequence: git file-tree delivery + client-side filtering.
+''
+'' PlantUML over Mermaid because: this flow has two distinct triggers (initial
+'' open vs. filter keystroke) that share a downstream render, and the filter path
+'' never touches main — it is a pure app-db update that force-expands matching
+'' folders. PlantUML `== phase ==` dividers separate the two triggers while
+'' keeping one `file-tree` lifeline; Mermaid would need two disconnected diagrams.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Git file-tree — delivery (`vv:tree`) + filter (`:tree/filter`)
+
+autonumber "0:"
+
+actor User #white
+participant "main.service" as Svc MAIN_COLOR
+participant "git CLI" as Git FS_COLOR
+participant "preload `window.vv`" as Vv IPC_COLOR
+participant "re-frame\nevents/subs" as RF REFRAME_COLOR
+participant "app.db\n(:ui :tree /\n :ui :tree-filter)" as Db APPDB_COLOR
+participant "ui.tree\nfile-tree" as Tree RENDERER_COLOR
+
+== delivery (on open) ==
+Svc -> Git : `rev-parse --show-toplevel`\n+ `ls-files` (cwd = file's dir)
+Git --> Svc : repo root + tracked paths
+Svc -> Vv : `webContents.send`\n**vv:tree** {root, files}
+Vv -> RF : `onTree` → dispatch `[:tree/received]`
+RF -> Db : `assoc-in [:ui :tree] {:root :files}`
+Db -> Tree : `:ui/tree` sub fires
+Tree -> Tree : `build-tree` (flat paths → nested map)\n→ collapsible `<details>` hiccup
+Tree --> User : sidebar shows the repo tree
+
+== filter (per keystroke) ==
+User -> Tree : type in "Filter files…"
+Tree -> RF : dispatch `[:tree/filter q]`
+RF -> Db : `assoc-in [:ui :tree-filter] q`
+Db -> Tree : `:ui/tree-filter` sub fires
+Tree -> Tree : keep files whose path\n`includes?` (lower-case q);\nmatching folders `:open true`
+Tree --> User : narrowed, force-expanded tree
+
+note over Svc, Git
+  No repo / git unavailable ⟶ `repo-tree` returns nil ⟶
+  no `vv:tree` sent ⟶ the sidebar simply does not appear
+  (`file-tree` renders nothing when `:files` is empty).
+end note
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN (git) |
+  | <#9F8766> | git CLI |
+  | <#B1951D> | IPC seam |
+  | <#4F97D7> | re-frame |
+  | <#7590DB> | app-db (tree + filter) |
+  | <#2D9574> | Renderer / UI |
+endlegend
+@enduml

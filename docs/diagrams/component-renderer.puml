@@ -1,0 +1,102 @@
+@startuml component-renderer
+'' ============================================================================
+'' vinary-viewer — Component view of the RENDERER process (re-frame loop + UI)
+''
+'' PlantUML over Mermaid because: the renderer is a layered re-frame graph
+'' (events → fx → side-world; subs ← db / DataScript ← UI) where the SAME colour
+'' must mean the SAME concept as in every other figure (purple = DataScript, blue
+'' = re-frame, teal = UI). Only PlantUML lets us reuse the shared `_vv-theme`
+'' palette macros and draw both `dispatch` (solid) and `subscribe` (dotted) edges
+'' with a self-contained legend.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title RENDERER process — components (`vinary.renderer.*`, `vinary.app.*`, `vinary.ui.*`)
+
+skinparam component {
+  BorderThickness 1.5
+}
+
+component "renderer.core\n`init` · `bridge!` · `keybindings!`(=resolver/install!) · `mount!`" as Core RENDERER_COLOR
+
+package "re-frame machinery" {
+  component "app.events\n(reg-event-db/-fx)" as Ev REFRAME_COLOR
+  component "app.fx\n(reg-fx — effects at the edge)" as Fx REFRAME_COLOR
+  component "app.subs\n(reg-sub — Observer graph)" as Sub REFRAME_COLOR
+}
+
+package "state" {
+  database "app.db\n(re-frame app-db:\nephemeral UI · `:ds/rev`)" as Db APPDB_COLOR
+  database "app.ds\n(DataScript conn:\ndocs / tabs SSOT)" as Ds DATASCRIPT_COLOR
+}
+
+package "renderer services" {
+  component "renderer.markdown\n(unified pipeline)" as Md MARKDOWN_COLOR
+  component "renderer.find\n(CSS Custom Highlight)" as Find RENDERER_COLOR
+  component "renderer.toc\n(extract · scroll-spy)" as Toc RENDERER_COLOR
+}
+
+package "reagent UI (React 19)" {
+  component "ui.views\n(shell · content-view · toolbar · find-bar · toc-panel)" as Views RENDERER_COLOR
+  component "ui.tabs\n(tab-strip)" as Tabs RENDERER_COLOR
+  component "ui.tree\n(file-tree)" as Tree RENDERER_COLOR
+}
+
+component "preload `window.vv`\n(IPC seam)" as Vv IPC_COLOR
+
+'' input / keybinding layer — LIVE (resolver installed by keybindings!).
+package "input / keybindings" {
+  component "input.resolver\n(keydown → trie-walk → decision)" as Res RENDERER_COLOR
+  component "app.commands\n(command registry · run)" as Cmd RENDERER_COLOR
+  component "input.keymap\n(presets ⊕ user · modes)" as Kmap RENDERER_COLOR
+  component "input.events / input.fx\n(:input/* · :palette/* · :dom/*)" as Iev REFRAME_COLOR
+}
+'' command-palette VIEW is the one pending piece (events+state exist; no view yet).
+component "ui.palette\n(command-palette view)" as Pal <<planned>>
+
+Core --> Ev   : `dispatch-sync [:db/init]`
+Core --> Vv   : `bridge!` wires onContent/onError/onTree
+Vv ..> Ev     : amber: payload ⟶ `[:content/received]` …
+Ev --> Db     : updates ephemeral UI
+Ev --> Fx     : `:fx` vector
+Fx --> Ds     : `:ds/transact`
+Fx --> Md     : `:markdown/render`
+Fx --> Find   : `:find/run` · `:find/cycle` · `:find/clear`
+Fx --> Toc    : `:toc/scroll`
+Fx ..> Vv     : `:vv/open` · `:vv/close` (amber)
+Md ..> Ev     : `.then` ⟶ `[:content/rendered]`
+Ds ..> Db     : `d/listen!` ⟶ `[:ds/changed]` (bumps `:ds/rev`)
+
+Sub ..> Db    : reads ephemeral UI
+Sub ..> Ds    : reads conn (gated on `:<- [:ds/rev]`)
+Sub ..> Toc   : `:doc/toc` ⟶ `toc/extract`
+
+Views ..> Sub : `subscribe`
+Tabs ..> Sub  : `subscribe`
+Tree ..> Sub  : `subscribe`
+Views --> Ev  : `dispatch` (theme/find/toc)
+Tabs --> Ev   : `dispatch` (`:tab/activate` · `:tab/close`)
+Tree --> Ev   : `dispatch` (`:doc/open` · `:tree/filter`)
+Views ..> Toc : `spy!` on scroll
+
+Core --> Res  : `keybindings!` = `resolver/install!`
+Res ..> Db    : reads ctx (mode · sequence) from app-db
+Res --> Cmd   : `commands/run` (decision → command id)
+Res --> Kmap  : active keymap `modes`
+Cmd --> Ev    : `rf/dispatch` resolved command's event
+Iev --> Db    : modal / palette state
+Vv ..> Iev    : amber: `onKeymap` ⟶ `[:keymap/config-received]` (pending main sender)
+Iev ..> Pal   : «planned» drives the palette view
+
+legend right
+  |= Colour |= Concept |
+  | <#2D9574> | Renderer / UI / services / input |
+  | <#4F97D7> | re-frame machinery |
+  | <#A45BAD> | DataScript SSOT |
+  | <#7590DB> | app-db (ephemeral UI) |
+  | <#67B11D> | markdown / unified |
+  | <#B1951D> | IPC seam |
+  | <#DDDDDD> | Forthcoming (palette view) |
+  Solid = dispatch / effect · Dotted = subscribe / listen
+endlegend
+@enduml

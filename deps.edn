@@ -1,0 +1,20 @@
+{:paths ["src" "resources" "test"]
+ ;; The shared f1r3fly ClojureScript base stack (versions aligned with LightningBug + the pgmcp webui
+ ;; design, so the three tools share one dependency baseline). core.async arrives transitively via
+ ;; shadow-cljs. A new application inspired by vmd; original code, Apache-2.0.
+ :deps {org.clojure/clojure          {:mvn/version "1.12.2"}
+        org.clojure/clojurescript    {:mvn/version "1.12.42"}
+        thheller/shadow-cljs         {:mvn/version "3.2.0"}
+        reagent/reagent              {:mvn/version "2.0.0-alpha2"}
+        re-frame/re-frame            {:mvn/version "1.4.3"}
+        re-com/re-com                {:mvn/version "2.27.1"}
+        com.andrewmcveigh/cljs-time  {:mvn/version "0.5.2"}   ; required by re-com
+        datascript/datascript        {:mvn/version "1.7.5"}
+        re-posh/re-posh              {:mvn/version "0.3.3"}
+        day8.re-frame/re-frame-10x   {:mvn/version "1.10.1"}
+        re-frisk/re-frisk            {:mvn/version "1.7.1"}
+        binaryage/devtools           {:mvn/version "1.0.7"}
+        com.taoensso/timbre          {:mvn/version "6.8.0"}
+        org.slf4j/slf4j-api          {:mvn/version "2.0.17"}
+        org.slf4j/slf4j-nop          {:mvn/version "2.0.17"}
+        org.clojure/test.check       {:mvn/version "1.1.1"}}}

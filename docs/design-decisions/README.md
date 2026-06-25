@@ -1,0 +1,88 @@
+# Design decisions (ADRs)
+
+This directory records the **architecture decisions** behind vinary-viewer as lightweight
+**Architecture Decision Records (ADRs)**. An ADR captures *one* significant choice: the context that
+forced it, the decision taken, its status, the consequences, the alternatives considered, and the
+trade-offs. ADRs are immutable history — when a decision changes, we add a **new** ADR that supersedes
+the old one rather than rewriting it.
+
+> **What an ADR is.** A short, dated document describing a single architectural decision and its
+> rationale, popularized by Michael Nygard's *"Documenting Architecture Decisions"* (2011). Each ADR is
+> numbered sequentially and lives forever, so the project's reasoning is reconstructable.
+
+---
+
+## Status legend
+
+| Status         | Meaning                                                                                  |
+|----------------|------------------------------------------------------------------------------------------|
+| **Accepted**   | The decision is in force and reflected in the current code.                               |
+| **Proposed**   | Under consideration; not yet implemented (often pairs with a *Forthcoming (planned)* feature). |
+| **Superseded** | Replaced by a later ADR; kept for history. The superseding ADR is linked.                |
+
+---
+
+## Template
+
+Copy this skeleton for a new ADR. Keep it short and pedagogical, and **cite code evidence** (file /
+namespace) for each claim.
+
+```markdown
+# NNNN — <short imperative title>
+
+- **Status:** Accepted | Proposed | Superseded (by ADR-XXXX)
+- **Date:** YYYY-MM-DD
+- **Deciders:** <who/role>
+
+## Context
+Why a decision was needed — the forces, constraints, and prior state.
+
+## Decision
+What we decided, stated plainly. Cite the code that embodies it.
+
+## Consequences
+What becomes true as a result — positive and negative.
+
+## Alternatives considered
+The options not taken, and why.
+
+## Trade-offs
+What we gave up to get what we gained.
+```
+
+The next free number is **0010**.
+
+---
+
+## Index
+
+| ADR  | Title                                                                                             | Status     |
+|------|---------------------------------------------------------------------------------------------------|------------|
+| [0001](0001-electron-42-supersedes-13.md) | Electron 42 supersedes the v0.1.0 Electron 13 pin                          | Accepted   |
+| [0002](0002-render-markdown-in-renderer.md) | Render Markdown in the renderer, keep main a thin IO service             | Accepted   |
+| [0003](0003-ref-innerHTML-no-vdom-body.md) | Write the document body via a ref + `innerHTML` (no VDOM diffing)          | Accepted   |
+| [0004](0004-ds-rev-bridge-vs-re-posh.md) | A `:ds/rev` transaction-revision bridge instead of re-posh internals        | Accepted   |
+| [0005](0005-datascript-nil-as-absence.md) | Model absent attributes as absence (omit/retract), never nil datoms       | Accepted   |
+| [0006](0006-multi-watcher-live-refresh.md) | One `chokidar` watcher per open path for live-refresh                     | Accepted   |
+| [0007](0007-css-mask-themed-watermark.md) | A CSS-mask + `currentColor` themed watermark (one asset, all themes)       | Accepted   |
+| [0008](0008-datascript-plus-app-db-split.md) | Split state: DataScript SSOT for docs/tabs, app-db for ephemeral UI     | Accepted   |
+| [0009](0009-mediator-ipc-over-point-to-point.md) | A single `window.vv` mediator seam over point-to-point IPC          | Accepted   |
+
+---
+
+## How the ADRs relate
+
+These nine decisions reinforce one another into a coherent reactive architecture:
+
+- **0001** sets the platform (modern Electron), which **enables** the contextBridge seam in **0009** and
+  the in-renderer rendering in **0002**.
+- **0008** establishes the two-store split; **0004** is the bridge that makes the DataScript store
+  reactive to re-frame; **0005** is the discipline that keeps that store clean.
+- **0002** puts rendering in the renderer; **0003** is how the rendered HTML reaches the screen.
+- **0006** is the live-refresh mechanism; it flows content into the **0008** SSOT without disturbing the
+  app-db UI state — which is *why* live-refresh preserves your scroll position and tabs.
+- **0007** is a focused UI decision (the empty-state watermark) that rides on the same theme-token
+  system used everywhere else.
+
+For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md) and the
+theory pillar under [`docs/theory/`](../theory/).

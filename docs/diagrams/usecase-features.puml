@@ -1,0 +1,88 @@
+@startuml usecase-features
+'' PlantUML over Mermaid because Mermaid has no first-class use-case diagram; PlantUML models actors,
+'' (use-case) ovals, system boundary rectangles, and «planned» stereotypes with per-feature colour — so
+'' "Available now" vs "Forthcoming (planned)" reads at a glance in the same notation as the rest of the suite.
+!include _vv-theme.iuml
+
+'' NOTE: !define colour macros (RENDERER_COLOR, …) expand only inside skinparam blocks and <<#COLOR>>
+'' arrow styles; in bareword "#COLOR" and "#line:COLOR" positions PlantUML needs the LITERAL hex, so the
+'' palette hexes are written out here. They are exactly the _vv-theme.iuml values (teal #2D9574 = renderer,
+'' tan #9F8766 = filesystem/user, grey #DDDDDD/#999999 = «planned»).
+skinparam usecase {
+  BackgroundColor #2D9574
+  BorderColor #1F6B53
+  FontColor #1A1A1A
+}
+'' dashed grey «planned» variant for Forthcoming features
+skinparam usecase<<planned>> {
+  BackgroundColor #DDDDDD
+  BorderColor #999999
+  BorderStyle dashed
+  FontColor #555555
+}
+skinparam actorStyle awesome
+
+left to right direction
+
+actor "User\n(reads/edits docs)" as User #9F8766
+
+rectangle "vinary-viewer" as VV {
+
+  rectangle "Available now" as Now #line:1F6B53 {
+    usecase "Open a file in a tab\n(`vv README.md`, click in tree)" as UC_open
+    usecase "Preview Markdown\n(GFM + slugs + highlight)" as UC_md
+    usecase "Live refresh on save\n(no scroll/find loss)" as UC_live
+    usecase "Browse multiple tabs" as UC_tabs
+    usecase "View an image\n(file://)" as UC_img
+    usecase "View plain text\n(escaped <pre>)" as UC_text
+    usecase "Find in page\n(Ctrl+F, ↑/↓ cycle)" as UC_find
+    usecase "Navigate history\n(Alt+←/→)" as UC_hist
+    usecase "Jump via Table of Contents\n(scroll-spy)" as UC_toc
+    usecase "Switch theme live\n(dark ⇆ light)" as UC_theme
+    usecase "Browse git file tree\n(+ filter)" as UC_tree
+    usecase "See empty-state watermark" as UC_mark
+  }
+
+  rectangle "Forthcoming (planned)" as Soon #line.dashed;line:999999 {
+    usecase "vv / vinary-viewer\nlauncher bins" as UC_bin <<planned>>
+    usecase "Custom keybindings\n(vim/emacs, palette)\n— now available" as UC_keys <<planned>>
+    usecase "Native PDF view\n(BrowserView)" as UC_pdf <<planned>>
+    usecase "Diagram rendering\n(d2/PlantUML/Mermaid→SVG)" as UC_diag <<planned>>
+    usecase "Source preview\n(tree-sitter)" as UC_src <<planned>>
+    usecase "Grammar registry\n(~/.config/vinary-viewer)" as UC_gram <<planned>>
+  }
+}
+
+User --> UC_open
+User --> UC_md
+User --> UC_live
+User --> UC_tabs
+User --> UC_img
+User --> UC_text
+User --> UC_find
+User --> UC_hist
+User --> UC_toc
+User --> UC_theme
+User --> UC_tree
+User --> UC_mark
+User ..> UC_bin
+User ..> UC_keys
+User ..> UC_pdf
+User ..> UC_diag
+User ..> UC_src
+User ..> UC_gram
+
+note bottom of UC_live
+  Flagship capability: a file change re-renders
+  the body but touches only :doc/* in DataScript,
+  never :ui/* — so scroll, find, and theme survive.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>| Available now (renderer-served feature) |
+  |<#DDDDDD>| Forthcoming (planned) — dashed «planned» |
+  |<#9F8766>| User actor (reads/edits files) |
+  «now available» = custom-keybinding system is now available.
+endlegend
+@enduml

@@ -1,0 +1,100 @@
+@startuml class-state-model
+'' PlantUML over Mermaid because the state model is two heterogeneous stores (a relational :doc entity
+'' with «unique»/«schema-less» stereotyped attributes, plus a nested ephemeral app-db map) bound by one
+'' amber bridge field; PlantUML classes carry stereotypes + colour + composition arrows that express
+'' "app-db OWNS these slices" and "the bridge field couples the two stores" — Mermaid classDiagram cannot
+'' colour members nor stereotype individual attributes.
+!include _vv-theme.iuml
+
+title vinary-viewer state model — DataScript :doc entity (SSOT) + app-db (ephemeral UI)\nlinked by the amber :ds/rev bridge field
+
+skinparam class {
+  AttributeFontColor #1A1A1A
+  BackgroundColor #FFFFFF
+}
+
+'' ---------- DataScript: the single source of truth for documents/tabs ----------
+package "DataScript conn  (vinary.app.ds)" <<Folder>> #line:743F7B {
+
+  class "schema" as Schema << (S,#A45BAD) >> #A45BAD {
+    :doc/path  →  {:db/unique :db.unique/identity}
+    .. that is the ENTIRE schema ..
+  }
+
+  class ":doc  (one per open file)" as Doc << (E,#A45BAD) entity >> #A45BAD {
+    + :doc/path : string  <<unique identity>>
+    --
+    :doc/kind  : "markdown" | "image" | "text"  <<schema-less>>
+    :doc/text  : string?   (absent for images)  <<schema-less>>
+    :doc/html  : string?   (rendered output)     <<schema-less>>
+    :doc/error : string?   (retracted when gone) <<schema-less>>
+    :doc/open? : boolean   (is it a tab?)         <<schema-less>>
+    :doc/order : long      (tab position)         <<schema-less>>
+  }
+  note bottom of Doc
+    «schema-less» = a plain scalar attribute that needs
+    NO schema entry. DataScript requires schema only for
+    :db.unique, :db.type/ref, and :db.cardinality/many.
+  end note
+}
+
+'' ---------- app-db: ephemeral UI only ----------
+package "app-db  (re-frame; vinary.app.db/default-db)" <<Folder>> #line:4C66AE {
+
+  class "app-db root" as AppDb << map >> #7590DB {
+    :ds/rev : long = 0   <<bridge>>
+    :ui : { … }
+  }
+
+  class ":ui" as Ui << map >> #7590DB {
+    :active-path : string?  (the focused tab)
+    :theme : "spacemacs-dark" | "spacemacs-light"
+    :active-heading : id?   (scroll-spy)
+    :sidebar-visible? : boolean
+    :tree : {:root :files}  / :tree-filter : string?
+  }
+
+  class ":ui/history  (Command stack)" as Hist << map >> #7590DB {
+    :stack : [path …]
+    :idx   : long = -1
+  }
+
+  class ":ui/find" as Find << map >> #7590DB {
+    :visible? : boolean = false
+    :query : string = ""
+    :count : long = 0
+    :idx   : long = 0
+  }
+
+  class ":ui/input / :ui/palette\n«now available»" as Input << map >> {
+    :input {:mode :sequence :count …}
+    :palette {:open? :source :query …}
+  }
+}
+
+AppDb *-- Ui          : :ui
+Ui    *-- Hist        : :history
+Ui    *-- Find        : :find
+Ui    *-- Input       : :input / :palette
+
+'' the amber bridge: a transaction on conn bumps :ds/rev, which conn-reading subs depend on
+Doc -[#B1951D,thickness=2]-> AppDb : **d/listen!** → [:ds/changed]\n**(update db :ds/rev inc)**
+
+note as N1 #FFF6D6
+  THE BRIDGE (amber): the two stores are kept in lock-step by one
+  field. Every DataScript transaction fires the conn listener, which
+  dispatches [:ds/changed] → (update db :ds/rev inc). The subs :tabs
+  and :doc/active declare :<- [:ds/rev], so they recompute per tx.
+  re-posh is a declared dependency but UNUSED — this hand-rolled
+  bridge is the real reactivity.
+end note
+N1 .. AppDb
+
+legend right
+  |= Colour |= Concept |
+  |<#A45BAD>| DataScript — single source of truth (documents/tabs) |
+  |<#7590DB>| app-db — ephemeral UI state (re-frame) |
+  |<#B1951D>| :ds/rev bridge field (DataScript ⇄ re-frame) |
+  «schema-less» needs no schema · «unique» = identity key · «now available» = available
+endlegend
+@enduml

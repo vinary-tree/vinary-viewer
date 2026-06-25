@@ -1,0 +1,46 @@
+@startuml state-find
+'' PlantUML over Mermaid because the find bar is a small finite-state machine with a count-parameterised
+'' state and self-looping cycle transitions; PlantUML state diagrams give composite/parameterised states,
+'' self-transitions, and per-state colour. Literal palette hexes: blue-violet #7590DB ephemeral :ui/find,
+'' green #67B11D the "matches present" (painted) state, grey for hidden.
+!include _vv-theme.iuml
+
+title Find-bar state machine (:ui/find)\n{:visible? :query :count :idx}
+
+skinparam state {
+  BackgroundColor #7590DB
+}
+
+[*] --> Hidden
+
+state "Hidden" as Hidden #DDDDDD : visible? = false\nhighlights cleared
+state "Visible (empty)" as Empty #7590DB : visible? = true\nquery = ""  ·  count = 0
+state "Visible (matches: n)" as Matches #67B11D : visible? = true\ncount = n > 0  ·  idx ∈ 1..n\nhighlights painted
+
+Hidden  --> Empty   : Ctrl+F  /  [:find/toggle]
+Empty   --> Hidden  : Ctrl+F (toggle off) | Escape\n/ [:find/close] → clear!
+
+Empty   --> Matches : type query (matches found)\n[:find/set-query] → search! → count n>0
+Empty   --> Empty   : type query (no match)\ncount = 0
+Matches --> Empty   : edit query → 0 matches\nor clear the field
+Matches --> Matches : type a new query\n(re-run search!, new n)
+
+Matches --> Matches : Enter / ↓  [:find/cycle +1]\nidx ≔ (idx mod n)+1  (1-based)
+Matches --> Matches : Shift+Enter / ↑  [:find/cycle -1]\nidx ≔ ((idx-2 mod n)+1)
+
+Matches --> Hidden  : Escape / ×  [:find/close]\n→ clear! (delete vv-find, vv-find-current)
+Matches --> Hidden  : Ctrl+F (toggle off)
+
+note bottom of Matches #FFF6D6
+  cycle! wraps with modular arithmetic:
+  idx ≔ (idx + dir) mod n  (internally 0-based;
+  returns the 1-based index shown as "idx/n").
+end note
+
+legend right
+  |= Colour |= State / concept |
+  |<#DDDDDD>| Hidden (find bar closed, highlights cleared) |
+  |<#7590DB>| Visible, no current matches (app-db :ui/find) |
+  |<#67B11D>| Visible with painted matches (CSS highlights) |
+endlegend
+@enduml

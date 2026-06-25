@@ -1,0 +1,65 @@
+@startuml container-two-build
+'' ============================================================================
+'' vinary-viewer — Container view: the two shadow-cljs builds + the preload seam
+''
+'' PlantUML over Mermaid because: we need a stereotyped trust boundary that
+'' *encloses* the Chromium renderer, distinct artifact rectangles with per-build
+'' fill colours, and a single amber IPC seam that physically sits between the two
+'' processes. PlantUML rectangles + `together` grouping + the shared `_vv-theme`
+'' palette express this; Mermaid's subgraphs cannot colour-code by concept nor
+'' draw the contextBridge as a first-class boundary object.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title vinary-viewer — Containers (one source tree → two builds, joined by the IPC seam)
+
+skinparam rectangle {
+  BorderThickness 1.6
+  FontColor #1A1A1A
+}
+
+rectangle "shadow-cljs\n(`shadow-cljs.edn` → 2 builds)" as Build REFRAME_COLOR {
+}
+
+package "Electron runtime" {
+
+  rectangle "**MAIN process** (Node)\n`:main` build → `:node-script`\n`dist/main/main.js`\nentry `vinary.main.core/main`" as Main MAIN_COLOR {
+    rectangle "main.core\nwindow + lifecycle" as MCore MAIN_COLOR
+    rectangle "main.service\nfs read · chokidar watch · git" as MSvc MAIN_COLOR
+  }
+
+  rectangle "preload (IPC seam)\n`resources/preload.js`\ncontextBridge → `window.vv`" as Preload IPC_COLOR
+
+  rectangle "trust boundary\n(contextIsolation = true,\nnodeIntegration = false)" as Boundary #line.dashed;line:B1951D {
+    rectangle "**RENDERER process** (Chromium)\n`:renderer` build → `:browser`\n`resources/public/js/main.js`\ninit `vinary.renderer.core/init`" as Rend RENDERER_COLOR {
+      rectangle "re-frame loop\n(events · subs · fx)" as RFrame REFRAME_COLOR
+      rectangle "DataScript conn\n(documents / tabs SSOT)" as DS DATASCRIPT_COLOR
+      rectangle "reagent UI (React 19)\n+ unified markdown" as UI RENDERER_COLOR
+    }
+  }
+}
+
+Build --> Main          : compiles\n`:node-script`
+Build --> Rend          : compiles\n`:browser`\n(fs/path/url ⟶ false)
+
+MCore --> Preload       : `webPreferences.preload`
+MSvc  ..> Preload       : `webContents.send`\n`vv:content` · `vv:error` · `vv:tree`
+Preload ..> RFrame      : `window.vv.onContent/onError/onTree`\n⟶ `rf/dispatch`
+RFrame --> Preload      : `window.vv.open/close`
+Preload ..> MSvc        : `ipcRenderer.send`\n`vv:open` · `vv:close`
+
+RFrame --> DS  : `:ds/transact`
+DS ..> RFrame  : `d/listen!` ⟶ `[:ds/changed]`\n(bumps `:ds/rev`)
+RFrame --> UI  : subscriptions
+MSvc --> MSvc  : reads filesystem\n(out of band)
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN / Node IO |
+  | <#2D9574> | Renderer / Chromium UI |
+  | <#B1951D> | IPC seam (preload / contextBridge) |
+  | <#A45BAD> | DataScript single-source-of-truth |
+  | <#4F97D7> | re-frame machinery / shadow-cljs |
+  Dashed border = trust boundary · Amber arrow = IPC message
+endlegend
+@enduml
