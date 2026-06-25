@@ -318,10 +318,9 @@ The conceptual model is in [theory/06](../theory/06-find-css-custom-highlight.md
   (written by the theory pillar). States *Hidden → Visible(empty) → Matching(idx/total)*, with
   cycle self-loops and the close transition back to *Hidden* clearing highlights.
 
-```plantuml
-'' Sources: docs/diagrams/seq-find.puml , docs/diagrams/state-find.puml
-'' Render with: plantuml -tsvg docs/diagrams/seq-find.puml docs/diagrams/state-find.puml
-```
+![In-page find sequence](../diagrams/seq-find.svg)
+
+![Find-bar state machine](../diagrams/state-find.svg)
 
 Palette: **blue-violet** = the `:ui/find` app-db slice, **blue** = re-frame events/effects,
 **teal** = the renderer (the finder module + the painted highlights). See

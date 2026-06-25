@@ -86,11 +86,7 @@ recorded events and you reproduce the state.
 The closed loop, with swimlane ownership of each step, is below. Source:
 [`../diagrams/flow-unidirectional-dataflow.puml`](../diagrams/flow-unidirectional-dataflow.puml).
 
-```plantuml
-!include ../diagrams/flow-unidirectional-dataflow.puml
-```
-
-![The six dominoes as a closed unidirectional loop](../diagrams/flow-unidirectional-dataflow.puml)
+![The six dominoes as a closed unidirectional loop](../diagrams/flow-unidirectional-dataflow.svg)
 
 ## 4. The two patterns underneath
 

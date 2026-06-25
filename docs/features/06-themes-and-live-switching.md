@@ -191,10 +191,7 @@ list, and [reference/css-variables.md](../reference/css-variables.md) for the to
   `:ui/theme`) + `:theme/apply` → `set! #vv-theme-link .href` → browser loads the palette →
   `var(--vv-*)` re-resolves → UI re-colors.
 
-```plantuml
-'' Source: docs/diagrams/seq-theme-switch.puml
-'' Render with: plantuml -tsvg docs/diagrams/seq-theme-switch.puml
-```
+![Theme switch sequence](../diagrams/seq-theme-switch.svg)
 
 Palette: **blue-violet** = the `:ui/theme` app-db slice, **blue** = the re-frame event/effect,
 **teal** = the renderer (the `<link>` swap + the re-resolved CSS). See

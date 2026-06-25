@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('vv', {
   // renderer → main
   open: (path) => ipcRenderer.send('vv:open', path),
   close: (path) => ipcRenderer.send('vv:close', path),
+  watchAssets: (docPath, paths) => ipcRenderer.send('vv:watch-assets', { docPath, paths }),
   requestKeymap: () => ipcRenderer.send('vv:keymap-request'),
   requestGrammars: () => ipcRenderer.send('vv:grammars-request'),
   pdfShow: (path, bounds) => ipcRenderer.send('vv:pdf-show', { path, bounds }),

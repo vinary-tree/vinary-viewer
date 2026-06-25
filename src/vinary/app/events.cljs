@@ -29,13 +29,14 @@
 
 (rf/reg-event-fx
  :content/received
- (fn [{:keys [db]} [_ {:keys [path kind text html]}]]
+ (fn [{:keys [db]} [_ {:keys [path kind text html stamp]}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
+         stamp   (if (some? stamp) stamp (js/Date.now))
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
          ;; Synchronous html (text/diagram) goes straight in; markdown's html arrives async (:content/rendered).
-         attrs   (cond-> {:doc/kind kind}
+         attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
                    text            (assoc :doc/text text)
                    html            (assoc :doc/html html)                ; diagram: pre-rendered SVG
                    (= kind "text") (assoc :doc/html (plain-html text)))  ; plain text
@@ -46,13 +47,17 @@
      ;; the CLI/initial file arrives before any tab exists → it opens the first tab
      {:db (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
       :fx (cond-> [[:ds/transact tx]]
-            (= kind "markdown") (conj [:markdown/render {:text text :path path :on-done [:content/rendered path]}]))})))
+            (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
+                                                          :on-done [:content/rendered path stamp]}]))})))
 
 (rf/reg-event-fx
  :content/rendered
- (fn [_ [_ path html]]
-   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
-     {:fx [[:ds/transact [[:db/add eid :doc/html html]]]]})))   ; add by entity-id, not :doc/path upsert
+ (fn [_ [_ path stamp {:keys [html assets]}]]
+   (let [snap (ds/snapshot)]
+     (when-let [eid (ds/eid-for-path snap path)]
+       (when (= stamp (ds/doc-attr snap path :doc/stamp))
+         {:fx [[:ds/transact [[:db/add eid :doc/html html]]]   ; add by entity-id, not :doc/path upsert
+               [:vv/watch-assets {:doc-path path :paths assets}]]})))))
 
 (rf/reg-event-fx
  :content/error

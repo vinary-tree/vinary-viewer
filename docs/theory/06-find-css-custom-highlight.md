@@ -261,21 +261,13 @@ stored in `app-db` `:ui/find :count`, with `:idx` set to 1 when there are matche
 feature). The full open→type→run→count→cycle handshake is below. Source:
 [`../diagrams/seq-find.puml`](../diagrams/seq-find.puml).
 
-```plantuml
-!include ../diagrams/seq-find.puml
-```
-
-![In-page find sequence: Ctrl+F → type → :find/run → count → cycle](../diagrams/seq-find.puml)
+![In-page find sequence: Ctrl+F → type → :find/run → count → cycle](../diagrams/seq-find.svg)
 
 And the find bar's own lifecycle — `Hidden → Visible(empty) → Visible(matches: n)`
 with the cycle self-loops and `Escape → Hidden` — is the state machine below.
 Source: [`../diagrams/state-find.puml`](../diagrams/state-find.puml).
 
-```plantuml
-!include ../diagrams/state-find.puml
-```
-
-![Find-bar state machine](../diagrams/state-find.puml)
+![Find-bar state machine](../diagrams/state-find.svg)
 
 ## 7. Summary
 

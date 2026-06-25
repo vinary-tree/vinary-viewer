@@ -35,11 +35,7 @@ phases the diagrams divide it into. The full sequence, with `autonumber`,
 activation bars, and `== detect / transact / render / paint ==` dividers, is below.
 Source: [`../diagrams/seq-live-refresh.puml`](../diagrams/seq-live-refresh.puml).
 
-```plantuml
-!include ../diagrams/seq-live-refresh.puml
-```
-
-![Live refresh: editor save → painted DOM, full round trip](../diagrams/seq-live-refresh.puml)
+![Live refresh: editor save → painted DOM, full round trip](../diagrams/seq-live-refresh.svg)
 
 ## 2. Stage by stage
 
@@ -231,11 +227,7 @@ a *single* counter, "update the document" and "the UI is unchanged" become two
 with the explicit *"UI untouched"* note at the paint stage. Source:
 [`../diagrams/activity-live-refresh-spine.puml`](../diagrams/activity-live-refresh-spine.puml).
 
-```plantuml
-!include ../diagrams/activity-live-refresh-spine.puml
-```
-
-![Live-refresh spine as layered swimlanes, UI untouched](../diagrams/activity-live-refresh-spine.puml)
+![Live-refresh spine as layered swimlanes, UI untouched](../diagrams/activity-live-refresh-spine.svg)
 
 ## 4. Convergence: per-path watcher + `:doc/path` identity = LWW upsert
 

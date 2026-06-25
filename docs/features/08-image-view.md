@@ -171,10 +171,7 @@ full list.
   following the **image** path: classify image → no text read → store doc without `:doc/text` →
   Strategy picks `<img file://>`.
 
-```plantuml
-'' Source: docs/diagrams/activity-content-strategy.puml  (image branch)
-'' Render with: plantuml -tsvg docs/diagrams/activity-content-strategy.puml
-```
+![Content strategy image branch](../diagrams/activity-content-strategy.svg)
 
 Palette: **slate** = MAIN (classification, no read), **amber** = the IPC seam (`vv:content`
 without `:text`), **purple** = DataScript (the textless `:doc`), **teal** = the renderer (the

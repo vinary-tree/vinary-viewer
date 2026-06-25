@@ -280,11 +280,13 @@ concept, matching the running app's hint-label colour):
   [`../diagrams/activity-link-hints.puml`](../diagrams/activity-link-hints.puml). `f` → collect + classify
   → label → type-to-filter → follow / cancel.
 
-```plantuml
-'' Sources: docs/diagrams/{seq-keymap-select,component-keybinding-editor,activity-kbedit-undo,activity-link-hints}.puml
-'' Render to SVG with, e.g.:  plantuml -tsvg docs/diagrams/component-keybinding-editor.puml
-'' (each .puml declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Keymap select sequence](../diagrams/seq-keymap-select.svg)
+
+![Keybinding editor component view](../diagrams/component-keybinding-editor.svg)
+
+![Keybinding editor undo and redo activity](../diagrams/activity-kbedit-undo.svg)
+
+![Vimium link hints activity](../diagrams/activity-link-hints.svg)
 
 Palette (all four): **teal** = renderer/editor UI · **blue** = re-frame events / command registry ·
 **blue-violet** = app-db (`[:ui :keymaps]`, `[:ui :kbedit]`, `[:ui :hints]`) · **magenta** = the keymap

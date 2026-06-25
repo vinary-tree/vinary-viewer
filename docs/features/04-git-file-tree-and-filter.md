@@ -240,10 +240,7 @@ See the [ADR index](../design-decisions/README.md) for the full list.
   `nodes->hiccup` (`<details>`/`<a>`), with the filter branch narrowing the flat list and
   force-expanding folders.
 
-```plantuml
-'' Source: docs/diagrams/seq-tree.puml
-'' Render with: plantuml -tsvg docs/diagrams/seq-tree.puml
-```
+![Git file-tree sequence](../diagrams/seq-tree.svg)
 
 Palette: **slate** = MAIN/Node-IO (the `git` calls), **amber** = the IPC seam (`vv:tree`),
 **blue-violet** = `app-db` (`:ui/tree`, `:ui/tree-filter`), **teal** = the renderer UI (the tree

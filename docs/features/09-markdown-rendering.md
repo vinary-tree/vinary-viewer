@@ -242,10 +242,7 @@ See the [ADR index](../design-decisions/README.md) for the full list.
   `:content/rendered` → `[:ds/transact {:doc/html …}]` → `:doc/active` recompute → `markdown-body`
   `innerHTML`, with the `.catch → :content/error` branch shown.
 
-```plantuml
-'' Source: docs/diagrams/seq-markdown-render.puml
-'' Render with: plantuml -tsvg docs/diagrams/seq-markdown-render.puml
-```
+![Markdown render sequence](../diagrams/seq-markdown-render.svg)
 
 Palette: **green** = the Markdown/unified pipeline, **blue** = the re-frame effect/events,
 **purple** = DataScript (`:doc/html`), **teal** = the renderer body. See

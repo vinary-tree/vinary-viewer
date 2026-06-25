@@ -36,11 +36,7 @@ The full picture — the DataScript `:doc` entity with its stereotyped attribute
 the nested `app-db` map, and the amber `:ds/rev` field linking them — is below.
 Source: [`../diagrams/class-state-model.puml`](../diagrams/class-state-model.puml).
 
-```plantuml
-!include ../diagrams/class-state-model.puml
-```
-
-![The state model: DataScript :doc entity + app-db, joined by :ds/rev](../diagrams/class-state-model.puml)
+![The state model: DataScript :doc entity + app-db, joined by :ds/rev](../diagrams/class-state-model.svg)
 
 ## 2. A DataScript primer (just enough)
 
@@ -197,11 +193,7 @@ The sequence of that handshake — and, importantly, why app-db-only subs are
 *untouched* — is below. Source:
 [`../diagrams/object-ds-rev-bridge.puml`](../diagrams/object-ds-rev-bridge.puml).
 
-```plantuml
-!include ../diagrams/object-ds-rev-bridge.puml
-```
-
-![One transaction bumps :ds/rev → the right subs recompute](../diagrams/object-ds-rev-bridge.puml)
+![One transaction bumps :ds/rev → the right subs recompute](../diagrams/object-ds-rev-bridge.svg)
 
 ### 3.2 Why hand-rolled, and why `re-posh` is dormant
 

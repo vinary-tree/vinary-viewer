@@ -62,11 +62,7 @@ mid-render.* This is exactly the order the activity diagram draws as a top-to-bo
 decision cascade (with the **planned** future arms dashed). Source:
 [`../diagrams/activity-content-strategy.puml`](../diagrams/activity-content-strategy.puml).
 
-```plantuml
-!include ../diagrams/activity-content-strategy.puml
-```
-
-![content-view Strategy: ordered precedence, planned arms dashed](../diagrams/activity-content-strategy.puml)
+![content-view Strategy: ordered precedence, planned arms dashed](../diagrams/activity-content-strategy.svg)
 
 > **Subtlety — why error precedes image/html.** Errors are stored as a separate
 > `:doc/error` attribute and *retracted* when they clear (Theory 02 §4,

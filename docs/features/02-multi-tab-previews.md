@@ -225,10 +225,9 @@ Recorded in [ADR-0008 DataScript + app-db split](../design-decisions/0008-datasc
   (written by the architecture pillar). `×` click → `:tab/close` → choose `new-active` →
   `[:db/retractEntity]` + `[:vv/close]` → `:tabs` recompute → watcher released in MAIN.
 
-```plantuml
-'' Rendered from docs/diagrams/state-tab-lifecycle.puml and docs/diagrams/seq-tab-close.puml.
-'' Render with: plantuml -tsvg docs/diagrams/state-tab-lifecycle.puml docs/diagrams/seq-tab-close.puml
-```
+![Tab lifecycle state machine](../diagrams/state-tab-lifecycle.svg)
+
+![Close tab sequence](../diagrams/seq-tab-close.svg)
 
 Palette: **purple** = DataScript (the `:doc` entities that *are* the tabs), **blue-violet** =
 `app-db` (`:ui/active-path`), **teal** = the renderer UI (the tab strip), **amber** = the IPC
@@ -260,10 +259,7 @@ you can re-open its documents without re-adding it.
 The horizontal strip and the vertical Tabs panel both render the *same* ordered `[:ui :tabs]` vector through
 the *same* `tab-item`, so their orders never drift and a drag in either splices the one vector.
 
-```plantuml
-'' Source: docs/diagrams/component-tab-dual-representation.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-tab-dual-representation.puml
-```
+![Tab dual representation component view](../diagrams/component-tab-dual-representation.svg)
 
 Palette: **blue-violet** = the single ordered tab model `[:ui :tabs]`, **teal** = the renderer views + the
 shared `tab-item`, **blue** = the re-frame reorder / context-menu events. See

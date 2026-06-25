@@ -133,11 +133,7 @@ registry atom + validation → bundled grammar embedding (`embed-base64`) → us
   the user `~/.config/vinary-viewer/grammars/` directory both feed a `clojure.spec`-validated
   registry atom, which the source-view consumes by extension lookup.
 
-```plantuml
-'' Source: docs/diagrams/component-grammar-registry-planned.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-grammar-registry-planned.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Grammar registry planned component view](../diagrams/component-grammar-registry-planned.svg)
 
 Palette: **tan** = grammar sources (bundled asset + user config dir), **purple** = the registry as a
 single stateful owner (the atom), **teal** = the renderer consumer (source-view), **dashed grey** =

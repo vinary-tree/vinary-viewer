@@ -58,9 +58,8 @@ source path so the figure stays reproducible:
 *Figure — source: [`docs/diagrams/container-two-build.puml`](../diagrams/container-two-build.puml)*
 ```
 
-Some pages instead inline a fenced ` ```plantuml ` block when the figure is short and worth reading as
-text; those pages still link the `.puml` path. Either way, **the `.puml` file is the single source of
-truth** — never hand-edit an `.svg`.
+Documentation pages should embed the rendered SVG rather than inline PlantUML source. The `.puml` file is
+still the single source of truth — always cite it near the figure, and never hand-edit an `.svg`.
 
 ---
 
@@ -68,7 +67,7 @@ truth** — never hand-edit an `.svg`.
 
 Every `.puml` file in this directory begins with:
 
-```plantuml
+```text
 @startuml <name>
 '' One-line note: "PlantUML over Mermaid because <reason>."
 !include _vv-theme.iuml

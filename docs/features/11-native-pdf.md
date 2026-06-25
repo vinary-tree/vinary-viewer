@@ -111,11 +111,7 @@ PDF + diagrams**.
   (owned by this pillar). Existing process frames are solid; the new `PdfService`, `BrowserView`,
   placeholder, and IPC bridge methods are dashed-grey «planned».
 
-```plantuml
-'' Source: docs/diagrams/component-native-pdf-planned.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-native-pdf-planned.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Native PDF planned component view](../diagrams/component-native-pdf-planned.svg)
 
 Palette: **slate** = MAIN (owns the BrowserView), **amber** = the IPC seam (bounds + reload),
 **teal** = the renderer (the placeholder), **tan** = the reused file watcher, **dashed grey** =

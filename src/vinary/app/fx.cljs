@@ -5,6 +5,7 @@
             [datascript.core :as d]
             [vinary.app.ds :as ds]
             [vinary.renderer.markdown :as md]
+            [vinary.renderer.media :as media]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.find :as finder]))
@@ -35,9 +36,9 @@
 ;; Markdown render (async unified pipeline) → dispatch the HTML back into the loop.
 (rf/reg-fx
  :markdown/render
- (fn [{:keys [text path on-done]}]
-   (-> (md/render text (md/dir-of path))   ; base-dir resolves relative img/link URLs → absolute file://
-       (.then (fn [html] (rf/dispatch (conj on-done html))))
+ (fn [{:keys [text path stamp on-done]}]
+   (-> (md/render text (md/dir-of path) stamp)   ; base-dir resolves relative img/link URLs → absolute file://
+       (.then (fn [html] (rf/dispatch (conj on-done {:html html :assets (media/local-media-paths-from-html html)}))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
@@ -62,6 +63,10 @@
 ;; renderer → main (over the contextBridge seam)
 (rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))
 (rf/reg-fx :vv/close (fn [path] (when-let [^js vv (.-vv js/window)] (.close vv path))))
+(rf/reg-fx :vv/watch-assets
+           (fn [{:keys [doc-path paths]}]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-watchAssets vv) (.watchAssets vv doc-path (clj->js (or paths [])))))))
 ;; ask the HTTP web view's preload to scroll to a heading id (Contents/TOC click on an HTML page)
 (rf/reg-fx :vv/http-toc-goto
            (fn [id] (when-let [^js vv (.-vv js/window)] (when (.-httpTocGoto vv) (.httpTocGoto vv id)))))

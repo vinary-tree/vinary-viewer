@@ -100,11 +100,7 @@ arm + transact SVG → live-refresh wiring → sanitization → verification. Tr
   (owned by this pillar). Existing Strategy entries (markdown/image/text) are solid; the new
   `diagram-svg` arm, the main-process engines, and the IPC bridge are dashed-grey «planned».
 
-```plantuml
-'' Source: docs/diagrams/component-diagram-rendering-planned.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-diagram-rendering-planned.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Diagram rendering planned component view](../diagrams/component-diagram-rendering-planned.svg)
 
 Palette: **green** = the existing Markdown/unified pipeline (alongside which the diagram arm sits),
 **teal** = renderer Strategy entries, **slate** = MAIN engines, **amber** = IPC seam, **tan** =

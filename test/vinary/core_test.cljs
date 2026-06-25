@@ -12,7 +12,8 @@
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.app.ds :as ds]
-            [vinary.renderer.hints :as hints]))
+            [vinary.renderer.hints :as hints]
+            [vinary.renderer.media :as media]))
 
 (def ^:private empty-tabs {:ui {:tabs [] :active-tab nil :next-tab-id 0}})
 (def ^:private empty-keymaps {:ui {:keymaps {:active "default" :order [] :sets {}}}})
@@ -185,5 +186,26 @@
   (is (= :file   (:kind (link/classify "file:///a/b.md" "x"))))
   (is (= "/a/b.md" (:path (link/classify "file:///a/b.md" "x"))))
   (is (= :dir    (:kind (link/classify "file:///a/" "x")))))
+
+(deftest local-media-url-cache-busting
+  (testing "local file media urls get a stable cache-busting parameter"
+    (is (= "file:///tmp/diagram.svg?vv-cache=42"
+           (media/cache-bust-local-media-url "file:///tmp/diagram.svg" 42)))
+    (is (= "file:///tmp/diagram.svg?x=1&vv-cache=42#frag"
+           (media/cache-bust-local-media-url "file:///tmp/diagram.svg?x=1#frag" 42)))
+    (is (= "file:///tmp/diagram.svg?vv-cache=43"
+           (media/cache-bust-local-media-url "file:///tmp/diagram.svg?vv-cache=42" 43))))
+  (testing "non-local and non-media urls are unchanged"
+    (is (= "https://example.com/diagram.svg"
+           (media/cache-bust-local-media-url "https://example.com/diagram.svg" 42)))
+    (is (= "file:///tmp/readme.md"
+           (media/cache-bust-local-media-url "file:///tmp/readme.md" 42)))
+    (is (= "docs/diagram.svg"
+           (media/cache-bust-local-media-url "docs/diagram.svg" 42))))
+  (testing "local media paths strip cache tokens and decode filesystem paths"
+    (is (= "/tmp/a b.svg" (media/local-media-path "file:///tmp/a%20b.svg?vv-cache=42")))
+    (is (nil? (media/local-media-path "file:///tmp/readme.md"))))
+  (testing "filesystem paths are encoded as file urls"
+    (is (= "file:///tmp/a%20b%23c.svg" (media/path->file-url "/tmp/a b#c.svg")))))
 
 (defn -main [& _] (run-tests))

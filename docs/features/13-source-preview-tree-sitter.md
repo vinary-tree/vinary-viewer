@@ -121,11 +121,7 @@ adapt LightningBug `syntax.cljs` (CodeMirror 6 + web-tree-sitter) → `StateFiel
   `Parser.parse(text, oldTree)` (incremental) → `StateField` → `Query`/`highlights.scm` →
   capture→style-map → `ViewPlugin` decorations → styled read-only source.
 
-```plantuml
-'' Source: docs/diagrams/component-tree-sitter-planned.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-tree-sitter-planned.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Tree-sitter source preview planned component view](../diagrams/component-tree-sitter-planned.svg)
 
 Palette: **teal** = the renderer (CodeMirror + WASM run here), **tan** = the grammar source,
 **dashed grey** = «planned». See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).

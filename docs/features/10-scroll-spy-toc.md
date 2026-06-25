@@ -224,11 +224,7 @@ Recorded in [ADR-0008 DataScript + app-db split](../design-decisions/0008-datasc
 The full TOC flow — extract on render, spy on scroll, scroll on click — is illustrated by the
 sequence diagram owned by this pillar: [`../diagrams/seq-toc.puml`](../diagrams/seq-toc.puml).
 
-```plantuml
-'' Source: docs/diagrams/seq-toc.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/seq-toc.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Scroll-spy TOC sequence](../diagrams/seq-toc.svg)
 
 Palette: **purple** = DataScript (`:doc/html` the TOC derives from), **blue** = re-frame
 sub/event loop, **teal** = the renderer (the panel, the DOM measurement, and the scroll). See

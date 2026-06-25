@@ -153,11 +153,7 @@ The emblem pipeline — *monochrome SVG → CSS mask → box filled with `var(--
 silhouette* — is illustrated by the object/component diagram owned by this pillar:
 [`../diagrams/object-watermark.puml`](../diagrams/object-watermark.puml).
 
-```plantuml
-'' Source: docs/diagrams/object-watermark.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/object-watermark.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Watermark mask object pipeline](../diagrams/object-watermark.svg)
 
 In the diagram, **tan** marks the filesystem SVG asset, **teal** the renderer CSS (paint-only, no
 IPC), **purple** the theme palette token `--vv-fg`, and the final green box the rendered emblem —

@@ -204,11 +204,7 @@ Command-pattern model is developed in [theory/07](../theory/07-command-history-m
   pillar). Snapshots of `{:stack :idx}` through each operation, showing the forward branch being
   truncated on the divergent navigation to D.
 
-```plantuml
-'' Source: docs/diagrams/object-history-stack.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/object-history-stack.puml
-'' (the .puml already declares @startuml/@enduml — render it directly; do not re-wrap)
-```
+![Navigation history stack snapshots](../diagrams/object-history-stack.svg)
 
 Palette: **blue-violet** = the app-db history snapshots, **purple** arrows = a forward navigation
 (`record-nav` appends), **blue** arrows = a back/forward index move, **red** = the divergent
@@ -240,10 +236,7 @@ Three related fixes ship alongside:
 entry pushes `{:uri :scroll 0}`, and `scroll/apply!` restores the destination position after layout; Back
 mirrors it by restoring the entry's saved scroll.
 
-```plantuml
-'' Source: docs/diagrams/seq-link-click-scroll.puml
-'' Render to SVG with:  plantuml -tsvg docs/diagrams/seq-link-click-scroll.puml
-```
+![Link click scroll restoration sequence](../diagrams/seq-link-click-scroll.svg)
 
 Palette: **tan** = the User, **teal** = the `markdown-body` view, **blue** = the re-frame event + scroll fx,
 **blue-violet** = the per-tab history entries `{:uri :scroll}`, **amber** = loading/rendering the document.

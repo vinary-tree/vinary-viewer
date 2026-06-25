@@ -18,6 +18,7 @@
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.renderer.figures :as figures]
+            [vinary.renderer.media :as media]
             [vinary.renderer.syntax :as syntax]))
 
 (defn- set-inner! [^js node html]
@@ -168,14 +169,15 @@
 
 (defn image-view
   "A directly-opened image filling the content width; consumes any pending scroll-restore on mount."
-  [_path]
+  [_path _stamp]
   (let [node (atom nil)]
     (r/create-class
      {:display-name "vv-image-view"
       :component-did-mount  (fn [_] (scroll/apply! @node))
       :component-did-update (fn [_] (scroll/apply! @node))
-      :reagent-render       (fn [path] [:div.vv-image-view {:ref (fn [el] (reset! node el))}
-                                        [:img {:src (str "file://" path) :alt path}]])})))
+      :reagent-render       (fn [path stamp] [:div.vv-image-view {:ref (fn [el] (reset! node el))}
+                                              [:img {:src (media/cache-bust-local-media-url (media/path->file-url path) stamp)
+                                                     :alt path}]])})))
 
 (defn watermark []
   [:div.vv-watermark
@@ -203,7 +205,8 @@
        (uri/http? uri)             [web-host uri]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        (= "pdf" (:doc/kind doc))   [pdf-host (:doc/path doc)]
-       (= "image" (:doc/kind doc)) ^{:key (:doc/path doc)} [image-view (:doc/path doc)]
+       (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [image-view (:doc/path doc) (:doc/stamp doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc)]]
        (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
        ;; "View Source" on a markdown doc → show its raw source in the pane (not replacing the window)

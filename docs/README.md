@@ -41,11 +41,7 @@ The use-case diagram below partitions every feature into **Available now**
 (teal) and **Forthcoming (planned)** (dashed grey). Source:
 [`diagrams/usecase-features.puml`](diagrams/usecase-features.puml).
 
-```plantuml
-!include diagrams/usecase-features.puml
-```
-
-![Use-case map: available-now vs planned features](diagrams/usecase-features.puml)
+![Use-case map: available-now vs planned features](diagrams/usecase-features.svg)
 
 ---
 
@@ -174,10 +170,9 @@ one coherent whole.
 3. **Diagrams are PlantUML.** Every diagram lives under
    [`diagrams/`](diagrams/README.md) as a `.puml` file that begins with
    `@startuml` and `!include _vv-theme.iuml`. Each file's header comment states
-   *why PlantUML was chosen over Mermaid for that illustration*. Documents embed a
-   fenced ```` ```plantuml ```` block **and** always link the `.puml` source path,
-   so the diagram renders in PlantUML-aware viewers and is one click from its
-   source everywhere else.
+   *why PlantUML was chosen over Mermaid for that illustration*. Documents embed
+   the rendered `.svg` image and cite the `.puml` source path, so the figure is
+   visible in ordinary Markdown viewers while remaining one click from its source.
 
 4. **Color legend.** Colours are **per-concept and stable across the whole
    suite** — a colour always means the same thing. The palette is defined once in

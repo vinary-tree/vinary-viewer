@@ -319,11 +319,9 @@ here:
 - **Activity — the spine as swimlanes:** [`../diagrams/activity-live-refresh-spine.puml`](../diagrams/activity-live-refresh-spine.puml).
   Partitions for MAIN (Node-IO), the IPC seam, and the RENDERER reactive loop.
 
-```plantuml
-'' Rendered from docs/diagrams/seq-live-refresh.puml (written by the theory pillar).
-'' Embed the generated SVG here, or render with:
-''   plantuml -tsvg docs/diagrams/seq-live-refresh.puml
-```
+![Live refresh sequence](../diagrams/seq-live-refresh.svg)
+
+![Live-refresh spine swimlanes](../diagrams/activity-live-refresh-spine.svg)
 
 Both reuse the shared palette: **slate** = MAIN/Node-IO, **amber** = the IPC seam, **teal** =
 the renderer, **purple** = DataScript, **blue-violet** = `app-db`, **green** = the Markdown

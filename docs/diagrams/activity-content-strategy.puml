@@ -12,36 +12,36 @@ start
 :render content-view\n(doc = @[:doc/active], tabs = @[:tabs]);
 
 if (tabs empty?) then (yes)
-  #2D9574:[watermark]\n.vv-watermark / .vv-shield;
+  :[watermark]\n.vv-watermark / .vv-shield; <<#2D9574>>
   stop
 else (no)
 endif
 
 if (:doc/error present?) then (yes)
-  #E0211D:[:div.vv-error "Error: …"];
+  :[:div.vv-error "Error: …"]; <<#E0211D>>
   stop
 else (no)
 endif
 
 if (:doc/kind = "image"?) then (yes)
-  #2D9574:[:div.vv-image-view\n[:img {:src "file://"+path}]];
+  :[:div.vv-image-view\n[:img {:src "file://"+path}]]; <<#2D9574>>
   stop
 else (no)
 endif
 
 if (:doc/html present?) then (yes)
-  #67B11D:[markdown-body html]\n(form-3; set! innerHTML);
+  :[markdown-body html]\n(form-3; set! innerHTML); <<#67B11D>>
   stop
 else (no — render in flight)
-  #DDDDDD:[:div.vv-empty "Rendering…"];
+  :[:div.vv-empty "Rendering…"]; <<#DDDDDD>>
   stop
 endif
 
 '' ----- Forthcoming branches (planned): drawn detached + dashed/grey -----
 partition "Forthcoming (planned) registry arms" #line.dashed;line:999999 {
-  #DDDDDD:«planned» kind = "pdf"\n→ native BrowserView;
-  #DDDDDD:«planned» kind = "diagram"\n→ d2/PlantUML/Mermaid → SVG;
-  #DDDDDD:«planned» kind = "source"\n→ tree-sitter view;
+  :«planned» kind = "pdf"\n→ native BrowserView; <<#DDDDDD>>
+  :«planned» kind = "diagram"\n→ d2/PlantUML/Mermaid → SVG; <<#DDDDDD>>
+  :«planned» kind = "source"\n→ tree-sitter view; <<#DDDDDD>>
   note right #EEEEEE
     Today the Strategy is a fixed cond; the planned
     "registry as data" replaces these arms with a

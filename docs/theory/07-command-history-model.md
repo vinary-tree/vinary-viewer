@@ -210,11 +210,7 @@ swap (and note it never re-reads the file, because the target doc is already a
 DataScript entity) — is below. Source:
 [`../diagrams/seq-history.puml`](../diagrams/seq-history.puml).
 
-```plantuml
-!include ../diagrams/seq-history.puml
-```
-
-![Navigation history: Alt+← → cursor move → :doc/active → body swap](../diagrams/seq-history.puml)
+![Navigation history: Alt+← → cursor move → :doc/active → body swap](../diagrams/seq-history.svg)
 
 ## 6. Relationship to tabs and DataScript
 
