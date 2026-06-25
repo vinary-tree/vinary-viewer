@@ -14,6 +14,9 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-root { display: flex; flex-direction: column; height: 100%; }
 .vv-app { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
 .vv-pane { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+/* the content region below the tab strip + address bar; positioning context for the floating find bar */
+.vv-content-wrap { position: relative; flex: 1 1 auto; display: flex; flex-direction: column;
+  min-height: 0; min-width: 0; }
 .vv-content { flex: 1 1 auto; overflow: auto; padding: 32px 45px; box-sizing: border-box; }
 .vv-error { color: var(--vv-error); }
 .vv-empty { color: var(--vv-fg-dim); }

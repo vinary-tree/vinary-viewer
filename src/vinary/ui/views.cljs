@@ -303,8 +303,11 @@
     [:div.vv-pane
      [tabs/tab-strip]
      [uri-bar]
-     [content-view]
-     [find-bar]
+     ;; content + its top-right floating find bar share a positioning context that starts BELOW the chrome,
+     ;; so the find bar floats over the document (not over the tab strip / address bar)
+     [:div.vv-content-wrap
+      [content-view]
+      [find-bar]]
      [status-bar]
      [mode-line]]]
    [palette/command-palette]
