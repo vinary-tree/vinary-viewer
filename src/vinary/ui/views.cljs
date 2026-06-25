@@ -301,8 +301,8 @@
    [:div.vv-app
     [sidebar/sidebar]
     [:div.vv-pane
-     [uri-bar]
      [tabs/tab-strip]
+     [uri-bar]
      [content-view]
      [find-bar]
      [status-bar]
