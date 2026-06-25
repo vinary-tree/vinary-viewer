@@ -25,4 +25,9 @@
    "M-b" {:id :tab/prev :when :not-in-input?}
    "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
    "C-g" :input/escape
-   "escape" :input/escape}}}
+   "escape" :input/escape
+   ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
+   "C-0" :view/zoom-reset
+   "C-=" :view/zoom-in
+   "C-+" :view/zoom-in
+   "C--" :view/zoom-out}}}

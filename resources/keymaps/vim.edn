@@ -45,4 +45,9 @@
   :insert
   {"escape" :input/escape}
   :all
-  {"escape" :input/escape}}}
+  {"escape" :input/escape
+   ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
+   "C-0" :view/zoom-reset
+   "C-=" :view/zoom-in
+   "C-+" :view/zoom-in
+   "C--" :view/zoom-out}}}
