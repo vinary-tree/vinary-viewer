@@ -250,6 +250,28 @@ Dereferences the conn to an immutable DataScript db value. Subscriptions call th
 
 ---
 
+## 7a. `app-db` `:ui` slices added/changed this round
+
+The browser-tab model (`[:ui :tabs]` / `[:ui :active-tab]`, each tab `{:id :uri :hist {:stack :idx}}`) is
+described in [features/02-multi-tab-previews.md](../features/02-multi-tab-previews.md) and
+[features/07-navigation-history.md](../features/07-navigation-history.md). This round added or changed:
+
+| Slice | Shape | Purpose | Written by | Read by |
+|---|---|---|---|---|
+| `[:ui :tabs … :hist :stack]` | `[{:uri :scroll}…]` | History entries now carry a **scroll position** (was a bare URI), so back/forward restore the scroll. | `nav/nav-active`/`step` (via `:content-scroll` cofx) | `:history/*`, `scroll/apply!` |
+| `[:ui :tabs … :view-source?]` | bool | Per-tab Markdown **View Source** toggle. | `:tab/toggle-source` | `:ui/active-view-source?` |
+| `[:ui :hover-link]` | string \| nil | URL under the cursor → the bottom-left status bar. | `:ui/hover-link` | `:ui/hover-link` |
+| `[:ui :keymaps]` | `{:active :order :sets}` | The **keymap-set registry** (built-ins + named custom sets); persisted to `keybindings.edn`. | `:keymap/config-received`, `:keymap/select`, `:kbedit/*` | `:keymaps/*`, the editor, the resolver (via `install-active!`) |
+| `[:ui :kbedit]` | `{:open? :sel :editing :capture :ctx :undo :redo}` | The **key-binding editor** dialog + its undo/redo command stacks. | `:kbedit/*` | `:kbedit/*` |
+| `[:ui :hints]` | `{:active? :targets :typed}` | **Vimium link hints** — collected targets + the typed label prefix. | `:hints/*` | `:ui/hints` |
+
+The keymap registry is a pure-helper module (`vinary.input.keymaps_registry`) over `[:ui :keymaps]` that
+**mirrors `nav.cljs`** — reads + transforms over app-db, with one side-effecting bridge (`install-active!`)
+to the live keymap atom. The editor's edits are reversible **data commands**
+(`vinary.input.kbedit_history`: pure `apply-cmd` / `invert`).
+
+---
+
 ## 8. See also
 
 - [theory/02-state-model-datascript-app-db.md](../theory/02-state-model-datascript-app-db.md) — *why*

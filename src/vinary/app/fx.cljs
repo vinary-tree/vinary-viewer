@@ -5,7 +5,29 @@
             [datascript.core :as d]
             [vinary.app.ds :as ds]
             [vinary.renderer.markdown :as md]
+            [vinary.renderer.scroll :as scroll]
+            [vinary.renderer.hints :as hints]
             [vinary.renderer.find :as finder]))
+
+;; content-pane scroll: a cofx reads the current scrollTop (so nav events save the leaving position into
+;; history); the fx requests the next-rendered document be restored to a saved position.
+(rf/reg-cofx :content-scroll (fn [cofx _] (assoc cofx :content-scroll (scroll/current))))
+(rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
+
+;; Vimium link hints: collect visible links + assign labels (→ :hints/activate); follow a chosen target
+(rf/reg-fx :hints/collect
+           (fn [_]
+             (let [el (.querySelector js/document ".vv-content")]
+               (rf/dispatch [:hints/activate (hints/with-labels (hints/collect el))]))))
+
+(rf/reg-fx :hints/follow
+           (fn [target]
+             (case (:kind target)
+               :anchor       (when-let [^js el (.getElementById js/document (:path target))]
+                               (.scrollIntoView el #js {:behavior "smooth" :block "start"}))
+               (:http :file) (rf/dispatch [:doc/open (:path target)])
+               :dir          (rf/dispatch [:shell/open-path (:path target)])
+               nil)))
 
 ;; DataScript writes go through this fx (keeps event handlers pure).
 (rf/reg-fx :ds/transact (fn [tx] (d/transact! ds/conn tx)))
@@ -52,6 +74,7 @@
 (rf/reg-fx :vv/devtools      (fn [_]    (when-let [^js v (vv)] (when (.-toggleDevtools v) (.toggleDevtools v)))))
 (rf/reg-fx :vv/copy          (fn [text] (when-let [^js v (vv)] (when (.-copyText v)     (.copyText v (str text))))))
 (rf/reg-fx :vv/save-settings (fn [edn]  (when-let [^js v (vv)] (when (.-saveSettings v) (.saveSettings v edn)))))
+(rf/reg-fx :vv/save-keymap   (fn [edn]  (when-let [^js v (vv)] (when (.-saveKeymap v) (.saveKeymap v edn)))))
 (rf/reg-fx :vv/open-path     (fn [p]    (when-let [^js v (vv)] (when (.-openPath v)     (.openPath v p)))))
 (rf/reg-fx :vv/open-external (fn [url]  (when-let [^js v (vv)] (when (.-openExternal v) (.openExternal v url)))))
 

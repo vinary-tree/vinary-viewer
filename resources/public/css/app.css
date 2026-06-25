@@ -122,6 +122,13 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vv-palette-cat { color: var(--vv-fg-dim); font-size: 11px; flex: 0 0 auto; }
 
+/* link-hover status bar (bottom-left of the pane, browser-style) */
+.vv-statusbar { position: absolute; bottom: 0; left: 0; z-index: 9; max-width: 72%;
+  padding: 2px 10px; font-size: 11px; color: var(--vv-fg-dim);
+  background: var(--vv-bg2); border-top: 1px solid var(--vv-border); border-right: 1px solid var(--vv-border);
+  border-top-right-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: "Fira Code", monospace; pointer-events: none; }
+
 /* mode-line (vim/emacs modal indicator + pending key-sequence) */
 .vv-modeline { position: absolute; bottom: 0; right: 0; z-index: 9; display: flex; gap: 8px;
   padding: 2px 10px; font-size: 12px; background: var(--vv-bg2); border-top: 1px solid var(--vv-border);
@@ -174,6 +181,14 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .vv-tab-close { color: var(--vv-fg-dim); border-radius: 3px; padding: 0 5px; line-height: 1; }
 .vv-tab-close:hover { color: var(--vv-error); background: var(--vv-bg2); }
+
+/* vertical Tabs sidebar panel (same model/order/menu as the horizontal strip) */
+.vv-vtabs { padding: 4px 0; }
+.vv-vtab { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px;
+  color: var(--vv-fg-dim); border-left: 2px solid transparent; white-space: nowrap; user-select: none; }
+.vv-vtab:hover { color: var(--vv-fg); background: var(--vv-bg-code); }
+.vv-vtab.vv-tab-active { color: var(--vv-head1); border-left-color: var(--vv-head1); background: var(--vv-bg1); }
+.vv-vtab .vv-tab-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; max-width: none; }
 
 /* watermark on empty tabs — the Vinary Tree logo, grayscale + faint */
 .vv-watermark { display: flex; align-items: center; justify-content: center; height: 100%; }
@@ -232,7 +247,7 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 /* ----- Menu bar (custom, themed) ----- */
 .vv-menubar { display: flex; align-items: stretch; flex: 0 0 auto; position: relative; z-index: 50;
   background: var(--vv-bg2); border-bottom: 1px solid var(--vv-border); user-select: none; }
-.vv-menu { position: relative; }
+.vv-menu { position: relative; z-index: 51; }   /* above .vv-menu-overlay (49) so hover-to-switch works */
 .vv-menu-label { padding: 5px 12px; font-size: 13px; color: var(--vv-fg); cursor: pointer; }
 .vv-menu-label:hover, .vv-menu-label-open { background: var(--vv-bg-code); color: var(--vv-head1); }
 .vv-menu-overlay { position: fixed; inset: 0; z-index: 49; }
@@ -245,6 +260,18 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-menu-item-accel { color: var(--vv-fg-dim); font-size: 11px; }
 .vv-menu-item:hover .vv-menu-item-accel { color: var(--vv-fg-strong); }
 .vv-menu-sep { height: 1px; margin: 4px 0; background: var(--vv-border); }
+/* radio submenus (Theme, Key Bindings) — flyout to the right + active marked */
+.vv-menu-item-submenu { position: relative; }
+.vv-menu-item-arrow { color: var(--vv-fg-dim); font-size: 11px; }
+.vv-menu-item-submenu:hover .vv-menu-item-arrow { color: var(--vv-fg-strong); }
+.vv-menu-subdropdown { position: absolute; left: 100%; top: -5px; z-index: 52; min-width: 200px;
+  background: var(--vv-bg2); border: 1px solid var(--vv-border); border-radius: 5px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.45); padding: 4px 0; }
+.vv-menu-item-radio { justify-content: flex-start; gap: 6px; }
+.vv-radio-dot { display: inline-block; width: 12px; color: var(--vv-head1); font-size: 11px; }
+.vv-radio-dot::before { content: "\25CB"; }            /* ○ */
+.vv-radio-dot-on::before { content: "\25CF"; }         /* ● */
+.vv-radio-dot-blank::before { content: ""; }
 
 /* ----- Context menu ----- */
 .vv-ctx-overlay { position: fixed; inset: 0; z-index: 120; }
@@ -280,3 +307,99 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-about-summary { font-size: 13px; line-height: 1.6; color: var(--vv-fg); text-align: left; }
 .vv-about-link { display: inline-block; margin-top: 8px; color: var(--vv-head1); font-size: 12px;
   text-decoration: underline; cursor: pointer; word-break: break-all; }
+
+/* ===== key-binding editor (vinary.ui.keybindings-editor) ===== */
+.vv-modal-wide { width: 920px; max-width: 95%; padding: 0; display: flex; flex-direction: column; }
+.vv-kb-modal { height: 80vh; }
+.vv-kb-header { display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px; border-bottom: 1px solid var(--vv-border); }
+.vv-kb-header-title { font-size: 16px; font-weight: 700; color: var(--vv-head1); }
+.vv-kb-header-btns { display: flex; gap: 8px; }
+.vv-kb-btn { padding: 4px 12px; font-size: 12px; color: var(--vv-fg); background: var(--vv-bg1);
+  border: 1px solid var(--vv-border); border-radius: 5px; cursor: pointer; }
+.vv-kb-btn:hover:not(:disabled) { background: var(--vv-bg-code); color: var(--vv-fg-strong); }
+.vv-kb-btn:disabled { opacity: 0.4; cursor: default; }
+.vv-kb-btn-primary { background: var(--vv-head1); color: var(--vv-bg2); border-color: var(--vv-head1); }
+.vv-kb-body { flex: 1 1 auto; display: flex; min-height: 0; }
+.vv-kb-sets { width: 250px; flex: 0 0 auto; border-right: 1px solid var(--vv-border);
+  display: flex; flex-direction: column; min-height: 0; }
+.vv-kb-actions { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.vv-kb-pane-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
+  font-size: 12px; font-weight: 600; color: var(--vv-fg-dim); border-bottom: 1px solid var(--vv-border);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.vv-kb-pane-actions { display: flex; gap: 4px; }
+.vv-kb-iconbtn { padding: 2px 9px; font-size: 12px; color: var(--vv-fg); background: var(--vv-bg1);
+  border: 1px solid var(--vv-border); border-radius: 5px; cursor: pointer; }
+.vv-kb-iconbtn:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-kb-set-list, .vv-kb-action-list { flex: 1 1 auto; overflow-y: auto; padding: 6px 0; }
+.vv-kb-set { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer;
+  font-size: 13px; color: var(--vv-fg); border-left: 2px solid transparent; user-select: none; }
+.vv-kb-set:hover { background: var(--vv-bg-code); }
+.vv-kb-set-focused { background: var(--vv-bg1); border-left-color: var(--vv-head1); color: var(--vv-head1); }
+.vv-kb-set-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.vv-kb-readonly .vv-kb-set-name { color: var(--vv-fg-dim); }
+.vv-kb-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--vv-bg-code);
+  color: var(--vv-fg-dim); border: 1px solid var(--vv-border); }
+.vv-kb-badge-active { background: var(--vv-head1); color: var(--vv-bg2); border-color: var(--vv-head1); }
+.vv-kb-rename { flex: 1 1 auto; font-size: 13px; padding: 2px 6px; color: var(--vv-fg);
+  background: var(--vv-bg2); border: 1px solid var(--vv-head1); border-radius: 4px; }
+.vv-kb-readonly-banner { margin: 8px 14px; padding: 8px 12px; font-size: 12px; color: var(--vv-fg-dim);
+  background: var(--vv-bg-quote); border-left: 3px solid var(--vv-head3); border-radius: 4px; }
+.vv-kb-cat { margin-bottom: 4px; }
+.vv-kb-cat-head { padding: 6px 14px 2px; font-size: 11px; font-weight: 700; color: var(--vv-head2);
+  text-transform: uppercase; letter-spacing: 0.05em; }
+.vv-kb-action { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 5px 14px; }
+.vv-kb-action:hover { background: var(--vv-bg-code); }
+.vv-kb-action-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.vv-kb-action-title { font-size: 13px; color: var(--vv-fg); }
+.vv-kb-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.vv-kb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--vv-font-fixed);
+  font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--vv-bg1);
+  border: 1px solid var(--vv-border); color: var(--vv-const); }
+.vv-kb-chip-x { cursor: pointer; color: var(--vv-fg-dim); font-weight: 700; }
+.vv-kb-chip-x:hover { color: var(--vv-error); }
+.vv-kb-chip-none { font-size: 11px; color: var(--vv-fg-dim); }
+.vv-kb-action-btns { flex: 0 0 auto; }
+/* capture overlay */
+.vv-kb-capture-overlay { position: absolute; inset: 0; z-index: 140; display: flex;
+  align-items: center; justify-content: center; background: rgba(0,0,0,0.45); border-radius: 8px; }
+.vv-kb-capture { width: 460px; max-width: 88%; background: var(--vv-bg2); border: 1px solid var(--vv-head1);
+  border-radius: 8px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); padding: 18px 20px; }
+.vv-kb-capture-title { font-size: 15px; font-weight: 700; color: var(--vv-head1); }
+.vv-kb-capture-sub { font-size: 12px; color: var(--vv-fg-dim); margin-top: 2px; }
+.vv-kb-capture-hint { font-size: 11px; color: var(--vv-fg-dim); margin: 8px 0; line-height: 1.5; }
+.vv-kb-capture-seq { min-height: 32px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 7px 9px; background: var(--vv-bg1); border: 1px solid var(--vv-border); border-radius: 6px; }
+.vv-kb-chord { font-family: var(--vv-font-fixed); font-size: 12px; padding: 2px 8px; border-radius: 4px;
+  background: var(--vv-bg-code); color: var(--vv-func); border: 1px solid var(--vv-border); }
+.vv-kb-capture-empty { font-size: 12px; color: var(--vv-fg-dim); font-style: italic; }
+.vv-kb-builder { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0; }
+.vv-kb-builder-mods { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.vv-kb-modchip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 3px; border-radius: 4px;
+  background: var(--vv-bg-code); border: 1px solid var(--vv-border); }
+.vv-kb-modname { font-size: 11px; color: var(--vv-const); padding: 0 2px; }
+.vv-kb-modmove, .vv-kb-modx { background: none; border: none; cursor: pointer; color: var(--vv-fg-dim);
+  font-size: 10px; padding: 0 1px; }
+.vv-kb-modmove:disabled { opacity: 0.3; cursor: default; }
+.vv-kb-modx:hover { color: var(--vv-error); }
+.vv-kb-modadd { font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--vv-bg1);
+  border: 1px dashed var(--vv-border); color: var(--vv-fg-dim); cursor: pointer; }
+.vv-kb-modadd:hover { color: var(--vv-head1); border-color: var(--vv-head1); }
+.vv-kb-base { width: 130px; font-size: 12px; padding: 3px 7px; color: var(--vv-fg);
+  background: var(--vv-bg1); border: 1px solid var(--vv-border); border-radius: 5px;
+  font-family: var(--vv-font-fixed); }
+.vv-kb-addchord { font-size: 12px; padding: 3px 10px; border-radius: 5px; background: var(--vv-bg1);
+  border: 1px solid var(--vv-border); color: var(--vv-fg); cursor: pointer; }
+.vv-kb-addchord:hover:not(:disabled) { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-kb-addchord:disabled { opacity: 0.4; cursor: default; }
+.vv-kb-capture-btns { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.vv-kb-spacer { flex: 1 1 auto; }
+
+/* ===== Vimium-style link hints ===== */
+.vv-hint-overlay { position: fixed; inset: 0; z-index: 95; pointer-events: none; }
+.vv-hint { position: absolute; transform: translate(-3px, -3px); padding: 1px 4px; border-radius: 3px;
+  font-family: var(--vv-font-fixed); font-size: 11px; font-weight: 700; line-height: 1.3;
+  background: var(--vv-head1); color: var(--vv-bg2); border: 1px solid var(--vv-bg2);
+  box-shadow: 0 1px 5px rgba(0,0,0,0.55); text-transform: uppercase; white-space: nowrap; }
+.vv-hint-typed { opacity: 0.45; }

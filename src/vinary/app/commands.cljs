@@ -32,6 +32,9 @@
    :history/forward   {:id :history/forward :title "Forward" :category "Navigation" :dispatch [:history/forward] :when :can-forward?}
    :nav/scroll-down   {:id :nav/scroll-down :title "Scroll down" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy 80}}
    :nav/scroll-up     {:id :nav/scroll-up :title "Scroll up" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy -80}}
+   :nav/scroll-left   {:id :nav/scroll-left :title "Scroll left" :category "Navigation" :dispatch [:nav/scroll] :arg {:dx :left}}
+   :nav/scroll-right  {:id :nav/scroll-right :title "Scroll right" :category "Navigation" :dispatch [:nav/scroll] :arg {:dx :right}}
+   :hint/start        {:id :hint/start :title "Link hints (Vimium f)" :category "Navigation" :dispatch [:hint/start]}
    :nav/page-down     {:id :nav/page-down :title "Page down" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy :page}}
    :nav/page-up       {:id :nav/page-up :title "Page up" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy :-page}}
    :nav/half-page-down {:id :nav/half-page-down :title "Half page down" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy :half}}
@@ -62,6 +65,9 @@
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :about/open     {:id :about/open :title "About vinary-viewer" :category "Help" :dispatch [:about/open]}
+   ;; ---- Editor (key-binding editor; active only while the editor is open) ----
+   :kbedit/undo {:id :kbedit/undo :title "Undo (key-binding editor)" :category "Editor" :dispatch [:kbedit/undo]}
+   :kbedit/redo {:id :kbedit/redo :title "Redo (key-binding editor)" :category "Editor" :dispatch [:kbedit/redo]}
    ;; ---- Mode (vim) ----
    :mode/normal  {:id :mode/normal :title "Normal mode" :category "Mode" :dispatch [:input/set-mode :normal]}
    :mode/insert  {:id :mode/insert :title "Insert mode" :category "Mode" :dispatch [:input/set-mode :insert]}

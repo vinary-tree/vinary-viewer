@@ -8,6 +8,9 @@
  {:normal
   {"j"   :nav/scroll-down
    "k"   :nav/scroll-up
+   "h"   :nav/scroll-left
+   "l"   :nav/scroll-right
+   "f"   :hint/start
    "C-d" :nav/half-page-down
    "C-u" :nav/half-page-up
    "C-f" :nav/page-down

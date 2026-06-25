@@ -61,34 +61,55 @@
      {:fx [[:ds/transact [[:db/add eid :doc/error message]]]]}
      {})))
 
-;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none
+;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
+;; scrolls itself, so http never requests a content-pane restore.
+(defn- nav-fx [uri scroll] (cond-> (load-fx uri) (uri/file-path uri) (conj [:scroll/restore scroll])))
+
+;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none. The leaving
+;; scroll is saved into history; the new entry starts at the top.
 (rf/reg-event-fx
  :tab/navigate
- (fn [{:keys [db]} [_ uri]]
-   {:db (if (nav/active-tab db) (nav/nav-active db uri) (nav/add-tab db uri)) :fx (load-fx uri)}))
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ uri]]
+   {:db (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))
+    :fx (nav-fx uri 0)}))
 
-;; open uri in a NEW tab (Ctrl+click)
+;; open uri in a NEW tab (Ctrl+click) — save the current tab's scroll first
 (rf/reg-event-fx
  :tab/open
- (fn [{:keys [db]} [_ uri]] {:db (nav/add-tab db uri) :fx (load-fx uri)}))
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ uri]]
+   {:db (nav/add-tab (nav/save-scroll db content-scroll) uri) :fx (nav-fx uri 0)}))
 
-;; "Open" (left-click / context menu): focus an existing tab for uri, else navigate the active tab
+;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its scroll), else navigate
 (rf/reg-event-fx
  :doc/open
- (fn [{:keys [db]} [_ uri]]
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
-     {:db (nav/activate db (:id t))}
-     {:db (if (nav/active-tab db) (nav/nav-active db uri) (nav/add-tab db uri)) :fx (load-fx uri)})))
+     (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
+       {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))})
+     {:db (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))
+      :fx (nav-fx uri 0)})))
 
 ;; "Open in new tab" (Ctrl+click / context menu): focus an existing tab for uri, else a new tab
 (rf/reg-event-fx
  :doc/open-new
- (fn [{:keys [db]} [_ uri]]
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
-     {:db (nav/activate db (:id t))}
-     {:db (nav/add-tab db uri) :fx (load-fx uri)})))
+     (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
+       {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))})
+     {:db (nav/add-tab (nav/save-scroll db content-scroll) uri) :fx (nav-fx uri 0)})))
 
-(rf/reg-event-db :tab/activate (fn [db [_ id]] (nav/activate db id)))
+;; switch tabs — save the leaving tab's scroll, restore the target tab's
+(rf/reg-event-fx
+ :tab/activate
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ id]]
+   (let [db'    (nav/activate (nav/save-scroll db content-scroll) id)
+         target (nav/active-uri db')]
+     {:db db' :fx (cond-> [] (uri/file-path target) (conj [:scroll/restore (nav/cur-scroll db')]))})))
 
 (rf/reg-event-fx
  :tab/close
@@ -104,14 +125,43 @@
 
 (rf/reg-event-fx :tab/reload (fn [{:keys [db]} _] {:fx (load-fx (nav/active-uri db))}))
 
-;; back/forward act on the ACTIVE tab's own history (per-tab, browser-like)
+;; toggle a markdown tab (the active one, or a given id) between rendered + source — in the pane, the
+;; content text is already cached, so no window replacement
+(rf/reg-event-db :tab/toggle-source
+                 (fn [db [_ id]] (if id (nav/toggle-source db id) (nav/toggle-source db))))
+
+;; drag-reorder: drop tab `from-id` before/after `to-id` (after? = cursor past the target's midpoint)
+(rf/reg-event-db
+ :tab/reorder
+ (fn [db [_ from-id to-id after?]]
+   (let [ts  (nav/tabs db)
+         toi (first (keep-indexed #(when (= (:id %2) to-id) %1) ts))]
+     (if toi (nav/reorder db from-id (+ toi (if after? 1 0))) db))))
+
+(rf/reg-event-fx
+ :tab/close-others
+ (fn [{:keys [db]} [_ id]]
+   {:fx (->> (nav/tabs db) (remove #(= (:id %) id)) (mapv (fn [t] [:dispatch [:tab/close (:id t)]])))}))
+
+(rf/reg-event-fx
+ :tab/close-right
+ (fn [{:keys [db]} [_ id]]
+   (let [ts  (vec (nav/tabs db))
+         idx (first (keep-indexed #(when (= (:id %2) id) %1) ts))]
+     {:fx (if idx (mapv (fn [t] [:dispatch [:tab/close (:id t)]]) (subvec ts (inc idx))) [])})))
+
+;; back/forward act on the ACTIVE tab's own history (per-tab, browser-like) + restore that entry's scroll
 (rf/reg-event-fx
  :history/back
- (fn [{:keys [db]} _] (if-let [[db' uri] (nav/step db -1)] {:db db' :fx (load-fx uri)} {})))
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} _]
+   (if-let [[db' uri sc] (nav/step db -1 content-scroll)] {:db db' :fx (nav-fx uri sc)} {})))
 
 (rf/reg-event-fx
  :history/forward
- (fn [{:keys [db]} _] (if-let [[db' uri] (nav/step db 1)] {:db db' :fx (load-fx uri)} {})))
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} _]
+   (if-let [[db' uri sc] (nav/step db 1 content-scroll)] {:db db' :fx (nav-fx uri sc)} {})))
 
 ;; URI bar: parse the typed text (http kept; file:// stripped; else a path) + navigate the active tab
 (rf/reg-event-fx
@@ -126,7 +176,7 @@
  :http/navigated
  (fn [db [_ {:keys [url]}]]
    (if (and url (uri/http? url) (not= url (nav/active-uri db)))
-     (nav/nav-active db url)
+     (nav/nav-active db url 0)   ; the web view scrolls itself; nothing to save into the content pane
      db)))
 
 ;; the web view's heading outline (for the Contents/TOC tab — HTML sections, like Markdown)
@@ -275,6 +325,7 @@
 ;; ---- context menu + clipboard / shell openers ----
 (rf/reg-event-db :context-menu/show  (fn [db [_ m]] (assoc-in db [:ui :context-menu] m)))
 (rf/reg-event-db :context-menu/close (fn [db _]     (assoc-in db [:ui :context-menu] nil)))
+(rf/reg-event-db :ui/hover-link      (fn [db [_ uri]] (assoc-in db [:ui :hover-link] uri)))
 (rf/reg-event-fx :clipboard/copy     (fn [_ [_ text]] {:fx [[:vv/copy text]]}))
 (rf/reg-event-fx :shell/open-path     (fn [_ [_ path]] {:fx [[:vv/open-path path]]}))
 (rf/reg-event-fx :shell/open-external (fn [_ [_ url]]  {:fx [[:vv/open-external url]]}))
@@ -317,3 +368,28 @@
  :tree/activate
  (fn [{:keys [db]} _]
    (when-let [sel (get-in db [:ui :tree-selected])] {:fx [[:dispatch [:doc/open sel]]]})))
+
+;; ---- Vimium-style link hints (f) ----
+(rf/reg-event-fx :hint/start (fn [_ _] {:fx [[:hints/collect]]}))
+
+(rf/reg-event-db :hints/activate
+                 (fn [db [_ targets]]
+                   (if (seq targets)
+                     (assoc-in db [:ui :hints] {:active? true :targets targets :typed ""})
+                     db)))
+
+(rf/reg-event-db :hints/cancel    (fn [db _] (assoc-in db [:ui :hints] {:active? false :targets [] :typed ""})))
+(rf/reg-event-db :hints/backspace (fn [db _] (update-in db [:ui :hints :typed] #(subs % 0 (max 0 (dec (count %)))))))
+
+;; type a label char: a single remaining match (even a unique prefix) activates; no match cancels
+(rf/reg-event-fx
+ :hints/type
+ (fn [{:keys [db]} [_ ch]]
+   (let [typed   (str (get-in db [:ui :hints :typed]) (str/upper-case ch))
+         targets (get-in db [:ui :hints :targets])
+         matches (filter #(str/starts-with? (:label %) typed) targets)]
+     (cond
+       (= 1 (count matches)) {:db (assoc-in db [:ui :hints] {:active? false :targets [] :typed ""})
+                              :fx [[:hints/follow (first matches)]]}
+       (empty? matches)      {:db (assoc-in db [:ui :hints] {:active? false :targets [] :typed ""})}
+       :else                 {:db (assoc-in db [:ui :hints :typed] typed)}))))

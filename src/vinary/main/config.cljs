@@ -10,15 +10,26 @@
             ["chokidar" :refer [watch]]))
 
 (defonce ^:private watcher (atom nil))
+(defonce ^:private inited  (atom false))
 
-(defn- config-path []
+(defn- conf-dir []
   (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
-    (path/join home "vinary-viewer" "keybindings.edn")))
+    (path/join home "vinary-viewer")))
+(defn- config-path [] (path/join (conf-dir) "keybindings.edn"))
 
 (defn- config-text []
   (let [p (config-path)]
     (try (if (.existsSync fs p) (.readFileSync fs p "utf8") "")
          (catch :default _ ""))))
+
+(defn- save!
+  "Write the keymap registry EDN back to keybindings.edn (the chokidar watcher then re-pushes; the
+   renderer's normalize-config is idempotent so the round-trip is a no-op). Mirrors settings.cljs save!."
+  [text]
+  (try
+    (when-not (.existsSync fs (conf-dir)) (.mkdirSync fs (conf-dir) (clj->js {:recursive true})))
+    (.writeFileSync fs (config-path) (str text))
+    (catch :default _ nil)))
 
 (defn push! [^js wc] (.send wc "vv:keymap" (config-text)))
 
@@ -32,4 +43,7 @@
         (.on w "add"    (fn [_] (push! wc)))
         (.on w "unlink" (fn [_] (.send wc "vv:keymap" "")))
         (reset! watcher w))))
-  (.on ipcMain "vv:keymap-request" (fn [^js e] (push! (.-sender e)))))
+  (when-not @inited
+    (reset! inited true)
+    (.on ipcMain "vv:keymap-request" (fn [^js e] (push! (.-sender e))))
+    (.on ipcMain "vv:keymap-save"    (fn [_e text] (save! text)))))

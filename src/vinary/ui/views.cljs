@@ -6,6 +6,8 @@
             [re-frame.core :as rf]
             [clojure.string :as str]
             [vinary.app.uri :as uri]
+            [vinary.app.link :as link]
+            [vinary.renderer.scroll :as scroll]
             [vinary.ui.tabs :as tabs]
             [vinary.ui.sidebar :as sidebar]
             [vinary.ui.palette :as palette]
@@ -13,6 +15,7 @@
             [vinary.ui.context-menu :as ctx-menu]
             [vinary.ui.settings :as settings-ui]
             [vinary.ui.about :as about]
+            [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.syntax :as syntax]))
@@ -20,46 +23,74 @@
 (defn- set-inner! [^js node html]
   (when node (set! (.-innerHTML node) (or html ""))))
 
+(defn- link-display [{:keys [kind path]}]
+  (case kind :anchor (str "#" path) :http path (:file :dir) path nil))
+
 (defn markdown-body
   "A .markdown-body whose innerHTML tracks the HTML passed in (content-view holds the subscription).
-   After each content change — and on a rAF-coalesced window resize — embedded SVG figures are font-matched
-   to the document (figures/scale-figures!, a no-op inside the diagram view)."
+   Intercepts link clicks (→ in-pane navigation, never replacing the window), shows the hovered link's URI
+   in the status bar, font-matches embedded SVG figures, restores the per-history scroll position, and
+   opens a themed context menu on right-click. Middle-click / Ctrl+click open a link in a new tab."
   [_html]
   (let [node (atom nil)
         raf  (atom false)
+        last-link (atom nil)
         on-resize (fn []
                     (when-not @raf
                       (reset! raf true)
                       (js/requestAnimationFrame
                        (fn [] (reset! raf false) (figures/scale-figures! @node)))))
-        ;; right-click a link in the rendered doc → themed context menu (links carry absolute file://
-        ;; or http urls after markdown's URL rewrite)
-        on-ctx (fn [^js e]
-                 (when-let [^js a (.closest (.-target e) "a")]
-                   (when-let [href (not-empty (.-href a))]
-                     (let [text   (str/trim (or (.-textContent a) ""))
-                           target (cond
-                                    (re-find #"(?i)^https?://" href) {:kind :http :path href :text text}
-                                    (re-find #"(?i)^file://" href)
-                                    (let [p (-> href (subs 7) (str/replace #"[?#].*$" "") js/decodeURI)]
-                                      {:kind (if (str/ends-with? p "/") :dir :file) :path p :text text})
-                                    :else nil)]
-                       (when target
+        follow (fn [^js a new-tab? ^js e]
+                 (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
+                   (.preventDefault e)
+                   (case (:kind target)
+                     :anchor       (when-let [^js el (.getElementById js/document (:path target))]
+                                     (.scrollIntoView el #js {:behavior "smooth" :block "start"}))
+                     (:http :file) (rf/dispatch [(if new-tab? :doc/open-new :doc/open) (:path target)])
+                     :dir          (rf/dispatch [:shell/open-path (:path target)])
+                     nil)))
+        on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
+        on-aux   (fn [^js e] (when (= 1 (.-button e))
+                               (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
+        on-over  (fn [^js e]
+                   (let [^js a (.closest (.-target e) "a")
+                         href  (when a (link/target-for-anchor a))]
+                     (when (not= href @last-link)
+                       (reset! last-link href)
+                       (rf/dispatch [:ui/hover-link (when a (link-display (link/classify href "")))]))))
+        on-leave (fn [_] (reset! last-link nil) (rf/dispatch [:ui/hover-link nil]))
+        on-ctx   (fn [^js e]
+                   (when-let [^js a (.closest (.-target e) "a")]
+                     (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
+                       (when (#{:file :dir :http} (:kind target))
                          (.preventDefault e)
-                         (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}]))))))]
+                         (.stopPropagation e)   ; don't also trigger the content-pane's doc menu
+                         (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))))]
     (r/create-class
      {:display-name "vv-markdown-body"
       :component-did-mount  (fn [this]
                               (set-inner! @node (second (r/argv this)))
                               (figures/scale-figures! @node)
+                              (scroll/apply! @node)
                               (.addEventListener js/window "resize" on-resize)
+                              (.addEventListener @node "click" on-click)
+                              (.addEventListener @node "auxclick" on-aux)
+                              (.addEventListener @node "mouseover" on-over)
+                              (.addEventListener @node "mouseleave" on-leave)
                               (.addEventListener @node "contextmenu" on-ctx))
       :component-did-update (fn [this]
                               (set-inner! @node (second (r/argv this)))
-                              (figures/scale-figures! @node))
+                              (figures/scale-figures! @node)
+                              (scroll/apply! @node))
       :component-will-unmount (fn [_]
                                 (.removeEventListener js/window "resize" on-resize)
-                                (when @node (.removeEventListener @node "contextmenu" on-ctx)))
+                                (when @node
+                                  (.removeEventListener @node "click" on-click)
+                                  (.removeEventListener @node "auxclick" on-aux)
+                                  (.removeEventListener @node "mouseover" on-over)
+                                  (.removeEventListener @node "mouseleave" on-leave)
+                                  (.removeEventListener @node "contextmenu" on-ctx))
+                                (rf/dispatch [:ui/hover-link nil]))
       :reagent-render       (fn [_html] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
 
 (defn- pdf-rect [^js node]
@@ -84,7 +115,8 @@
         (show! (second (r/argv this)))
         (when (exists? js/ResizeObserver)
           (let [o (js/ResizeObserver. (fn [_] (bounds!)))] (.observe o @node) (reset! obs o)))
-        (.addEventListener js/window "resize" bounds!))
+        (.addEventListener js/window "resize" bounds!)
+        (scroll/apply! @node))
       :component-did-update   (fn [this] (show! (second (r/argv this))))
       :component-will-unmount (fn [_]
                                 (when-let [^js v (vv)] (when (.-pdfHide v) (.pdfHide v)))
@@ -109,7 +141,8 @@
         (show! (second (r/argv this)))
         (when (exists? js/ResizeObserver)
           (let [o (js/ResizeObserver. (fn [_] (bounds!)))] (.observe o @node) (reset! obs o)))
-        (.addEventListener js/window "resize" bounds!))
+        (.addEventListener js/window "resize" bounds!)
+        (scroll/apply! @node))
       :component-did-update   (fn [this] (show! (second (r/argv this))))
       :component-will-unmount (fn [_]
                                 (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v)))
@@ -128,10 +161,21 @@
             (destroy! [] (when @view (.destroy ^js @view) (reset! view nil)))]
       (r/create-class
        {:display-name           "vv-source-view"
-        :component-did-mount     (fn [this] (build! this))
-        :component-did-update    (fn [this] (destroy!) (build! this))
+        :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))
+        :component-did-update    (fn [this] (destroy!) (build! this) (scroll/apply! @node))
         :component-will-unmount  (fn [_] (destroy!))
         :reagent-render          (fn [_text _path] [:div.vv-source {:ref (fn [el] (reset! node el))}])}))))
+
+(defn image-view
+  "A directly-opened image filling the content width; consumes any pending scroll-restore on mount."
+  [_path]
+  (let [node (atom nil)]
+    (r/create-class
+     {:display-name "vv-image-view"
+      :component-did-mount  (fn [_] (scroll/apply! @node))
+      :component-did-update (fn [_] (scroll/apply! @node))
+      :reagent-render       (fn [path] [:div.vv-image-view {:ref (fn [el] (reset! node el))}
+                                        [:img {:src (str "file://" path) :alt path}]])})))
 
 (defn watermark []
   [:div.vv-watermark
@@ -143,17 +187,28 @@
   []
   (let [doc  @(rf/subscribe [:doc/active])
         tabs @(rf/subscribe [:ui/tabs])
-        uri  @(rf/subscribe [:ui/active-uri])]
-    [:div.vv-content {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
+        uri  @(rf/subscribe [:ui/active-uri])
+        vs?  @(rf/subscribe [:ui/active-view-source?])]
+    [:div.vv-content
+     {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))
+      ;; right-click the markdown content (not a link) → a doc context menu (View Source / Copy)
+      :on-context-menu (fn [^js e]
+                         (when (and (= "markdown" (:doc/kind doc)) (not (.closest (.-target e) "a")))
+                           (.preventDefault e)
+                           (rf/dispatch [:context-menu/show
+                                         {:x (.-clientX e) :y (.-clientY e)
+                                          :target {:kind :doc :path (:doc/path doc)}}])))}
      (cond
        (empty? tabs)               [watermark]
        (uri/http? uri)             [web-host uri]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        (= "pdf" (:doc/kind doc))   [pdf-host (:doc/path doc)]
-       (= "image" (:doc/kind doc)) [:div.vv-image-view
-                                    [:img {:src (str "file://" (:doc/path doc)) :alt (:doc/path doc)}]]
+       (= "image" (:doc/kind doc)) ^{:key (:doc/path doc)} [image-view (:doc/path doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc)]]
        (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
+       ;; "View Source" on a markdown doc → show its raw source in the pane (not replacing the window)
+       (and vs? (= "markdown" (:doc/kind doc)) (:doc/text doc))
+       ^{:key (str "src:" (:doc/path doc))} [source-view (:doc/text doc) (:doc/path doc)]
        (:doc/html doc)             [markdown-body (:doc/html doc)]
        :else                       [:div.vv-empty "Rendering…"])]))
 
@@ -220,6 +275,26 @@
        [:span.vv-modeline-mode (str/upper-case (name mode))]
        (when (seq pending) [:span.vv-modeline-seq (str/join " " pending)])])))
 
+(defn status-bar
+  "Bottom-left link-hover URI indicator (like a browser's status bar); shown only while hovering a link."
+  []
+  (when-let [uri @(rf/subscribe [:ui/hover-link])]
+    [:div.vv-statusbar uri]))
+
+(defn hints-overlay
+  "Vimium link-hint labels positioned over the visible links; only labels still matching what's typed show
+   (the typed prefix is highlighted). The capture-phase key listener that drives this is in renderer.core."
+  []
+  (let [{:keys [active? targets typed]} @(rf/subscribe [:ui/hints])]
+    (when active?
+      [:div.vv-hint-overlay
+       (for [{:keys [label x y]} targets
+             :when (str/starts-with? label typed)]
+         ^{:key label}
+         [:div.vv-hint {:style {:left (str x "px") :top (str y "px")}}
+          (when (seq typed) [:span.vv-hint-typed typed])
+          [:span.vv-hint-rest (subs label (count typed))]])])))
+
 (defn root []
   [:div.vv-root
    [menubar/menubar]
@@ -230,8 +305,11 @@
      [tabs/tab-strip]
      [content-view]
      [find-bar]
+     [status-bar]
      [mode-line]]]
    [palette/command-palette]
    [ctx-menu/context-menu]
    [settings-ui/dialog]
-   [about/dialog]])
+   [about/dialog]
+   (when @(rf/subscribe [:kbedit/open?]) [kbedit/dialog])
+   [hints-overlay]])

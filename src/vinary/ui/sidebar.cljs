@@ -4,7 +4,8 @@
    live in app-db (persisted via settings in Phase 5)."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
-            [vinary.ui.tree :as tree]))
+            [vinary.ui.tree :as tree]
+            [vinary.ui.tabs :as tabs-ui]))
 
 (defn- contents-panel
   "The Contents tab: the active document's section outline (Markdown headings or, for an HTTP page, the
@@ -20,6 +21,19 @@
                           :on-click #(rf/dispatch [:toc/goto id])}
           text])]
       [:div.vv-sidebar-empty "No sections"])))
+
+(defn- tabs-panel
+  "The Tabs tab: a vertical list of the open tabs in the same order as the horizontal strip (top→bottom ==
+   left→right). Shares the strip's tab-item — so drag-reorder and the right-click context menu behave the
+   same, and reordering here reorders the strip. Useful when tabs overflow the horizontal strip."
+  []
+  (let [tabs   @(rf/subscribe [:ui/tabs])
+        active @(rf/subscribe [:ui/active-tab-id])]
+    (if (seq tabs)
+      [:div.vv-vtabs
+       (for [{:keys [id] tab-uri :uri} tabs]
+         ^{:key id} [tabs-ui/tab-item {:id id :uri tab-uri :active? (= id active) :horizontal? false}])]
+      [:div.vv-sidebar-empty "No open tabs"])))
 
 (defn- resize-handle
   "A draggable bar on the sidebar's right edge; dragging writes [:ui :sidebar-width] (clamped in the event)."
@@ -51,10 +65,13 @@
                               :on-click #(rf/dispatch [:sidebar/tab :files])} "Files"]
         [:div.vv-sidebar-tab {:class    (when (= tab :contents) "vv-sidebar-tab-active")
                               :on-click #(rf/dispatch [:sidebar/tab :contents])} "Contents"]
+        [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
+                              :on-click #(rf/dispatch [:sidebar/tab :tabs])} "Tabs"]
         [:div.vv-sidebar-tabs-spacer]
         [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} "‹"]]
        [:div.vv-sidebar-body
         (case tab
           :contents [contents-panel]
+          :tabs     [tabs-panel]
           [tree/file-tree])]
        [resize-handle]])))

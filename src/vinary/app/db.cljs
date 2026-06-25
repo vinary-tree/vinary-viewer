@@ -22,6 +22,18 @@
         :about-open? false
         :app-info nil               ; {:name :version :repo} pushed by main
         :context-menu nil           ; {:x :y :target {…}} or nil
+        :hover-link nil             ; URI of the link under the cursor (status bar), or nil
+        ;; keymap-set registry (Settings ▸ Key Bindings + the editor): built-ins + named custom sets
+        :keymaps {:active "default" :order [] :sets {}}
+        ;; the key-binding editor dialog (vinary.ui.keybindings-editor + vinary.input.kbedit-history)
+        :kbedit {:open?   false        ; dialog visible?
+                 :sel     nil          ; focused set id (for editing; not the active set)
+                 :editing nil          ; set id whose name is being renamed in-place, or nil
+                 :capture nil          ; {:set-id :mode :action :chords […]} during key capture, or nil
+                 :ctx     nil          ; {:x :y :id} editor right-click context menu, or nil
+                 :undo    []           ; command stack (vinary.input.kbedit-history)
+                 :redo    []}
+        :hints {:active? false :targets [] :typed ""}   ; Vimium-style link hints
         :find {:visible? false :query "" :count 0 :idx 0}
         ;; keybinding / modal / sequence state (ephemeral UI; the keymap itself lives in
         ;; vinary.input.keymap's atom, not here)

@@ -25,7 +25,8 @@
 ;; ---- transforms (pure db→db, or db→[db' …]) ----
 (defn activate [db id] (assoc-in db [:ui :active-tab] id))
 
-(defn- mk-tab [id uri] {:id id :uri uri :hist {:stack [uri] :idx 0}})
+;; a history entry is {:uri :scroll}; the tab's top-level :uri mirrors the current entry's :uri
+(defn- mk-tab [id uri] {:id id :uri uri :hist {:stack [{:uri uri :scroll 0}] :idx 0}})
 
 (defn add-tab
   "Append a new tab for uri and make it active."
@@ -40,25 +41,58 @@
   (let [id (active-id db)]
     (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (f %) %) ts)))))
 
+;; ---- per-tab history with scroll position ----
+(defn- capture-scroll
+  "Save scrollTop onto the active tab's current history entry (called before leaving that entry)."
+  [t scroll]
+  (assoc-in t [:hist :stack (get-in t [:hist :idx]) :scroll] (or scroll 0)))
+
+(defn cur-scroll
+  "The saved scrollTop of the active tab's current history entry (restored on tab switch)."
+  [db]
+  (let [{:keys [stack idx]} (:hist (active-tab db))] (:scroll (get stack idx) 0)))
+
+(defn save-scroll
+  "Save scroll onto the active tab's current entry — before switching tabs / opening a new tab elsewhere."
+  [db scroll]
+  (update-active db #(capture-scroll % scroll)))
+
 (defn nav-active
-  "Point the active tab at uri, pushing it onto that tab's history (truncating any forward branch); a
-   repeat of the current entry just refreshes the uri."
-  [db uri]
+  "Point the active tab at uri, saving the leaving entry's `scroll` and pushing a new entry (scroll 0);
+   a repeat of the current entry just refreshes the uri."
+  [db uri scroll]
   (update-active db
     (fn [t]
-      (let [{:keys [stack idx]} (:hist t)]
-        (if (= uri (get stack idx))
+      (let [t (capture-scroll t scroll)
+            {:keys [stack idx]} (:hist t)]
+        (if (= uri (:uri (get stack idx)))
           (assoc t :uri uri)
-          (let [stack' (conj (vec (take (inc idx) stack)) uri)]
+          (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0})]
             (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})))))))
 
 (defn step
-  "Move the active tab back (-1) / forward (+1) in its history. Returns [db' uri] or nil if at an end."
-  [db delta]
+  "Move the active tab back (-1) / forward (+1), saving the leaving entry's `scroll`. Returns
+   [db' uri target-scroll] or nil at an end."
+  [db delta scroll]
   (let [t (active-tab db) {:keys [stack idx]} (:hist t) idx' (+ (or idx 0) delta)]
     (when (and idx (<= 0 idx') (< idx' (count stack)))
-      [(update-active db #(-> % (assoc :uri (get stack idx')) (assoc-in [:hist :idx] idx')))
-       (get stack idx')])))
+      (let [entry (get stack idx')]
+        [(update-active db (fn [t] (-> (capture-scroll t scroll)
+                                       (assoc :uri (:uri entry))
+                                       (assoc-in [:hist :idx] idx'))))
+         (:uri entry) (:scroll entry 0)]))))
+
+(defn reorder
+  "Move the tab `from-id` to land at insertion gap `insert-idx` (0..n) in the tab strip."
+  [db from-id insert-idx]
+  (let [ts   (tabs db)
+        from (first (keep-indexed #(when (= (:id %2) from-id) %1) ts))]
+    (if (and from insert-idx)
+      (let [tab     (get ts from)
+            removed (vec (concat (subvec ts 0 from) (subvec ts (inc from))))
+            ins     (max 0 (min (count removed) (if (< from insert-idx) (dec insert-idx) insert-idx)))]
+        (assoc-in db [:ui :tabs] (vec (concat (subvec removed 0 ins) [tab] (subvec removed ins)))))
+      db)))
 
 (defn close
   "Remove the tab id (activating a neighbor if it was active). Returns [db' closed-uri still-open?]."
@@ -73,6 +107,11 @@
         [(-> db (assoc-in [:ui :tabs] ts') (assoc-in [:ui :active-tab] new-active))
          (:uri closing)
          (boolean (some #(= (:uri %) (:uri closing)) ts'))]))))
+
+(defn view-source? [db] (boolean (:view-source? (active-tab db))))
+(defn toggle-source
+  ([db]    (toggle-source db (active-id db)))
+  ([db id] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (update % :view-source? not) %) ts)))))
 
 (defn nth-id
   "The id of the tab `dir` steps from the active one (wrapping), or nil if no tabs."

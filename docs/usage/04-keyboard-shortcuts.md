@@ -171,4 +171,25 @@ command palette · ~/.config/vinary-viewer/keybindings.edn
 
 ---
 
+## New this round
+
+- **Switch keymaps from the menu** — **Settings ▸ Key Bindings** is a radio submenu (*Standard / Vim /
+  Emacs* + your custom sets, the active one checked); the change applies live and persists. No file editing
+  required.
+- **Edit bindings visually** — **Settings ▸ Key Bindings ▸ Customize…** opens a two-pane editor with key
+  capture (sequences like `Ctrl+x Ctrl+f`), emacs-style modifier chips, clone / rename / drag-reorder, and
+  full **undo/redo** (`Ctrl+Z` / `Ctrl+Shift+Z`).
+- **Mouse history buttons** — the mouse **Back** (button 3) and **Forward** (button 4) thumb buttons walk
+  history, exactly like `Alt+←` / `Alt+→`.
+- **Vim like Vimium** — in Vim mode: `h`/`l` scroll horizontally (`H`/`L` are history), **`f`** shows
+  alphabetic **link hints** (type a label to follow the link), `/` opens find.
+- **Link clicks** in a rendered document now open **in the preview pane** (with the hovered URL shown
+  bottom-left) and record per-tab history — so Back/Forward restore both the document **and its scroll
+  position**.
+
+The depth — the command registry, the set registry, the editor's undo model, and the hint engine — is in
+[../features/15-custom-keybindings.md](../features/15-custom-keybindings.md).
+
+---
+
 *Next: [05-configuration.md](05-configuration.md).*

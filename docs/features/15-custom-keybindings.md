@@ -1,8 +1,13 @@
-# Custom Keybindings (vim / emacs / default) — *Available now*
+# Custom Keybindings (vim / emacs / default + a visual editor) — *Available now*
 
 > **Status:** Available now. A full, user-customizable keybinding system with preset **default**,
 > **vim**, and **emacs** keymaps, a named **command registry**, a modal/chord/leader **resolver**, a
 > **command palette / fuzzy finder**, and a live-reloaded **`~/.config/vinary-viewer/keybindings.edn`**.
+>
+> **New this round:** runtime **keymap-set switching** from a **Settings ▸ Key Bindings** radio submenu;
+> a two-pane visual **key-binding editor** (`Customize…`) with key capture, emacs-style modifier chips,
+> drag-reorder, in-place rename, clone, and full **undo/redo** (`Ctrl+Z` / `Ctrl+Shift+Z`); and
+> **Vimium-style** vim — `h`/`l` horizontal scroll, `f` link hints, `/` find. See §6.
 
 ## 1. What it is
 
@@ -90,11 +95,15 @@ IME events return `nil` and are ignored.
 Each keymap is `{:name :initial-mode :timeout-ms :leader :modes}`. A **mode-map** maps a chord token to
 either a command (leaf) or a nested map (a **prefix/sequence** — the trie the resolver walks):
 `{"C-x" {"C-f" :file/open}}` is `C-x C-f`. The three bundled presets are read from
-`resources/keymaps/{default,vim,emacs}.edn` **at compile time** by the `vinary.input.presets/bundled`
-macro and inlined as data — the renderer build stubs `fs`, so presets cannot be read at runtime.
-`install-user!` deep-merges the user delta over the `:extends` preset (`:unbind` removes; `deep-merge`
-keeps the preset where the user supplies no value), normalizes the keys (`"SPC"`→`"space"`), and stores
-the result in an atom.
+`resources/keymaps/{default,vim,emacs}.edn` **at compile time** and inlined as data — the renderer build
+stubs `fs`, so presets cannot be read at runtime. They are inlined via **`shadow.resource/inline`** (in
+`keymap.cljs`), which — unlike a plain compile-time `slurp` — **tracks each EDN file as a build
+dependency**, so editing a keymap EDN triggers a recompile (a bare `slurp` would leave the bundled
+keymaps stale until a cache-clearing rebuild). `merge-user` (pure) deep-merges the user delta over the
+`:extends` preset (`:unbind` removes; `deep-merge` keeps the preset where the user supplies no value),
+strips `:unbind` leaves, and normalizes the keys (`"SPC"`→`"space"`); `install-user!` stores the result
+in the live atom, and the editor reads `merge-user` directly to show a set's *effective* bindings without
+installing it.
 
 ### 3.4 The resolver (`src/vinary/input/resolver.cljs`)
 
@@ -130,6 +139,12 @@ the keyword command-ids (`:file/open`) to strings, so the renderer parses the te
 preserving keywords. The renderer pulls once on boot (`requestKeymap`) to avoid a startup race, and
 re-installs on every file change — *live keybinding reload*.
 
+Since this round the file is the **registry envelope** (see §6.1) rather than a single delta; the editor
+and the radio submenu **write it back** over a new `vv:keymap-save` channel (`config.cljs` `save!`,
+mirroring `settings.cljs`). `normalize-config` is **idempotent** and back-compatible: a legacy
+single-delta file (`{:extends :keymaps}`) is wrapped as one custom set, and the chokidar watcher's
+re-push after a save is a no-op round-trip.
+
 ## 4. Design notes
 
 - **Patterns:** Command (the registry), Strategy (keymap-per-mode + preset selection), Interpreter
@@ -150,3 +165,91 @@ macro, and the main→renderer config seam.
 > while the `src/vinary/input/*` modules were mid-landing. The system is now complete and verified
 > end-to-end (default `Ctrl+F`/`Alt+←→`/`C-t`; vim `j`/`g g`/`SPC` leader/modal; emacs `C-x C-f` chord +
 > timeout reset; config auto-load via `XDG_CONFIG_HOME`; palette filter + run).
+
+## 6. Keymap-set switching, the visual editor, and Vimium hints
+
+This round adds three user-facing surfaces on top of the engine above, plus the persistence to back them.
+
+### 6.1 The keymap-set registry (`src/vinary/input/keymaps_registry.cljs`)
+
+Where the engine knew only *one* active keymap (one preset ⊕ one optional user delta), it now manages a
+**registry of named sets** over the app-db slice `[:ui :keymaps] = {:active :order :sets}` — mirroring the
+browser-tab model in `nav.cljs` (pure reads + transforms over app-db, plus one side-effecting bridge):
+
+- three read-only **built-ins** — `default` → *Standard Mode*, `vim` → *Vim Mode*, `emacs` → *Emacs Mode*;
+- any number of user **custom sets**, each a `{:extends <preset> :keymaps <modes-delta>}` entry, ordered
+  by `:order` (that order is also the submenu order);
+- transforms `select` / `add-custom` / `delete-custom` / `rename-custom` / `reorder` / `clone-set`, plus
+  `effective-modes` / `action-index` / `conflict` (read the merged bindings), `normalize-config` /`->edn`
+  (the on-disk envelope), and `install-active!` (→ `keymap/install!` for a built-in, `install-user!` for a
+  custom set). The on-disk file is exactly this envelope:
+
+```clojure
+{:active "My Vim"
+ :order  ["My Vim"]
+ :sets   {"My Vim" {:extends :vim :keymaps {:normal {"C-x" {"C-f" :file/open}}}}}}
+```
+
+Selecting a set (event `:keymap/select`) installs it live (fx `:keymap/install-active`, which also sets
+the modal `:initial-mode`) **and** persists the registry (fx `:vv/save-keymap`).
+
+### 6.2 Settings ▸ Key Bindings (and Theme) radio submenus (`src/vinary/ui/menubar.cljs`)
+
+The menu bar grew a generic **radio-submenu** item `{:submenu "…" :radio :sub/<src>}` that flies out to
+the right and marks the active choice with a `●`/`○` dot. Two are wired: **Theme** (the two themes) and
+**Key Bindings** — `Standard Mode` / `Vim Mode` / `Emacs Mode` + every custom set (in `:order`), the active
+one selected, then a separator and **`Customize…`** which opens the editor. (A CSS `z-index` fix —
+`.vv-menu`/`.vv-menu-label` above the click-away overlay — also restored hover-to-switch between top-level
+menus.)
+
+### 6.3 The key-binding editor (`src/vinary/ui/keybindings_editor.cljs`)
+
+`Customize…` opens a two-pane modal:
+
+- **Left — the sets.** Built-ins first (a `built-in` badge, read-only but **cloneable**), then custom sets
+  (draggable to reorder — which *is* the submenu order). Header `+`/`−` add a fresh custom set (begins an
+  in-place rename) / delete the selected one; double-click a custom name to **rename in place**;
+  right-click for a **`Clone` / `Rename` / `Delete`** context menu. Clone (any set) snapshots its config to
+  a new serial-named set, appended and focused.
+- **Right — the actions.** The command registry grouped by category (`:mode/*` hidden for non-modal sets).
+  Each action shows its current binding **chips** (`registry/action-index`; each chip's `×` writes an
+  `:unbind`) plus a **`⌨ Capture`** button. A built-in shows a read-only banner + `Clone`.
+- **Key capture** (overlay). `Capture` (or a manual **modifier-chip builder** — toggle `Ctrl`/`Alt`/`Shift`
+  chips, which are reorderable/removable, + a base key) accumulates a **chord *sequence*** (e.g. `C-x C-f`);
+  a capture-phase `window` keydown listener routes keys to the capture (Esc cancels, `Done` confirms),
+  pre-empting the global resolver. **Modifiers use emacs set-semantics** — the chip order is cosmetic and
+  canonicalizes to `C- M- S-` on build; `Shift`+printable folds to the shifted glyph.
+- **Undo/redo.** Every edit is a **data command** (`src/vinary/input/kbedit_history.cljs`) with a pure
+  `apply-cmd` and a pure `invert` carrying enough captured state (previous binding value; a removed set's
+  config + index) to be perfectly reversible. Ops: `:put` (set/clear a binding), `:insert-set`/`:remove-set`
+  (mutual inverses), `:rename-set`, `:reorder`. The header `↶`/`↷` buttons and `Ctrl+Z` / `Ctrl+Shift+Z`
+  walk `[:ui :kbedit :undo]`/`[:ui :kbedit :redo]`; *undoing a delete restores the set at its position*.
+  Each committed edit live-applies (`:keymap/install-active`) and persists **debounced**
+  (`:keymap/persist`, ~400 ms).
+
+> A real `Ctrl+Shift+Z` arrives as the chord **`C-Z`** (Shift uppercases the printable `z`), not `C-S-z` —
+> the editor's redo accepts `C-Z` / `C-S-z` / `C-y`. This is the same fold the chip builder applies.
+
+### 6.4 Vimium-style vim (`src/vinary/renderer/hints.cljs`, `resources/web-preload.js`)
+
+The `vim` keymap now mirrors Vimium for Chrome:
+
+- **`h` / `l`** scroll the content pane horizontally (`:nav/scroll-left`/`-right` → the `:dom/scroll` fx,
+  which gained a `:dx` axis); `H`/`L` remain history back/forward.
+- **`f`** overlays short **alphabetic hint labels** on every link visible in the content viewport
+  (`hints/collect` finds + classifies each `a[href]`, `hints/labels` assigns uniform-length, unique labels);
+  typing a label activates that link (file → open in pane, http → web view, dir → file manager, `#anchor` →
+  scroll), `Backspace` pops a char, `Esc` cancels. A capture-phase key listener owns the keyboard only
+  while hints are active, so `f` itself still reaches the resolver to *start* hinting. **HTTP pages** get
+  their own self-contained `f`-hint mode injected by `web-preload.js` (the web view is a separate page).
+- **`/`** opens the in-page find bar (already bound).
+
+## 7. Limitations & notes
+
+- **PDF hints are excluded.** Chromium's built-in PDF viewer renders in an isolated plugin process that
+  cannot be script-injected, so `f` link hints are unavailable on PDF pages (a genuine platform limit, not
+  a deferral). Markdown / source / diagram (renderer-local) and HTTP pages are all covered.
+- **Editing a keymap EDN** (`resources/keymaps/*.edn`) now triggers a recompile during `watch`/`release`
+  because the files are inlined via `shadow.resource/inline` (§3.3) — no cache-clearing rebuild needed.
+- **`h`/`l` only move a pane that actually overflows horizontally.** A normal Markdown document fits the
+  pane width (a wide `<pre>` carries its own scroller), so there `h`/`l` are correctly inert.

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('vv', {
   openExternal: (url) => ipcRenderer.send('vv:open-external', url),
   requestSettings: () => ipcRenderer.send('vv:settings-request'),
   saveSettings: (edn) => ipcRenderer.send('vv:settings-save', edn),
+  saveKeymap: (edn) => ipcRenderer.send('vv:keymap-save', edn),
   requestAppInfo: () => ipcRenderer.send('vv:app-info-request'),
   quit: () => ipcRenderer.send('vv:quit'),
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),

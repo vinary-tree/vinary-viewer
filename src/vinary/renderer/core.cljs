@@ -54,6 +54,34 @@
   []
   (resolver/install!))
 
+(defn mouse-nav!
+  "Mouse thumb buttons: button 3 → Back, button 4 → Forward (like a browser). preventDefault on the
+   capture-phase mousedown cancels Chromium's own back/forward so it never replaces the page."
+  []
+  (.addEventListener js/window "mousedown"
+                     (fn [^js e]
+                       (case (.-button e)
+                         3 (do (.preventDefault e) (rf/dispatch [:history/back]))
+                         4 (do (.preventDefault e) (rf/dispatch [:history/forward]))
+                         nil))
+                     true))
+
+(defn hints!
+  "When link hints are active, a capture-phase key listener owns the keyboard: letters filter/activate the
+   labels, Backspace pops a char, Esc cancels — preempting the global resolver via stopPropagation. When
+   hints are inactive it is inert, so `f` still reaches the resolver to start hinting."
+  []
+  (.addEventListener js/window "keydown"
+                     (fn [^js e]
+                       (when (get-in @rfdb/app-db [:ui :hints :active?])
+                         (let [k (.-key e)]
+                           (cond
+                             (= k "Escape")    (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:hints/cancel]))
+                             (= k "Backspace") (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:hints/backspace]))
+                             (re-matches #"[a-zA-Z]" k) (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:hints/type k]))
+                             :else nil))))
+                     true))
+
 (defn mount! []
   (when (nil? @root)
     (reset! root (rdomc/create-root (.getElementById js/document "app"))))
@@ -64,9 +92,11 @@
   (ds/install-bridge!)
   (set! (.-__vvdb js/window) (fn [] (clj->js @rfdb/app-db)))            ; DEV inspect hooks
   (set! (.-__vvds js/window) (fn [] (clj->js (ds/open-docs (ds/snapshot)))))
-  (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/config-received {:extends (keyword nm)}])))
+  (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (bridge!)
   (keybindings!)
+  (mouse-nav!)
+  (hints!)
   (mount!))
 
 (defn ^:export reload [] (mount!))

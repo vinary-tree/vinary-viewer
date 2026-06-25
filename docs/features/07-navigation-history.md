@@ -213,3 +213,23 @@ Command-pattern model is developed in [theory/07](../theory/07-command-history-m
 Palette: **blue-violet** = the app-db history snapshots, **purple** arrows = a forward navigation
 (`record-nav` appends), **blue** arrows = a back/forward index move, **red** = the divergent
 navigation that truncates. See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).
+
+---
+
+## Per-tab history + scroll restore (new this round)
+
+History is **per tab** (each tab in `nav.cljs` owns its own `{:stack :idx}`), and each stack entry is now
+`{:uri :scroll}` rather than a bare URI — so back/forward restore **both the document and where you were
+scrolled in it**. The leaving scroll position is captured at navigation time (a `:content-scroll` cofx
+reads `.vv-content`'s `scrollTop`), and the destination's saved position is re-applied after the new
+document lays out (one frame + a short settle, to avoid clamping against a not-yet-complete height).
+
+Three related fixes ship alongside:
+
+- **Clicking a link** in a rendered Markdown document now opens the target **in the preview pane** —
+  in-page for `#anchors`, the same tab for files/URLs, a new tab on `Ctrl`/middle-click — instead of letting
+  Electron replace the whole window with raw page source. This restores the per-tab history that
+  `Alt+←/→` traverse. The hovered link's URL appears **bottom-left**, like a browser's status bar.
+- **Mouse thumb buttons** — button 3 → Back, button 4 → Forward (a capture-phase `mousedown` listener that
+  `preventDefault`s Chromium's own navigation).
+- **A web (HTTP) tab** still scrolls itself; the content-pane restore is requested only for local files.

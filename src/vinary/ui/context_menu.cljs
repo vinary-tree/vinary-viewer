@@ -7,7 +7,7 @@
 
 (defn- basename [p] (last (str/split (str p) #"/")))
 
-(defn- items-for [{:keys [kind path text]}]
+(defn- items-for [{:keys [kind path text id]} vs?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -24,19 +24,34 @@
            :sep
            {:label "Copy link URL"        :event [:clipboard/copy path]}
            (when (seq text) {:label "Copy link text" :event [:clipboard/copy text]})]
+    ;; a tab (right-clicked in either the horizontal strip or the vertical Tabs panel)
+    :tab  [{:label "Close"                :event [:tab/close id]}
+           {:label "Close Others"         :event [:tab/close-others id]}
+           {:label "Close to the Right"   :event [:tab/close-right id]}
+           :sep
+           {:label "View Source"          :event [:tab/toggle-source id]}
+           (when path :sep)
+           (when path {:label "Copy file path" :event [:clipboard/copy path]})
+           (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})]
+    ;; the active markdown document (right-clicked in the content pane, not on a link)
+    :doc  [{:label (if vs? "View Rendered" "View Source") :event [:tab/toggle-source]}
+           :sep
+           {:label "Copy file path"       :event [:clipboard/copy path]}
+           {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
     nil))
 
 (defn- act! [event] (rf/dispatch [:context-menu/close]) (rf/dispatch event))
 
 (defn context-menu []
-  (let [{:keys [x y target] :as m} @(rf/subscribe [:ui/context-menu])]
+  (let [{:keys [x y target] :as m} @(rf/subscribe [:ui/context-menu])
+        vs? @(rf/subscribe [:ui/active-view-source?])]
     (when m
       [:div.vv-ctx-overlay
        {:on-click        #(rf/dispatch [:context-menu/close])
         :on-context-menu (fn [^js e] (.preventDefault e) (rf/dispatch [:context-menu/close]))}
        [:div.vv-ctx-menu {:style    {:left (str x "px") :top (str y "px")}
                           :on-click #(.stopPropagation %)}
-        (for [[i item] (map-indexed vector (remove nil? (items-for target)))]
+        (for [[i item] (map-indexed vector (remove nil? (items-for target vs?)))]
           (if (= item :sep)
             ^{:key i} [:div.vv-menu-sep]
             ^{:key i} [:div.vv-menu-item {:on-click #(act! (:event item))}

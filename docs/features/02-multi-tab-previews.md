@@ -233,3 +233,24 @@ Recorded in [ADR-0008 DataScript + app-db split](../design-decisions/0008-datasc
 Palette: **purple** = DataScript (the `:doc` entities that *are* the tabs), **blue-violet** =
 `app-db` (`:ui/active-path`), **teal** = the renderer UI (the tab strip), **amber** = the IPC
 seam (`:vv/close`). See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).
+
+---
+
+## Tab management (new this round)
+
+The tab strip gained the management affordances you'd expect of a browser, and a second representation:
+
+- **Drag to reorder.** Drag a tab along the strip to move it; the drop position is decided by which side of
+  a tab's midline you release on. Reordering is a pure splice of the ordered tab vector (`nav/reorder`).
+- **Right-click context menu** — **Close · Close Others · Close to the Right · View Source · Copy file
+  path/name** (the `:tab` target in `context_menu.cljs`).
+- **View Source** — a per-tab toggle (View menu, the tab menu, or right-clicking the document) shows a
+  Markdown document's **raw source in the pane** (the cached text via `source-view`) instead of its rendered
+  form — *without* replacing the window. Toggle it back to return to the render.
+- **A `Tabs` sidebar panel** — a third sidebar tab alongside *Files* and *Contents* lists the open tabs
+  **vertically, in the same order** as the horizontal strip (top→bottom == left→right). It shares the
+  strip's tab component, so its drag-reorder and right-click menu behave identically and **reordering either
+  representation reorders both** — useful when more tabs are open than fit horizontally.
+
+Closing all of a project's tabs leaves the project in the **Files** tree (projects are never pruned), so
+you can re-open its documents without re-adding it.
