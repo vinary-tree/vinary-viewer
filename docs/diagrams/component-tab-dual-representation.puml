@@ -1,0 +1,40 @@
+@startuml component-tab-dual-representation
+'' PlantUML over Mermaid because this shows ONE ordered model feeding TWO views through a shared component,
+'' with the reorder flowing back to mutate the single source — a component picture with bidirectional,
+'' concept-coloured wiring that Mermaid's flowchart cannot colour per concept as cleanly.
+!include _vv-theme.iuml
+
+title Tabs — one ordered model, two representations (reordering either reorders both)
+
+rectangle "app-db [:ui :tabs]\nORDERED vector of tabs\n(the single source of truth)" as MODEL #7590DB
+
+rectangle "vinary.ui.tabs/tab-item\nshared component\n(click · × close · right-click menu · draggable)" as ITEM #2D9574
+
+rectangle "horizontal tab strip\n(above the content pane)\nleft → right" as STRIP #2D9574
+rectangle "vertical Tabs sidebar panel\n(Files · Contents · Tabs)\ntop → bottom" as PANEL #2D9574
+
+rectangle ":tab/reorder\n(reg-event-db → nav/reorder)\nvector splice" as REORDER #4F97D7
+rectangle ":context-menu/show {:kind :tab}\nClose · Close Others ·\nClose to the Right · View Source" as CTX #4F97D7
+
+MODEL --> STRIP : render in :order
+MODEL --> PANEL : render in the SAME :order
+STRIP --> ITEM  : each tab
+PANEL --> ITEM  : each tab
+ITEM  --> REORDER : drag-drop (x-midpoint on the strip, y-midpoint in the panel)
+ITEM  --> CTX     : right-click
+REORDER --> MODEL : splice [:ui :tabs] → both views re-render
+
+note bottom #FFF6D6
+  Because both representations render the **same** ordered `[:ui :tabs]` vector through the **same**
+  `tab-item`, top→bottom in the panel always equals left→right in the strip, and a drag in either one
+  splices the one vector — so the orders never drift. The vertical panel is most useful when more tabs are
+  open than fit horizontally.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#7590DB>| app-db ordered tab model [:ui :tabs] |
+  |<#2D9574>| renderer views + the shared tab-item |
+  |<#4F97D7>| re-frame events (reorder, context menu) |
+endlegend
+@enduml

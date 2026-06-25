@@ -254,3 +254,17 @@ The tab strip gained the management affordances you'd expect of a browser, and a
 
 Closing all of a project's tabs leaves the project in the **Files** tree (projects are never pruned), so
 you can re-open its documents without re-adding it.
+
+**Diagram — one model, two representations:**
+[`../diagrams/component-tab-dual-representation.puml`](../diagrams/component-tab-dual-representation.puml).
+The horizontal strip and the vertical Tabs panel both render the *same* ordered `[:ui :tabs]` vector through
+the *same* `tab-item`, so their orders never drift and a drag in either splices the one vector.
+
+```plantuml
+'' Source: docs/diagrams/component-tab-dual-representation.puml
+'' Render to SVG with:  plantuml -tsvg docs/diagrams/component-tab-dual-representation.puml
+```
+
+Palette: **blue-violet** = the single ordered tab model `[:ui :tabs]`, **teal** = the renderer views + the
+shared `tab-item`, **blue** = the re-frame reorder / context-menu events. See
+[`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).
