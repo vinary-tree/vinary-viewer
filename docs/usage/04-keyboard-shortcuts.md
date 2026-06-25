@@ -186,6 +186,10 @@ command palette · ~/.config/vinary-viewer/keybindings.edn
 - **Link clicks** in a rendered document now open **in the preview pane** (with the hovered URL shown
   bottom-left) and record per-tab history — so Back/Forward restore both the document **and its scroll
   position**.
+- **Font size / zoom** — `Ctrl`+`=` (or `Ctrl`+`+`) **increases**, `Ctrl`+`-` **decreases**, and `Ctrl`+`0`
+  **resets** the size, in **every** keymap (Standard / Vim / Emacs) and via **View ▸ Zoom In/Out/Reset**.
+  This is whole-app zoom (text, images, diagrams, embedded PDF/web views), like a browser's `Ctrl`+`±`,
+  clamped to 0.4×–3.0× in steps of 0.1.
 
 The depth — the command registry, the set registry, the editor's undo model, and the hint engine — is in
 [../features/15-custom-keybindings.md](../features/15-custom-keybindings.md).
