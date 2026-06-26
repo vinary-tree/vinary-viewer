@@ -156,6 +156,7 @@
         source* (atom nil)
         path* (atom nil)
         raf  (atom false)
+        resize-observer (atom nil)
         last-link (atom nil)
         render-html! (fn [html]
                        (reset! html* html)
@@ -163,10 +164,20 @@
                        (figures/scale-figures! @node)
                        (scroll/apply! @node))
         on-resize (fn []
-                    (when-not @raf
+                    (when (and @node (not @raf))
                       (reset! raf true)
                       (js/requestAnimationFrame
-                       (fn [] (reset! raf false) (figures/scale-figures! @node)))))
+                       (fn []
+                         (reset! raf false)
+                         (when @node (figures/scale-figures! @node))))))
+        observe-resize! (fn []
+                          (if (exists? js/ResizeObserver)
+                            (let [o (js/ResizeObserver. (fn [_] (on-resize)))]
+                              (.observe o @node)
+                              (when-let [^js content (.closest @node ".vv-content")]
+                                (.observe o content))
+                              (reset! resize-observer o))
+                            (.addEventListener js/window "resize" on-resize)))
         follow (fn [^js a new-tab? ^js e]
                  (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
                    (when-let [event (preview-nav/open-event target new-tab?)]
@@ -203,7 +214,7 @@
                                 (reset! source* source)
                                 (reset! path* path)
                                 (render-html! html))
-                              (.addEventListener js/window "resize" on-resize)
+                              (observe-resize!)
                               (.addEventListener @node "click" on-click)
                               (.addEventListener @node "auxclick" on-aux)
                               (.addEventListener @node "mouseover" on-over)
@@ -217,6 +228,10 @@
                                   (render-html! html))))
       :component-will-unmount (fn [_]
                                 (.removeEventListener js/window "resize" on-resize)
+                                (when @resize-observer
+                                  (let [^js o @resize-observer]
+                                    (.disconnect o))
+                                  (reset! resize-observer nil))
                                 (when @node
                                   (.removeEventListener @node "click" on-click)
                                   (.removeEventListener @node "auxclick" on-aux)

@@ -9,17 +9,26 @@
    and the browser otherwise stretches it to the full column, magnifying its text.)"
   (:require [clojure.string :as str]))
 
-(defonce ^:private meta-cache (atom {}))   ; abs svg url → {:v viewBox-width :f dominant-font}
+(defonce ^:private meta-cache (atom {}))   ; abs svg url -> {:v viewBox-width :h viewBox-height :f dominant-font}
 (defonce ^:private inflight   (atom {}))   ; abs svg url → Promise (dedupe concurrent fetches)
 
+(defn- parse-positive-float [s]
+  (let [n (js/parseFloat s)]
+    (if (and (not (js/isNaN n)) (pos? n)) n 0)))
+
+(defn- positive-number? [n]
+  (and (number? n) (not (js/isNaN n)) (pos? n)))
+
 (defn- parse-svg-meta
-  "Extract {:v viewBox-width :f dominant-font-size} from SVG source text. viewBox width = the 3rd number
-   of `viewBox=\"minX minY W H\"` (fallback: a `<svg width=\"Npx\">`); dominant font = the most-frequent
-   rounded `font-size:` value across the file. Either may be 0 → natural sizing."
+  "Extract {:v viewBox-width :h viewBox-height :f dominant-font-size} from SVG source text. viewBox
+   dimensions fall back to `<svg width=\"Npx\" height=\"Npx\">`; dominant font is the most-frequent
+   rounded `font-size:` value across the file. Missing dimensions may be 0 -> natural sizing."
   [txt]
   (let [vb (re-find #"viewBox\s*=\s*[\"']\s*[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)" txt)
         w  (when-not vb (re-find #"<svg[^>]*\swidth\s*=\s*[\"']([\d.]+)(?:px)?[\"']" txt))
-        v  (cond vb (js/parseFloat (nth vb 1)) w (js/parseFloat (nth w 1)) :else 0)
+        h  (when-not vb (re-find #"<svg[^>]*\sheight\s*=\s*[\"']([\d.]+)(?:px)?[\"']" txt))
+        v  (cond vb (parse-positive-float (nth vb 1)) w (parse-positive-float (nth w 1)) :else 0)
+        vh (cond vb (parse-positive-float (nth vb 2)) h (parse-positive-float (nth h 1)) :else 0)
         counts (let [re (js/RegExp. "font-size\\s*[:=]\\s*[\"']?\\s*([\\d.]+)" "g")]
                  (loop [acc {}]
                    (if-let [m (.exec re txt)]
@@ -27,10 +36,10 @@
                        (recur (if (pos? k) (update acc k (fnil inc 0)) acc)))
                      acc)))
         f  (->> counts (sort-by val >) ffirst (#(or % 0)))]
-    {:v v :f f}))
+    {:v v :h vh :f f}))
 
 (defn- fetch-meta
-  "Promise<{:v :f}> for an absolute file:// svg url; memoized + in-flight de-duped. Unreadable → {:v 0 :f 0}."
+  "Promise<{:v :h :f}> for an absolute file:// svg url; memoized + in-flight de-duped. Unreadable -> zero metadata."
   [url]
   (or (some-> (get @meta-cache url) js/Promise.resolve)
       (get @inflight url)
@@ -42,17 +51,45 @@
                              (swap! inflight dissoc url)
                              m)))
                   (.catch (fn [_]
-                            (let [m {:v 0 :f 0}]
+                            (let [m {:v 0 :h 0 :f 0}]
                               (swap! meta-cache assoc url m)
                               (swap! inflight dissoc url)
                               m))))]
         (swap! inflight assoc url p)
         p)))
 
+(defn- clear-size! [^js img]
+  (let [style (.-style img)]
+    (.removeProperty style "width")
+    (.removeProperty style "height")
+    (.removeProperty style "aspect-ratio")))
+
+(defn- target-width [v f avail doc-font]
+  (if (and (positive-number? f) (positive-number? avail))
+    (let [matched (* doc-font (/ v f))]
+      (if (<= matched avail) matched (js/Math.min v avail)))
+    (if (positive-number? avail) (js/Math.min v avail) v)))
+
+(defn- apply-svg-size! [^js body ^js img avail doc-font {:keys [v h f]}]
+  (when (and (.-isConnected img)
+             (identical? body (.closest img ".markdown-body")))
+    (if (positive-number? v)
+      (let [width (target-width v f avail doc-font)
+            style (.-style img)]
+          (.setProperty style "width" (str (js/Math.round width) "px"))
+        (if (positive-number? h)
+          (let [height (* width (/ h v))]
+            (.setProperty style "height" (str (js/Math.round height) "px") "important")
+            (.setProperty style "aspect-ratio" (str v " / " h)))
+          (do
+            (.removeProperty style "height")
+            (.removeProperty style "aspect-ratio"))))
+      (clear-size! img))))
+
 (defn scale-figures!
   "Size each embedded SVG <img> in `body` (a .markdown-body element) so its text == the doc font. Async
-   per <img> (fetch); applies the width when the fetch resolves. No-op inside the diagram view and for
-   emoji / non-file / non-svg images (those clear any inline width → CSS owns them)."
+   per <img> (fetch); applies width + height from metadata when the fetch resolves. No-op inside the
+   diagram view and for emoji / non-file / non-svg images (those clear inline sizing -> CSS owns them)."
   [^js body]
   (when (and body (not (.closest body ".vv-diagram")))
     (let [cs       (js/getComputedStyle body)
@@ -66,17 +103,12 @@
               src     (or (.getAttribute img "src") "")
               url     (.-src img)                          ; resolved absolute URL
               path    (str/replace url #"[?#].*$" "")]
+          (set! (.-draggable img) false)
+          (.setAttribute img "draggable" "false")
           (cond
             (re-find #"(?i)^emoji" src)         nil
-            (not (re-find #"(?i)^file://" url)) (set! (.. img -style -width) "")
-            (not (re-find #"(?i)\.svg$" path))  (set! (.. img -style -width) "")
+            (not (re-find #"(?i)^file://" url)) (clear-size! img)
+            (not (re-find #"(?i)\.svg$" path))  (clear-size! img)
             :else
             (-> (fetch-meta url)
-                (.then (fn [{:keys [v f]}]
-                         (if (and v (pos? v))
-                           (let [target (if (and (pos? f) (pos? avail))
-                                          (let [matched (* doc-font (/ v f))]
-                                            (if (<= matched avail) matched (js/Math.min v avail)))
-                                          (if (pos? avail) (js/Math.min v avail) v))]
-                             (set! (.. img -style -width) (str (js/Math.round target) "px")))
-                           (set! (.. img -style -width) "")))))))))))
+                (.then (fn [meta] (apply-svg-size! body img avail doc-font meta))))))))))

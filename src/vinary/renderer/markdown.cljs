@@ -118,7 +118,7 @@
     (when (and (string? src) (not (str/blank? src)))
       #js {:type "element"
            :tagName "a"
-           :properties #js {:href src}
+           :properties #js {:href src :className #js ["vv-figure-link"]}
            :children #js [img]
            :position (.-position img)})))
 

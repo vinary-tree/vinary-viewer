@@ -221,6 +221,24 @@ hr {
     margin-left: auto !important;
     margin-right: auto !important;
     height: auto !important;   /* keep height proportional if a too-wide figure is shrunk to fit */
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+.markdown-body a.vv-figure-link {
+    display: block !important;
+    width: -webkit-fit-content;
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    line-height: 0;
+    text-decoration: none !important;
+}
+
+.markdown-body a.vv-figure-link img:not([src^="emoji"]) {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
 }
 
 /* 12. File-tree sidebar (paired with sidebar.js). <nav id="vmd-sidebar"> is

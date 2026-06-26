@@ -7,18 +7,62 @@ process.env.XDG_SESSION_TYPE = 'x11';
 delete process.env.WAYLAND_DISPLAY;
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, ipcMain } = require('electron');
 
 const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'resources', 'public', 'index.html');
 const PRELOAD = path.join(ROOT, 'resources', 'preload.js');
+const tempDirs = [];
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 app.commandLine.appendSwitch('ozone-platform', 'x11');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function cleanupTempDirs() {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function svgDiagram({ width, height, fontSize, label, fill }) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" height="${height}px" preserveAspectRatio="none" ` +
+    `style="width:${width}px;height:${height}px;background:#FFFFFF;" viewBox="0 0 ${width} ${height}" ` +
+    `width="${width}px"><rect width="${width}" height="${height}" fill="${fill}"/>` +
+    `<text x="${width / 2}" y="${height / 2}" font-size="${fontSize}" fill="#111827" ` +
+    `text-anchor="middle">${label}</text></svg>`;
+}
+
+function createLocalSvgScrollFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-svg-scroll-'));
+  const diagramsDir = path.join(dir, 'diagrams');
+  tempDirs.push(dir);
+  fs.mkdirSync(diagramsDir);
+
+  const diagrams = [
+    { file: 'wide.svg', width: 1461, height: 242, fontSize: 14, label: 'wide local svg', fill: '#DBEAFE' },
+    { file: 'tall.svg', width: 563, height: 731, fontSize: 12, label: 'tall local svg', fill: '#DCFCE7' },
+    { file: 'very-wide.svg', width: 3269, height: 415, fontSize: 14, label: 'very wide local svg', fill: '#FEF3C7' }
+  ];
+  for (const diagram of diagrams) {
+    fs.writeFileSync(path.join(diagramsDir, diagram.file), svgDiagram(diagram));
+  }
+
+  const filler = Array.from({ length: 16 }, (_value, index) =>
+    `Paragraph ${index + 1}. This gives the local SVG scroll test enough height.`
+  ).join('\n\n');
+  const text = `# Local SVG Scroll\n\n${filler}\n\n` +
+    `![Wide](diagrams/wide.svg)\n\n## Middle\n\n${filler}\n\n` +
+    `![Tall](diagrams/tall.svg)\n\n## More\n\n${filler}\n\n` +
+    `![Very wide](diagrams/very-wide.svg)\n\n## End\n\n${filler}`;
+  const docPath = path.join(dir, 'local-svg-scroll.md');
+  fs.writeFileSync(docPath, text);
+  return { docPath, text };
+}
 
 async function waitFor(predicate, label, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;
@@ -385,6 +429,123 @@ async function main() {
   assert.ok(scrollStability.activeHeading, 'scrolling must still update the active TOC heading');
   console.log('[ok] markdown image scrolling keeps preview DOM and chrome stable');
 
+  const localSvgFixture = createLocalSvgScrollFixture();
+  state.contentByPath.set(localSvgFixture.docPath, {
+    path: localSvgFixture.docPath,
+    kind: 'markdown',
+    text: localSvgFixture.text,
+    stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [localSvgFixture.docPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Local SVG Scroll'`),
+    'local SVG scroll markdown document'
+  );
+  await waitFor(
+    () => evalIn(win, `(() => {
+      const imgs = Array.from(document.querySelectorAll('.markdown-body img'));
+      return imgs.length === 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+    })()`),
+    'local SVG image loads'
+  );
+  await waitFor(
+    () => evalIn(win, `Array.from(document.querySelectorAll('.markdown-body img'))
+      .every((img) => img.style.width && img.style.height && img.style.aspectRatio && img.getAttribute('draggable') === 'false')`),
+    'local SVG figure sizing'
+  );
+  const localSvgStart = await evalIn(win, `(() => {
+    const body = document.querySelector('.markdown-body');
+    const imgs = Array.from(body.querySelectorAll('img'));
+    window.__vvSvgScrollImages = imgs;
+    window.__vvSvgScrollChildListMutations = 0;
+    window.__vvSvgScrollObserver?.disconnect?.();
+    window.__vvSvgScrollObserver = new MutationObserver((records) => {
+      window.__vvSvgScrollChildListMutations += records.filter((record) => record.type === 'childList').length;
+    });
+    window.__vvSvgScrollObserver.observe(body, { childList: true });
+    return {
+      imageCount: imgs.length,
+      dims: imgs.map((img) => {
+        const rect = img.getBoundingClientRect();
+        return {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          styleWidth: img.style.width,
+          styleHeight: img.style.height,
+          aspectRatio: img.style.aspectRatio
+        };
+      })
+    };
+  })()`);
+  assert.strictEqual(localSvgStart.imageCount, 3, 'local SVG fixture must render three images');
+  win.show();
+  await delay(100);
+  win.focus();
+  win.webContents.focus();
+  for (let i = 0; i < localSvgStart.imageCount; i++) {
+    const wheelTarget = await evalIn(win, `(() => {
+      const content = document.querySelector('.vv-content');
+      const img = document.querySelectorAll('.markdown-body img')[${i}];
+      const maxTop = Math.max(0, content.scrollHeight - content.clientHeight);
+      const targetTop = Math.max(0, Math.min(maxTop - 1, img.offsetTop - (content.clientHeight / 2) + (img.offsetHeight / 2)));
+      content.scrollTop = targetTop;
+      const rect = img.getBoundingClientRect();
+      return {
+        before: content.scrollTop,
+        x: Math.round(rect.left + Math.max(1, Math.min(rect.width - 1, rect.width / 2))),
+        y: Math.round(rect.top + Math.max(1, Math.min(rect.height - 1, rect.height / 2)))
+      };
+    })()`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: wheelTarget.x, y: wheelTarget.y });
+    win.webContents.sendInputEvent({
+      type: 'mouseWheel',
+      x: wheelTarget.x,
+      y: wheelTarget.y,
+      deltaY: -480,
+      wheelTicksY: -4,
+      hasPreciseScrollingDeltas: true,
+      canScroll: true
+    });
+    await waitFor(
+      () => evalIn(win, `document.querySelector('.vv-content').scrollTop > ${wheelTarget.before + 8}`),
+      `wheel scroll over local SVG ${i + 1}`,
+      2000
+    );
+  }
+  const localSvgResult = await evalIn(win, `(() => {
+    const body = document.querySelector('.markdown-body');
+    const imgs = Array.from(body.querySelectorAll('img'));
+    const dims = imgs.map((img) => {
+      const rect = img.getBoundingClientRect();
+      return {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        styleWidth: img.style.width,
+        styleHeight: img.style.height,
+        aspectRatio: img.style.aspectRatio
+      };
+    });
+    const result = {
+      childListMutations: window.__vvSvgScrollChildListMutations,
+      sameImages: Array.isArray(window.__vvSvgScrollImages) &&
+        window.__vvSvgScrollImages.length === imgs.length &&
+        imgs.every((img, index) => img === window.__vvSvgScrollImages[index]),
+      dims,
+      docStillOpen: document.querySelector('.markdown-body h1')?.textContent.trim() === 'Local SVG Scroll',
+      dedicatedImageView: Boolean(document.querySelector('.vmd-image-view'))
+    };
+    window.__vvSvgScrollObserver?.disconnect?.();
+    window.__vvSvgScrollObserver = null;
+    window.__vvSvgScrollImages = null;
+    return result;
+  })()`);
+  assert.strictEqual(localSvgResult.childListMutations, 0, 'wheel scrolling local SVGs must not rebuild markdown body children');
+  assert.strictEqual(localSvgResult.sameImages, true, 'wheel scrolling local SVGs must not recreate image nodes');
+  assert.strictEqual(localSvgResult.docStillOpen, true, 'wheel scrolling local SVGs must keep the markdown document open');
+  assert.strictEqual(localSvgResult.dedicatedImageView, false, 'wheel scrolling local SVGs must not open the dedicated image view');
+  assert.deepStrictEqual(localSvgResult.dims, localSvgStart.dims, 'local SVG dimensions must stay stable while scrolling over images');
+  console.log('[ok] local SVG markdown images scroll without layout churn');
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();
@@ -428,6 +589,7 @@ async function main() {
 }
 
 const hardTimeout = setTimeout(() => {
+  cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
 }, 25000);
@@ -435,11 +597,13 @@ const hardTimeout = setTimeout(() => {
 main()
   .then(() => {
     clearTimeout(hardTimeout);
+    cleanupTempDirs();
     console.log('[ok] Electron smoke test passed');
     app.quit();
   })
   .catch((err) => {
     clearTimeout(hardTimeout);
+    cleanupTempDirs();
     console.error(err && err.stack ? err.stack : err);
     app.exit(1);
   });
