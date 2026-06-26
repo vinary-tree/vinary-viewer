@@ -14,11 +14,12 @@
    "C-S-tab" :tab/prev
    "C-w"     :tab/close
    "C-o"     :file/open-dialog
+   "C-S-o"   :file/open-dialog-new-tab
    "C-r"     :doc/reload
    "C-p"     :palette/files
    "C-S-p"   :palette/open
    "C-b"     :sidebar/toggle
-   "C-t"     :theme/cycle
+   "C-t"     :tab/new-blank
    "C-0"     :view/zoom-reset
    "C-="     :view/zoom-in
    "C-+"     :view/zoom-in

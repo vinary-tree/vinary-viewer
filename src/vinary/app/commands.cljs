@@ -21,9 +21,11 @@
    :tab/next  {:id :tab/next  :title "Next tab"     :category "Tabs" :dispatch [:tab/next] :when :has-tabs}
    :tab/prev  {:id :tab/prev  :title "Previous tab" :category "Tabs" :dispatch [:tab/prev] :when :has-tabs}
    :tab/close {:id :tab/close :title "Close tab"    :category "Tabs" :dispatch [:tab/close-active] :when :has-tabs}
+   :tab/new-blank {:id :tab/new-blank :title "New blank tab" :category "Tabs" :dispatch [:tab/new-blank]}
    ;; ---- File ----
    :file/open            {:id :file/open :title "Find file…" :category "File" :prompt :file}
    :file/open-dialog     {:id :file/open-dialog :title "Open file…" :category "File" :dispatch [:file/open-dialog]}
+   :file/open-dialog-new-tab {:id :file/open-dialog-new-tab :title "Open file in new tab…" :category "File" :dispatch [:file/open-dialog :new-tab]}
    :file/open-in-new-tab {:id :file/open-in-new-tab :title "Open file in new tab…" :category "File" :prompt :file}
    :file/reveal-in-tree  {:id :file/reveal-in-tree :title "Reveal in tree" :category "File" :dispatch [:sidebar/reveal]}
    :doc/reload           {:id :doc/reload :title "Reload" :category "File" :dispatch [:tab/reload]}

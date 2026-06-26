@@ -14,12 +14,14 @@
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.app.ds :as ds]
+            [vinary.app.uri :as uri]
             [vinary.grammar-catalog :as grammar-catalog]
             [vinary.main.file-kind :as file-kind]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
             [vinary.renderer.media :as media]
+            [vinary.ui.context-menu :as context-menu]
             [vinary.ui.preview-context :as preview-context]
             [vinary.ui.preview-navigation :as preview-nav]))
 
@@ -55,7 +57,22 @@
   (testing "default keymap reproduces the baseline"
     (keymap/install! :default)
     (is (= :search/start (get-in (keymap/modes) [:all "C-f"])))
-    (is (= :history/back (get-in (keymap/modes) [:all "M-left"])))))
+    (is (= :history/back (get-in (keymap/modes) [:all "M-left"]))))
+  (testing "file dialog shortcuts resolve across bundled keymaps"
+    (doseq [preset [:default :vim :emacs]]
+      (keymap/install! preset)
+      (is (= :file/open-dialog (get-in (keymap/modes) [:all "C-o"]))
+          (str preset " C-o"))
+      (is (= :file/open-dialog-new-tab (get-in (keymap/modes) [:all "C-S-o"]))
+          (str preset " C-S-o")))
+    (keymap/install! :vim)
+    (is (= :file/open-dialog (:command (resolver/step (keymap/modes) :normal [] "C-o" {:in-input? false})))
+        "vim normal C-o opens the file dialog"))
+  (testing "Ctrl-t opens a new blank tab across bundled keymaps"
+    (doseq [preset [:default :vim :emacs]]
+      (keymap/install! preset)
+      (is (= :tab/new-blank (get-in (keymap/modes) [:all "C-t"]))
+          (str preset " C-t")))))
 
 (deftest resolver-step
   (let [modes {:normal {"j" :nav/scroll-down "g" {"g" :nav/scroll-top}} :all {"escape" :input/escape}}]
@@ -76,10 +93,14 @@
     (is (true?  (commands/allowed? :tab/next {:tabs [1 2]})))
     (is (false? (commands/allowed? :tab/next {:tabs []})) ":has-tabs fails with no tabs")
     (is (false? (commands/allowed? :history/back {:can-back? false})))
+    (is (true?  (commands/allowed? :tab/new-blank {})))
+    (is (true?  (commands/allowed? :file/open-dialog-new-tab {})))
     (is (true?  (commands/allowed? :search/start {}))  "no :when ⇒ always"))
   (testing "all-visible filters by :when"
     (let [ids (set (map :id (commands/all-visible {:tabs [] :can-back? false})))]
       (is (not (contains? ids :tab/next)))
+      (is (contains? ids :tab/new-blank))
+      (is (contains? ids :file/open-dialog-new-tab))
       (is (contains? ids :search/start)))))
 
 (deftest datascript-helpers
@@ -105,6 +126,22 @@
       (is (= "markdown" (ds/doc-attr @conn "/tmp/readme.md" :doc/kind)))
       (is (= "render failed" (ds/doc-attr @conn "/tmp/readme.md" :doc/error)))
       (is (= 2 (ds/doc-attr @conn "/tmp/readme.md" :doc/stamp))))))
+
+(deftest open-dialog-file-dispatch
+  (testing "current-tab mode opens the first selected file in the current tab"
+    (is (= [[:dispatch [:doc/open "/tmp/a.md"]]]
+           (events/files-opened-fx :current ["/tmp/a.md"])))
+    (is (= [[:dispatch [:doc/open "/tmp/a.md"]]
+            [:dispatch [:doc/open-new "/tmp/b.md"]]]
+           (events/files-opened-fx :current ["/tmp/a.md" "/tmp/b.md"]))))
+  (testing "new-tab mode opens every selected file in a new tab"
+    (is (= [[:dispatch [:doc/open-new "/tmp/a.md"]]
+            [:dispatch [:doc/open-new "/tmp/b.md"]]]
+           (events/files-opened-fx :new-tab ["/tmp/a.md" "/tmp/b.md"]))))
+  (testing "empty and unknown modes are stable"
+    (is (= [] (events/files-opened-fx :new-tab [])))
+    (is (= :current (events/open-dialog-mode nil)))
+    (is (= :current (events/open-dialog-mode :unexpected)))))
 
 ;; ---- navigation: per-tab history with scroll (Phase A) + reorder/view-source (Phase B) ----
 (deftest nav-history-scroll
@@ -158,6 +195,37 @@
       (is (false? (nav/view-source? db)))
       (is (true?  (nav/view-source? (nav/toggle-source db))))
       (is (false? (nav/view-source? (nav/toggle-source (nav/toggle-source db))))))))
+
+(deftest nav-duplicate-and-blank-tabs
+  (testing "duplicate inserts immediately after the source tab and preserves tab state"
+    (let [db0  (-> empty-tabs
+                   (nav/add-tab "/a.md")
+                   (nav/nav-active "/b.md" 42)
+                   (nav/toggle-source 0))
+          db1  (nav/duplicate-tab db0 0)
+          tabs (nav/tabs db1)]
+      (is (= [0 1] (mapv :id tabs)))
+      (is (= ["/b.md" "/b.md"] (mapv :uri tabs)))
+      (is (= 1 (nav/active-id db1)))
+      (is (= 2 (get-in db1 [:ui :next-tab-id])))
+      (is (= (:hist (first tabs)) (:hist (second tabs))))
+      (is (true? (:view-source? (second tabs))))))
+  (testing "duplicating an inactive tab still inserts next to that tab"
+    (let [db0  (-> empty-tabs
+                   (nav/add-tab "/a.md")
+                   (nav/add-tab "/b.md")
+                   (nav/add-tab "/c.md"))
+          db1  (nav/duplicate-tab db0 0)
+          tabs (nav/tabs db1)]
+      (is (= [0 3 1 2] (mapv :id tabs)))
+      (is (= ["/a.md" "/a.md" "/b.md" "/c.md"] (mapv :uri tabs)))
+      (is (= 3 (nav/active-id db1)))))
+  (testing "blank tabs have nil uri and browser-style display text"
+    (let [db (nav/add-tab empty-tabs nil)]
+      (is (nil? (nav/active-uri db)))
+      (is (nil? (uri/file-path (nav/active-uri db))))
+      (is (= "" (uri/display (nav/active-uri db))))
+      (is (= "New Tab" (uri/basename (nav/active-uri db)))))))
 
 (deftest file-kind-classification
   (let [source? (fn [path] (contains? grammar-catalog/bundled-source-exts
@@ -341,6 +409,17 @@
   (testing "best-source-offset finds the rendered token inside its Markdown source span"
     (is (= 8 (preview-context/best-source-offset "Hello **world**" 0 15 "world" 0)))
     (is (= 0 (preview-context/best-source-offset "Hello **world**" 0 15 "missing" 0)))))
+
+(deftest tab-context-menu-items
+  (testing "tab menu has duplicate and orientation-aware close-side labels"
+    (let [labels (fn [orientation]
+                   (->> (context-menu/tab-items {:id 1 :path "/tmp/readme.md"
+                                                 :orientation orientation})
+                        (remove #{:sep})
+                        (mapv :label)))]
+      (is (some #{"Duplicate tab"} (labels :horizontal)))
+      (is (some #{"Close to the Right"} (labels :horizontal)))
+      (is (some #{"Close Below"} (labels :vertical))))))
 
 (deftest markdown-render-preview-metadata
   (async done

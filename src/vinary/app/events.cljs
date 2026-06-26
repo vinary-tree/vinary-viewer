@@ -100,6 +100,12 @@
  (fn [{:keys [db content-scroll]} [_ uri]]
    {:db (nav/add-tab (nav/save-scroll db content-scroll) uri) :fx (nav-fx uri 0)}))
 
+(rf/reg-event-fx
+ :tab/new-blank
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} _]
+   {:db (nav/add-tab (nav/save-scroll db content-scroll) nil)}))
+
 ;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its scroll), else navigate
 (rf/reg-event-fx
  :doc/open
@@ -129,6 +135,17 @@
    (let [db'    (nav/activate (nav/save-scroll db content-scroll) id)
          target (nav/active-uri db')]
      {:db db' :fx (cond-> [] (uri/file-path target) (conj [:scroll/restore (nav/cur-scroll db')]))})))
+
+(rf/reg-event-fx
+ :tab/duplicate
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} [_ id]]
+   (let [db'    (cond-> db (= id (nav/active-id db)) (nav/save-scroll content-scroll))
+         db''   (nav/duplicate-tab db' id)
+         target (nav/active-uri db'')]
+     {:db db''
+      :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
+            (conj [:scroll/restore (nav/cur-scroll db'')]))})))
 
 (rf/reg-event-fx
  :tab/close
@@ -297,7 +314,26 @@
 (rf/reg-event-db :menu/toggle (fn [db [_ label]] (update-in db [:ui :menu] #(if (= % label) nil label))))
 
 ;; ---- menu shell actions (cross the IPC seam to main) ----
-(rf/reg-event-fx :file/open-dialog (fn [_ _] {:fx [[:vv/open-dialog]]}))
+(defn open-dialog-mode [mode]
+  (if (= mode :new-tab) :new-tab :current))
+
+(defn files-opened-fx
+  "Dispatches for files chosen from the native Open dialog."
+  [mode paths]
+  (let [paths (vec (or paths []))]
+    (case (open-dialog-mode mode)
+      :new-tab (mapv (fn [p] [:dispatch [:doc/open-new p]]) paths)
+      (case (count paths)
+        0 []
+        1 [[:dispatch [:doc/open (first paths)]]]
+        (vec (cons [:dispatch [:doc/open (first paths)]]
+                   (map (fn [p] [:dispatch [:doc/open-new p]]) (rest paths))))))))
+
+(rf/reg-event-fx
+ :file/open-dialog
+ (fn [{:keys [db]} [_ mode]]
+   {:db (assoc-in db [:ui :open-dialog-mode] (open-dialog-mode mode))
+    :fx [[:vv/open-dialog]]}))
 (rf/reg-event-fx :app/quit         (fn [_ _] {:fx [[:vv/quit]]}))
 (rf/reg-event-fx :view/zoom        (fn [_ [_ dir]] {:fx [[:vv/zoom dir]]}))
 (rf/reg-event-fx :view/devtools    (fn [_ _] {:fx [[:vv/devtools]]}))
@@ -314,15 +350,14 @@
    {:db (assoc-in db [:ui :re-frame-10x-open?] false)
     :fx [[:devtools/re-frame-10x false]]}))
 
-;; the Open dialog returns the chosen paths: one → current tab; several → one new tab each
+;; the Open dialog returns chosen paths; the pending mode decides current-tab vs new-tab handling.
 (rf/reg-event-fx
  :files/opened
- (fn [_ [_ {:keys [paths]}]]
-   (let [paths (vec paths)]
-     (case (count paths)
-       0 {}
-       1 {:fx [[:dispatch [:doc/open (first paths)]]]}
-       {:fx (mapv (fn [p] [:dispatch [:doc/open-new p]]) paths)}))))
+ (fn [{:keys [db]} [_ {:keys [paths]}]]
+   (let [mode (get-in db [:ui :open-dialog-mode])
+         fx   (files-opened-fx mode paths)]
+     (cond-> {:db (assoc-in db [:ui :open-dialog-mode] :current)}
+       (seq fx) (assoc :fx fx)))))
 
 ;; ---- Preferences / settings (theme persists via :theme/set; fonts via :settings/set) ----
 (rf/reg-event-db :settings/open  (fn [db _] (assoc-in db [:ui :settings-open?] true)))

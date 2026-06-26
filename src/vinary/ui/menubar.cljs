@@ -13,6 +13,7 @@
 (def ^:private menus
   [{:label "File"
     :items [{:label "Open…"     :accel "Ctrl+O" :event [:file/open-dialog]}
+            {:label "Open in New Tab…" :accel "Ctrl+Shift+O" :event [:file/open-dialog :new-tab]}
             {:label "Close Tab" :accel "Ctrl+W" :event [:tab/close-active]}
             :sep
             {:label "Reload"    :accel "Ctrl+R" :event [:tab/reload]}

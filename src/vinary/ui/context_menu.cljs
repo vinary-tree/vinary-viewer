@@ -11,7 +11,21 @@
 (defn- source-label [source?]
   (if source? "View Preview" "View Source"))
 
-(defn- items-for [{:keys [kind path uri text id view-source? source-location] :as target} vs?]
+(defn tab-close-side-label [orientation]
+  (if (= orientation :vertical) "Close Below" "Close to the Right"))
+
+(defn tab-items [{:keys [path id view-source? orientation]}]
+  [{:label "Close"                :event [:tab/close id]}
+   {:label "Duplicate tab"        :event [:tab/duplicate id]}
+   {:label "Close Others"         :event [:tab/close-others id]}
+   {:label (tab-close-side-label orientation) :event [:tab/close-right id]}
+   :sep
+   {:label (source-label view-source?) :event [:tab/toggle-source id]}
+   (when path :sep)
+   (when path {:label "Copy file path" :event [:clipboard/copy path]})
+   (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
+
+(defn- items-for [{:keys [kind path uri text source-location] :as target} vs?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -42,14 +56,7 @@
      (when source-location
        {:label "Copy source location" :event [:clipboard/copy source-location]})]
     ;; a tab (right-clicked in either the horizontal strip or the vertical Tabs panel)
-    :tab  [{:label "Close"                :event [:tab/close id]}
-           {:label "Close Others"         :event [:tab/close-others id]}
-           {:label "Close to the Right"   :event [:tab/close-right id]}
-           :sep
-           {:label (source-label view-source?) :event [:tab/toggle-source id]}
-           (when path :sep)
-           (when path {:label "Copy file path" :event [:clipboard/copy path]})
-           (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})]
+    :tab  (tab-items target)
     ;; the active markdown document (right-clicked in the content pane, not on a link)
     :doc  [{:label (source-label vs?) :event [:tab/toggle-source]}
            :sep

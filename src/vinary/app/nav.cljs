@@ -37,6 +37,24 @@
         (assoc-in [:ui :active-tab] id)
         (assoc-in [:ui :next-tab-id] (inc id)))))
 
+(defn duplicate-tab
+  "Duplicate tab id immediately after itself and make the duplicate active."
+  [db id]
+  (let [ts  (vec (tabs db))
+        idx (first (keep-indexed #(when (= (:id %2) id) %1) ts))]
+    (if (nil? idx)
+      db
+      (let [new-id    (get-in db [:ui :next-tab-id] 0)
+            duplicate (assoc (get ts idx) :id new-id)
+            insert-at (inc idx)]
+        (-> db
+            (assoc-in [:ui :tabs]
+                      (vec (concat (subvec ts 0 insert-at)
+                                   [duplicate]
+                                   (subvec ts insert-at))))
+            (assoc-in [:ui :active-tab] new-id)
+            (assoc-in [:ui :next-tab-id] (inc new-id)))))))
+
 (defn- update-active [db f]
   (let [id (active-id db)]
     (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (f %) %) ts)))))

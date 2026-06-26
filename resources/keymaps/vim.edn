@@ -18,7 +18,7 @@
    "g"   {"g" :nav/scroll-top "t" :tab/next "T" :tab/prev}
    "G"   :nav/scroll-bottom
    "C-w" {"h" :focus/sidebar "l" :focus/content "w" :focus/toggle "q" :tab/close}
-   "C-o" :history/back
+   "C-o" :file/open-dialog
    "C-i" :history/forward
    "H"   :history/back
    "L"   :history/forward
@@ -46,6 +46,9 @@
   {"escape" :input/escape}
   :all
   {"escape" :input/escape
+   "C-o" :file/open-dialog
+   "C-S-o" :file/open-dialog-new-tab
+   "C-t" :tab/new-blank
    ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
    "C-0" :view/zoom-reset
    "C-=" :view/zoom-in

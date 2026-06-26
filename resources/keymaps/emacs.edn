@@ -23,6 +23,9 @@
    "M-v" :nav/page-up
    "M-f" {:id :tab/next :when :not-in-input?}
    "M-b" {:id :tab/prev :when :not-in-input?}
+   "C-o" :file/open-dialog
+   "C-S-o" :file/open-dialog-new-tab
+   "C-t" :tab/new-blank
    "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
    "C-g" :input/escape
    "escape" :input/escape

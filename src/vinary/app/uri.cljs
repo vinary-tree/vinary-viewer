@@ -32,7 +32,7 @@
   "Short tab label: a file's basename, or for http the last path segment (falling back to the host)."
   [uri]
   (cond
-    (nil? uri)  ""
+    (nil? uri)  "New Tab"
     (http? uri) (try (let [u   (js/URL. uri)
                            seg (last (remove str/blank? (str/split (.-pathname u) #"/")))]
                        (or (not-empty seg) (.-hostname u)))

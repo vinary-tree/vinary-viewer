@@ -324,6 +324,7 @@
      {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
+       (nil? uri)                  [:div.vv-empty "New Tab"]
        (uri/http? uri)             [web-host uri]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        (= "pdf" (:doc/kind doc))   [pdf-host (:doc/path doc)]

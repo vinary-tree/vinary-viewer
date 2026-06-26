@@ -187,7 +187,8 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 
 /* tab strip */
 .vv-tabs { display: flex; flex: 0 0 auto; background: var(--vv-bg2);
-  border-bottom: 1px solid var(--vv-border); overflow-x: auto; user-select: none; }
+  border-bottom: 1px solid var(--vv-border); overflow: hidden; user-select: none; }
+.vv-tab-list { display: flex; flex: 1 1 auto; min-width: 0; overflow-x: auto; }
 .vv-tab { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
   color: var(--vv-fg-dim); border-right: 1px solid var(--vv-border); white-space: nowrap;
   border-bottom: 2px solid transparent; font-size: 13px; }
@@ -196,6 +197,10 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-tab-name { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .vv-tab-close { color: var(--vv-fg-dim); border-radius: 3px; padding: 0 5px; line-height: 1; }
 .vv-tab-close:hover { color: var(--vv-error); background: var(--vv-bg2); }
+.vv-tab-new { flex: 0 0 34px; width: 34px; border: none; border-left: 1px solid var(--vv-border);
+  border-bottom: 2px solid transparent; background: var(--vv-bg2); color: var(--vv-fg-dim);
+  cursor: pointer; font: inherit; font-size: 17px; line-height: 1; }
+.vv-tab-new:hover { color: var(--vv-head1); background: var(--vv-bg-code); }
 
 /* vertical Tabs sidebar panel (same model/order/menu as the horizontal strip) */
 .vv-vtabs { padding: 4px 0; }

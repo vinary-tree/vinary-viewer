@@ -19,6 +19,7 @@
                             (rf/dispatch [:context-menu/show
                                           {:x (.-clientX e) :y (.-clientY e)
                                            :target {:kind :tab :id id :path (uri/file-path uri)
+                                                    :orientation (if horizontal? :horizontal :vertical)
                                                     :view-source? view-source?}}]))
          :on-drag-start   (fn [^js e] (.setData (.-dataTransfer e) "text/plain" (str id)))
          :on-drag-over    (fn [^js e] (.preventDefault e))
@@ -37,8 +38,13 @@
 (defn tab-strip []
   (let [tabs   @(rf/subscribe [:ui/tabs])
         active @(rf/subscribe [:ui/active-tab-id])]
-    (when (seq tabs)
-      [:div.vv-tabs
+    [:div.vv-tabs
+     [:div.vv-tab-list
        (for [{:keys [id view-source?] tab-uri :uri} tabs]
          ^{:key id} [tab-item {:id id :uri tab-uri :active? (= id active)
-                                :horizontal? true :view-source? view-source?}])])))
+                                :horizontal? true :view-source? view-source?}])]
+     [:button.vv-tab-new {:type "button"
+                          :title "New Tab"
+                          :aria-label "New Tab"
+                          :on-click #(rf/dispatch [:tab/new-blank])}
+      "+"]]))
