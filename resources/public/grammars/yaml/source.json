@@ -1,0 +1,14 @@
+{
+  "id": "yaml",
+  "language": "yaml",
+  "extensions": [
+    ".yaml",
+    ".yml"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-yaml",
+    "subdir": "."
+  },
+  "sourceRev": "a1c4812a73ec5e089de8e441fdea3a921e8d5079"
+}

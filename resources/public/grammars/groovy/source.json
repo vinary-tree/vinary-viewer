@@ -1,0 +1,13 @@
+{
+  "id": "groovy",
+  "language": "groovy",
+  "extensions": [
+    ".gradle"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/Decodetalkers/tree-sitter-groovy",
+    "query": "test/queries/highlights.scm"
+  },
+  "sourceRev": "679459be70d7fbac175fb19f668948d57b3825ef"
+}

@@ -2,20 +2,19 @@
   "Grammar registry (main side): decides which files are 'source' (→ the read-only CodeMirror view) and
    discovers USER tree-sitter grammars under ~/.config/vinary-viewer/grammars/<lang>/ (each a
    grammar.wasm + highlights.scm, extension defaulting to .<lang>). The user list is sent to the
-   renderer as EDN text (file:// urls); the renderer already bundles Rholang."
+   renderer as EDN text (file:// urls); bundled grammars are compiled into vinary.grammar-catalog."
   (:require ["electron" :refer [ipcMain]]
             ["fs" :as fs]
             ["path" :as path]
             ["os" :as os]
             [clojure.string :as str]
-            [cljs.reader :as reader]))
+            [cljs.reader :as reader]
+            [vinary.grammar-catalog :as grammar-catalog]))
 
-;; built-in source extensions → the read-only CodeMirror view (highlighted iff a grammar matches)
-(def ^:private code-exts
-  #{".rho" ".rs" ".py" ".js" ".mjs" ".cjs" ".jsx" ".ts" ".tsx" ".clj" ".cljs" ".cljc" ".edn"
-    ".go" ".c" ".h" ".cpp" ".hpp" ".cc" ".java" ".kt" ".rb" ".php" ".sh" ".bash" ".zsh"
-    ".lua" ".sql" ".scala" ".hs" ".ml" ".ex" ".exs" ".erl" ".swift" ".dart" ".vim" ".el"
-    ".toml" ".yaml" ".yml" ".ini" ".cfg" ".conf" ".gradle" ".cmake" ".nim" ".zig"})
+(def ^:private plain-source-exts
+  "Known source extensions whose tree-sitter grammar is not bundled yet. These still use the
+   read-only source view, but without syntax decorations until a grammar entry is enabled."
+  #{".sql" ".vim" ".v"})
 
 (defonce ^:private user-grammars (atom []))   ; [{:language :extensions :wasm-url :scm-url} …]
 
@@ -49,7 +48,8 @@
   "Should path open in the source view? (a built-in code extension, or a user grammar's extension)"
   [path]
   (let [e (str/lower-case (path/extname path))]
-    (boolean (or (contains? code-exts e)
+    (boolean (or (contains? grammar-catalog/bundled-source-exts e)
+                 (contains? plain-source-exts e)
                  (some (fn [g] (some #{e} (:extensions g))) @user-grammars)))))
 
 (defn push! [^js wc] (.send wc "vv:grammars" (pr-str @user-grammars)))

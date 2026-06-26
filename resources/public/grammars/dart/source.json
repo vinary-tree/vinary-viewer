@@ -1,0 +1,12 @@
+{
+  "id": "dart",
+  "language": "dart",
+  "extensions": [
+    ".dart"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/UserNobody14/tree-sitter-dart"
+  },
+  "sourceRev": "a9bdfa3db2fbc9b9f12c93450d04a671f33a5102"
+}

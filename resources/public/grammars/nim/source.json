@@ -1,0 +1,12 @@
+{
+  "id": "nim",
+  "language": "nim",
+  "extensions": [
+    ".nim"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/alaviss/tree-sitter-nim"
+  },
+  "sourceRev": "3878440d9398515ae053c6f6024986e69868bb74"
+}

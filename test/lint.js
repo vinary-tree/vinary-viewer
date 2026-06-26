@@ -16,6 +16,7 @@ const log = (ok, msg) => { console.log((ok ? '✓ ' : '✗ ') + msg); if (!ok) f
 const jsFiles = [
   'src/sidebar.js', 'src/patch-create-window.js', 'src/patch-renderer-main.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
+  'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
 ];
 for (const f of jsFiles) {
   try { execFileSync(process.execPath, ['--check', path.join(root, f)]); log(true, `parses: ${f}`); }

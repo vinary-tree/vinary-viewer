@@ -1,0 +1,12 @@
+{
+  "id": "tlaplus",
+  "language": "tlaplus",
+  "extensions": [
+    ".tla"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tlaplus-community/tree-sitter-tlaplus"
+  },
+  "sourceRev": "add40814fda369f6efd989977b2c498aaddde984"
+}

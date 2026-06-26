@@ -1,0 +1,12 @@
+{
+  "id": "cmake",
+  "language": "cmake",
+  "extensions": [
+    ".cmake"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/uyha/tree-sitter-cmake"
+  },
+  "sourceRev": "c7b2a71e7f8ecb167fad4c97227c838439280175"
+}

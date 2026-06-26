@@ -1,0 +1,12 @@
+{
+  "id": "lua",
+  "language": "lua",
+  "extensions": [
+    ".lua"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-lua"
+  },
+  "sourceRev": "10fe0054734eec83049514ea2e718b2a56acd0c9"
+}

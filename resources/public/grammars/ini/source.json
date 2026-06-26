@@ -1,0 +1,14 @@
+{
+  "id": "ini",
+  "language": "ini",
+  "extensions": [
+    ".ini",
+    ".cfg",
+    ".conf"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/justinmk/tree-sitter-ini"
+  },
+  "sourceRev": "e4018b5176132b4f3c5d6e61cea383f42288d0f5"
+}

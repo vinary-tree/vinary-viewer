@@ -1,0 +1,13 @@
+{
+  "id": "latex",
+  "language": "latex",
+  "extensions": [
+    ".tex"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/latex-lsp/tree-sitter-latex",
+    "queryText": "(comment) @comment\n(comment_environment) @comment\n(command_name) @function\n(generic_command) @function\n(inline_formula) @string.special\n(displayed_equation) @string.special\n(math_environment) @string.special\n(math_delimiter) @punctuation.delimiter\n"
+  },
+  "sourceRev": "7e0ecdc02926c7b9b2e0c76003d4fe7b0944f957"
+}

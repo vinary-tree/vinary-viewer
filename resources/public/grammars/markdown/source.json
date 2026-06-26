@@ -1,0 +1,15 @@
+{
+  "id": "markdown",
+  "language": "markdown",
+  "extensions": [
+    ".md",
+    ".markdown",
+    ".mdx"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown",
+    "subdir": "tree-sitter-markdown"
+  },
+  "sourceRev": "c3570720f7f7bbad22fe96603f106276618e0cf5"
+}

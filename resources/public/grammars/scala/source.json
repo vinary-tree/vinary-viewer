@@ -1,0 +1,12 @@
+{
+  "id": "scala",
+  "language": "scala",
+  "extensions": [
+    ".scala"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter/tree-sitter-scala"
+  },
+  "sourceRev": "4d081d98670ff6e98ca42c085294fc75eec15e1d"
+}

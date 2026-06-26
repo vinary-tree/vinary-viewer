@@ -1,0 +1,13 @@
+{
+  "id": "elixir",
+  "language": "elixir",
+  "extensions": [
+    ".ex",
+    ".exs"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/elixir-lang/tree-sitter-elixir"
+  },
+  "sourceRev": "7937d3b4d65fa574163cfa59394515d3c1cf16f4"
+}

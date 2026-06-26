@@ -1,0 +1,14 @@
+{
+  "id": "rholang",
+  "language": "rholang",
+  "extensions": [
+    ".rho"
+  ],
+  "source": {
+    "type": "existing",
+    "wasm": "node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/tree-sitter-rholang.wasm",
+    "query": "resources/public/grammars/rholang/highlights.scm",
+    "url": "https://github.com/F1R3FLY-io/rholang-rs"
+  },
+  "sourceRev": null
+}

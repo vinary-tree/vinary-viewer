@@ -1,0 +1,12 @@
+{
+  "id": "elisp",
+  "language": "elisp",
+  "extensions": [
+    ".el"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/Wilfred/tree-sitter-elisp"
+  },
+  "sourceRev": "29b4e49275f4a947ce17c8533bc20a1f97768c70"
+}

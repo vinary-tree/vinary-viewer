@@ -1,0 +1,12 @@
+{
+  "id": "lean",
+  "language": "lean",
+  "extensions": [
+    ".lean"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/Julian/tree-sitter-lean"
+  },
+  "sourceRev": "dc5997b2744595eeb389e1ed9c4f5e727c5b655e"
+}

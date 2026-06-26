@@ -1,0 +1,12 @@
+{
+  "id": "proto",
+  "language": "proto",
+  "extensions": [
+    ".proto"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/coder3101/tree-sitter-proto"
+  },
+  "sourceRev": "cf8e4eba6e5b4afb9eb16c9178bba3d2504b46c2"
+}

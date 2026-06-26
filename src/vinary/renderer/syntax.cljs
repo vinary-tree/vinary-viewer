@@ -3,30 +3,37 @@
    (parse → highlights.scm query → CodeMirror decorations). Adapted from LightningBug's lib/editor/
    syntax.cljs, reduced to the read-only case (no incremental editing — the doc is set once and
    re-created on live-refresh). A grammar registry maps file extensions to a tree-sitter `.wasm` +
-   `highlights.scm`; Rholang is bundled, more can be dropped in ~/.config/vinary-viewer/grammars/."
+   `highlights.scm`; bundled grammars are shipped in resources/public/grammars, and more can be
+   dropped in ~/.config/vinary-viewer/grammars/."
   (:require [clojure.string :as str]
             ["@codemirror/state" :refer [EditorState Compartment StateField]]
             ["@codemirror/view" :refer [EditorView Decoration lineNumbers]]
-            ["web-tree-sitter" :refer [Language Parser]]))
+            ["web-tree-sitter" :refer [Language Parser Query]]
+            [vinary.grammar-catalog :as grammar-catalog]))
 
 ;; tree-sitter capture name → CodeMirror CSS class (styled in app.css against the --vv-* palette)
 (def ^:private style-map
   {"keyword" "cm-keyword" "keyword.operator" "cm-keyword"
+   "keyword.directive" "cm-keyword" "keyword.function" "cm-keyword" "keyword.return" "cm-keyword"
    "operator" "cm-operator" "variable" "cm-variable" "variable.parameter" "cm-variable"
+   "variable.builtin" "cm-variable" "variable.special" "cm-variable"
    "number" "cm-number" "string" "cm-string" "string.special" "cm-string"
-   "boolean" "cm-boolean" "comment" "cm-comment" "type" "cm-type" "type.builtin" "cm-type"
-   "constant" "cm-constant" "constant.builtin" "cm-constant" "function" "cm-function"
-   "function.builtin" "cm-function" "constructor" "cm-type" "method" "cm-function"
-   "property" "cm-property" "punctuation" "cm-punctuation" "punctuation.delimiter" "cm-punctuation"
+   "string.escape" "cm-string" "character" "cm-string"
+   "boolean" "cm-boolean" "comment" "cm-comment" "comment.documentation" "cm-comment"
+   "type" "cm-type" "type.builtin" "cm-type" "tag" "cm-type" "tag.builtin" "cm-type"
+   "constant" "cm-constant" "constant.builtin" "cm-constant" "constant.numeric" "cm-number"
+   "constant.character" "cm-string" "function" "cm-function" "function.call" "cm-function"
+   "function.builtin" "cm-function" "function.method" "cm-function" "constructor" "cm-type"
+   "method" "cm-function" "module" "cm-label" "namespace" "cm-label"
+   "property" "cm-property" "attribute" "cm-property" "punctuation" "cm-punctuation"
+   "punctuation.delimiter" "cm-punctuation" "punctuation.special" "cm-punctuation"
    "punctuation.bracket" "cm-bracket" "label" "cm-label"})
 
 (defn- class-for [name]
   (or (get style-map name) (get style-map (first (str/split name #"\.")))))
 
 ;; ---- grammar registry: bundled (shipped in resources/) + user (from main, file:// urls) ----
-(def ^:private bundled-grammars
-  [{:language "rholang" :extensions [".rho"]
-    :wasm-url "grammars/rholang/grammar.wasm" :scm-url "grammars/rholang/highlights.scm"}])
+(def ^:private bundled-grammars grammar-catalog/bundled-grammars)
 
 (defonce ^:private user-grammars (atom []))
 
@@ -93,7 +100,7 @@
                          parser (Parser.)]
                      (.setLanguage parser lang)
                      (let [tree  (.parse parser text)
-                           query (.query lang scm)
+                           query (Query. lang scm)
                            decos (build-decorations tree query)]
                        (.dispatch view #js {:effects (.reconfigure hl (highlight-field decos))})))))
           (.catch (fn [e] (js/console.warn "[vv] grammar load failed:" e)))))

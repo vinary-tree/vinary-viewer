@@ -1,0 +1,12 @@
+{
+  "id": "rust",
+  "language": "rust",
+  "extensions": [
+    ".rs"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter/tree-sitter-rust"
+  },
+  "sourceRev": "77a3747266f4d621d0757825e6b11edcbf991ca5"
+}

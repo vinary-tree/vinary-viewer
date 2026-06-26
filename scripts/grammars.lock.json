@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "rholang",
+      "language": "rholang",
+      "extensions": [".rho"],
+      "source": {
+        "type": "existing",
+        "wasm": "node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/tree-sitter-rholang.wasm",
+        "query": "resources/public/grammars/rholang/highlights.scm",
+        "url": "https://github.com/F1R3FLY-io/rholang-rs"
+      }
+    },
+    {
+      "id": "metta",
+      "language": "metta",
+      "extensions": [".metta"],
+      "source": {
+        "type": "local",
+        "path": "../MeTTa-Compiler/tree-sitter-metta",
+        "query": "queries/highlights.scm"
+      }
+    },
+    {"id": "rust", "language": "rust", "extensions": [".rs"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-rust"}},
+    {"id": "python", "language": "python", "extensions": [".py", ".pyi"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-python"}},
+    {"id": "javascript", "language": "javascript", "extensions": [".js", ".mjs", ".cjs", ".jsx"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-javascript"}},
+    {"id": "typescript", "language": "typescript", "extensions": [".ts"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-typescript", "subdir": "typescript"}},
+    {"id": "tsx", "language": "tsx", "extensions": [".tsx"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-typescript", "subdir": "tsx"}},
+    {"id": "clojure", "language": "clojure", "extensions": [".clj", ".cljs", ".cljc", ".edn"], "source": {"type": "git", "url": "https://github.com/sogaiu/tree-sitter-clojure"}},
+    {"id": "go", "language": "go", "extensions": [".go"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-go"}},
+    {"id": "c", "language": "c", "extensions": [".c", ".h"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-c"}},
+    {"id": "cpp", "language": "cpp", "extensions": [".cpp", ".hpp", ".cc"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-cpp"}},
+    {"id": "java", "language": "java", "extensions": [".java"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-java"}},
+    {"id": "kotlin", "language": "kotlin", "extensions": [".kt"], "source": {"type": "git", "url": "https://github.com/fwcd/tree-sitter-kotlin"}},
+    {"id": "ruby", "language": "ruby", "extensions": [".rb"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-ruby"}},
+    {"id": "php", "language": "php", "extensions": [".php"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-php", "subdir": "php"}},
+    {"id": "bash", "language": "bash", "extensions": [".sh", ".bash", ".zsh"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-bash"}},
+    {"id": "lua", "language": "lua", "extensions": [".lua"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-lua"}},
+    {
+      "id": "sql",
+      "language": "sql",
+      "extensions": [".sql"],
+      "enabled": false,
+      "note": "Disabled until a SQL grammar builds reliably to WASM; m-novikov/tree-sitter-sql hung in tree-sitter build --wasm and DerekStride/tree-sitter-sql hit a WASI argument-list limit.",
+      "source": {"type": "git", "url": "https://github.com/m-novikov/tree-sitter-sql"}
+    },
+    {"id": "scala", "language": "scala", "extensions": [".scala"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-scala"}},
+    {"id": "haskell", "language": "haskell", "extensions": [".hs"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-haskell"}},
+    {"id": "ocaml", "language": "ocaml", "extensions": [".ml"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-ocaml", "subdir": "grammars/ocaml", "query": "queries/highlights.scm"}},
+    {"id": "elixir", "language": "elixir", "extensions": [".ex", ".exs"], "source": {"type": "git", "url": "https://github.com/elixir-lang/tree-sitter-elixir"}},
+    {"id": "erlang", "language": "erlang", "extensions": [".erl"], "source": {"type": "git", "url": "https://github.com/WhatsApp/tree-sitter-erlang"}},
+    {"id": "swift", "language": "swift", "extensions": [".swift"], "source": {"type": "git", "url": "https://github.com/alex-pinkus/tree-sitter-swift"}},
+    {"id": "dart", "language": "dart", "extensions": [".dart"], "source": {"type": "git", "url": "https://github.com/UserNobody14/tree-sitter-dart"}},
+    {
+      "id": "vim",
+      "language": "vim",
+      "extensions": [".vim"],
+      "enabled": false,
+      "note": "Disabled until the Vim grammar builds reliably to WASM; tree-sitter build --wasm stopped advancing with tree-sitter-grammars/tree-sitter-vim.",
+      "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-vim", "query": "queries/vim/highlights.scm"}
+    },
+    {"id": "elisp", "language": "elisp", "extensions": [".el"], "source": {"type": "git", "url": "https://github.com/Wilfred/tree-sitter-elisp"}},
+    {"id": "toml", "language": "toml", "extensions": [".toml"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-toml"}},
+    {"id": "yaml", "language": "yaml", "extensions": [".yaml", ".yml"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-yaml", "subdir": "."}},
+    {"id": "ini", "language": "ini", "extensions": [".ini", ".cfg", ".conf"], "source": {"type": "git", "url": "https://github.com/justinmk/tree-sitter-ini"}},
+    {"id": "groovy", "language": "groovy", "extensions": [".gradle"], "source": {"type": "git", "url": "https://github.com/Decodetalkers/tree-sitter-groovy", "query": "test/queries/highlights.scm"}},
+    {"id": "cmake", "language": "cmake", "extensions": [".cmake"], "source": {"type": "git", "url": "https://github.com/uyha/tree-sitter-cmake"}},
+    {"id": "nim", "language": "nim", "extensions": [".nim"], "source": {"type": "git", "url": "https://github.com/alaviss/tree-sitter-nim"}},
+    {"id": "zig", "language": "zig", "extensions": [".zig"], "source": {"type": "git", "url": "https://github.com/maxxnino/tree-sitter-zig"}},
+    {"id": "markdown", "language": "markdown", "extensions": [".md", ".markdown", ".mdx"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "subdir": "tree-sitter-markdown"}},
+    {"id": "html", "language": "html", "extensions": [".html", ".htm"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-html"}},
+    {"id": "css", "language": "css", "extensions": [".css"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-css"}},
+    {"id": "scss", "language": "scss", "extensions": [".scss"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-scss"}},
+    {"id": "json", "language": "json", "extensions": [".json", ".jsonc"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-json"}},
+    {"id": "xml", "language": "xml", "extensions": [".xml", ".svg"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-xml", "subdir": "xml", "query": "queries/xml/highlights.scm"}},
+    {
+      "id": "latex",
+      "language": "latex",
+      "extensions": [".tex"],
+      "source": {
+        "type": "git",
+        "url": "https://github.com/latex-lsp/tree-sitter-latex",
+        "queryText": "(comment) @comment\n(comment_environment) @comment\n(command_name) @function\n(generic_command) @function\n(inline_formula) @string.special\n(displayed_equation) @string.special\n(math_environment) @string.special\n(math_delimiter) @punctuation.delimiter\n"
+      }
+    },
+    {"id": "lean", "language": "lean", "extensions": [".lean"], "source": {"type": "git", "url": "https://github.com/Julian/tree-sitter-lean"}},
+    {"id": "tlaplus", "language": "tlaplus", "extensions": [".tla"], "source": {"type": "git", "url": "https://github.com/tlaplus-community/tree-sitter-tlaplus"}},
+    {"id": "proto", "language": "proto", "extensions": [".proto"], "source": {"type": "git", "url": "https://github.com/coder3101/tree-sitter-proto"}}
+  ]
+}

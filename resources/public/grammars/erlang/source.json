@@ -1,0 +1,12 @@
+{
+  "id": "erlang",
+  "language": "erlang",
+  "extensions": [
+    ".erl"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/WhatsApp/tree-sitter-erlang"
+  },
+  "sourceRev": "836aa2b6c3af2c7cef3f84049b0ed6d44485a870"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "kotlin",
+  "language": "kotlin",
+  "extensions": [
+    ".kt"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/fwcd/tree-sitter-kotlin"
+  },
+  "sourceRev": "c8ac3d2627240160b999a2c100de3babbdb8f419"
+}

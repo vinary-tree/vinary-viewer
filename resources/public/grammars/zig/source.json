@@ -1,0 +1,12 @@
+{
+  "id": "zig",
+  "language": "zig",
+  "extensions": [
+    ".zig"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/maxxnino/tree-sitter-zig"
+  },
+  "sourceRev": "a80a6e9be81b33b182ce6305ae4ea28e29211bd5"
+}

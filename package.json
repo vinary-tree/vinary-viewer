@@ -27,6 +27,8 @@
     "release": "shadow-cljs release main renderer",
     "start": "electron .",
     "dev": "shadow-cljs compile main renderer && electron .",
+    "grammars:sync": "node scripts/sync-grammars.mjs",
+    "grammars:check": "node scripts/check-grammars.mjs",
     "test": "shadow-cljs compile test && node dist/test/test.js"
   },
   "dependencies": {

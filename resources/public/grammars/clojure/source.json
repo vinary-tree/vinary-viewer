@@ -1,0 +1,15 @@
+{
+  "id": "clojure",
+  "language": "clojure",
+  "extensions": [
+    ".clj",
+    ".cljs",
+    ".cljc",
+    ".edn"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/sogaiu/tree-sitter-clojure"
+  },
+  "sourceRev": "e43eff80d17cf34852dcd92ca5e6986d23a7040f"
+}

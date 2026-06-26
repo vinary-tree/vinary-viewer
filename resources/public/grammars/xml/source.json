@@ -1,0 +1,15 @@
+{
+  "id": "xml",
+  "language": "xml",
+  "extensions": [
+    ".xml",
+    ".svg"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-xml",
+    "subdir": "xml",
+    "query": "queries/xml/highlights.scm"
+  },
+  "sourceRev": "5000ae8f22d11fbe93939b05c1e37cf21117162d"
+}

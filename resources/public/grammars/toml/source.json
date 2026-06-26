@@ -1,0 +1,12 @@
+{
+  "id": "toml",
+  "language": "toml",
+  "extensions": [
+    ".toml"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-toml"
+  },
+  "sourceRev": "64b56832c2cffe41758f28e05c756a3a98d16f41"
+}

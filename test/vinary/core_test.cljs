@@ -2,6 +2,7 @@
   "Unit tests for the pure, DOM-free logic: key normalization, keymap merge, the keybinding resolver,
    command gating, and DataScript helpers. Run with: npx shadow-cljs compile test && node dist/test/test.js"
   (:require [cljs.test :refer [deftest is testing run-tests]]
+            [clojure.string :as str]
             [datascript.core :as d]
             [vinary.input.keys :as keys]
             [vinary.input.keymap :as keymap]
@@ -12,6 +13,7 @@
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.app.ds :as ds]
+            [vinary.grammar-catalog :as grammar-catalog]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.media :as media]))
 
@@ -109,6 +111,19 @@
       (is (false? (nav/view-source? db)))
       (is (true?  (nav/view-source? (nav/toggle-source db))))
       (is (false? (nav/view-source? (nav/toggle-source (nav/toggle-source db))))))))
+
+(deftest bundled-grammar-catalog
+  (testing "catalog entries expose required runtime fields"
+    (is (seq grammar-catalog/bundled-grammars))
+    (doseq [g grammar-catalog/bundled-grammars]
+      (is (string? (:id g)))
+      (is (string? (:language g)))
+      (is (seq (:extensions g)))
+      (is (every? #(and (string? %) (str/starts-with? % ".")) (:extensions g)))
+      (is (string? (:wasm-url g)))
+      (is (string? (:scm-url g)))))
+  (testing "source extensions are derived from the bundled catalog"
+    (is (contains? grammar-catalog/bundled-source-exts ".rho"))))
 
 ;; ---- keymap-set registry (Phase C) ----
 (deftest keymaps-registry
