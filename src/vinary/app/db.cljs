@@ -17,6 +17,10 @@
         :projects []                ; [{:root :files} …] — one git-rooted file tree per open project
         ;; menu bar / dialogs / context menu (Phase 5)
         :menu nil                   ; which top-level menu is open (label) or nil
+        :menu-submenu nil           ; which flyout submenu is open inside the active menu, or nil
+        :menu-focus nil             ; focused item index inside the open top-level menu
+        :menu-submenu-focus nil     ; focused item index inside the open flyout submenu
+        :access-keys-active? false  ; Alt/menu/dialog mnemonic hints are visible while true
         :settings {}                ; persisted prefs (theme + fonts), loaded from settings.edn
         :settings-open? false
         :about-open? false

@@ -1,0 +1,14 @@
+{
+  "id": "bnfc",
+  "language": "bnfc",
+  "extensions": [
+    ".cf",
+    ".bnfc"
+  ],
+  "source": {
+    "type": "local",
+    "path": "resources/grammars-src/tree-sitter-bnfc",
+    "query": "queries/highlights.scm"
+  },
+  "sourceRev": "119e3a991a7fa7bdb0a6d58c198e608797efd834"
+}

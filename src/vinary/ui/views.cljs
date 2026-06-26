@@ -152,10 +152,16 @@
    opens a themed context menu on right-click. Middle-click / Ctrl+click open a link in a new tab."
   [_html _source _path]
   (let [node (atom nil)
+        html* (atom nil)
         source* (atom nil)
         path* (atom nil)
         raf  (atom false)
         last-link (atom nil)
+        render-html! (fn [html]
+                       (reset! html* html)
+                       (set-inner! @node html)
+                       (figures/scale-figures! @node)
+                       (scroll/apply! @node))
         on-resize (fn []
                     (when-not @raf
                       (reset! raf true)
@@ -196,9 +202,7 @@
                               (let [[_ html source path] (r/argv this)]
                                 (reset! source* source)
                                 (reset! path* path)
-                                (set-inner! @node html))
-                              (figures/scale-figures! @node)
-                              (scroll/apply! @node)
+                                (render-html! html))
                               (.addEventListener js/window "resize" on-resize)
                               (.addEventListener @node "click" on-click)
                               (.addEventListener @node "auxclick" on-aux)
@@ -209,9 +213,8 @@
                               (let [[_ html source path] (r/argv this)]
                                 (reset! source* source)
                                 (reset! path* path)
-                                (set-inner! @node html))
-                              (figures/scale-figures! @node)
-                              (scroll/apply! @node))
+                                (when (not= html @html*)
+                                  (render-html! html))))
       :component-will-unmount (fn [_]
                                 (.removeEventListener js/window "resize" on-resize)
                                 (when @node
@@ -319,9 +322,11 @@
   (let [doc  @(rf/subscribe [:doc/active])
         tabs @(rf/subscribe [:ui/tabs])
         uri  @(rf/subscribe [:ui/active-uri])
-        vs?  @(rf/subscribe [:ui/active-view-source?])]
+        vs?  @(rf/subscribe [:ui/active-view-source?])
+        pdf? (= "pdf" (:doc/kind doc))]
     [:div.vv-content
-     {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
+     {:class (when pdf? "vv-content-pdf")
+      :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
        (nil? uri)                  [:div.vv-empty "New Tab"]

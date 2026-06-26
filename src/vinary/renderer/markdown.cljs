@@ -3,7 +3,7 @@
    Rehype transforms rewrite relative URLs to source-relative file:// URIs, wrap bare preview images in
    links, and preserve Markdown source positions as data attributes for preview context-menu actions.
    Runs in the renderer (Chromium): the all-ESM remark stack bundles cleanly and the browser URL
-   constructor does the path join (Node `path` is stubbed here). Pure transform; returns Promise<string>."
+   constructor resolves relative paths without Node path APIs. Pure transform; returns Promise<string>."
   (:require ["unified" :refer [unified]]
             ["remark-parse$default"     :as remark-parse]
             ["remark-gfm$default"       :as remark-gfm]
@@ -12,7 +12,8 @@
             ["rehype-highlight$default" :as rehype-highlight]
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
-            [vinary.renderer.media :as media]))
+            [vinary.renderer.media :as media]
+            [vinary.renderer.syntax :as syntax]))
 
 (defn dir-of
   "The directory of an absolute POSIX path (\"/a/b/c.md\" → \"/a/b\"), or nil if there is no \"/\"."
@@ -175,4 +176,4 @@
        (.use (source-positions))
        (.use rehype-stringify)
        (.process md)
-       (.then (fn [file] (str file))))))
+       (.then (fn [file] (syntax/highlight-html-code-blocks (str file)))))))

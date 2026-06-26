@@ -25,6 +25,7 @@
    "js" "javascript" "jsx" "javascript" "node" "javascript"
    "ts" "typescript"
    "d2" "d2"
+   "bnfc" "bnfc" "lbnf" "bnfc" "cf" "bnfc"
    "markdown" "markdown" "md" "markdown" "mdx" "markdown" "gfm" "markdown"
    "py" "python" "rb" "ruby" "rs" "rust"
    "yml" "yaml" "jsonc" "json"})

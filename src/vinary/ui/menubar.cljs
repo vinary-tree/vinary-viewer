@@ -3,108 +3,332 @@
    dropdown; items dispatch re-frame events (the same events the keybindings use). Settings hosts radio
    SUBMENUS (Theme, Key Bindings) that flyout to the right and mark the active choice. A full-window overlay
    closes on click-away; hovering another top-level label switches menus."
-  (:require [reagent.core :as r]
-            [re-frame.core :as rf]))
+  (:require [re-frame.core :as rf]
+            [re-frame.db :as rfdb]
+            [vinary.input.keymaps-registry :as registry]
+            [vinary.ui.access-keys :as access]
+            [vinary.ui.menu-focus :as menu-focus]))
 
 (def ^:private themes
-  [["spacemacs-dark" "Spacemacs Dark"]
-   ["spacemacs-light" "Spacemacs Light"]])
+  [["spacemacs-dark" "Spacemacs Dark" "d"]
+   ["spacemacs-light" "Spacemacs Light" "l"]])
 
-(def ^:private menus
-  [{:label "File"
-    :items [{:label "Open…"     :accel "Ctrl+O" :event [:file/open-dialog]}
-            {:label "Open in New Tab…" :accel "Ctrl+Shift+O" :event [:file/open-dialog :new-tab]}
-            {:label "Close Tab" :accel "Ctrl+W" :event [:tab/close-active]}
+(def menus
+  [{:label "File" :access-key "f"
+    :items [{:label "Open…"     :access-key "o" :accel "Ctrl+O" :event [:file/open-dialog]}
+            {:label "Open in New Tab…" :access-key "n" :accel "Ctrl+Shift+O" :event [:file/open-dialog :new-tab]}
+            {:label "Close Tab" :access-key "c" :accel "Ctrl+W" :event [:tab/close-active]}
             :sep
-            {:label "Reload"    :accel "Ctrl+R" :event [:tab/reload]}
-            {:label "Quit"      :accel "Ctrl+Q" :event [:app/quit]}]}
-   {:label "View"
-    :items [{:label "Toggle Sidebar" :accel "Ctrl+B" :event [:sidebar/toggle]}
-            {:label "Files"          :event [:sidebar/show :files]}
-            {:label "Contents"       :event [:sidebar/show :contents]}
-            {:label "Tabs"           :event [:sidebar/show :tabs]}
+            {:label "Reload"    :access-key "r" :accel "Ctrl+R" :event [:tab/reload]}
+            {:label "Quit"      :access-key "q" :accel "Ctrl+Q" :event [:app/quit]}]}
+   {:label "View" :access-key "v"
+    :items [{:label "Toggle Sidebar" :access-key "s" :accel "Ctrl+B" :event [:sidebar/toggle]}
+            {:label "Files"          :access-key "f" :event [:sidebar/show :files]}
+            {:label "Contents"       :access-key "c" :event [:sidebar/show :contents]}
+            {:label "Tabs"           :access-key "t" :event [:sidebar/show :tabs]}
             :sep
-            {:label "View Source"    :event [:tab/toggle-source]}
-            {:label "Find…"          :accel "Ctrl+F" :event [:find/toggle]}
+            {:label "View Source"    :access-key "v" :event [:tab/toggle-source]}
+            {:label "Find…"          :access-key "n" :accel "Ctrl+F" :event [:find/toggle]}
             :sep
-            {:label "Zoom In"        :accel "Ctrl++" :event [:view/zoom 1]}
-            {:label "Zoom Out"       :accel "Ctrl+-" :event [:view/zoom -1]}
-            {:label "Reset Zoom"     :accel "Ctrl+0" :event [:view/zoom 0]}
+            {:label "Zoom In"        :access-key "i" :accel "Ctrl++" :event [:view/zoom 1]}
+            {:label "Zoom Out"       :access-key "o" :accel "Ctrl+-" :event [:view/zoom -1]}
+            {:label "Reset Zoom"     :access-key "r" :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
-            {:label "Developer Tools" :accel "Ctrl+Shift+I" :event [:view/devtools]}
-            {:label "re-frame-10x"   :event [:view/re-frame-10x]}]}
-   {:label "Settings"
-    :items [{:submenu "Theme"        :radio :sub/theme}
-            {:submenu "Key Bindings" :radio :sub/keymaps}
+            {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
+            {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x]}]}
+   {:label "Settings" :access-key "s"
+    :items [{:submenu "Theme"        :access-key "t" :radio :sub/theme}
+            {:submenu "Key Bindings" :access-key "k" :radio :sub/keymaps}
             :sep
-            {:label "Preferences…"   :event [:settings/open]}]}
-   {:label "Help"
-    :items [{:label "Command Palette" :accel "Ctrl+Shift+P" :event [:palette/open {:source :command}]}
+            {:label "Preferences…"   :access-key "p" :event [:settings/open]}]}
+   {:label "Help" :access-key "h"
+    :items [{:label "Command Palette" :access-key "c" :accel "Ctrl+Shift+P" :event [:palette/open {:source :command}]}
             :sep
-            {:label "About vinary-viewer" :event [:about/open]}]}])
+            {:label "About vinary-viewer" :access-key "a" :event [:about/open]}]}])
+
+(def ^:private submenu-preferred-keys
+  {"Spacemacs Dark" "d"
+   "Spacemacs Light" "l"
+   "Standard Mode" "s"
+   "Vim Mode" "v"
+   "Emacs Mode" "e"
+   "Customize…" "c"})
+
+(defn radio-rows-from-db
+  "The flyout rows for a submenu source, using db so keyboard access can resolve outside subscriptions."
+  [db src]
+  (let [rows (case src
+               :sub/theme   (let [cur (get-in db [:ui :theme])]
+                               (mapv (fn [[v label k]]
+                                       {:label label :access-key k :selected? (= v cur) :event [:theme/set v]})
+                                     themes))
+               :sub/keymaps (conj (mapv (fn [id]
+                                           {:label (registry/display-name db id)
+                                            :selected? (= id (registry/active-id db))
+                                            :event [:keymap/select id]})
+                                         (registry/set-ids db))
+                                   :sep
+                                   {:label "Customize…" :access-key "c" :event [:kbedit/open]})
+               nil)]
+    (access/annotate-rows (or rows []) submenu-preferred-keys)))
 
 (defn- radio-rows
-  "The flyout rows for a submenu source — each {:label :selected? :event} (or :sep)."
+  "The flyout rows for a submenu source — each {:label :selected? :event :access-key} (or :sep)."
   [src]
-  (case src
-    :sub/theme   (let [cur @(rf/subscribe [:ui/theme])]
-                   (mapv (fn [[v label]] {:label label :selected? (= v cur) :event [:theme/set v]}) themes))
-    :sub/keymaps (conj (mapv (fn [{:keys [id name selected?]}]
-                               {:label name :selected? selected? :event [:keymap/select id]})
-                             @(rf/subscribe [:keymaps/set-rows]))
-                       :sep
-                       {:label "Customize…" :event [:kbedit/open]})
-    nil))
+  (radio-rows-from-db @rfdb/app-db src))
+
+(defn- menu-index [label]
+  (first (keep-indexed (fn [idx m] (when (= (:label m) label) idx)) menus)))
+
+(defn- adjacent-menu-label [label dir]
+  (let [idx (or (menu-index label) 0)]
+    (:label (nth menus (mod (+ idx dir) (count menus))))))
+
+(defn menu-for-access-key [k]
+  (some (fn [m] (when (access/match? (:access-key m) k) m)) menus))
+
+(defn- open-menu-spec [label]
+  (some (fn [m] (when (= (:label m) label) m)) menus))
+
+(defn- submenu-spec [menu submenu]
+  (some (fn [item] (when (and (map? item) (= (:submenu item) submenu)) item)) (:items menu)))
+
+(defn- focus-main! [menu idx]
+  (rf/dispatch [:menu/focus idx])
+  (if-let [submenu (:submenu (get (:items menu) idx))]
+    (rf/dispatch [:menu/submenu submenu])
+    (rf/dispatch [:menu/submenu nil])))
+
+(defn- focus-submenu! [idx]
+  (rf/dispatch [:menu/submenu-focus idx]))
+
+(defn- focused-submenu-rows [db menu]
+  (when-let [submenu (get-in db [:ui :menu-submenu])]
+    (when-let [item (submenu-spec menu submenu)]
+      (radio-rows-from-db db (:radio item)))))
+
+(defn- open-submenu-with-focus! [db menu item]
+  (let [rows (radio-rows-from-db db (:radio item))]
+    (rf/dispatch [:menu/submenu (:submenu item)])
+    (rf/dispatch [:menu/submenu-focus (menu-focus/first-index rows)])))
+
+(defn- switch-menu! [label dir]
+  (let [next-label (adjacent-menu-label label dir)]
+    (rf/dispatch [:menu/open next-label])
+    (when-let [menu (open-menu-spec next-label)]
+      (rf/dispatch [:menu/focus (menu-focus/first-index (:items menu))]))))
+
+(defn access-action
+  "Resolve a menu access key against db. Returns one of:
+   {:action :open-menu :label ...}, {:action :open-submenu :submenu ...}, or {:action :dispatch :event ...}."
+  [db k]
+  (let [open    (get-in db [:ui :menu])
+        submenu (get-in db [:ui :menu-submenu])]
+    (if open
+      (let [menu (open-menu-spec open)]
+        (or (when-let [sub (and submenu (submenu-spec menu submenu))]
+              (some (fn [row]
+                      (when (and (map? row) (access/match? (:access-key row) k))
+                        {:action :dispatch :event (:event row)}))
+                    (radio-rows-from-db db (:radio sub))))
+            (some (fn [item]
+                    (when (and (map? item) (access/match? (:access-key item) k))
+                      (if (:submenu item)
+                        {:action :open-submenu :submenu (:submenu item)}
+                        {:action :dispatch :event (:event item)})))
+                  (:items menu))))
+      (when-let [menu (menu-for-access-key k)]
+        {:action :open-menu :label (:label menu)}))))
 
 (defn- act! [event]
   (rf/dispatch [:menu/close])
   (rf/dispatch event))
 
-(defn- row-item [row]
-  [:div.vv-menu-item.vv-menu-item-radio {:on-click #(act! (:event row))}
+(defn- menu-item-class
+  ([base focused?]
+   (str base (when focused? " vv-menu-item-focused")))
+  ([base focused? extra]
+   (str base (when extra (str " " extra)) (when focused? " vv-menu-item-focused"))))
+
+(defn- row-item [row access-active? focused? on-focus]
+  [:div {:class (menu-item-class "vv-menu-item vv-menu-item-radio" focused?)
+         :role "menuitemradio"
+         :aria-checked (when (contains? row :selected?) (boolean (:selected? row)))
+         :on-mouse-enter on-focus
+         :on-click #(act! (:event row))}
    (if (contains? row :selected?)
      [:span.vv-radio-dot {:class (when (:selected? row) "vv-radio-dot-on")}]
      [:span.vv-radio-dot.vv-radio-dot-blank])
-   [:span.vv-menu-item-label (:label row)]])
+   [:span.vv-menu-item-label [access/label (:label row) (:access-key row) access-active?]]])
+
+(defn- dispatch-access-action! [action]
+  (case (:action action)
+    :open-menu    (do (rf/dispatch [:access-keys/set true])
+                      (rf/dispatch [:menu/open (:label action)])
+                      (when-let [menu (open-menu-spec (:label action))]
+                        (rf/dispatch [:menu/focus (menu-focus/first-index (:items menu))])))
+    :open-submenu (do (rf/dispatch [:access-keys/set true])
+                      (rf/dispatch [:menu/submenu (:submenu action)]))
+    :dispatch     (act! (:event action))
+    nil))
+
+(defn- dispatch-menu-nav! [db ^js e]
+  (when-let [label (get-in db [:ui :menu])]
+    (when-let [menu (open-menu-spec label)]
+      (let [main-focus (get-in db [:ui :menu-focus])
+            sub-focus  (get-in db [:ui :menu-submenu-focus])
+            key        (.-key e)
+            in-sub?    (some? sub-focus)
+            rows       (when in-sub? (focused-submenu-rows db menu))]
+        (when (#{"ArrowDown" "ArrowUp" "ArrowLeft" "ArrowRight" "Home" "End" "Enter" " "} key)
+          (access/consume! e)
+          (case key
+            "ArrowDown"
+            (if in-sub?
+              (focus-submenu! (menu-focus/move-index rows sub-focus 1))
+              (focus-main! menu (menu-focus/move-index (:items menu) main-focus 1)))
+
+            "ArrowUp"
+            (if in-sub?
+              (focus-submenu! (menu-focus/move-index rows sub-focus -1))
+              (focus-main! menu (menu-focus/move-index (:items menu) main-focus -1)))
+
+            "Home"
+            (if in-sub?
+              (focus-submenu! (menu-focus/first-index rows))
+              (focus-main! menu (menu-focus/first-index (:items menu))))
+
+            "End"
+            (if in-sub?
+              (focus-submenu! (menu-focus/last-index rows))
+              (focus-main! menu (menu-focus/last-index (:items menu))))
+
+            "ArrowRight"
+            (let [item (menu-focus/item-at (:items menu) main-focus)]
+              (cond
+                in-sub? nil
+                (:submenu item) (open-submenu-with-focus! db menu item)
+                :else (switch-menu! label 1)))
+
+            "ArrowLeft"
+            (if in-sub?
+              (focus-submenu! nil)
+              (switch-menu! label -1))
+
+            ("Enter" " ")
+            (if in-sub?
+              (when-let [row (menu-focus/item-at rows sub-focus)]
+                (act! (:event row)))
+              (when-let [item (menu-focus/item-at (:items menu) main-focus)]
+                (if (:submenu item)
+                  (open-submenu-with-focus! db menu item)
+                  (act! (:event item)))))
+
+            nil)
+          true)))))
+
+(defn- modal-open? [db]
+  (or (get-in db [:ui :settings-open?])
+      (get-in db [:ui :about-open?])
+      (get-in db [:ui :kbedit :open?])
+      (get-in db [:ui :palette :open?])
+      (get-in db [:ui :context-menu])))
+
+(defn- handle-keydown! [^js e]
+  (let [db @rfdb/app-db]
+    (when-not (get-in db [:ui :kbedit :capture])
+      (cond
+        (= "Alt" (.-key e))
+        (rf/dispatch [:access-keys/set true])
+
+        (and (= "Escape" (.-key e))
+             (get-in db [:ui :menu]))
+        (do (access/consume! e)
+            (rf/dispatch [:menu/close]))
+
+        (and (get-in db [:ui :menu])
+             (dispatch-menu-nav! db e))
+        nil
+
+        :else
+        (when-let [k (access/event-letter e)]
+          (when-let [action (and (or (get-in db [:ui :menu])
+                                      (and (.-altKey e) (not (modal-open? db))))
+                                 (access-action db k))]
+            (access/consume! e)
+            (dispatch-access-action! action)))))))
+
+(defn- handle-keyup! [^js e]
+  (when (and (= "Alt" (.-key e)) (nil? (get-in @rfdb/app-db [:ui :menu])))
+    (rf/dispatch [:access-keys/set false])))
+
+(defonce ^:private access-installed? (atom false))
+
+(defn install-access-keys! []
+  (when-not @access-installed?
+    (reset! access-installed? true)
+    (.addEventListener js/window "keydown" handle-keydown! true)
+    (.addEventListener js/window "keyup" handle-keyup! true)))
 
 (defn menubar []
-  (let [sub-open (r/atom nil)]
-    (fn []
-      (let [open @(rf/subscribe [:ui/menu])]
-        [:div.vv-menubar
-         (when open [:div.vv-menu-overlay {:on-click #(do (rf/dispatch [:menu/close]) (reset! sub-open nil))}])
-         (for [{:keys [label items]} menus]
-           ^{:key label}
-           [:div.vv-menu
-            [:div.vv-menu-label {:class          (when (= open label) "vv-menu-label-open")
-                                 :on-click       #(do (rf/dispatch [:menu/toggle label]) (reset! sub-open nil))
-                                 :on-mouse-enter #(when open (do (rf/dispatch [:menu/open label]) (reset! sub-open nil)))}
-             label]
-            (when (= open label)
-              [:div.vv-menu-dropdown
-               (for [[i item] (map-indexed vector items)]
-                 (cond
-                   (= item :sep) ^{:key i} [:div.vv-menu-sep]
-                   (:submenu item)
-                   ^{:key i}
-                   [:div.vv-menu-item.vv-menu-item-submenu
-                    {:on-mouse-enter #(reset! sub-open (:submenu item))
-                     :on-mouse-over  #(reset! sub-open (:submenu item))
-                     :on-click       (fn [e]
-                                       (.preventDefault e)
-                                       (.stopPropagation e)
-                                       (reset! sub-open (:submenu item)))}
-                    [:span.vv-menu-item-label (:submenu item)]
-                    [:span.vv-menu-item-arrow "▸"]
-                    (when (= @sub-open (:submenu item))
-                      [:div.vv-menu-subdropdown
-                       (for [[j row] (map-indexed vector (remove nil? (radio-rows (:radio item))))]
-                         (if (= row :sep)
-                           ^{:key j} [:div.vv-menu-sep]
-                           ^{:key j} [row-item row]))])]
-                   :else
-                   ^{:key i}
-                   [:div.vv-menu-item {:on-click       #(act! (:event item))
-                                       :on-mouse-enter #(reset! sub-open nil)}
-                    [:span.vv-menu-item-label (:label item)]
-                    (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))])])]))))
+  (let [open @(rf/subscribe [:ui/menu])
+        sub-open @(rf/subscribe [:ui/menu-submenu])
+        focus @(rf/subscribe [:ui/menu-focus])
+        sub-focus @(rf/subscribe [:ui/menu-submenu-focus])
+        access-active? @(rf/subscribe [:ui/access-keys-active?])]
+    [:div.vv-menubar {:role "menubar"}
+     (when open [:div.vv-menu-overlay {:on-click #(rf/dispatch [:menu/close])}])
+     (for [{:keys [label items access-key]} menus]
+       ^{:key label}
+       [:div.vv-menu
+        [:div.vv-menu-label (merge {:class          (when (= open label) "vv-menu-label-open")
+                                    :role           "menuitem"
+                                    :aria-haspopup  "menu"
+                                    :aria-expanded  (= open label)
+                                    :on-click       #(rf/dispatch [:menu/toggle label])
+                                    :on-mouse-enter #(when open (rf/dispatch [:menu/open label]))}
+                                   (access/access-attrs access-key))
+         [access/label label access-key access-active?]]
+        (when (= open label)
+          [:div.vv-menu-dropdown {:role "menu"}
+           (for [[i item] (map-indexed vector items)]
+             (cond
+               (= item :sep) ^{:key i} [:div.vv-menu-sep]
+               (:submenu item)
+               ^{:key i}
+               [:div
+                (merge {:class          (menu-item-class "vv-menu-item vv-menu-item-submenu" (= focus i))
+                        :role           "menuitem"
+                        :aria-haspopup  "menu"
+                        :aria-expanded  (= sub-open (:submenu item))
+                        :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
+                                             (rf/dispatch [:menu/submenu (:submenu item)]))
+                        :on-mouse-over  #(do (rf/dispatch [:menu/focus i])
+                                             (rf/dispatch [:menu/submenu (:submenu item)]))
+                        :on-click       (fn [e]
+                                          (.preventDefault e)
+                                          (.stopPropagation e)
+                                          (rf/dispatch [:menu/focus i])
+                                          (rf/dispatch [:menu/submenu (:submenu item)]))}
+                       (access/access-attrs (:access-key item)))
+                [:span.vv-menu-item-label [access/label (:submenu item) (:access-key item) access-active?]]
+                [:span.vv-menu-item-arrow ">"]
+                (when (= sub-open (:submenu item))
+                  (let [rows (vec (remove nil? (radio-rows (:radio item))))]
+                    [:div.vv-menu-subdropdown {:role "menu"}
+                     (for [[j row] (map-indexed vector rows)]
+                       (if (= row :sep)
+                         ^{:key j} [:div.vv-menu-sep]
+                         ^{:key j} [row-item row access-active? (= sub-focus j)
+                                    #(rf/dispatch [:menu/submenu-focus j])]))]))]
+               :else
+               ^{:key i}
+               [:div
+                (merge {:class          (menu-item-class "vv-menu-item" (= focus i))
+                        :role           "menuitem"
+                        :on-click       #(act! (:event item))
+                        :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
+                                             (rf/dispatch [:menu/submenu nil]))}
+                       (access/access-attrs (:access-key item)))
+                [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
+                (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))])])]))

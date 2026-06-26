@@ -309,9 +309,43 @@
                  (fn [db [_ tab]] (-> db (assoc-in [:ui :sidebar-visible?] true) (assoc-in [:ui :sidebar-tab] tab))))
 
 ;; ---- menu bar (custom, theme-matched) ----
-(rf/reg-event-db :menu/open   (fn [db [_ label]] (assoc-in db [:ui :menu] label)))
-(rf/reg-event-db :menu/close  (fn [db _]         (assoc-in db [:ui :menu] nil)))
-(rf/reg-event-db :menu/toggle (fn [db [_ label]] (update-in db [:ui :menu] #(if (= % label) nil label))))
+(rf/reg-event-db :access-keys/set
+                 (fn [db [_ active?]] (assoc-in db [:ui :access-keys-active?] (boolean active?))))
+(rf/reg-event-db :menu/open
+                 (fn [db [_ label]] (-> db
+                                         (assoc-in [:ui :menu] label)
+                                         (assoc-in [:ui :menu-submenu] nil)
+                                         (assoc-in [:ui :menu-focus] nil)
+                                         (assoc-in [:ui :menu-submenu-focus] nil))))
+(rf/reg-event-db :menu/close
+                 (fn [db _] (-> db
+                                 (assoc-in [:ui :menu] nil)
+                                 (assoc-in [:ui :menu-submenu] nil)
+                                 (assoc-in [:ui :menu-focus] nil)
+                                 (assoc-in [:ui :menu-submenu-focus] nil)
+                                 (assoc-in [:ui :access-keys-active?] false))))
+(rf/reg-event-db :menu/toggle
+                 (fn [db [_ label]]
+                   (if (= (get-in db [:ui :menu]) label)
+                     (-> db
+                         (assoc-in [:ui :menu] nil)
+                         (assoc-in [:ui :menu-submenu] nil)
+                         (assoc-in [:ui :menu-focus] nil)
+                         (assoc-in [:ui :menu-submenu-focus] nil)
+                         (assoc-in [:ui :access-keys-active?] false))
+                     (-> db
+                         (assoc-in [:ui :menu] label)
+                         (assoc-in [:ui :menu-submenu] nil)
+                         (assoc-in [:ui :menu-focus] nil)
+                         (assoc-in [:ui :menu-submenu-focus] nil)))))
+(rf/reg-event-db :menu/submenu
+                 (fn [db [_ submenu]] (-> db
+                                           (assoc-in [:ui :menu-submenu] submenu)
+                                           (assoc-in [:ui :menu-submenu-focus] nil))))
+(rf/reg-event-db :menu/focus
+                 (fn [db [_ idx]] (assoc-in db [:ui :menu-focus] idx)))
+(rf/reg-event-db :menu/submenu-focus
+                 (fn [db [_ idx]] (assoc-in db [:ui :menu-submenu-focus] idx)))
 
 ;; ---- menu shell actions (cross the IPC seam to main) ----
 (defn open-dialog-mode [mode]

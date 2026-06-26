@@ -69,6 +69,7 @@
     {"id": "nim", "language": "nim", "extensions": [".nim"], "source": {"type": "git", "url": "https://github.com/alaviss/tree-sitter-nim"}},
     {"id": "zig", "language": "zig", "extensions": [".zig"], "source": {"type": "git", "url": "https://github.com/maxxnino/tree-sitter-zig"}},
     {"id": "d2", "language": "d2", "extensions": [".d2"], "source": {"type": "local", "path": "resources/grammars-src/tree-sitter-d2", "query": "queries/highlights.scm"}},
+    {"id": "bnfc", "language": "bnfc", "extensions": [".cf", ".bnfc"], "source": {"type": "local", "path": "resources/grammars-src/tree-sitter-bnfc", "query": "queries/highlights.scm"}},
     {"id": "markdown", "language": "markdown", "extensions": [".md", ".markdown", ".mdx"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "subdir": "tree-sitter-markdown", "queryFile": "resources/public/grammars/markdown/highlights.scm"}},
     {"id": "markdown-inline", "language": "markdown_inline", "extensions": [], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "subdir": "tree-sitter-markdown-inline", "queryFile": "resources/public/grammars/markdown-inline/highlights.scm"}},
     {"id": "html", "language": "html", "extensions": [".html", ".htm"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-html"}},

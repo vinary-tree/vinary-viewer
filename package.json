@@ -29,7 +29,8 @@
     "dev": "shadow-cljs compile main renderer && electron .",
     "grammars:sync": "node scripts/sync-grammars.mjs",
     "grammars:check": "node scripts/check-grammars.mjs",
-    "test": "shadow-cljs compile test && node dist/test/test.js"
+    "test": "shadow-cljs compile test && node dist/test/test.js",
+    "test:electron": "electron --no-sandbox test/electron-smoke.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

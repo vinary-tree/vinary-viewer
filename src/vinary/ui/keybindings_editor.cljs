@@ -14,7 +14,10 @@
             [re-frame.db :as rfdb]
             [clojure.string :as str]
             [vinary.app.commands :as commands]
-            [vinary.input.keys :as keys]))
+            [vinary.input.keymaps-registry :as registry]
+            [vinary.input.keys :as keys]
+            [vinary.ui.access-keys :as access]
+            [vinary.ui.menu-focus :as menu-focus]))
 
 ;; ---------- chord display ----------
 (def ^:private named-bases
@@ -23,6 +26,9 @@
 
 (defn- named? [b]
   (or (contains? named-bases b) (boolean (re-matches #"f\d{1,2}" b))))
+
+(defn- single-letter? [s]
+  (boolean (re-matches #"[A-Za-z]" s)))
 
 (defn- base-pretty [b]
   (cond (contains? named-bases b)        (named-bases b)
@@ -44,15 +50,20 @@
 (defn- pretty-seq [chords] (str/join " " (map pretty-chord chords)))
 
 (defn- build-chord
-  "An ordered modifier vector + a base token → a canonical chord (C- M- S- order; printable+Shift folds)."
+  "An ordered modifier vector + a base token → a canonical chord (C- M- S- order)."
   [mods base]
   (let [b0 (keys/normalize-token (str/trim (or base "")))]
     (when (seq b0)
       (let [ctrl  (boolean (some #{"Ctrl"} mods))
             alt   (boolean (some #{"Alt"} mods))
             shift (boolean (some #{"Shift"} mods))
-            b     (if (and shift (not (named? b0)) (= 1 (count b0))) (str/upper-case b0) b0)
-            shift' (and shift (named? b0))]
+            modified? (or ctrl alt)
+            letter? (single-letter? b0)
+            b     (cond
+                    (and shift modified? letter?) (str/lower-case b0)
+                    (and shift (not modified?) (not (named? b0)) (= 1 (count b0))) (str/upper-case b0)
+                    :else b0)
+            shift' (and shift (or (named? b0) (and modified? letter?)))]
         (str (when ctrl "C-") (when alt "M-") (when shift' "S-") b)))))
 
 ;; ---------- left pane: sets ----------
@@ -100,9 +111,11 @@
      [:div.vv-kb-pane-head
       [:span "Key Binding Sets"]
       [:span.vv-kb-pane-actions
-       [:button.vv-kb-iconbtn {:title "New set" :on-click #(rf/dispatch [:kbedit/add])} "+"]
-       [:button.vv-kb-iconbtn {:title "Delete the selected set" :disabled (not sel-custom?)
-                               :on-click #(when sel-custom? (rf/dispatch [:kbedit/delete sel]))} "−"]]]
+       [:button.vv-kb-iconbtn (merge {:title "New set (Alt+N)" :on-click #(rf/dispatch [:kbedit/add])}
+                                     (access/access-attrs "n")) "+"]
+       [:button.vv-kb-iconbtn (merge {:title "Delete the selected set (Alt+D)" :disabled (not sel-custom?)
+                                      :on-click #(when sel-custom? (rf/dispatch [:kbedit/delete sel]))}
+                                     (access/access-attrs "d")) "−"]]]
      [:div.vv-kb-set-list
       (for [{:keys [id] :as s} sets]
         ^{:key id} [set-row s (= id editing)])]]))
@@ -189,13 +202,17 @@
 (defn- actions-pane []
   (let [{:keys [id name builtin? custom? modal?] :as focused} @(rf/subscribe [:kbedit/focused])
         idx @(rf/subscribe [:kbedit/action-index])
-        by-cat (group-by :category (vals commands/registry))]
+        by-cat (group-by :category (vals commands/registry))
+        access-active? @(rf/subscribe [:ui/access-keys-active?])]
     [:div.vv-kb-actions
      [:div.vv-kb-pane-head
       [:span "Bindings — " [:b name]]
       (when builtin?
         [:span.vv-kb-pane-actions
-         [:button.vv-kb-iconbtn {:title "Clone to a new editable set" :on-click #(rf/dispatch [:kbedit/clone id])} "Clone"]])]
+         [:button.vv-kb-iconbtn (merge {:title "Clone to a new editable set (Alt+L)"
+                                        :on-click #(rf/dispatch [:kbedit/clone id])}
+                                       (access/access-attrs "l"))
+          [access/label "Clone" "l" access-active?]]])]
      (when builtin?
        [:div.vv-kb-readonly-banner "Built-in sets are read-only. Clone this set to customize its bindings."])
      [:div.vv-kb-action-list
@@ -211,26 +228,76 @@
          (for [spec specs] ^{:key (:id spec)} [action-row focused spec idx])])]]))
 
 ;; ---------- editor context menu (left-pane right-click) ----------
+(defn- editor-ctx-items [id custom?]
+  (cond-> [{:label "Clone" :event [:kbedit/clone id]}]
+    custom? (conj {:label "Rename" :event [:kbedit/begin-rename id]}
+                  {:label "Delete" :event [:kbedit/delete id]})))
+
+(defn- close-and-dispatch! [event]
+  (rf/dispatch [:kbedit/ctx-close])
+  (rf/dispatch event))
+
+(defn- consume! [^js e]
+  (.preventDefault e)
+  (.stopPropagation e))
+
+(defn- editor-ctx-keydown [items focus ^js e]
+  (case (.-key e)
+    "ArrowDown" (do (consume! e) (reset! focus (menu-focus/move-index items @focus 1)))
+    "ArrowUp"   (do (consume! e) (reset! focus (menu-focus/move-index items @focus -1)))
+    "Home"      (do (consume! e) (reset! focus (menu-focus/first-index items)))
+    "End"       (do (consume! e) (reset! focus (menu-focus/last-index items)))
+    "Enter"     (do (consume! e) (when-let [item (menu-focus/item-at items @focus)] (close-and-dispatch! (:event item))))
+    " "         (do (consume! e) (when-let [item (menu-focus/item-at items @focus)] (close-and-dispatch! (:event item))))
+    "Escape"    (do (consume! e) (rf/dispatch [:kbedit/ctx-close]))
+    nil))
+
 (defn- editor-ctx []
-  (when-let [{:keys [x y id]} @(rf/subscribe [:kbedit/ctx])]
-    (let [sets   @(rf/subscribe [:kbedit/sets])
-          custom? (:custom? (first (filter #(= (:id %) id) sets)))]
-      [:div.vv-ctx-overlay {:on-click #(rf/dispatch [:kbedit/ctx-close])
-                            :on-context-menu (fn [^js e] (.preventDefault e) (rf/dispatch [:kbedit/ctx-close]))}
-       [:div.vv-ctx-menu {:style {:left (str x "px") :top (str y "px")} :on-click #(.stopPropagation %)}
-        [:div.vv-menu-item {:on-click #(do (rf/dispatch [:kbedit/ctx-close]) (rf/dispatch [:kbedit/clone id]))}
-         [:span.vv-menu-item-label "Clone"]]
-        (when custom?
-          [:div.vv-menu-item {:on-click #(do (rf/dispatch [:kbedit/ctx-close]) (rf/dispatch [:kbedit/begin-rename id]))}
-           [:span.vv-menu-item-label "Rename"]])
-        (when custom?
-          [:div.vv-menu-item {:on-click #(do (rf/dispatch [:kbedit/ctx-close]) (rf/dispatch [:kbedit/delete id]))}
-           [:span.vv-menu-item-label "Delete"]])]])))
+  (r/with-let [focus (r/atom nil)
+               last-ctx (r/atom nil)]
+    (let [ctx @(rf/subscribe [:kbedit/ctx])]
+      (if-let [{:keys [x y id] :as ctx} ctx]
+        (let [sets    @(rf/subscribe [:kbedit/sets])
+              custom? (:custom? (first (filter #(= (:id %) id) sets)))
+              items   (editor-ctx-items id custom?)
+              focused @focus]
+          (when (not= @last-ctx ctx)
+            (reset! last-ctx ctx)
+            (reset! focus nil))
+          [:div.vv-ctx-overlay {:on-click #(rf/dispatch [:kbedit/ctx-close])
+                                :on-context-menu (fn [^js e] (.preventDefault e) (rf/dispatch [:kbedit/ctx-close]))}
+           [:div.vv-ctx-menu {:style {:left (str x "px") :top (str y "px")}
+                              :role "menu"
+                              :tab-index 0
+                              :on-click #(.stopPropagation %)
+                              :on-key-down #(editor-ctx-keydown items focus %)
+                              :ref (fn [el] (when el (.focus el)))}
+            (doall
+             (for [[i item] (map-indexed vector items)]
+               ^{:key (:label item)}
+               [:div.vv-menu-item {:class (when (= focused i) "vv-menu-item-focused")
+                                   :role "menuitem"
+                                   :on-mouse-enter #(reset! focus i)
+                                   :on-click #(close-and-dispatch! (:event item))}
+                [:span.vv-menu-item-label (:label item)]]))]])
+        nil))))
 
 ;; ---------- the dialog ----------
+(defn- handle-access-key! [db k]
+  (let [sel (get-in db [:ui :kbedit :sel])]
+    (case k
+      "u" (when (seq (get-in db [:ui :kbedit :undo])) (rf/dispatch [:kbedit/undo]) true)
+      "r" (when (seq (get-in db [:ui :kbedit :redo])) (rf/dispatch [:kbedit/redo]) true)
+      "c" (do (rf/dispatch [:kbedit/close]) true)
+      "n" (do (rf/dispatch [:kbedit/add]) true)
+      "d" (do (when (registry/custom? db sel) (rf/dispatch [:kbedit/delete sel])) true)
+      "l" (do (when sel (rf/dispatch [:kbedit/clone sel])) true)
+      false)))
+
 (defn- on-keydown [^js e]
   (let [db  @rfdb/app-db
-        cap (get-in db [:ui :kbedit :capture])]
+        cap (get-in db [:ui :kbedit :capture])
+        ctx (get-in db [:ui :kbedit :ctx])]
     (if cap
       (let [k (.-key e)]
         (.preventDefault e) (.stopPropagation e)
@@ -239,12 +306,18 @@
           (= k "Enter")  (rf/dispatch [:kbedit/capture-commit])
           :else          (when-let [chord (keys/event->chord e (keys/mac?))]
                            (rf/dispatch [:kbedit/capture-chord chord]))))
-      ;; Ctrl+Shift+Z folds to chord "C-Z" (Shift uppercases the printable z); also accept C-S-z / C-y
-      (case (keys/event->chord e (keys/mac?))
-        "C-z"                 (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/undo]))
-        ("C-Z" "C-S-z" "C-y") (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/redo]))
-        "escape"              (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/close]))
-        nil))))
+      (if (and ctx (= "Escape" (.-key e)))
+        (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/ctx-close]))
+        (if-let [k (and (.-altKey e) (access/event-letter e))]
+          (when (handle-access-key! db k)
+            (.preventDefault e)
+            (.stopPropagation e))
+          ;; Ctrl+Shift+Z normalizes to C-S-z; C-y is the conventional redo fallback.
+          (case (keys/event->chord e (keys/mac?))
+            "C-z"                 (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/undo]))
+            ("C-S-z" "C-y")       (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/redo]))
+            "escape"              (do (.preventDefault e) (.stopPropagation e) (rf/dispatch [:kbedit/close]))
+            nil))))))
 
 (defn dialog []
   (r/create-class
@@ -254,15 +327,24 @@
     :reagent-render
     (fn []
       (let [can-undo? @(rf/subscribe [:kbedit/can-undo?])
-            can-redo? @(rf/subscribe [:kbedit/can-redo?])]
+            can-redo? @(rf/subscribe [:kbedit/can-redo?])
+            access-active? @(rf/subscribe [:ui/access-keys-active?])]
         [:div.vv-modal-overlay {:on-click #(rf/dispatch [:kbedit/close])}
          [:div.vv-modal.vv-modal-wide.vv-kb-modal {:on-click #(.stopPropagation %)}
           [:div.vv-kb-header
            [:span.vv-kb-header-title "Key Bindings"]
            [:span.vv-kb-header-btns
-            [:button.vv-kb-btn {:disabled (not can-undo?) :title "Undo (Ctrl+Z)" :on-click #(rf/dispatch [:kbedit/undo])} "↶ Undo"]
-            [:button.vv-kb-btn {:disabled (not can-redo?) :title "Redo (Ctrl+Shift+Z)" :on-click #(rf/dispatch [:kbedit/redo])} "↷ Redo"]
-            [:button.vv-kb-btn {:on-click #(rf/dispatch [:kbedit/close])} "Close"]]]
+            [:button.vv-kb-btn (merge {:disabled (not can-undo?) :title "Undo (Ctrl+Z, Alt+U)"
+                                       :on-click #(rf/dispatch [:kbedit/undo])}
+                                      (access/access-attrs "u"))
+             "↶ " [access/label "Undo" "u" access-active?]]
+            [:button.vv-kb-btn (merge {:disabled (not can-redo?) :title "Redo (Ctrl+Shift+Z, Alt+R)"
+                                       :on-click #(rf/dispatch [:kbedit/redo])}
+                                      (access/access-attrs "r"))
+             "↷ " [access/label "Redo" "r" access-active?]]
+            [:button.vv-kb-btn (merge {:on-click #(rf/dispatch [:kbedit/close])}
+                                      (access/access-attrs "c"))
+             [access/label "Close" "c" access-active?]]]]
           [:div.vv-kb-body
            [sets-pane]
            [actions-pane]]

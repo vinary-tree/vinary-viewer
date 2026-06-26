@@ -172,6 +172,50 @@ function catalogEdn(catalog) {
   return `[\n${catalog.map(entry => ednString(entry)).join('\n')}\n]\n`;
 }
 
+function readExistingCatalog() {
+  if (!fs.existsSync(catalogPath)) return [];
+  const text = fs.readFileSync(catalogPath, 'utf8');
+  const entries = [];
+  for (const [mapText] of text.matchAll(/\{[^\n]*\}/g)) {
+    const field = name => {
+      const match = mapText.match(new RegExp(`:${name} "([^"]*)"`));
+      return match && match[1];
+    };
+    const extMatch = mapText.match(/:extensions \[([^\]]*)\]/);
+    const id = field('id');
+    if (!id) continue;
+    entries.push({
+      id,
+      language: field('language') || id,
+      extensions: extMatch ? [...extMatch[1].matchAll(/"([^"]+)"/g)].map(m => m[1]) : [],
+      'wasm-url': field('wasm-url'),
+      'scm-url': field('scm-url'),
+      'source-kind': field('source-kind'),
+      source: field('source')
+    });
+  }
+  return entries;
+}
+
+function mergeCatalog(existing, updates) {
+  const byId = new Map();
+  for (const entry of existing) byId.set(entry.id, entry);
+  for (const entry of updates) byId.set(entry.id, entry);
+
+  const ordered = [];
+  const seen = new Set();
+  for (const entry of lock.entries.filter(entry => entry.enabled !== false)) {
+    if (byId.has(entry.id)) {
+      ordered.push(byId.get(entry.id));
+      seen.add(entry.id);
+    }
+  }
+  for (const entry of existing) {
+    if (!seen.has(entry.id)) ordered.push(entry);
+  }
+  return ordered;
+}
+
 ensureDir(grammarOutRoot);
 ensureDir(path.dirname(catalogPath));
 ensureDir(path.join(publicRoot, 'js'));
@@ -218,8 +262,9 @@ for (const entry of entries) {
   }
 }
 
-fs.writeFileSync(catalogPath, catalogEdn(catalog));
-console.log(`\nwrote ${path.relative(root, catalogPath)} (${catalog.length} grammar${catalog.length === 1 ? '' : 's'})`);
+const finalCatalog = only.size ? mergeCatalog(readExistingCatalog(), catalog) : catalog;
+fs.writeFileSync(catalogPath, catalogEdn(finalCatalog));
+console.log(`\nwrote ${path.relative(root, catalogPath)} (${finalCatalog.length} grammar${finalCatalog.length === 1 ? '' : 's'})`);
 if (failures.length) {
   console.error('\nfailed grammars:');
   for (const failure of failures) console.error(`- ${failure.id}: ${failure.error.message || failure.error}`);

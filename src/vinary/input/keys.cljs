@@ -1,8 +1,8 @@
 (ns vinary.input.keys
   "Key normalization: a js KeyboardEvent → a canonical chord token. Modifiers fold cross-platform
-   (Ctrl OR ⌘ on macOS → \"C-\"; Alt/Option → \"M-\"; Shift → \"S-\" only for NAMED keys, since for
-   printables Shift is already in the character). Tokens: \"g\", \"/\", \"?\", \"G\", \"left\", \"tab\",
-   \"escape\", \"space\", \"C-x\", \"M-f\", \"S-tab\", \"C-M-g\"."
+   (Ctrl OR ⌘ on macOS → \"C-\"; Alt/Option → \"M-\"; Shift → \"S-\" for named keys and for modified
+   letters). Unmodified shifted printables keep their typed character. Tokens: \"g\", \"/\", \"?\",
+   \"G\", \"left\", \"tab\", \"escape\", \"space\", \"C-x\", \"M-f\", \"S-tab\", \"C-M-S-g\"."
   (:require [clojure.string :as str]))
 
 (def ^:private named
@@ -18,6 +18,9 @@
 (defn- named-base? [base]
   (or (contains? named-bases base) (boolean (re-matches #"f\d{1,2}" base))))
 
+(defn- single-letter? [s]
+  (boolean (re-matches #"[A-Za-z]" s)))
+
 (defn mac? [] (boolean (re-find #"Mac" (or (.-platform js/navigator) ""))))
 
 (defn event->chord
@@ -25,13 +28,18 @@
   [^js e is-mac]
   (let [k (.-key e)]
     (when-not (or (nil? k) (contains? modifier-keys k))
-      (let [base  (cond
-                    (contains? named k)         (named k)
-                    (re-matches #"F\d{1,2}" k)  (str/lower-case k)
-                    :else                       k)
-            ctrl  (or (.-ctrlKey e) (and is-mac (.-metaKey e)))
-            meta  (.-altKey e)
-            shift (and (.-shiftKey e) (named-base? base))]
+      (let [ctrl      (or (.-ctrlKey e) (and is-mac (.-metaKey e)))
+            meta      (.-altKey e)
+            modified? (or ctrl meta)
+            letter?   (single-letter? k)
+            base      (cond
+                        (contains? named k)         (named k)
+                        (re-matches #"F\d{1,2}" k)  (str/lower-case k)
+                        (and modified? letter?)     (str/lower-case k)
+                        :else                       k)
+            shift     (and (.-shiftKey e)
+                           (or (named-base? base)
+                               (and modified? letter?)))]
         (str (when ctrl "C-") (when meta "M-") (when shift "S-") base)))))
 
 (defn bare-printable?

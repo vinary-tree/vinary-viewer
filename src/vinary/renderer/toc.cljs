@@ -2,7 +2,8 @@
   "Table of contents. Headings are parsed from the rendered HTML (rehype-slug put stable ids on them),
    and a scroll-spy marks the heading currently at the top of the viewport. Both are derived views over
    the same content — no separate source of truth."
-  (:require [re-frame.core :as rf]))
+  (:require [re-frame.core :as rf]
+            [re-frame.db :as rfdb]))
 
 (defn extract
   "Parse rendered HTML → ordered [{:level :text :id}] for h1–h6 (ids from rehype-slug)."
@@ -37,4 +38,5 @@
                               (recur (inc i) (.-id h))
                               last-id))
                           last-id))]
-           (rf/dispatch [:toc/active-heading active])))))))
+           (when (not= active (get-in @rfdb/app-db [:ui :active-heading]))
+             (rf/dispatch [:toc/active-heading active]))))))))

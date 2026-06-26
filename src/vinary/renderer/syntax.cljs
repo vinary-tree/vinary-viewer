@@ -116,13 +116,19 @@
   (when (and cls (< s e))
     (.push ranges (.range (.mark Decoration #js {:class cls}) s e))))
 
-(defn- capture-ranges! [ranges ^js tree ^js query offset]
+(defn- capture-spans! [spans ^js tree ^js query offset]
   (doseq [cap (array-seq (.captures query (.-rootNode tree)))]
     (let [^js node (.-node cap)
           cls      (class-for (.-name cap) node)
           s        (+ offset (.-startIndex node))
           e        (+ offset (.-endIndex node))]
-      (mark-range! ranges cls s e)))
+      (when (and cls (< s e))
+        (.push spans {:from s :to e :class cls}))))
+  spans)
+
+(defn- capture-ranges! [ranges ^js tree ^js query offset]
+  (doseq [span (array-seq (capture-spans! (array) tree query offset))]
+    (mark-range! ranges (:class span) (:from span) (:to span)))
   ranges)
 
 (defn- decoration-set [ranges]
@@ -161,7 +167,7 @@
     (info-language (node-text text info))))
 
 (defn- highlight-fenced-code! [ranges text ^js block]
-  (when-let [content (first (nodes-of-type block #{"code_fence_content"}))]
+  (when-let [^js content (first (nodes-of-type block #{"code_fence_content"}))]
     (mark-range! ranges "cm-md-code-block" (.-startIndex content) (.-endIndex content))
     (if-let [grammar (some-> (fenced-language text block) grammar-for-language)]
       (-> (load-grammar grammar)
@@ -191,7 +197,7 @@
                        code-jobs    (array)]
                    (capture-ranges! ranges tree (:query block-loaded) 0)
                    (when inline-loaded
-                     (doseq [inline (nodes-of-type root #{"inline"})]
+                     (doseq [^js inline (nodes-of-type root #{"inline"})]
                        (let [inline-tree (parse-tree inline-loaded (node-text text inline))]
                          (capture-ranges! ranges inline-tree (:query inline-loaded) (.-startIndex inline)))))
                    (doseq [block (nodes-of-type root #{"fenced_code_block"})]
@@ -205,6 +211,77 @@
   (if (markdown-grammar? grammar)
     (markdown-highlight-ranges text grammar)
     (generic-highlight-ranges text grammar)))
+
+(defn- escape-html [s]
+  (-> (or s "")
+      (str/replace #"&" "&amp;")
+      (str/replace #"<" "&lt;")
+      (str/replace #">" "&gt;")
+      (str/replace #"\"" "&quot;")))
+
+(defn- spans->html [text spans]
+  (let [text  (or text "")
+        spans (->> spans
+                   (filter #(and (:class %) (number? (:from %)) (number? (:to %)) (< (:from %) (:to %))))
+                   (sort-by (juxt :from (comp - :to))))]
+    (loop [pos 0 spans spans out []]
+      (if-let [{:keys [from to class]} (first spans)]
+        (if (< from pos)
+          (recur pos (rest spans) out)
+          (recur to
+                 (rest spans)
+                 (conj out
+                       (escape-html (subs text pos (min from (count text))))
+                       "<span class=\""
+                       (escape-html class)
+                       "\">"
+                       (escape-html (subs text from (min to (count text))))
+                       "</span>")))
+        (apply str (conj out (escape-html (subs text pos))))))))
+
+(defn highlight-language-html
+  "Return Promise<string|null> with tree-sitter-highlighted HTML for text in language."
+  [language text]
+  (if-let [grammar (some-> language grammar-for-language)]
+    (-> (load-grammar grammar)
+        (.then (fn [loaded]
+                 (let [tree  (parse-tree loaded text)
+                       spans (capture-spans! (array) tree (:query loaded) 0)]
+                   (spans->html text (array-seq spans)))))
+        (.catch (fn [e]
+                  (js/console.warn "[vv] rendered code grammar failed:" e)
+                  nil)))
+    (js/Promise.resolve nil)))
+
+(defn- code-language [^js code]
+  (let [classes (.-classList code)]
+    (some (fn [i]
+            (let [cls (.item classes i)]
+              (or (second (re-find #"^language-(.+)$" cls))
+                  (second (re-find #"^lang-(.+)$" cls)))))
+          (range (.-length classes)))))
+
+(defn highlight-html-code-blocks
+  "Post-process rendered Markdown HTML so known fenced code languages use tree-sitter highlighting."
+  [html]
+  (if-not (exists? js/DOMParser)
+    (js/Promise.resolve html)
+    (let [parser (js/DOMParser.)
+          doc (.parseFromString parser (or html "") "text/html")
+          node-list (.querySelectorAll doc "pre > code[class*='language-'], pre > code[class*='lang-']")
+          nodes (map #(.item node-list %) (range (.-length node-list)))
+          jobs (->> nodes
+                    (keep (fn [^js code]
+                            (when-let [language (code-language code)]
+                              (-> (highlight-language-html language (.-textContent code))
+                                  (.then (fn [highlighted]
+                                           (when highlighted
+                                             (set! (.-innerHTML code) highlighted))))))))
+                    into-array)]
+      (if (pos? (.-length jobs))
+        (-> (js/Promise.all jobs)
+            (.then (fn [_] (.-innerHTML (.-body doc)))))
+        (js/Promise.resolve html)))))
 
 (defn- highlight-field [decos]
   (.define StateField

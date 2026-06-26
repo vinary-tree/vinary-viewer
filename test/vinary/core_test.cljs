@@ -21,7 +21,10 @@
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
             [vinary.renderer.media :as media]
+            [vinary.ui.access-keys :as access]
             [vinary.ui.context-menu :as context-menu]
+            [vinary.ui.menu-focus :as menu-focus]
+            [vinary.ui.menubar :as menubar]
             [vinary.ui.preview-context :as preview-context]
             [vinary.ui.preview-navigation :as preview-nav]))
 
@@ -35,7 +38,16 @@
     (is (= "C-f"   (keys/event->chord (ev {:key "f" :ctrlKey true}) false)))
     (is (= "C-f"   (keys/event->chord (ev {:key "f" :metaKey true}) true)) "⌘ folds to C- on mac")
     (is (= "M-left" (keys/event->chord (ev {:key "ArrowLeft" :altKey true}) false)))
+    (is (nil? (access/event-letter (ev {:key "ArrowLeft" :altKey true})))
+        "Alt+Left is not a menu access key")
+    (is (= "f" (access/event-letter (ev {:key "f" :altKey true}))))
     (is (= "G"     (keys/event->chord (ev {:key "G" :shiftKey true}) false)) "Shift folds into a printable")
+    (is (= "C-S-o" (keys/event->chord (ev {:key "O" :ctrlKey true :shiftKey true}) false))
+        "modified shifted letters keep explicit Shift so Ctrl+Shift+O resolves from previews")
+    (is (= "C-S-z" (keys/event->chord (ev {:key "Z" :ctrlKey true :shiftKey true}) false))
+        "redo uses normalized Ctrl+Shift+Z")
+    (is (= "C-+"   (keys/event->chord (ev {:key "+" :ctrlKey true :shiftKey true}) false))
+        "modified shifted punctuation stays as the typed printable")
     (is (= "S-tab" (keys/event->chord (ev {:key "Tab" :shiftKey true}) false)) "Shift kept for named keys")
     (is (= "space" (keys/event->chord (ev {:key " "}) false)))
     (is (nil? (keys/event->chord (ev {:key "Control"}) false)) "modifier-only → nil"))
@@ -239,6 +251,8 @@
                              ["workflow.plantuml" "source"]
                              ["workflow.mmd" "source"]
                              ["workflow.dot" "source"]
+                             ["grammar.cf" "source"]
+                             ["grammar.bnfc" "source"]
                              ["program.rho" "source"]
                              ["notes.unknown" "text"]]]
       (is (= expected (file-kind/kind-of source? path)) path))))
@@ -256,11 +270,18 @@
   (testing "source extensions are derived from the bundled catalog"
     (is (contains? grammar-catalog/bundled-source-exts ".rho"))
     (is (contains? grammar-catalog/bundled-source-exts ".d2"))
+    (is (contains? grammar-catalog/bundled-source-exts ".cf"))
+    (is (contains? grammar-catalog/bundled-source-exts ".bnfc"))
     (is (contains? grammar-catalog/bundled-source-exts ".md"))
     (is (not (contains? grammar-catalog/bundled-source-exts ""))))
   (testing "grammars resolve by path, id, and language alias"
     (is (= "d2" (:id (grammar-catalog/grammar-for-path "workflow.d2" grammar-catalog/bundled-grammars))))
     (is (= "d2" (:id (grammar-catalog/grammar-for-language "d2" grammar-catalog/bundled-grammars))))
+    (is (= "bnfc" (:id (grammar-catalog/grammar-for-path "grammar.cf" grammar-catalog/bundled-grammars))))
+    (is (= "bnfc" (:id (grammar-catalog/grammar-for-path "grammar.bnfc" grammar-catalog/bundled-grammars))))
+    (is (= "bnfc" (:id (grammar-catalog/grammar-for-language "bnfc" grammar-catalog/bundled-grammars))))
+    (is (= "bnfc" (:id (grammar-catalog/grammar-for-language "lbnf" grammar-catalog/bundled-grammars))))
+    (is (= "bnfc" (:id (grammar-catalog/grammar-for-language "cf" grammar-catalog/bundled-grammars))))
     (is (= "markdown" (:id (grammar-catalog/grammar-for-path "README.md" grammar-catalog/bundled-grammars))))
     (is (= "markdown-inline" (:id (grammar-catalog/grammar-for-id "markdown-inline"
                                                                     grammar-catalog/bundled-grammars))))
@@ -268,6 +289,58 @@
                                                                          grammar-catalog/bundled-grammars))))
     (is (= "javascript" (:id (grammar-catalog/grammar-for-language "js" grammar-catalog/bundled-grammars))))
     (is (= "markdown" (:id (grammar-catalog/grammar-for-language "gfm" grammar-catalog/bundled-grammars))))))
+
+(deftest menu-access-keys
+  (testing "top-level Alt access keys resolve to menus"
+    (is (= {:action :open-menu :label "File"} (menubar/access-action {:ui {}} "f")))
+    (is (= {:action :open-menu :label "View"} (menubar/access-action {:ui {}} "v")))
+    (is (= "Settings" (:label (menubar/menu-for-access-key "s")))))
+  (testing "View menu keeps re-frame-10x directly beneath Developer Tools"
+    (let [view-menu (first (filter #(= "View" (:label %)) menubar/menus))
+          labels    (->> (:items view-menu) (filter map?) (map :label) vec)
+          idx       (first (keep-indexed (fn [i label] (when (= "Developer Tools" label) i)) labels))]
+      (is (number? idx))
+      (is (= "re-frame-10x" (get labels (inc idx))))))
+  (testing "Settings exposes Theme and Key Bindings as the first two submenus"
+    (let [settings-menu (first (filter #(= "Settings" (:label %)) menubar/menus))]
+      (is (= ["Theme" "Key Bindings"]
+             (->> (:items settings-menu) (filter map?) (take 2) (map :submenu) vec)))))
+  (testing "open menu access keys resolve actions and submenus"
+    (is (= {:action :dispatch :event [:file/open-dialog]}
+           (menubar/access-action {:ui {:menu "File"}} "o")))
+    (is (= {:action :dispatch :event [:file/open-dialog :new-tab]}
+           (menubar/access-action {:ui {:menu "File"}} "n")))
+    (is (= {:action :open-submenu :submenu "Theme"}
+           (menubar/access-action {:ui {:menu "Settings"}} "t"))))
+  (testing "submenu rows get access keys from current app state"
+    (let [db (assoc-in empty-keymaps [:ui :menu] "Settings")
+          db (-> db
+                 (assoc-in [:ui :menu-submenu] "Theme")
+                 (assoc-in [:ui :theme] "spacemacs-dark"))]
+      (is (= {:action :dispatch :event [:theme/set "spacemacs-light"]}
+             (menubar/access-action db "l"))))))
+
+(deftest menu-focus-helpers
+  (let [rows [{:label "Open"}
+              :sep
+              nil
+              {:label "Disabled" :disabled? true}
+              {:label "Close"}
+              {:label "Reload"}]]
+    (testing "focus indexes skip nils, separators, and disabled rows"
+      (is (= [0 4 5] (menu-focus/focusable-indexes rows)))
+      (is (= 0 (menu-focus/first-index rows)))
+      (is (= 5 (menu-focus/last-index rows))))
+    (testing "movement wraps and recovers from nil or invalid focus"
+      (is (= 0 (menu-focus/move-index rows nil 1)))
+      (is (= 5 (menu-focus/move-index rows nil -1)))
+      (is (= 4 (menu-focus/move-index rows 0 1)))
+      (is (= 0 (menu-focus/move-index rows 5 1)))
+      (is (= 5 (menu-focus/move-index rows 99 -1))))
+    (testing "item-at only returns focusable rows"
+      (is (= {:label "Close"} (menu-focus/item-at rows 4)))
+      (is (nil? (menu-focus/item-at rows 1)))
+      (is (nil? (menu-focus/item-at rows 3))))))
 
 ;; ---- keymap-set registry (Phase C) ----
 (deftest keymaps-registry

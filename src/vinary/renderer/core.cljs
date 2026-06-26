@@ -13,6 +13,7 @@
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.syntax :as syntax]
             [cljs.reader :as reader]
+            [vinary.ui.menubar :as menubar]
             [vinary.ui.views :as views]))
 
 (defonce root (atom nil))
@@ -108,6 +109,7 @@
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (bridge!)
   (keybindings!)
+  (menubar/install-access-keys!)
   (mouse-nav!)
   (hints!)
   (mount!)

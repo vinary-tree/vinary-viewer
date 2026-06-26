@@ -17,7 +17,9 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 /* the content region below the tab strip + address bar; positioning context for the floating find bar */
 .vv-content-wrap { position: relative; flex: 1 1 auto; display: flex; flex-direction: column;
   min-height: 0; min-width: 0; }
-.vv-content { flex: 1 1 auto; overflow: auto; padding: 32px 45px; box-sizing: border-box; }
+.vv-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
+  padding: 32px 45px; box-sizing: border-box; }
+.vv-content-pdf { padding: 0; overflow: hidden; }
 .vv-error { color: var(--vv-error); }
 .vv-empty { color: var(--vv-fg-dim); }
 /* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
@@ -63,6 +65,21 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-source .cm-md-list,
 .vv-source .cm-md-task           { color: var(--vv-meta); font-weight: 600; }
 .vv-source .cm-md-quote          { color: var(--vv-head2); }
+
+.markdown-body .cm-keyword     { color: var(--vv-head1); }
+.markdown-body .cm-operator    { color: var(--vv-head1); }
+.markdown-body .cm-variable    { color: var(--vv-var); }
+.markdown-body .cm-number      { color: var(--vv-const); }
+.markdown-body .cm-string      { color: var(--vv-head2); }
+.markdown-body .cm-boolean     { color: var(--vv-const); }
+.markdown-body .cm-comment     { color: var(--vv-comment); font-style: italic; }
+.markdown-body .cm-type        { color: var(--vv-func); }
+.markdown-body .cm-constant    { color: var(--vv-const); }
+.markdown-body .cm-function    { color: var(--vv-func); }
+.markdown-body .cm-property    { color: var(--vv-head4); }
+.markdown-body .cm-punctuation { color: var(--vv-fg-dim); }
+.markdown-body .cm-bracket     { color: var(--vv-fg); }
+.markdown-body .cm-label       { color: var(--vv-meta); }
 
 /* ----- Sidebar: tabbed (Files / Contents), collapsible, resizable ----- */
 .vv-sidebar { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 140px;
@@ -270,20 +287,23 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-menu { position: relative; z-index: 51; }   /* above .vv-menu-overlay (49) so hover-to-switch works */
 .vv-menu-label { padding: 5px 12px; font-size: 13px; color: var(--vv-fg); cursor: pointer; }
 .vv-menu-label:hover, .vv-menu-label-open { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-access-key { text-decoration: underline; text-underline-offset: 2px; }
 .vv-menu-overlay { position: fixed; inset: 0; z-index: 49; }
 .vv-menu-dropdown { position: absolute; top: 100%; left: 0; z-index: 51; min-width: 220px;
   background: var(--vv-bg2); border: 1px solid var(--vv-border); border-radius: 0 0 5px 5px;
   box-shadow: 0 6px 22px rgba(0,0,0,0.45); padding: 4px 0; }
 .vv-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 24px;
   padding: 5px 14px; font-size: 13px; color: var(--vv-fg); cursor: pointer; white-space: nowrap; }
-.vv-menu-item:hover { background: var(--vv-highlight); color: var(--vv-fg-strong); }
+.vv-menu-item:hover, .vv-menu-item-focused { background: var(--vv-highlight); color: var(--vv-fg-strong); }
 .vv-menu-item-accel { color: var(--vv-fg-dim); font-size: 11px; }
-.vv-menu-item:hover .vv-menu-item-accel { color: var(--vv-fg-strong); }
+.vv-menu-item:hover .vv-menu-item-accel,
+.vv-menu-item-focused .vv-menu-item-accel { color: var(--vv-fg-strong); }
 .vv-menu-sep { height: 1px; margin: 4px 0; background: var(--vv-border); }
 /* radio submenus (Theme, Key Bindings) — flyout to the right + active marked */
 .vv-menu-item-submenu { position: relative; }
 .vv-menu-item-arrow { color: var(--vv-fg-dim); font-size: 11px; }
-.vv-menu-item-submenu:hover .vv-menu-item-arrow { color: var(--vv-fg-strong); }
+.vv-menu-item-submenu:hover .vv-menu-item-arrow,
+.vv-menu-item-focused .vv-menu-item-arrow { color: var(--vv-fg-strong); }
 .vv-menu-subdropdown { position: absolute; left: 100%; top: -5px; z-index: 52; min-width: 200px;
   background: var(--vv-bg2); border: 1px solid var(--vv-border); border-radius: 5px;
   box-shadow: 0 6px 22px rgba(0,0,0,0.45); padding: 4px 0; }
