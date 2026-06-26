@@ -1,9 +1,7 @@
 (ns vinary.renderer.markdown
-  "Markdown → HTML via the unified/remark/rehype pipeline (GFM + heading slugs + syntax highlighting),
-   plus a small rehype step that rewrites RELATIVE img/link URLs to absolute file:// against the source
-   document's directory. Without it, an embedded `![](../diagrams/foo.svg)` renders to a relative
-   `<img src>` that — shown via innerHTML inside resources/public/index.html — resolves against
-   resources/public/ (the renderer's file:// base), not the doc's dir, so the figure is blank.
+  "Markdown → HTML via the unified/remark/rehype pipeline (GFM + heading slugs + syntax highlighting).
+   Rehype transforms rewrite relative URLs to source-relative file:// URIs, wrap bare preview images in
+   links, and preserve Markdown source positions as data attributes for preview context-menu actions.
    Runs in the renderer (Chromium): the all-ESM remark stack bundles cleanly and the browser URL
    constructor does the path join (Node `path` is stubbed here). Pure transform; returns Promise<string>."
   (:require ["unified" :refer [unified]]
@@ -62,6 +60,80 @@
     (when-let [^js kids (.-children node)]
       (dotimes [i (.-length kids)] (walk-rewrite! (aget kids i) base cache-token)))))
 
+(defn- source-props [pos kind]
+  (let [props #js {}]
+    (when pos
+      (when-let [^js start (.-start pos)]
+        (aset props "data-vv-source-start-line" (str (.-line start)))
+        (aset props "data-vv-source-start-column" (str (.-column start)))
+        (when (some? (.-offset start))
+          (aset props "data-vv-source-start-offset" (str (.-offset start)))))
+      (when-let [^js end (.-end pos)]
+        (aset props "data-vv-source-end-line" (str (.-line end)))
+        (aset props "data-vv-source-end-column" (str (.-column end)))
+        (when (some? (.-offset end))
+          (aset props "data-vv-source-end-offset" (str (.-offset end)))))
+      (aset props "data-vv-source-kind" kind))
+    props))
+
+(defn- merge-source-props! [^js node kind]
+  (when-let [pos (.-position node)]
+    (let [props (or (.-properties node) #js {})]
+      (when-not (.-properties node) (set! (.-properties node) props))
+      (let [src (source-props pos kind)]
+        (doseq [k ["data-vv-source-start-line"
+                   "data-vv-source-start-column"
+                   "data-vv-source-start-offset"
+                   "data-vv-source-end-line"
+                   "data-vv-source-end-column"
+                   "data-vv-source-end-offset"
+                   "data-vv-source-kind"]]
+          (when-let [v (aget src k)]
+            (aset props k v)))))))
+
+(defn- source-text-span [^js node]
+  #js {:type "element"
+       :tagName "span"
+       :properties (source-props (.-position node) "text")
+       :children #js [node]
+       :position (.-position node)})
+
+(defn- annotate-source! [^js node]
+  (when node
+    (when (= "element" (.-type node))
+      (merge-source-props! node "element"))
+    (when-let [^js kids (.-children node)]
+      (dotimes [i (.-length kids)]
+        (let [child (aget kids i)]
+          (if (and (= "text" (.-type child))
+                   (.-position child)
+                   (not (str/blank? (.-value child))))
+            (aset kids i (source-text-span child))
+            (annotate-source! child)))))))
+
+(defn- wrap-image-node [^js img]
+  (let [props (or (.-properties img) #js {})
+        src   (aget props "src")]
+    (when (and (string? src) (not (str/blank? src)))
+      #js {:type "element"
+           :tagName "a"
+           :properties #js {:href src}
+           :children #js [img]
+           :position (.-position img)})))
+
+(defn- wrap-unlinked-images! [^js node parent-tag]
+  (when node
+    (when-let [^js kids (.-children node)]
+      (dotimes [i (.-length kids)]
+        (let [child (aget kids i)
+              tag   (.-tagName child)]
+          (if (and (= "element" (.-type child))
+                   (= "img" tag)
+                   (not= "a" parent-tag))
+            (when-let [wrapped (wrap-image-node child)]
+              (aset kids i wrapped))
+            (wrap-unlinked-images! child tag)))))))
+
 (defn- rewrite-urls
   "A rehype (hast) transformer plugin: rewrite relative element URLs to absolute file:// against base-dir."
   [base-dir cache-token]
@@ -69,6 +141,22 @@
     (fn [tree _file]
       (when (and base-dir (not (str/blank? base-dir)))
         (walk-rewrite! tree (str "file://" base-dir "/") cache-token))
+      tree)))
+
+(defn- wrap-images
+  "A rehype transformer plugin: wrap bare images in links to their resolved src URI."
+  []
+  (fn [_opts]
+    (fn [tree _file]
+      (wrap-unlinked-images! tree nil)
+      tree)))
+
+(defn- source-positions
+  "A rehype transformer plugin: expose Markdown source positions to the preview DOM."
+  []
+  (fn [_opts]
+    (fn [tree _file]
+      (annotate-source! tree)
       tree)))
 
 (defn render
@@ -83,6 +171,8 @@
        (.use rehype-slug)
        (.use rehype-highlight)
        (.use (rewrite-urls base-dir cache-token))
+       (.use (wrap-images))
+       (.use (source-positions))
        (.use rehype-stringify)
        (.process md)
        (.then (fn [file] (str file))))))

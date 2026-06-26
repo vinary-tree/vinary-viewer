@@ -39,6 +39,19 @@
   (thematic_break)
 ] @punctuation.special
 
+(task_list_marker_checked) @markup.list.checked
+(task_list_marker_unchecked) @markup.list.unchecked
+
+(pipe_table_header
+  (pipe_table_cell) @markup.heading)
+
+[
+  (pipe_table_delimiter_cell)
+  (pipe_table_delimiter_row)
+  (pipe_table_align_left)
+  (pipe_table_align_right)
+] @punctuation.delimiter
+
 [
   (block_continuation)
   (block_quote_marker)

@@ -10,11 +10,22 @@
             [vinary.app.commands]
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
+            [vinary.renderer.history-input :as history-input]
             [vinary.renderer.syntax :as syntax]
             [cljs.reader :as reader]
             [vinary.ui.views :as views]))
 
 (defonce root (atom nil))
+(defonce last-history-input (atom {:dir nil :time 0}))
+
+(defn- dispatch-history-nav! [dir]
+  (let [[state accepted?] (history-input/accept @last-history-input dir (.now js/Date))]
+    (reset! last-history-input state)
+    (when accepted?
+      (case dir
+        "back"    (rf/dispatch [:history/back])
+        "forward" (rf/dispatch [:history/forward])
+        nil))))
 
 (defn bridge!
   "Wire the preload's contextBridge API (window.vv) to re-frame. Content streams in here on every file
@@ -38,6 +49,8 @@
       (.onWebToc vv (fn [payload] (rf/dispatch [:web/toc (js->clj payload :keywordize-keys true)]))))
     (when (.-onWebActiveHeading vv)
       (.onWebActiveHeading vv (fn [id] (rf/dispatch [:web/active-heading id]))))
+    (when (.-onHistoryNav vv)
+      (.onHistoryNav vv dispatch-history-nav!))
     ;; menu shell: files chosen in the Open dialog, persisted settings (EDN text), app-info for About
     (when (.-onOpenFiles vv)
       (.onOpenFiles vv (fn [payload] (rf/dispatch [:files/opened (js->clj payload :keywordize-keys true)]))))
@@ -61,8 +74,8 @@
   (.addEventListener js/window "mousedown"
                      (fn [^js e]
                        (case (.-button e)
-                         3 (do (.preventDefault e) (rf/dispatch [:history/back]))
-                         4 (do (.preventDefault e) (rf/dispatch [:history/forward]))
+                         3 (do (.preventDefault e) (dispatch-history-nav! "back"))
+                         4 (do (.preventDefault e) (dispatch-history-nav! "forward"))
                          nil))
                      true))
 
@@ -97,6 +110,7 @@
   (keybindings!)
   (mouse-nav!)
   (hints!)
-  (mount!))
+  (mount!)
+  (rf/dispatch [:view/re-frame-10x-hide]))
 
 (defn ^:export reload [] (mount!))

@@ -71,6 +71,11 @@ contextBridge.exposeInMainWorld('vv', {
     ipcRenderer.on('vv:web-active-heading', h);
     return () => ipcRenderer.removeListener('vv:web-active-heading', h);
   },
+  onHistoryNav: (cb) => {
+    const h = (_e, dir) => cb(dir);
+    ipcRenderer.on('vv:history-nav', h);
+    return () => ipcRenderer.removeListener('vv:history-nav', h);
+  },
   onOpenFiles: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:open-files', h);

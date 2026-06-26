@@ -3,11 +3,15 @@
    Items adapt to the target kind (a tree/link file, a directory, or an http link), arranged + separated
    for clarity. A click-away (or right-click) overlay closes it."
   (:require [re-frame.core :as rf]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [vinary.ui.preview-navigation :as preview-nav]))
 
 (defn- basename [p] (last (str/split (str p) #"/")))
 
-(defn- items-for [{:keys [kind path text id]} vs?]
+(defn- source-label [source?]
+  (if source? "View Preview" "View Source"))
+
+(defn- items-for [{:keys [kind path uri text id view-source? source-location] :as target} vs?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -24,17 +28,30 @@
            :sep
            {:label "Copy link URL"        :event [:clipboard/copy path]}
            (when (seq text) {:label "Copy link text" :event [:clipboard/copy text]})]
+    :preview-link
+    [{:label "Open"                 :event (preview-nav/open-event target false)}
+     (when (preview-nav/new-tab? target)
+       {:label "Open in new tab"    :event (preview-nav/open-event target true)})
+     :sep
+     {:label "Copy link location"   :event [:clipboard/copy uri]}
+     {:label "Copy link text"       :event [:clipboard/copy (or text "")]}
+     (when source-location
+       {:label "Copy source location" :event [:clipboard/copy source-location]})]
+    :preview-body
+    [{:label "Copy"                 :event [:clipboard/copy (or text "")]}
+     (when source-location
+       {:label "Copy source location" :event [:clipboard/copy source-location]})]
     ;; a tab (right-clicked in either the horizontal strip or the vertical Tabs panel)
     :tab  [{:label "Close"                :event [:tab/close id]}
            {:label "Close Others"         :event [:tab/close-others id]}
            {:label "Close to the Right"   :event [:tab/close-right id]}
            :sep
-           {:label "View Source"          :event [:tab/toggle-source id]}
+           {:label (source-label view-source?) :event [:tab/toggle-source id]}
            (when path :sep)
            (when path {:label "Copy file path" :event [:clipboard/copy path]})
            (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})]
     ;; the active markdown document (right-clicked in the content pane, not on a link)
-    :doc  [{:label (if vs? "View Rendered" "View Source") :event [:tab/toggle-source]}
+    :doc  [{:label (source-label vs?) :event [:tab/toggle-source]}
            :sep
            {:label "Copy file path"       :event [:clipboard/copy path]}
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]

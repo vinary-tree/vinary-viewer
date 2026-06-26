@@ -30,7 +30,8 @@
             {:label "Zoom Out"       :accel "Ctrl+-" :event [:view/zoom -1]}
             {:label "Reset Zoom"     :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
-            {:label "Developer Tools" :accel "Ctrl+Shift+I" :event [:view/devtools]}]}
+            {:label "Developer Tools" :accel "Ctrl+Shift+I" :event [:view/devtools]}
+            {:label "re-frame-10x"   :event [:view/re-frame-10x]}]}
    {:label "Settings"
     :items [{:submenu "Theme"        :radio :sub/theme}
             {:submenu "Key Bindings" :radio :sub/keymaps}
@@ -86,7 +87,12 @@
                    (:submenu item)
                    ^{:key i}
                    [:div.vv-menu-item.vv-menu-item-submenu
-                    {:on-mouse-enter #(reset! sub-open (:submenu item))}
+                    {:on-mouse-enter #(reset! sub-open (:submenu item))
+                     :on-mouse-over  #(reset! sub-open (:submenu item))
+                     :on-click       (fn [e]
+                                       (.preventDefault e)
+                                       (.stopPropagation e)
+                                       (reset! sub-open (:submenu item)))}
                     [:span.vv-menu-item-label (:submenu item)]
                     [:span.vv-menu-item-arrow "▸"]
                     (when (= @sub-open (:submenu item))

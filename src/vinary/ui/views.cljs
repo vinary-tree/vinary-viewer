@@ -13,6 +13,8 @@
             [vinary.ui.palette :as palette]
             [vinary.ui.menubar :as menubar]
             [vinary.ui.context-menu :as ctx-menu]
+            [vinary.ui.preview-context :as preview-ctx]
+            [vinary.ui.preview-navigation :as preview-nav]
             [vinary.ui.settings :as settings-ui]
             [vinary.ui.about :as about]
             [vinary.ui.keybindings-editor :as kbedit]
@@ -27,13 +29,131 @@
 (defn- link-display [{:keys [kind path]}]
   (case kind :anchor (str "#" path) :http path (:file :dir) path nil))
 
+(defn- text-node? [^js node]
+  (= 3 (.-nodeType node)))
+
+(defn- node-contained? [^js root ^js node]
+  (when (and root node)
+    (or (identical? root node)
+        (when-let [el (if (= 1 (.-nodeType node)) node (.-parentElement node))]
+          (.contains root el)))))
+
+(defn- first-text-node [^js node]
+  (when node
+    (if (text-node? node)
+      node
+      (let [kids (.-childNodes node)]
+        (first (keep #(first-text-node (aget kids %)) (range (.-length kids))))))))
+
+(defn- last-text-node [^js node]
+  (when node
+    (if (text-node? node)
+      node
+      (let [kids (.-childNodes node)]
+        (first (keep #(last-text-node (aget kids %)) (range (dec (.-length kids)) -1 -1)))))))
+
+(defn- text-node-at [^js node offset]
+  (cond
+    (not node) nil
+    (text-node? node) [node offset]
+    :else
+    (let [kids (.-childNodes node)
+          len  (.-length kids)
+          i    (max 0 (min len (or offset 0)))]
+      (or (when (< i len)
+            (when-let [t (first-text-node (aget kids i))]
+              [t 0]))
+          (when (pos? i)
+            (when-let [t (last-text-node (aget kids (dec i)))]
+              [t (count (.-nodeValue t))]))
+          (when-let [t (first-text-node node)]
+            [t 0])))))
+
+(defn- caret-at [x y]
+  (let [doc js/document]
+    (or (when-let [f (aget doc "caretPositionFromPoint")]
+          (when-let [p (.call f doc x y)]
+            [(.-offsetNode p) (.-offset p)]))
+        (when-let [f (aget doc "caretRangeFromPoint")]
+          (when-let [r (.call f doc x y)]
+            [(.-startContainer r) (.-startOffset r)])))))
+
+(defn- active-selection [^js body]
+  (when-let [sel (.getSelection js/window)]
+    (when (and (pos? (.-rangeCount sel)) (not (.-isCollapsed sel)))
+      (let [range (.getRangeAt sel 0)
+            text  (str sel)]
+        (when (and (seq (str/trim text))
+                   (node-contained? body (.-startContainer range))
+                   (node-contained? body (.-endContainer range)))
+          {:text text :node (.-startContainer range) :offset (.-startOffset range)})))))
+
+(defn- current-term [^js body ^js e]
+  (when-let [[node offset] (caret-at (.-clientX e) (.-clientY e))]
+    (when-let [[text-node text-offset] (text-node-at node offset)]
+      (when (node-contained? body text-node)
+        (when-let [{:keys [text start]} (preview-ctx/term-at (.-nodeValue text-node) text-offset)]
+          {:text text :node text-node :offset start})))))
+
+(defn- selection-or-term [^js body ^js e]
+  (or (active-selection body) (current-term body e)))
+
+(defn- source-element [^js node]
+  (loop [el (if (= 1 (.-nodeType node)) node (.-parentElement node))]
+    (when el
+      (if (.hasAttribute el "data-vv-source-start-line")
+        el
+        (recur (.-parentElement el))))))
+
+(defn- source-span [^js el]
+  {:kind         (.getAttribute el "data-vv-source-kind")
+   :start-line   (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-start-line"))
+   :start-column (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-start-column"))
+   :start-offset (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-start-offset"))
+   :end-offset   (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-end-offset"))})
+
+(defn- source-location [source path node offset text]
+  (when-let [el (and node (source-element node))]
+    (let [{:keys [kind start-line start-column start-offset end-offset] :as span} (source-span el)
+          exact-text? (= "text" kind)
+          source-offset (cond
+                          (and exact-text? (number? start-offset) (number? offset))
+                          (+ start-offset offset)
+
+                          (and (seq text) (number? start-offset))
+                          (preview-ctx/best-source-offset source start-offset end-offset text start-offset)
+
+                          :else start-offset)
+          lc (or (preview-ctx/offset->line-column source source-offset)
+                 {:line start-line :column start-column})]
+      (preview-ctx/location-string path lc))))
+
+(defn- link-text [^js a]
+  (or (not-empty (str/trim (.-textContent a)))
+      (when-let [^js img (.querySelector a "img[alt]")]
+        (not-empty (str/trim (or (.getAttribute img "alt") ""))))
+      ""))
+
+(defn- preview-link-target [^js a source path]
+  (let [href (link/target-for-anchor a)
+        text (link-text a)]
+    (when-let [{link-kind :kind link-path :path} (link/classify href text)]
+      {:kind :preview-link
+       :link-kind link-kind
+       :path link-path
+       :uri href
+       :text text
+       :source-location (source-location source path a nil nil)})))
+
 (defn markdown-body
   "A .markdown-body whose innerHTML tracks the HTML passed in (content-view holds the subscription).
    Intercepts link clicks (→ in-pane navigation, never replacing the window), shows the hovered link's URI
    in the status bar, font-matches embedded SVG figures, restores the per-history scroll position, and
    opens a themed context menu on right-click. Middle-click / Ctrl+click open a link in a new tab."
-  [_html]
+  [_html _source _path]
   (let [node (atom nil)
+        source* (atom nil)
+        path* (atom nil)
         raf  (atom false)
         last-link (atom nil)
         on-resize (fn []
@@ -43,13 +163,9 @@
                        (fn [] (reset! raf false) (figures/scale-figures! @node)))))
         follow (fn [^js a new-tab? ^js e]
                  (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
-                   (.preventDefault e)
-                   (case (:kind target)
-                     :anchor       (when-let [^js el (.getElementById js/document (:path target))]
-                                     (.scrollIntoView el #js {:behavior "smooth" :block "start"}))
-                     (:http :file) (rf/dispatch [(if new-tab? :doc/open-new :doc/open) (:path target)])
-                     :dir          (rf/dispatch [:shell/open-path (:path target)])
-                     nil)))
+                   (when-let [event (preview-nav/open-event target new-tab?)]
+                     (.preventDefault e)
+                     (rf/dispatch event))))
         on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
         on-aux   (fn [^js e] (when (= 1 (.-button e))
                                (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
@@ -61,16 +177,26 @@
                        (rf/dispatch [:ui/hover-link (when a (link-display (link/classify href "")))]))))
         on-leave (fn [_] (reset! last-link nil) (rf/dispatch [:ui/hover-link nil]))
         on-ctx   (fn [^js e]
-                   (when-let [^js a (.closest (.-target e) "a")]
-                     (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
-                       (when (#{:file :dir :http} (:kind target))
-                         (.preventDefault e)
-                         (.stopPropagation e)   ; don't also trigger the content-pane's doc menu
-                         (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))))]
+                   (let [source @source*
+                         path @path*
+                         ^js body @node
+                         ^js a (.closest (.-target e) "a")
+                         target (or (when a (preview-link-target a source path))
+                                    (let [{:keys [text node offset] :as current} (selection-or-term body e)
+                                          source-node (or node (.-target e))]
+                                      {:kind :preview-body
+                                       :text (or text "")
+                                       :source-location (source-location source path source-node offset text)}))]
+                     (.preventDefault e)
+                     (.stopPropagation e)
+                     (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))]
     (r/create-class
      {:display-name "vv-markdown-body"
       :component-did-mount  (fn [this]
-                              (set-inner! @node (second (r/argv this)))
+                              (let [[_ html source path] (r/argv this)]
+                                (reset! source* source)
+                                (reset! path* path)
+                                (set-inner! @node html))
                               (figures/scale-figures! @node)
                               (scroll/apply! @node)
                               (.addEventListener js/window "resize" on-resize)
@@ -80,7 +206,10 @@
                               (.addEventListener @node "mouseleave" on-leave)
                               (.addEventListener @node "contextmenu" on-ctx))
       :component-did-update (fn [this]
-                              (set-inner! @node (second (r/argv this)))
+                              (let [[_ html source path] (r/argv this)]
+                                (reset! source* source)
+                                (reset! path* path)
+                                (set-inner! @node html))
                               (figures/scale-figures! @node)
                               (scroll/apply! @node))
       :component-will-unmount (fn [_]
@@ -92,7 +221,7 @@
                                   (.removeEventListener @node "mouseleave" on-leave)
                                   (.removeEventListener @node "contextmenu" on-ctx))
                                 (rf/dispatch [:ui/hover-link nil]))
-      :reagent-render       (fn [_html] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
+      :reagent-render       (fn [_html _source _path] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
 
 (defn- pdf-rect [^js node]
   (let [r (.getBoundingClientRect node)]
@@ -192,14 +321,7 @@
         uri  @(rf/subscribe [:ui/active-uri])
         vs?  @(rf/subscribe [:ui/active-view-source?])]
     [:div.vv-content
-     {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))
-      ;; right-click the markdown content (not a link) → a doc context menu (View Source / Copy)
-      :on-context-menu (fn [^js e]
-                         (when (and (= "markdown" (:doc/kind doc)) (not (.closest (.-target e) "a")))
-                           (.preventDefault e)
-                           (rf/dispatch [:context-menu/show
-                                         {:x (.-clientX e) :y (.-clientY e)
-                                          :target {:kind :doc :path (:doc/path doc)}}])))}
+     {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
        (uri/http? uri)             [web-host uri]
@@ -207,12 +329,12 @@
        (= "pdf" (:doc/kind doc))   [pdf-host (:doc/path doc)]
        (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
                                    [image-view (:doc/path doc) (:doc/stamp doc)]
-       (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc)]]
+       (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
        (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
        ;; "View Source" on a markdown doc → show its raw source in the pane (not replacing the window)
        (and vs? (= "markdown" (:doc/kind doc)) (:doc/text doc))
        ^{:key (str "src:" (:doc/path doc))} [source-view (:doc/text doc) (:doc/path doc)]
-       (:doc/html doc)             [markdown-body (:doc/html doc)]
+       (:doc/html doc)             [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
        :else                       [:div.vv-empty "Rendering…"])]))
 
 (defn uri-bar

@@ -31,7 +31,9 @@
 {:id "cmake" :language "cmake" :extensions [".cmake"] :wasm-url "grammars/cmake/grammar.wasm" :scm-url "grammars/cmake/highlights.scm" :source-kind "git" :source "https://github.com/uyha/tree-sitter-cmake"}
 {:id "nim" :language "nim" :extensions [".nim"] :wasm-url "grammars/nim/grammar.wasm" :scm-url "grammars/nim/highlights.scm" :source-kind "git" :source "https://github.com/alaviss/tree-sitter-nim"}
 {:id "zig" :language "zig" :extensions [".zig"] :wasm-url "grammars/zig/grammar.wasm" :scm-url "grammars/zig/highlights.scm" :source-kind "git" :source "https://github.com/maxxnino/tree-sitter-zig"}
+{:id "d2" :language "d2" :extensions [".d2"] :wasm-url "grammars/d2/grammar.wasm" :scm-url "grammars/d2/highlights.scm" :source-kind "local" :source "resources/grammars-src/tree-sitter-d2"}
 {:id "markdown" :language "markdown" :extensions [".md" ".markdown" ".mdx"] :wasm-url "grammars/markdown/grammar.wasm" :scm-url "grammars/markdown/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-markdown"}
+{:id "markdown-inline" :language "markdown_inline" :extensions [] :wasm-url "grammars/markdown-inline/grammar.wasm" :scm-url "grammars/markdown-inline/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-markdown"}
 {:id "html" :language "html" :extensions [".html" ".htm"] :wasm-url "grammars/html/grammar.wasm" :scm-url "grammars/html/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter/tree-sitter-html"}
 {:id "css" :language "css" :extensions [".css"] :wasm-url "grammars/css/grammar.wasm" :scm-url "grammars/css/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter/tree-sitter-css"}
 {:id "scss" :language "scss" :extensions [".scss"] :wasm-url "grammars/scss/grammar.wasm" :scm-url "grammars/scss/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-scss"}

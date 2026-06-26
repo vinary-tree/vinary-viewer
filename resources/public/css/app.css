@@ -51,6 +51,18 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-source .cm-punctuation { color: var(--vv-fg-dim); }
 .vv-source .cm-bracket     { color: var(--vv-fg); }
 .vv-source .cm-label       { color: var(--vv-meta); }
+.vv-source .cm-md-heading        { color: var(--vv-head1); font-weight: 700; }
+.vv-source .cm-md-heading-marker { color: var(--vv-fg-dim); font-weight: 600; }
+.vv-source .cm-md-code           { color: var(--vv-head4); background: var(--vv-bg-code); }
+.vv-source .cm-md-code-block     { background: var(--vv-bg2); }
+.vv-source .cm-md-url,
+.vv-source .cm-md-link           { color: var(--vv-head1); text-decoration: underline; text-underline-offset: 2px; }
+.vv-source .cm-md-strong         { color: var(--vv-const); font-weight: 700; }
+.vv-source .cm-md-emphasis       { color: var(--vv-em); font-style: italic; }
+.vv-source .cm-md-strike         { color: var(--vv-fg-dim); text-decoration: line-through; }
+.vv-source .cm-md-list,
+.vv-source .cm-md-task           { color: var(--vv-meta); font-weight: 600; }
+.vv-source .cm-md-quote          { color: var(--vv-head2); }
 
 /* ----- Sidebar: tabbed (Files / Contents), collapsible, resizable ----- */
 .vv-sidebar { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 140px;

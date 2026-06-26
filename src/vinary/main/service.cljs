@@ -10,8 +10,8 @@
             ["chokidar" :refer [watch]]
             [clojure.set :as set]
             [clojure.string :as str]
+            [vinary.main.file-kind :as file-kind]
             [vinary.main.pdf :as pdf]
-            [vinary.main.diagram :as diagram]
             [vinary.main.grammars :as grammars]))
 
 (defonce ^:private watchers (atom {}))   ; path -> chokidar watcher
@@ -47,14 +47,7 @@
     (.send wc "vv:tree" (clj->js t))))
 
 (defn- kind-of [^String path]
-  (let [lower (str/lower-case path)]
-    (cond
-      (re-find #"\.(md|markdown|mdx)$" lower)                     "markdown"
-      (re-find #"\.(png|jpe?g|gif|svg|webp|bmp|ico|avif)$" lower) "image"
-      (re-find #"\.pdf$" lower)                                   "pdf"
-      (re-find #"\.(d2|puml|plantuml|pu|iuml|wsd|mmd|mermaid|dot|gv|graphviz)$" lower) "diagram"
-      (grammars/source? path)                                    "source"
-      :else                                                      "text")))
+  (file-kind/kind-of grammars/source? path))
 
 (defn- send-content! [^js wc path]
   (let [kind  (kind-of path)
@@ -64,11 +57,6 @@
       (#{"image" "pdf"} kind)
       (do (.send wc "vv:content" (clj->js {:path path :kind kind :stamp stamp}))
           (when (= kind "pdf") (pdf/reload! path)))   ; live-refresh the native PDF view on change
-
-      ;; diagrams render to SVG in main (shelling out to d2/plantuml/mmdc/dot) and ship as HTML
-      (= "diagram" kind)
-      (try (.send wc "vv:content" (clj->js {:path path :kind kind :html (diagram/render path) :stamp stamp}))
-           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
       :else
       (try (let [text (.readFileSync fs path "utf8")]

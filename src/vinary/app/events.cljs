@@ -59,12 +59,26 @@
          {:fx [[:ds/transact [[:db/add eid :doc/html html]]]   ; add by entity-id, not :doc/path upsert
                [:vv/watch-assets {:doc-path path :paths assets}]]})))))
 
+(defn content-error-tx
+  "Create/update a document error transaction for path, even if no content entity exists yet."
+  [snap path message stamp]
+  (when path
+    (let [message (or message "Unknown content error")]
+      (if-let [eid (ds/eid-for-path snap path)]
+        [[:db/add eid :doc/error message]
+         [:db/add eid :doc/stamp stamp]]
+        [{:doc/path path
+          :doc/kind "text"
+          :doc/error message
+          :doc/stamp stamp}]))))
+
 (rf/reg-event-fx
  :content/error
- (fn [_ [_ {:keys [path message]}]]
-   (if-let [eid (and path (ds/eid-for-path (ds/snapshot) path))]
-     {:fx [[:ds/transact [[:db/add eid :doc/error message]]]]}
-     {})))
+ (fn [{:keys [db]} [_ {:keys [path message stamp]}]]
+   (let [tx    (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)))
+         db'   (if (and path (empty? (nav/tabs db))) (nav/add-tab db path) db)]
+     (cond-> {:db db'}
+       (seq tx) (assoc :fx [[:ds/transact tx]])))))
 
 ;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
 ;; scrolls itself, so http never requests a content-pane restore.
@@ -287,6 +301,18 @@
 (rf/reg-event-fx :app/quit         (fn [_ _] {:fx [[:vv/quit]]}))
 (rf/reg-event-fx :view/zoom        (fn [_ [_ dir]] {:fx [[:vv/zoom dir]]}))
 (rf/reg-event-fx :view/devtools    (fn [_ _] {:fx [[:vv/devtools]]}))
+(rf/reg-event-fx
+ :view/re-frame-10x
+ (fn [{:keys [db]} _]
+   (let [open? (not (get-in db [:ui :re-frame-10x-open?]))]
+     {:db (assoc-in db [:ui :re-frame-10x-open?] open?)
+      :fx [[:devtools/re-frame-10x open?]]})))
+
+(rf/reg-event-fx
+ :view/re-frame-10x-hide
+ (fn [{:keys [db]} _]
+   {:db (assoc-in db [:ui :re-frame-10x-open?] false)
+    :fx [[:devtools/re-frame-10x false]]}))
 
 ;; the Open dialog returns the chosen paths: one → current tab; several → one new tab each
 (rf/reg-event-fx

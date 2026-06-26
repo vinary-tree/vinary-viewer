@@ -9,7 +9,7 @@
 (defn tab-item
   "One tab row. `horizontal?` selects the strip vs. the vertical Tabs panel; the behavior (activate / close
    / context menu / drag-reorder) is identical in both, only the drop-side test (x vs y) differs."
-  [{:keys [id uri active? horizontal?]}]
+  [{:keys [id uri active? horizontal? view-source?]}]
   [:div {:class           (str (if horizontal? "vv-tab" "vv-vtab") (when active? " vv-tab-active"))
          :title           (uri/display uri)
          :draggable       true
@@ -18,7 +18,8 @@
                             (.preventDefault e) (.stopPropagation e)
                             (rf/dispatch [:context-menu/show
                                           {:x (.-clientX e) :y (.-clientY e)
-                                           :target {:kind :tab :id id :path (uri/file-path uri)}}]))
+                                           :target {:kind :tab :id id :path (uri/file-path uri)
+                                                    :view-source? view-source?}}]))
          :on-drag-start   (fn [^js e] (.setData (.-dataTransfer e) "text/plain" (str id)))
          :on-drag-over    (fn [^js e] (.preventDefault e))
          :on-drop         (fn [^js e]
@@ -38,5 +39,6 @@
         active @(rf/subscribe [:ui/active-tab-id])]
     (when (seq tabs)
       [:div.vv-tabs
-       (for [{:keys [id] tab-uri :uri} tabs]
-         ^{:key id} [tab-item {:id id :uri tab-uri :active? (= id active) :horizontal? true}])])))
+       (for [{:keys [id view-source?] tab-uri :uri} tabs]
+         ^{:key id} [tab-item {:id id :uri tab-uri :active? (= id active)
+                                :horizontal? true :view-source? view-source?}])])))

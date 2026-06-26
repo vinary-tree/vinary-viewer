@@ -97,6 +97,7 @@ function grammarDir(entry, srcDir) {
 
 function queryPath(entry, srcDir, gramDir) {
   if (entry.source.queryText) return { text: entry.source.queryText };
+  if (entry.source.queryFile) return { path: repoPath(entry.source.queryFile) };
   const query = entry.source.query;
   const candidates = [
     query && path.resolve(srcDir, query),

@@ -62,6 +62,7 @@
    :view/zoom-out   {:id :view/zoom-out :title "Zoom out" :category "View" :dispatch [:view/zoom -1]}
    :view/zoom-reset {:id :view/zoom-reset :title "Reset zoom" :category "View" :dispatch [:view/zoom 0]}
    :view/devtools   {:id :view/devtools :title "Developer tools" :category "View" :dispatch [:view/devtools]}
+   :view/re-frame-10x {:id :view/re-frame-10x :title "re-frame-10x" :category "View" :dispatch [:view/re-frame-10x]}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :about/open     {:id :about/open :title "About vinary-viewer" :category "Help" :dispatch [:about/open]}

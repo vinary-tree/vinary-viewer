@@ -15,8 +15,7 @@
              :modules    {:main {:init-fn vinary.renderer.core/init}}
              :devtools   {:after-load vinary.renderer.core/reload
                           :preloads   [devtools.preload
-                                       day8.re-frame-10x.preload.react-18
-                                       re-frisk.preload]}
+                                       day8.re-frame-10x.preload.react-18]}
              ;; trace is a dev-only re-frame-10x feature; in :release it defaults to goog.DEBUG (false)
              :dev {:compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}}
              ;; :simple (not :advanced) for release — advanced property-renaming breaks the re-frame /

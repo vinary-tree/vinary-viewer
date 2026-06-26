@@ -73,6 +73,14 @@
 
 ;; ---- menu shell effects (renderer → main over the seam) ----
 (defn- vv [] (.-vv js/window))
+(defn- js-get-in [obj ks]
+  (reduce (fn [o k] (when o (aget o k))) obj ks))
+
+(defn- set-re-frame-10x! [visible?]
+  (when-let [show! (js-get-in js/window ["day8" "re_frame_10x" "show_panel_BANG_"])]
+    (when (fn? show!)
+      (show! (boolean visible?)))))
+
 (rf/reg-fx :vv/open-dialog   (fn [_]    (when-let [^js v (vv)] (when (.-openDialog v)   (.openDialog v)))))
 (rf/reg-fx :vv/quit          (fn [_]    (when-let [^js v (vv)] (when (.-quit v)         (.quit v)))))
 (rf/reg-fx :vv/zoom          (fn [dir]  (when-let [^js v (vv)] (when (.-zoom v)         (.zoom v dir)))))
@@ -82,6 +90,7 @@
 (rf/reg-fx :vv/save-keymap   (fn [edn]  (when-let [^js v (vv)] (when (.-saveKeymap v) (.saveKeymap v edn)))))
 (rf/reg-fx :vv/open-path     (fn [p]    (when-let [^js v (vv)] (when (.-openPath v)     (.openPath v p)))))
 (rf/reg-fx :vv/open-external (fn [url]  (when-let [^js v (vv)] (when (.-openExternal v) (.openExternal v url)))))
+(rf/reg-fx :devtools/re-frame-10x (fn [visible?] (set-re-frame-10x! visible?)))
 
 ;; apply font preferences as CSS custom properties on :root (consumed by app.css with fallbacks)
 (rf/reg-fx

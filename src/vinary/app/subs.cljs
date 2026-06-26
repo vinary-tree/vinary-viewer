@@ -26,6 +26,7 @@
 (rf/reg-sub :ui/app-info       (fn [db _] (get-in db [:ui :app-info])))
 (rf/reg-sub :ui/context-menu   (fn [db _] (get-in db [:ui :context-menu])))
 (rf/reg-sub :ui/hover-link     (fn [db _] (get-in db [:ui :hover-link])))
+(rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
 
 ;; ---- keymap-set registry (Settings ▸ Key Bindings + the editor) ----

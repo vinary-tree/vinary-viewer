@@ -23,6 +23,7 @@
         :app-info nil               ; {:name :version :repo} pushed by main
         :context-menu nil           ; {:x :y :target {…}} or nil
         :hover-link nil             ; URI of the link under the cursor (status bar), or nil
+        :re-frame-10x-open? false   ; dev-only day8 re-frame-10x panel visibility
         ;; keymap-set registry (Settings ▸ Key Bindings + the editor): built-ins + named custom sets
         :keymaps {:active "default" :order [] :sets {}}
         ;; the key-binding editor dialog (vinary.ui.keybindings-editor + vinary.input.kbedit-history)

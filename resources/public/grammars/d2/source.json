@@ -1,0 +1,13 @@
+{
+  "id": "d2",
+  "language": "d2",
+  "extensions": [
+    ".d2"
+  ],
+  "source": {
+    "type": "local",
+    "path": "resources/grammars-src/tree-sitter-d2",
+    "query": "queries/highlights.scm"
+  },
+  "sourceRev": "45c8ee8e96fda4745705dd8232f8435131ec1cd0"
+}

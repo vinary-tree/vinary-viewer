@@ -1,7 +1,7 @@
 (ns vinary.core-test
   "Unit tests for the pure, DOM-free logic: key normalization, keymap merge, the keybinding resolver,
    command gating, and DataScript helpers. Run with: npx shadow-cljs compile test && node dist/test/test.js"
-  (:require [cljs.test :refer [deftest is testing run-tests]]
+  (:require [cljs.test :refer [async deftest is testing run-tests]]
             [clojure.string :as str]
             [datascript.core :as d]
             [vinary.input.keys :as keys]
@@ -10,12 +10,18 @@
             [vinary.input.keymaps-registry :as registry]
             [vinary.input.kbedit-history :as hist]
             [vinary.app.commands :as commands]
+            [vinary.app.events :as events]
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.app.ds :as ds]
             [vinary.grammar-catalog :as grammar-catalog]
+            [vinary.main.file-kind :as file-kind]
             [vinary.renderer.hints :as hints]
-            [vinary.renderer.media :as media]))
+            [vinary.renderer.history-input :as history-input]
+            [vinary.renderer.markdown :as markdown]
+            [vinary.renderer.media :as media]
+            [vinary.ui.preview-context :as preview-context]
+            [vinary.ui.preview-navigation :as preview-nav]))
 
 (def ^:private empty-tabs {:ui {:tabs [] :active-tab nil :next-tab-id 0}})
 (def ^:private empty-keymaps {:ui {:keymaps {:active "default" :order [] :sets {}}}})
@@ -85,6 +91,21 @@
     (is (some? (ds/eid-for-path @conn "/a")))
     (is (= "markdown" (ds/doc-attr @conn "/a" :doc/kind)))))
 
+(deftest content-error-transactions
+  (testing "an error for an uncached path creates a visible document entity"
+    (let [conn (d/create-conn {:doc/path {:db/unique :db.unique/identity}})]
+      (d/transact! conn (events/content-error-tx @conn "/tmp/broken.puml" "PlantUML failed" 123))
+      (is (= "text" (ds/doc-attr @conn "/tmp/broken.puml" :doc/kind)))
+      (is (= "PlantUML failed" (ds/doc-attr @conn "/tmp/broken.puml" :doc/error)))
+      (is (= 123 (ds/doc-attr @conn "/tmp/broken.puml" :doc/stamp)))))
+  (testing "an error for an existing document updates that entity"
+    (let [conn (d/create-conn {:doc/path {:db/unique :db.unique/identity}})]
+      (d/transact! conn [{:doc/path "/tmp/readme.md" :doc/kind "markdown" :doc/stamp 1}])
+      (d/transact! conn (events/content-error-tx @conn "/tmp/readme.md" "render failed" 2))
+      (is (= "markdown" (ds/doc-attr @conn "/tmp/readme.md" :doc/kind)))
+      (is (= "render failed" (ds/doc-attr @conn "/tmp/readme.md" :doc/error)))
+      (is (= 2 (ds/doc-attr @conn "/tmp/readme.md" :doc/stamp))))))
+
 ;; ---- navigation: per-tab history with scroll (Phase A) + reorder/view-source (Phase B) ----
 (deftest nav-history-scroll
   (let [db1 (nav/add-tab empty-tabs "/a")
@@ -102,6 +123,32 @@
         (is (= 100 sc) "restores /a's scroll")
         (is (= 50 (get-in (nav/active-tab db3) [:hist :stack 1 :scroll])) "/b's scroll saved")))))
 
+(deftest nav-preview-link-history
+  (testing "preview navigation pushes into the active tab and restores the markdown scroll"
+    (let [db1 (nav/add-tab empty-tabs "/previous.md")
+          db2 (nav/nav-active db1 "/readme.md" 25)
+          db3 (nav/nav-active db2 "/diagram.png" 340)
+          [db4 uri4 sc4] (nav/step db3 -1 0)
+          [db5 uri5 sc5] (nav/step db4 1 345)]
+      (is (= "/readme.md" uri4))
+      (is (= 340 sc4))
+      (is (= "/diagram.png" uri5))
+      (is (= 0 sc5))
+      (is (= 345 (get-in (nav/active-tab db5) [:hist :stack 1 :scroll])))))
+  (testing "an image already open in another tab does not steal focus from preview navigation"
+    (let [db0 (-> empty-tabs
+                  (nav/add-tab "/readme.md")
+                  (nav/add-tab "/diagram.png")
+                  (nav/activate 0))
+          db1 (nav/nav-active db0 "/diagram.png" 120)
+          tabs (nav/tabs db1)]
+      (is (= 0 (nav/active-id db1)))
+      (is (= "/diagram.png" (nav/active-uri db1)))
+      (is (= [{:uri "/readme.md" :scroll 120}
+              {:uri "/diagram.png" :scroll 0}]
+             (get-in (nav/active-tab db1) [:hist :stack])))
+      (is (= "/diagram.png" (:uri (second tabs)))))))
+
 (deftest nav-reorder-and-source
   (let [db (-> empty-tabs (nav/add-tab "/a") (nav/add-tab "/b") (nav/add-tab "/c"))]  ; ids 0,1,2
     (testing "reorder moves a tab to an insertion gap"
@@ -112,18 +159,47 @@
       (is (true?  (nav/view-source? (nav/toggle-source db))))
       (is (false? (nav/view-source? (nav/toggle-source (nav/toggle-source db))))))))
 
+(deftest file-kind-classification
+  (let [source? (fn [path] (contains? grammar-catalog/bundled-source-exts
+                                      (file-kind/extension path)))]
+    (doseq [[path expected] [["README.md" "markdown"]
+                             ["diagram.png" "image"]
+                             ["diagram.svg" "image"]
+                             ["manual.pdf" "pdf"]
+                             ["workflow.d2" "source"]
+                             ["workflow.puml" "source"]
+                             ["workflow.plantuml" "source"]
+                             ["workflow.mmd" "source"]
+                             ["workflow.dot" "source"]
+                             ["program.rho" "source"]
+                             ["notes.unknown" "text"]]]
+      (is (= expected (file-kind/kind-of source? path)) path))))
+
 (deftest bundled-grammar-catalog
   (testing "catalog entries expose required runtime fields"
     (is (seq grammar-catalog/bundled-grammars))
     (doseq [g grammar-catalog/bundled-grammars]
       (is (string? (:id g)))
       (is (string? (:language g)))
-      (is (seq (:extensions g)))
+      (is (vector? (:extensions g)))
       (is (every? #(and (string? %) (str/starts-with? % ".")) (:extensions g)))
       (is (string? (:wasm-url g)))
       (is (string? (:scm-url g)))))
   (testing "source extensions are derived from the bundled catalog"
-    (is (contains? grammar-catalog/bundled-source-exts ".rho"))))
+    (is (contains? grammar-catalog/bundled-source-exts ".rho"))
+    (is (contains? grammar-catalog/bundled-source-exts ".d2"))
+    (is (contains? grammar-catalog/bundled-source-exts ".md"))
+    (is (not (contains? grammar-catalog/bundled-source-exts ""))))
+  (testing "grammars resolve by path, id, and language alias"
+    (is (= "d2" (:id (grammar-catalog/grammar-for-path "workflow.d2" grammar-catalog/bundled-grammars))))
+    (is (= "d2" (:id (grammar-catalog/grammar-for-language "d2" grammar-catalog/bundled-grammars))))
+    (is (= "markdown" (:id (grammar-catalog/grammar-for-path "README.md" grammar-catalog/bundled-grammars))))
+    (is (= "markdown-inline" (:id (grammar-catalog/grammar-for-id "markdown-inline"
+                                                                    grammar-catalog/bundled-grammars))))
+    (is (= "markdown-inline" (:id (grammar-catalog/grammar-for-language "markdown_inline"
+                                                                         grammar-catalog/bundled-grammars))))
+    (is (= "javascript" (:id (grammar-catalog/grammar-for-language "js" grammar-catalog/bundled-grammars))))
+    (is (= "markdown" (:id (grammar-catalog/grammar-for-language "gfm" grammar-catalog/bundled-grammars))))))
 
 ;; ---- keymap-set registry (Phase C) ----
 (deftest keymaps-registry
@@ -222,5 +298,67 @@
     (is (nil? (media/local-media-path "file:///tmp/readme.md"))))
   (testing "filesystem paths are encoded as file urls"
     (is (= "file:///tmp/a%20b%23c.svg" (media/path->file-url "/tmp/a b#c.svg")))))
+
+(deftest preview-navigation-events
+  (testing "preview links navigate the active tab with browser-like semantics"
+    (is (= [:tab/navigate "/tmp/diagram.png"]
+           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} false)))
+    (is (= [:tab/open "/tmp/diagram.png"]
+           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} true)))
+    (is (= [:tab/navigate "https://example.com"]
+           (preview-nav/open-event {:kind :http :path "https://example.com"} false)))
+    (is (= [:tab/open "https://example.com"]
+           (preview-nav/open-event {:kind :preview-link :link-kind :http :path "https://example.com"} true))))
+  (testing "non-document preview targets keep their existing destinations"
+    (is (= [:toc/goto "section"]
+           (preview-nav/open-event {:kind :anchor :path "section"} false)))
+    (is (= [:shell/open-path "/tmp"]
+           (preview-nav/open-event {:kind :dir :path "/tmp"} false)))
+    (is (true? (preview-nav/new-tab? {:kind :preview-link :link-kind :file :path "/x"})))
+    (is (false? (preview-nav/new-tab? {:kind :preview-link :link-kind :anchor :path "x"})))))
+
+(deftest history-input-coalescing
+  (let [[s1 ok1?] (history-input/accept {:dir nil :time 0} "back" 1000)
+        [s2 ok2?] (history-input/accept s1 "back" 1100)
+        [_ ok3?]  (history-input/accept s2 "back" 1181)
+        [_ ok4?]  (history-input/accept s1 "forward" 1100)]
+    (is ok1?)
+    (is (false? ok2?))
+    (is ok3?)
+    (is ok4?)))
+
+(deftest preview-context-helpers
+  (testing "term-at copies the token under the caret and trims wrapping punctuation"
+    (is (= {:start 6 :end 20 :text "/tmp/readme.md"}
+           (select-keys (preview-context/term-at "open (/tmp/readme.md)." 12)
+                        [:start :end :text])))
+    (is (nil? (preview-context/term-at "one two" 3))))
+  (testing "source offsets format as compiler-style locations"
+    (is (= {:line 2 :column 3}
+           (preview-context/offset->line-column "a\nbc\n" 4)))
+    (is (= "/tmp/doc.md:2:3"
+           (preview-context/location-string "/tmp/doc.md" {:line 2 :column 3}))))
+  (testing "best-source-offset finds the rendered token inside its Markdown source span"
+    (is (= 8 (preview-context/best-source-offset "Hello **world**" 0 15 "world" 0)))
+    (is (= 0 (preview-context/best-source-offset "Hello **world**" 0 15 "missing" 0)))))
+
+(deftest markdown-render-preview-metadata
+  (async done
+    (-> (js/Promise.all
+         #js [(markdown/render "Hello **world**\n\n![Alt](img.png)\n" "/tmp" 1)
+              (markdown/render "[![Alt](img.png)](target.md)\n" "/tmp" 1)])
+        (.then (fn [htmls]
+                 (let [bare   (aget htmls 0)
+                       linked (aget htmls 1)]
+                   (is (str/includes? bare "data-vv-source-start-line=\"1\""))
+                   (is (str/includes? bare "data-vv-source-kind=\"text\""))
+                   (is (re-find #"<a[^>]+href=\"file:///tmp/img\.png\?vv-cache=1\"" bare)
+                       "bare images are wrapped in links to their resolved preview URI")
+                   (is (= 1 (count (re-seq #"<a " linked)))
+                       "already-linked images are not wrapped again"))
+                 (done)))
+        (.catch (fn [e]
+                  (is false (str "Markdown render failed: " (.-message e)))
+                  (done))))))
 
 (defn -main [& _] (run-tests))

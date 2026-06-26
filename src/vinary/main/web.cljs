@@ -8,11 +8,62 @@
   (:require ["electron" :refer [ipcMain WebContentsView]]
             ["path" :as path]))
 
-(defonce ^:private state  (atom {:view nil :win nil :url nil}))
+(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil}))
 (defonce ^:private inited (atom false))
+(defonce ^:private last-history-nav (atom {:dir nil :time 0}))
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
 (defn- app-wc    []   (some-> ^js (:win @state) .-webContents))
+
+(defn- send-history-nav! [dir]
+  (let [now (.now js/Date)
+        {:keys [time]} @last-history-nav
+        last-dir (:dir @last-history-nav)]
+    ;; App-command and low-level mouse/input hooks can both fire for one physical gesture.
+    (when (or (not= dir last-dir) (> (- now time) 180))
+      (reset! last-history-nav {:dir dir :time now})
+      (when-let [^js awc (app-wc)]
+        (.send awc "vv:history-nav" dir)))))
+
+(defn- input-history-dir [^js input]
+  (when (and (= "keyDown" (.-type input))
+             (.-alt input)
+             (not (.-control input))
+             (not (.-meta input))
+             (not (.-isComposing input)))
+    (case (.-key input)
+      ("ArrowLeft" "Left")   "back"
+      ("ArrowRight" "Right") "forward"
+      nil)))
+
+(defn- mouse-history-dir [^js mouse]
+  (when (= "mouseDown" (.-type mouse))
+    (case (.-button mouse)
+      ("back" 3)    "back"
+      ("forward" 4) "forward"
+      nil)))
+
+(defn- attach-web-input! [^js wc]
+  (.on wc "before-input-event"
+       (fn [event input]
+         (when-let [dir (input-history-dir input)]
+           (.preventDefault event)
+           (send-history-nav! dir))))
+  (.on wc "before-mouse-event"
+       (fn [event mouse]
+         (when-let [dir (mouse-history-dir mouse)]
+           (.preventDefault event)
+           (send-history-nav! dir)))))
+
+(defn- attach-app-command! [^js win]
+  (when (and win (not= win (:app-command-win @state)))
+    (swap! state assoc :app-command-win win)
+    (.on win "app-command"
+         (fn [event cmd]
+           (case cmd
+             "browser-backward" (do (.preventDefault event) (send-history-nav! "back"))
+             "browser-forward"  (do (.preventDefault event) (send-history-nav! "forward"))
+             nil)))))
 
 (defn- ensure-view! [^js win]
   (or (:view @state)
@@ -29,6 +80,7 @@
         (.setVisible v false)
         (.on wc "did-navigate"          relay)
         (.on wc "did-navigate-in-page"  relay)
+        (attach-web-input! wc)
         (swap! state assoc :view v :win win)
         v)))
 
@@ -53,6 +105,7 @@
   ;; a recreated window invalidates the old view (it belonged to the closed window)
   (when (not= win (:win @state)) (swap! state assoc :view nil :url nil))
   (swap! state assoc :win win)
+  (attach-app-command! win)
   (when-not @inited
     (reset! inited true)
     ;; ---- app renderer → web view ----
