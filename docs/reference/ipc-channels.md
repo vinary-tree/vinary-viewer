@@ -1,114 +1,118 @@
 # Reference · IPC Channels
 
-> **What this is.** A flat, lookup-form catalog of every Electron IPC channel between the **main** and
-> **renderer** processes. The architectural narrative (envelope rationale, the `on*` contract,
-> security seam) is in [architecture/03-ipc-protocol.md](../architecture/03-ipc-protocol.md); this page
-> is the same data optimised for "what is channel X?". All traffic crosses the preload `contextBridge`
-> object `window.vv` (`resources/preload.js`).
+> **What this is.** A lookup-form catalog of Electron Inter-Process
+> Communication (IPC) channels between the **main** process and the renderer
+> process. The architectural rationale is in
+> [architecture/03-ipc-protocol.md](../architecture/03-ipc-protocol.md). The
+> concrete renderer-facing API is `window.vv`, exposed by
+> [`resources/preload.js`](../../resources/preload.js).
+
+All renderer code talks to main through `window.vv`. The renderer never imports
+`ipcRenderer`, `fs`, or `child_process` directly.
 
 ---
 
-## 1. At a glance
+## 1. Renderer → Main
 
-```text
-   renderer → main                         main → renderer
-   ───────────────                         ───────────────
-   vv:open            (open / re-open)      vv:content   (content, live)
-   vv:close           (stop watching)       vv:error     (read error)
-   vv:keymap-request  (pull user keymap)    vv:tree      (git file-tree)
-                                            vv:keymap    (user keymap config)
-```
+| Channel | Preload method | Payload | Main receiver | Purpose |
+|---------|----------------|---------|---------------|---------|
+| `vv:open` | `open(path)` | `path` string | `vinary.main.service/open!` | Read a local file, send content, send git tree, and start/reuse its watcher. |
+| `vv:close` | `close(path)` | `path` string | `vinary.main.service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
+| `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `vinary.main.service/sync-retained!` | Replace main's retained local-file set and release unretained watchers/assets. |
+| `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service/watch-assets!` | Watch local media assets referenced by a retained Markdown document. |
+| `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config/push!` | Request persisted `keybindings.edn`. |
+| `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config/save!` | Persist keybinding registry EDN. |
+| `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars/push!` | Request user grammar registry and filetype mappings. |
+| `vv:settings-request` | `requestSettings()` | none | `vinary.main.settings/push!` | Request persisted `settings.edn`. |
+| `vv:settings-save` | `saveSettings(edn)` | EDN string | `vinary.main.settings/save!` | Persist settings EDN. |
+| `vv:pdf-show` | `pdfShow(path, bounds)` | `{path, bounds}` | `vinary.main.pdf/show!` | Show/load the native PDF `WebContentsView`. |
+| `vv:pdf-hide` | `pdfHide()` | none | `vinary.main.pdf/hide!` | Hide the native PDF view. |
+| `vv:pdf-bounds` | `pdfBounds(bounds)` | `{bounds}` | `vinary.main.pdf/set-bounds!` | Reposition the native PDF view. |
+| `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. |
+| `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
+| `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web/set-bounds!` | Reposition the in-app HTTP view. |
+| `vv:http-toc-goto` | `httpTocGoto(id)` | heading id string | `vinary.main.web` | Scroll the HTTP page to a heading. |
+| `vv:open-dialog` | `openDialog()` | none | `vinary.main.shell` | Open the multi-file native dialog. |
+| `vv:clipboard-write` | `copyText(text)` | string | `vinary.main.shell` | Copy text to the OS clipboard. |
+| `vv:open-path` | `openPath(path)` | string | `vinary.main.shell` | Ask the OS to reveal/open a local path. |
+| `vv:open-external` | `openExternal(url)` | string | `vinary.main.shell` | Ask the OS to open an external URL. |
+| `vv:app-info-request` | `requestAppInfo()` | none | `vinary.main.shell` | Request app metadata for About UI. |
+| `vv:quit` | `quit()` | none | `vinary.main.shell` | Quit the Electron app. |
+| `vv:devtools` | `toggleDevtools()` | none | `vinary.main.shell` | Toggle renderer devtools. |
+| `vv:zoom` | `zoom(dir)` | direction value | `vinary.main.shell` | Adjust Chromium zoom. |
 
-Three renderer→main, four main→renderer; **seven** channels total.
-
----
-
-## 2. Channel catalog
-
-| Channel | Direction | Payload (JSON) | Sender (renderer side / main side) | Receiver | Trigger | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| `vv:open` | renderer → main | `path` *(string)* | `window.vv.open(path)` → `ipcRenderer.send` | `ipcMain.on("vv:open")` → `service/open!` | `:vv/open` fx (open a tree file / re-open) | live |
-| `vv:close` | renderer → main | `path` *(string)* | `window.vv.close(path)` → `ipcRenderer.send` | `ipcMain.on("vv:close")` → `service/close!` | `:vv/close` fx (from `:tab/close`) | live |
-| `vv:keymap-request` | renderer → main | *(none)* | `window.vv.requestKeymap()` → `ipcRenderer.send` | *(no main handler yet)* | `renderer.core/bridge!` after subscribing to `onKeymap` | **renderer-wired; main handler pending** |
-| `vv:content` | main → renderer | `{:path :kind (:text)}` | `webContents.send("vv:content")` | `window.vv.onContent(cb)` → `[:content/received]` | initial `open!`; every chokidar `change`/`add` | live |
-| `vv:error` | main → renderer | `{:path :message}` | `webContents.send("vv:error")` | `window.vv.onError(cb)` → `[:content/error]` | `readFileSync` throws in `send-content!` | live |
-| `vv:tree` | main → renderer | `{:root :files}` | `webContents.send("vv:tree")` | `window.vv.onTree(cb)` → `[:tree/received]` | `open!` when the file is in a git repo | live |
-| `vv:keymap` | main → renderer | user keymap config *(map)* | `webContents.send("vv:keymap")` | `window.vv.onKeymap(cb)` → `[:keymap/config-received]` | (main pushes the user's `keybindings.edn`) | **renderer-wired; main sender pending** |
-
-> **`vv:keymap` / `vv:keymap-request` are defined-but-dormant.** The renderer subscribes
-> (`onKeymap`) and pulls (`requestKeymap`), guarded on `window.vv.onKeymap` existing, but **main does
-> not yet handle the request nor send the config**. Until it does, the renderer uses the bundled
-> `:default` preset (or a preset chosen at runtime via `window.__vvkeymap("vim")`). See
-> [events-effects-subs.md §4.4](./events-effects-subs.md#44-what-is-wired-vs-pending).
-
----
-
-## 3. Payload shapes (verbatim)
-
-```clojure
-;; vv:content  — kind ∈ {"markdown" "image" "text"}  (service/kind-of)
-{:path "/abs/README.md" :kind "markdown" :text "# Hello\n…"}   ; :text for markdown/text
-{:path "/abs/logo.png"  :kind "image"}                          ; NO :text for images (file:// load)
-
-;; vv:error
-{:path "/abs/missing.md" :message "ENOENT: …"}
-
-;; vv:tree  — root = git top-level; files = repo-relative (git ls-files)
-{:root "/abs/repo" :files ["README.md" "docs/intro.md" …]}
-
-;; vv:keymap  — the user's ~/.config/vinary-viewer/keybindings.edn, e.g.
-{:extends :vim :initial-mode :normal :timeout-ms 1000
- :keymaps {:normal {"za" :sidebar/toggle "zd" :unbind}}}
-```
-
-`vv:open`, `vv:close` send a **bare string** `path`; `vv:keymap-request` sends **nothing**.
+`bounds` payloads are plain maps with numeric `x`, `y`, `width`, and `height`
+fields derived from `getBoundingClientRect()`.
 
 ---
 
-## 4. The `kind` classifier (`service/kind-of`)
+## 2. Main → Renderer
 
-Case-insensitive on the file extension:
-
-| Extension(s) | `kind` |
-| --- | --- |
-| `.md`, `.markdown`, `.mdx` | `"markdown"` |
-| `.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`, `.ico`, `.avif` | `"image"` |
-| everything else | `"text"` |
+| Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
+|---------|----------------------|---------|-----------------------|---------|
+| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?}` | `[:content/received ...]` | Deliver initial and live-refreshed document content. |
+| `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error ...]` | Deliver read/render errors. |
+| `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received ...]` | Deliver git file-tree data. |
+| `vv:keymap` | `onKeymap(cb)` | keymap registry map/string | `[:keymap/config-received ...]` | Deliver persisted keybinding config. |
+| `vv:grammars` | `onGrammars(cb)` | EDN string map `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
+| `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated ...]` | Sync in-app HTTP navigation into active tab history. |
+| `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc ...]` | Deliver heading outline from the HTTP web view. |
+| `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading ...]` | Deliver active HTTP heading. |
+| `vv:history-nav` | `onHistoryNav(cb)` | `"back"` or `"forward"` | history dispatch | Forward browser-like navigation from native/web surfaces. |
+| `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened ...]` | Deliver file selections from the native Open dialog. |
+| `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received ...]` | Deliver persisted settings. |
+| `vv:app-info` | `onAppInfo(cb)` | app metadata map | `[:app-info/received ...]` | Deliver app metadata. |
 
 ---
 
-## 5. The `on*` → unsubscribe contract
+## 3. Content Kinds
 
-Every `window.vv.on*(cb)` returns an **unsubscribe function** that calls
-`ipcRenderer.removeListener`. The Electron `event` object is dropped — only the `payload` reaches the
-renderer callback. (`onContent`, `onError`, `onTree`, `onKeymap` all follow this identical shape.)
+`vv:content` uses the file classifier in `vinary.main.file-kind/kind-of`:
+
+| Extension(s) | `kind` | Payload detail |
+|---------------|--------|----------------|
+| `.md`, `.markdown`, `.mdx` | `"markdown"` | text is read and rendered in the renderer. |
+| image extensions such as `.png`, `.jpg`, `.svg`, `.webp`, `.avif` | `"image"` | binary is not read as text; renderer uses `file://` URL. |
+| `.pdf` | `"pdf"` | binary is not read as text; main-owned PDF view loads `file://` URL. |
+| `.mmd`, `.mermaid` | `"mermaid"` | text is read and rendered to SVG by the renderer-side Mermaid strategy. |
+| bundled/user source extensions, configured filetype mappings, and non-Mermaid diagram-source extensions | `"source"` | text is read into the read-only source view. |
+| everything else | `"text"` | text is escaped into plain HTML. |
+
+---
+
+## 4. The `on*` → Unsubscribe Contract
+
+Every `window.vv.on*(cb)` subscription returns an unsubscribe function that calls
+`ipcRenderer.removeListener`. The Electron event object is dropped; only the
+payload reaches renderer code.
 
 ```js
 onTree: (cb) => {
   const h = (_e, payload) => cb(payload);
   ipcRenderer.on('vv:tree', h);
-  return () => ipcRenderer.removeListener('vv:tree', h);   // ◀ unsubscribe
+  return () => ipcRenderer.removeListener('vv:tree', h);
 },
 ```
 
 ---
 
-## 6. Envelope & conversion
+## 5. Envelope And Conversion
 
 | Hop | Conversion |
-| --- | --- |
-| main → renderer (send) | `(clj->js {…})` before `webContents.send` |
-| main → renderer (receive) | `(js->clj payload :keywordize-keys true)` before `rf/dispatch` |
-| renderer → main (send) | bare string (`vv:open`/`vv:close`) or nothing (`vv:keymap-request`) |
+|-----|------------|
+| main → renderer | ClojureScript data is converted with `clj->js` or serialized as EDN text before `webContents.send`. |
+| renderer receive | Renderer converts JavaScript payloads with `js->clj :keywordize-keys true`, or parses EDN text where keyword fidelity matters. |
+| renderer → main | Preload sends plain strings, arrays, objects, numbers, booleans, or EDN strings. |
 
-Plain JSON is mandatory because `contextBridge`/Electron IPC transfers only structured-clonable
-values across the V8 context boundary (ClojureScript persistent structures do not survive it).
+Plain structured data is mandatory because Electron IPC and `contextBridge`
+cross V8 context boundaries; ClojureScript persistent structures do not cross
+that boundary directly.
 
 ---
 
-## 7. Not exposed (intentionally)
+## 6. Not Exposed
 
-`fs` / arbitrary reads · `ipcRenderer` directly · `child_process` / git (main-only) · writing files ·
-Node `require` in the page. See
+The renderer does not receive direct access to `fs`, arbitrary file reads,
+`ipcRenderer`, `child_process`, or Node `require`. See
 [architecture/03-ipc-protocol.md §8](../architecture/03-ipc-protocol.md#8-what-is-intentionally-not-exposed)
 and [security/threat-model.md](../security/threat-model.md).

@@ -83,27 +83,31 @@ API. This is the entire surface the renderer can use to affect the outside world
 
 ```js
 contextBridge.exposeInMainWorld('vv', {
-  open:  (path) => ipcRenderer.send('vv:open', path),    // renderer → main
-  close: (path) => ipcRenderer.send('vv:close', path),   // renderer → main
-  onContent: (cb) => { … return unsubscribe; },          // main → renderer
-  onError:   (cb) => { … return unsubscribe; },          // main → renderer
-  onTree:    (cb) => { … return unsubscribe; },           // main → renderer
+  open: (path) => ipcRenderer.send('vv:open', path),
+  syncRetainedFiles: (paths) => ipcRenderer.send('vv:retained-files', paths),
+  watchAssets: (docPath, paths) => ipcRenderer.send('vv:watch-assets', { docPath, paths }),
+  copyText: (text) => ipcRenderer.send('vv:clipboard-write', text),
+  onContent: (cb) => { … return unsubscribe; },
+  onGrammars: (cb) => { … return unsubscribe; },
 });
 ```
 
 ### What the seam **does** expose
 
-| Capability        | Direction        | Semantics                                                                 |
-|-------------------|------------------|---------------------------------------------------------------------------|
-| `vv.open(path)`   | renderer → main  | "read and watch this path"; main responds with `vv:content` (or `vv:error`) and `vv:tree`. |
-| `vv.close(path)`  | renderer → main  | "stop watching this path."                                                |
-| `vv.onContent`    | main → renderer  | receive `{:path :kind (:text)}` whenever a file's content is (re-)sent.    |
-| `vv.onError`      | main → renderer  | receive `{:path :message}` on a read failure.                             |
-| `vv.onTree`       | main → renderer  | receive `{:root :files}` (the git file list).                             |
+| Capability class | Direction | Semantics |
+|------------------|-----------|-----------|
+| File content and watchers | renderer → main → renderer | Read retained local paths, watch retained files and embedded local media assets, and send `vv:content`, `vv:error`, and `vv:tree` payloads back. |
+| Configuration | both | Request/persist settings and keybindings; request user grammar and filetype registry data. |
+| Native views | renderer → main | Show, hide, and position main-owned PDF and HTTP views; relay HTTP heading metadata back to the renderer. |
+| Clipboard and shell helpers | renderer → main | Copy explicit text to the OS clipboard, open local paths through the OS, open external URLs, zoom, devtools, and quit. |
+| App metadata and dialogs | both | Open the native file dialog and deliver selected paths; deliver About metadata. |
 
 Each `on*` returns an **unsubscribe** function and passes only the message **payload** to the callback
 (`(_e, payload) => cb(payload)`) — the raw Electron `IpcRendererEvent` (which carries `sender`,
 `ports`, etc.) is **not** handed to the renderer.
+
+The channel catalog is maintained in
+[reference/ipc-channels.md](../reference/ipc-channels.md).
 
 ### What the seam does **NOT** expose
 
@@ -114,16 +118,17 @@ This is the important half of the analysis. The renderer **cannot**:
 - **run a shell or spawn a process** — no `exec`/`spawn` is exposed (the `git` calls live in main and
   are not parameterized by the renderer beyond the open file's directory).
 - **reach raw `ipcRenderer`** — `ipcRenderer` is used **inside** the preload but is **not** placed on
-  `window`. The renderer cannot `send`/`invoke` arbitrary channels; it is limited to the five named
-  operations above. (`contextIsolation:true` is what makes this confinement real — without it, the page
-  could reach the preload's scope.)
+  `window`. The renderer cannot `send`/`invoke` arbitrary channels; it is limited to the documented
+  `window.vv` methods. (`contextIsolation:true` is what makes this confinement real — without it, the
+  page could reach the preload's scope.)
 - **access Node globals** — `require`, `process`, `Buffer`, `__dirname` are all absent in the page
   (`nodeIntegration:false`).
 
 **Consequence:** the seam is a **mediator** with a fixed, small vocabulary. An attacker who fully
 controls the renderer's JavaScript can, at worst, ask the main process to **read and watch arbitrary
-paths the user can read** and receive their contents back — they cannot escalate to writing files,
-running commands, or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of §4.)
+paths the user can read**, write explicit text to the clipboard, control native preview surfaces, and
+request the documented shell helpers — they cannot escalate to arbitrary file writes, running commands,
+or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of §4.)
 
 > **Design note.** This single-seam shape is a deliberate decision: see
 > [design-decisions/0009-mediator-ipc-over-point-to-point.md](../design-decisions/0009-mediator-ipc-over-point-to-point.md).
@@ -166,7 +171,9 @@ classic XSS sink, so the question is: **can a malicious Markdown document inject
 ### The pipeline (exact)
 
 ```text
-unified → remark-parse → remark-gfm → remark-rehype → rehype-slug → rehype-highlight → rehype-stringify
+unified → remark-parse → remark-gfm → remark-math → remark-rehype → rehype-slug
+→ rehype-highlight → rehype-stringify → MathJax SVG postprocess → Mermaid SVG postprocess
+→ tree-sitter fenced-code postprocess
 ```
 
 The decisive fact: **`rehype-raw` is NOT in the pipeline** (and is not even a dependency in
@@ -179,6 +186,11 @@ the Markdown source** — without `rehype-raw` (or `allowDangerousHtml`), inline
 - What *is* produced is the structured HTML that remark/rehype generate from Markdown constructs
   (headings, lists, links, code blocks, GFM tables, etc.), plus `rehype-slug` ids and
   `rehype-highlight` `<span class="hljs-…">` wrappers.
+- Math expressions are parsed by `remark-math` and converted to SVG by MathJax. The TeX source is
+  local document text; MathJax conversion is renderer-local and does not add privileged IPC.
+- Mermaid fenced blocks are converted to SVG by Mermaid's browser renderer with `securityLevel:
+  "strict"`. Direct `.mmd` and `.mermaid` files use the same renderer-side Mermaid helper. Mermaid
+  output is treated as generated SVG markup and inserted into the preview body.
 
 So the `innerHTML` write receives HTML derived from a pipeline that **does not forward attacker-authored
 raw HTML**. This is the primary reason the `innerHTML` sink is acceptable here.
@@ -196,6 +208,9 @@ raw HTML**. This is the primary reason the `innerHTML` sink is acceptable here.
 - **Plain-text kind.** Non-markdown files are wrapped as `<pre class="vv-plain">` with the text
   **HTML-escaped** via `goog.string/htmlEscape` (`vinary.app.events/plain-html`), so a `.txt`/source
   file containing `<script>` is shown as inert, escaped text — never parsed as HTML.
+- **Math and Mermaid.** These renderers convert local document text into generated SVG. MathJax and
+  Mermaid failures are displayed as escaped inline error blocks. Mermaid rendering uses the library's
+  strict security mode and does not add a main-process rendering channel.
 
 > **Precise statement.** *Raw HTML embedded in a Markdown document is not passed through to the rendered
 > output, because the pipeline does not enable `rehype-raw`.* That, plus escaping the plain-text kind, is
@@ -235,9 +250,9 @@ Additional, lower-priority items consistent with the checklist (also Forthcoming
 | Property                                   | Today                                    |
 |--------------------------------------------|------------------------------------------|
 | Renderer ↔ OS isolation                    | **Strong** — `contextIsolation:true`, `nodeIntegration:false`, Node modules stubbed in the build. |
-| Cross-process surface                      | **Minimal** — five named, JSON-only `window.vv` operations; no raw `ipcRenderer`, fs, or shell.   |
+| Cross-process surface                      | **Mediated** — documented `window.vv` operations; no raw `ipcRenderer`, fs, arbitrary file writes, or shell. |
 | Filesystem reads                           | Any path the user can read (CLI-viewer trust); `git` via `execFileSync` (no shell).               |
-| Markdown XSS via raw HTML                   | **Not passed through** — `rehype-raw` is not enabled; plain-text kind is HTML-escaped.            |
+| Markdown XSS via raw HTML                   | **Not passed through** — `rehype-raw` is not enabled; plain-text/source fallback kinds are HTML-escaped. |
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
 | CSP                                        | **None yet** — Forthcoming.                                                                       |
 | Navigation lock-down                       | **None yet** — Forthcoming.                                                                       |

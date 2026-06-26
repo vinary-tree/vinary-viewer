@@ -5,7 +5,6 @@
             [datascript.core :as d]
             [vinary.app.ds :as ds]
             [vinary.renderer.markdown :as md]
-            [vinary.renderer.media :as media]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.find :as finder]))
@@ -38,7 +37,7 @@
  :markdown/render
  (fn [{:keys [text path stamp on-done]}]
    (-> (md/render text (md/dir-of path) stamp)   ; base-dir resolves relative img/link URLs → absolute file://
-       (.then (fn [html] (rf/dispatch (conj on-done {:html html :assets (media/local-media-paths-from-html html)}))))
+       (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
@@ -67,6 +66,10 @@
            (fn [{:keys [doc-path paths]}]
              (when-let [^js vv (.-vv js/window)]
                (when (.-watchAssets vv) (.watchAssets vv doc-path (clj->js (or paths [])))))))
+(rf/reg-fx :vv/sync-retained-files
+           (fn [paths]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-syncRetainedFiles vv) (.syncRetainedFiles vv (clj->js (or paths [])))))))
 ;; ask the HTTP web view's preload to scroll to a heading id (Contents/TOC click on an HTML page)
 (rf/reg-fx :vv/http-toc-goto
            (fn [id] (when-let [^js vv (.-vv js/window)] (when (.-httpTocGoto vv) (.httpTocGoto vv id)))))

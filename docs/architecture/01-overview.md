@@ -1,213 +1,149 @@
-# 01 · Architecture Overview
+# 01. Architecture Overview
 
-> **Scope.** This page is the entry point to the *architecture* pillar of the vinary-viewer
-> documentation. It gives the **system context** (who and what the app talks to), the **container
-> view** (the two builds and the seam between them), and the central design thesis — **a thin main
-> process and a smart renderer**. Subsequent pages drill into the build topology (02), the IPC
-> protocol (03), the state schema (04), the data flows (05), and the renderer runtime (06).
+This page is the entry point for the architecture pillar. It describes the
+process model, IPC seam, state ownership, renderer runtime, and current feature
+status.
 
 ---
 
-## 1. What vinary-viewer is
+## 1. System purpose
 
-**vinary-viewer** is a reactive desktop **document previewer** built with **ClojureScript**,
-**re-frame**, **re-com**, and **Electron**. It opens a file named on the command line
-(`vv README.md`), renders it, and — crucially — **re-renders it live** whenever the file changes on
-disk, so you edit in your own editor and watch the preview update without lifting a finger. It
-previews Markdown (with GitHub-Flavoured extensions, heading anchors, and syntax-highlighted code),
-images, and plain text today; PDF, diagram, and source-code views are
-[Forthcoming](#7-status-current-vs-forthcoming).
+vinary-viewer is a local-first Electron previewer for repository resources. It
+opens Markdown, images, PDFs, source files, text files, and HTTP/HTTPS links. It
+live-refreshes local files while preserving tabs, per-tab history, scroll
+positions, settings, and keybinding state.
 
-> **Terminology, defined before use.**
-> - **Main process** — the Electron/Node process that owns OS resources (windows, the filesystem, child
->   processes). One per app.
-> - **Renderer process** — the Electron/Chromium process that runs the UI (a web page). One per window.
-> - **IPC** (*Inter-Process Communication*) — the message channel between main and renderer.
-> - **Preload** — a small script that runs in the renderer's process *with* Node privileges, before the
->   page loads, used to expose a **narrow, safe API** to the otherwise-sandboxed page.
-> - **re-frame** — a ClojureScript framework implementing a unidirectional **event → effect → state →
->   view** loop (events, effects (`fx`), subscriptions (`subs`), and a single app database, `app-db`).
-> - **DataScript** — an immutable, in-memory **Datalog** database; here it is the single source of truth
->   (SSOT) for the open documents and tabs.
-> - **reagent** — a ClojureScript wrapper over React that renders UI from plain data (*hiccup*).
+Key terms:
 
-The package is `vinary-viewer` at version `0.2.0-dev`; it is *inspired by* [vmd](https://github.com/yoshuawuyts/vmd)
-but is a new application with original code under **Apache-2.0**.
+| Term | Meaning |
+|------|---------|
+| Main process | Electron/Node process that owns OS APIs: filesystem, dialogs, clipboard, config files, watchers, native PDF/web views, and git tree queries. |
+| Renderer process | Chromium process that owns the re-frame/Reagent UI, Markdown rendering, source preview, tabs, search, TOC, and keybindings. |
+| Preload mediator | `resources/preload.js`; exposes `window.vv` through `contextBridge`. |
+| DataScript content cache | In-memory document cache keyed by `:doc/path`. |
+| Retained file | A local file reachable from any open tab history entry. |
 
 ---
 
 ## 2. System context
 
-vinary-viewer sits between the **user**, the **filesystem** (where the documents live), the **git
-repository** that contains them (for the file-tree sidebar), and the user's **external editor** (the
-thing that actually changes files). vinary-viewer is **read-only** with respect to user content: it
-never writes the documents it previews.
+vinary-viewer is read-only with respect to user documents. It reads and watches
+files, reads git metadata for the sidebar, and writes only its own user config.
 
 ![System context](../diagrams/system-context.svg)
 
-*Source: [`../diagrams/system-context.puml`](../diagrams/system-context.puml).*
+*Diagram source: [`../diagrams/system-context.puml`](../diagrams/system-context.puml).*
 
-```text
-        edits in                       saves                       reads + watches
- User ───────────▶ External Editor ───────────▶ Filesystem ◀───────────────────── vinary-viewer
-   │                                                  │                                  ▲
-   │ clicks tabs / tree / TOC,                        │  change / add events             │ git rev-parse
-   │ finds, switches theme                            └──────────────────────────────────┤ + git ls-files
-   └──────────────────────────────────────────────────────────── live refresh ──────────┘
-```
+Primary loops:
 
-The essential loops:
-
-1. **Open** — the user launches `vv <path>`; main reads the file and pushes its content to the
-   renderer (see [05 · Data Flows](./05-data-flows.md#1-open-a-file) and
-   [`seq-open-file`](../diagrams/seq-open-file.puml)).
-2. **Live refresh** — main watches every open path; on each save it re-pushes content, and the
-   renderer re-renders **without disturbing scroll position or which tab is active**.
-3. **Navigate** — tabs, the git file-tree, in-page find, the table-of-contents scroll-spy, and a
-   back/forward history are all driven from the renderer.
+| Loop | Behavior |
+|------|----------|
+| Open | Main reads/classifies a file and sends `vv:content`; renderer caches/renders and points a tab at it. |
+| Live refresh | Main watcher re-sends content; renderer updates cached content and rendered metadata without resetting UI state. |
+| Navigation | Renderer tab/history events change app-db, load retained local files when needed, and restore scroll. |
+| Configuration | Main watches settings/keybinding/grammar files and pushes plain EDN/data over IPC. |
 
 ---
 
-## 3. The container view: one source tree, two builds, one seam
+## 3. Two builds, one seam
 
-A single ClojureScript source tree (`src/vinary/**`) is compiled by **shadow-cljs** into **two**
-independent JavaScript artifacts that run in **two** Electron processes, joined by **one** IPC seam
-(the preload `contextBridge`).
+| Build | Target | Output | Entry | Process |
+|-------|--------|--------|-------|---------|
+| `main` | `:node-script` | `dist/main/main.js` | `vinary.main.core/main` | Electron main |
+| `renderer` | `:browser` | `resources/public/js/main.js` | `vinary.renderer.core/init` | Chromium renderer |
 
 ![Containers](../diagrams/container-two-build.svg)
 
-*Source: [`../diagrams/container-two-build.puml`](../diagrams/container-two-build.puml).*
+*Diagram source: [`../diagrams/container-two-build.puml`](../diagrams/container-two-build.puml).*
 
-| Build (`shadow-cljs.edn`) | Target | Output | Entry | Runs in |
-| --- | --- | --- | --- | --- |
-| `:main` | `:node-script` | `dist/main/main.js` | `vinary.main.core/main` | MAIN (Node) |
-| `:renderer` | `:browser` | `resources/public/js/main.js` | `vinary.renderer.core/init` | RENDERER (Chromium) |
-
-The **only** path between the two processes is the amber seam: `resources/preload.js` exposes a
-minimal JSON-only object, `window.vv`, via Electron's `contextBridge`. The renderer never touches the
-filesystem or `ipcRenderer` directly. (Full catalog in [03 · IPC Protocol](./03-ipc-protocol.md).)
+The renderer never imports `electron`, `fs`, or `ipcRenderer`. The only
+renderer-to-main API is `window.vv`, exposed by the preload mediator.
 
 ---
 
-## 4. The thesis: thin main, smart renderer
+## 4. State ownership
 
-vinary-viewer deliberately concentrates **almost all logic in the renderer** and keeps **main as a
-thin IO service at the edge**. This is the inverse of the "fat backend, dumb view" split common to
-desktop apps, and it is a load-bearing decision, so it deserves a clear rationale.
+| State | Owner | Examples |
+|-------|-------|----------|
+| UI and navigation | re-frame `app-db` | Tabs, active tab id, tab histories, saved scroll entries, sidebar state, find state, settings UI, keybinding UI. |
+| Loaded content | DataScript | `:doc/path`, `:doc/kind`, `:doc/text`, `:doc/html`, `:doc/toc`, `:doc/assets`, `:doc/error`, `:doc/stamp`. |
+| OS/native resources | Main process | Chokidar watchers, asset watchers, PDF `WebContentsView`, HTTP web view, config file watchers. |
 
-### What main does (and only this)
-
-`vinary.main.core` + `vinary.main.service` together:
-
-- create the `BrowserWindow` with a sandbox-leaning posture (`contextIsolation: true`,
-  `nodeIntegration: false`, the preload script);
-- parse the initial file from `argv`;
-- **read** a file's bytes (`fs.readFileSync`) and classify it (`kind-of` → `markdown` / `image` /
-  `text`);
-- **push** content/errors/tree to the renderer (`webContents.send`);
-- **watch** each open path with one chokidar watcher and re-push on change;
-- compute the **git file-tree** (`git rev-parse --show-toplevel` + `git ls-files`).
-
-Notably, main does **not** parse Markdown, manage tabs, hold UI state, or know anything about
-rendering. Rendering happens in the renderer because the **all-ESM remark/rehype stack bundles
-cleanly for the browser** and runs against the live DOM.
-
-### What the renderer does
-
-`vinary.renderer.*` + `vinary.app.*` + `vinary.ui.*` own:
-
-- the **re-frame loop** (events, effects, subscriptions);
-- the **DataScript** document/tab store and the reactivity bridge that connects it to re-frame;
-- **Markdown rendering** (the unified pipeline);
-- the **multi-tab** model, **git file-tree**, **in-page find**, **theme** switching,
-  **table-of-contents** scroll-spy, and navigation **history**;
-- the **reagent** view tree (React 19).
-
-### Why this split
-
-| Force | Consequence of "thin main, smart renderer" |
-| --- | --- |
-| **Security** | The renderer is sandbox-leaning and reaches the filesystem **only** through the audited preload seam; the app's large surface (rendering, UI) runs with no Node privileges. |
-| **Reactivity** | Live refresh, tabs, find, and history are naturally expressed as a unidirectional re-frame loop over an immutable store — keeping them in one process avoids cross-process state synchronisation. |
-| **Toolchain fit** | remark/rehype is browser-friendly ESM; the renderer is exactly where it belongs. Main stays Node-only (`fs`, `chokidar`, `child_process`) with no bundling of UI deps. |
-| **Testability / time-travel** | re-frame's `fx`-at-the-edge discipline plus DataScript immutability make the renderer replayable and inspectable (re-frame-10x, re-frisk). |
+The `:ds/rev` bridge connects DataScript to re-frame subscriptions. Each
+DataScript transaction dispatches `[:ds/changed]`, increments `:ds/rev`, and
+causes content-reading subscriptions to re-read the current DataScript snapshot.
 
 ---
 
-## 5. Concern → process → namespace map
+## 5. Main process responsibilities
 
-The table below is the canonical "where does X live?" index. Namespaces are detailed in
-[reference/namespaces.md](../reference/namespaces.md).
+Main owns privileged operations:
 
-| Concern | Process | Namespace(s) / file | Key entry points |
-| --- | --- | --- | --- |
-| App + window lifecycle | MAIN | `vinary.main.core` | `main`, `create-window!`, `initial-file` |
-| File IO, watch, git tree | MAIN | `vinary.main.service` | `open!`, `close!`, `send-content!`, `repo-tree`, `init!` |
-| IPC seam (contextBridge) | preload | `resources/preload.js` | `window.vv.{open,close,onContent,onError,onTree}` |
-| Renderer bootstrap | RENDERER | `vinary.renderer.core` | `init`, `bridge!`, `keybindings!`, `mount!` |
-| Ephemeral UI state (default) | RENDERER | `vinary.app.db` | `default-db` |
-| Document/tab SSOT + reactivity bridge | RENDERER | `vinary.app.ds` | `schema`, `conn`, `install-bridge!`, query helpers |
-| Events (the loop's verbs) | RENDERER | `vinary.app.events` | `:content/received`, `:tab/*`, `:theme/set`, `:find/*`, … |
-| Effects (IO/async at the edge) | RENDERER | `vinary.app.fx` | `:ds/transact`, `:markdown/render`, `:theme/apply`, `:vv/*`, … |
-| Subscriptions (the Observer graph) | RENDERER | `vinary.app.subs` | `:tabs`, `:doc/active`, `:doc/toc`, `:history/*`, … |
-| Markdown rendering | RENDERER | `vinary.renderer.markdown` | `render` (unified pipeline) |
-| In-page find | RENDERER | `vinary.renderer.find` | `search!`, `cycle!`, `clear!` |
-| Table-of-contents + scroll-spy | RENDERER | `vinary.renderer.toc` | `extract`, `spy!` |
-| Views (shell, content, toolbar, find, TOC) | RENDERER | `vinary.ui.views` | `root`, `content-view`, `markdown-body`, … |
-| Tab strip | RENDERER | `vinary.ui.tabs` | `tab-strip` |
-| Git file-tree sidebar | RENDERER | `vinary.ui.tree` | `file-tree`, `build-tree` |
-| Command registry | RENDERER | `vinary.app.commands` | `registry`, `predicates`, `run`, `all-visible` |
-| Keymap resolver (keydown → command) | RENDERER | `vinary.input.resolver` | `install!`, `step`, `handle` |
-| Keymap presets + merge | RENDERER | `vinary.input.keymap` | `bundled`, `install!`, `install-user!`, `modes` |
-| Key normalization | RENDERER | `vinary.input.keys` | `event->chord`, `normalize-token` |
-| Input/palette events + effects | RENDERER | `vinary.input.events`, `vinary.input.fx` | `:input/*`, `:palette/*`; `:dom/scroll`, `:dom/focus` |
+| Namespace | Responsibility |
+|-----------|----------------|
+| `vinary.main.core` | App/window lifecycle and initial file handling. |
+| `vinary.main.service` | File reading, kind classification, retained watcher reconciliation, git tree, embedded asset watchers. |
+| `vinary.main.pdf` | Native PDF view and PDF reloads. |
+| `vinary.main.web` | In-app HTTP/HTTPS web view. |
+| `vinary.main.config` | `keybindings.edn` load/save/watch. |
+| `vinary.main.settings` | `settings.edn` load/save/watch. |
+| `vinary.main.grammars` | Bundled and user grammar registry. |
+
+Main does not parse Markdown, own tabs, or render ordinary UI.
 
 ---
 
-## 6. The reactive spine (one paragraph you should remember)
+## 6. Renderer responsibilities
 
-Content arrives from main on **every file change** and is **transacted into DataScript**. Each
-DataScript transaction fires a listener that dispatches `[:ds/changed]`, which bumps a counter
-`:ds/rev` in `app-db`. The conn-reading subscriptions (`:tabs`, `:doc/active`) declare `:<- [:ds/rev]`
-as an input, so they recompute exactly when the store changes — and the reagent views that subscribe
-to them re-render. A content update **never** writes scroll or active-tab state (those live in
-`app-db`), which is precisely why live-refresh preserves *where you are* in the document. This
-"`:ds/rev` bridge" is the explicit, hand-rolled reactivity glue; see
-[04 · State Schema](./04-state-schema-reference.md) and
-[06 · Renderer Runtime](./06-renderer-runtime.md).
+Renderer owns reactive application behavior:
 
----
+| Namespace family | Responsibility |
+|------------------|----------------|
+| `vinary.app.*` | app-db defaults, events, effects, subscriptions, navigation helpers, DataScript helpers, command registry. |
+| `vinary.renderer.*` | Markdown rendering, source highlighting, TOC offset cache, figure sizing, scroll restore, media helpers, find. |
+| `vinary.ui.*` | Reagent/Re-frame views, tabs, tree, menu bar, settings, keybinding editor. |
+| `vinary.input.*` | Key tokenization, keymap presets, keymap registry, modal/chord resolver, input effects. |
 
-## 7. Status: current vs Forthcoming
-
-**Available now:** live refresh; multi-tab Markdown/text/image preview; git file-tree with filter;
-in-page find (CSS Custom Highlight API); themes with live switching (Spacemacs dark/light);
-back/forward history; table-of-contents scroll-spy; and a **data-driven keybinding system** — a
-command registry (`vinary.app.commands`), a keymap resolver (`vinary.input.resolver`), and three
-bundled presets (`:default` non-modal, `:vim` modal, `:emacs`) embedded at compile time. The default
-preset generalizes the original `Ctrl+F` (find) and `Alt+←/→` (history) bindings; switch preset at
-runtime with `window.__vvkeymap("vim")`.
-
-**Wired but pending:** (a) loading a **user** `~/.config/vinary-viewer/keybindings.edn` over the
-`vv:keymap` IPC channel — the renderer subscribes/pulls but main has no sender yet (falls back to the
-bundled `:default`); (b) the **command-palette view** — its events + `:palette/state` subscription
-exist, but no palette component is rendered yet. See
-[reference/events-effects-subs.md §4.4](../reference/events-effects-subs.md#44-what-is-wired-vs-pending).
-
-**Forthcoming (planned, not built):** `vv` / `vinary-viewer` binary launchers; a
-`~/.config/vinary-viewer/` grammar registry; native PDF view (BrowserView); diagram rendering
-(d2/plantuml/mermaid → SVG); a tree-sitter source view.
+The renderer uses React 19 through Reagent and renders the shell declaratively.
+Rendered Markdown bodies are inserted through an imperative lifecycle component
+because the HTML comes from the Markdown pipeline rather than React children.
 
 ---
 
-## 8. Where to go next
+## 7. Current status
 
-- [02 · Process & Build Topology](./02-process-and-build-topology.md) — the shadow-cljs builds, the
-  dependency stack, and the dev hot-reload loop.
-- [03 · IPC Protocol](./03-ipc-protocol.md) — the authoritative channel catalog and the seam's
-  security rationale.
-- [04 · State Schema Reference](./04-state-schema-reference.md) — the DataScript schema, the
-  schema-less attribute catalog, and `app-db`.
-- [05 · Data Flows](./05-data-flows.md) — a literate trace + sequence diagram per user action.
-- [06 · Renderer Runtime](./06-renderer-runtime.md) — `init`, the bridges, the subscription graph,
-  and the imperative `innerHTML` body.
+Available now:
+
+| Area | Status |
+|------|--------|
+| Launchers | `./install.sh` installs `vinary-viewer` and `vv`. |
+| Markdown | GFM render, slugged headings, code highlighting, TOC metadata, asset tracking. |
+| Live refresh | Retained-path watcher reconciliation and bounded DataScript cache eviction. |
+| Tabs/history | Browser-like tabs, per-tab history, scroll restore, tab reorder, tab context menus, View Source. |
+| PDF | Native Chromium PDF viewer in a main-owned `WebContentsView`. |
+| Source preview | Read-only CodeMirror 6 with web-tree-sitter highlighting when a grammar or filetype mapping is available. |
+| Grammar registry | Bundled grammars plus user grammars under `~/.config/vinary-viewer/grammars/` and filename/pattern mappings from `filetypes.edn`. |
+| Mermaid rendering | Mermaid fences in Markdown and direct `.mmd` / `.mermaid` files render to SVG in the renderer. |
+| Keybindings | Standard/Vim/Emacs presets, command registry, resolver, visual editor, persisted `keybindings.edn`. |
+| Settings | Persisted theme and font settings in `settings.edn`. |
+| HTTP links | In-app web view with heading outline integration. |
+
+Still planned:
+
+| Area | Current behavior |
+|------|------------------|
+| External diagram engines | `.d2`, `.puml`, `.dot`, and related non-Mermaid diagram sources open as source code; generated SVGs from those tools can be embedded in Markdown. |
+| Additional security hardening | Renderer sandboxing and a strict CSP are tracked in the threat model. |
+
+---
+
+## 8. Architecture map
+
+| Topic | Document |
+|-------|----------|
+| Build topology | [02-process-and-build-topology.md](02-process-and-build-topology.md) |
+| IPC protocol | [03-ipc-protocol.md](03-ipc-protocol.md) |
+| State schema | [04-state-schema-reference.md](04-state-schema-reference.md) |
+| Data flows | [05-data-flows.md](05-data-flows.md) |
+| Renderer runtime | [06-renderer-runtime.md](06-renderer-runtime.md) |
+| Security model | [../security/threat-model.md](../security/threat-model.md) |

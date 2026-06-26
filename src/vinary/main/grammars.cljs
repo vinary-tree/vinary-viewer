@@ -1,8 +1,9 @@
 (ns vinary.main.grammars
   "Grammar registry (main side): decides which files are 'source' (→ the read-only CodeMirror view) and
    discovers USER tree-sitter grammars under ~/.config/vinary-viewer/grammars/<lang>/ (each a
-   grammar.wasm + highlights.scm, extension defaulting to .<lang>). The user list is sent to the
-   renderer as EDN text (file:// urls); bundled grammars are compiled into vinary.grammar-catalog."
+   grammar.wasm + highlights.scm, extension defaulting to .<lang>). User filetype mappings live in
+   ~/.config/vinary-viewer/filetypes.edn. The combined user registry is sent to the renderer as EDN text
+   (file:// urls); bundled grammars are compiled into vinary.grammar-catalog."
   (:require ["electron" :refer [ipcMain]]
             ["fs" :as fs]
             ["path" :as path]
@@ -17,10 +18,17 @@
   #{".sql" ".vim" ".v"})
 
 (defonce ^:private user-grammars (atom []))   ; [{:language :extensions :wasm-url :scm-url} …]
+(defonce ^:private user-filetypes (atom {}))  ; {:filenames {...} :patterns [...]}
+
+(defn- config-dir []
+  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
+    (path/join home "vinary-viewer")))
 
 (defn- grammars-dir []
-  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
-    (path/join home "vinary-viewer" "grammars")))
+  (path/join (config-dir) "grammars"))
+
+(defn- filetypes-path []
+  (path/join (config-dir) "filetypes.edn"))
 
 (defn- load-user! []
   (reset! user-grammars
@@ -44,17 +52,32 @@
                 []))
             (catch :default _ []))))
 
+(defn- load-filetypes! []
+  (reset! user-filetypes
+          (try
+            (let [p (filetypes-path)]
+              (if (.existsSync fs p)
+                (grammar-catalog/normalize-filetype-config (reader/read-string (.readFileSync fs p "utf8")))
+                {}))
+            (catch :default _ {}))))
+
+(defn- all-grammars []
+  (concat @user-grammars grammar-catalog/bundled-grammars))
+
 (defn source?
-  "Should path open in the source view? (a built-in code extension, or a user grammar's extension)"
+  "Should path open in the source view? (a built-in/user grammar match, filetype mapping, or plain source ext)"
   [path]
   (let [e (str/lower-case (path/extname path))]
-    (boolean (or (contains? grammar-catalog/bundled-source-exts e)
+    (boolean (or (grammar-catalog/grammar-for-path path (all-grammars) @user-filetypes)
                  (contains? plain-source-exts e)
                  (some (fn [g] (some #{e} (:extensions g))) @user-grammars)))))
 
-(defn push! [^js wc] (.send wc "vv:grammars" (pr-str @user-grammars)))
+(defn push! [^js wc]
+  (.send wc "vv:grammars" (pr-str {:grammars @user-grammars
+                                    :filetypes @user-filetypes})))
 
 (defn init! [^js wc]
   (load-user!)
+  (load-filetypes!)
   (push! wc)
   (.on ipcMain "vv:grammars-request" (fn [^js e] (push! (.-sender e)))))

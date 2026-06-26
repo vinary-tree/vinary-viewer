@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0010**.
+The next free number is **0011**.
 
 ---
 
@@ -63,26 +63,30 @@ The next free number is **0010**.
 | [0003](0003-ref-innerHTML-no-vdom-body.md) | Write the document body via a ref + `innerHTML` (no VDOM diffing)          | Accepted   |
 | [0004](0004-ds-rev-bridge-vs-re-posh.md) | A `:ds/rev` transaction-revision bridge instead of re-posh internals        | Accepted   |
 | [0005](0005-datascript-nil-as-absence.md) | Model absent attributes as absence (omit/retract), never nil datoms       | Accepted   |
-| [0006](0006-multi-watcher-live-refresh.md) | One `chokidar` watcher per open path for live-refresh                     | Accepted   |
+| [0006](0006-multi-watcher-live-refresh.md) | One `chokidar` watcher per retained path for live-refresh                 | Accepted   |
 | [0007](0007-css-mask-themed-watermark.md) | A CSS-mask + `currentColor` themed watermark (one asset, all themes)       | Accepted   |
-| [0008](0008-datascript-plus-app-db-split.md) | Split state: DataScript SSOT for docs/tabs, app-db for ephemeral UI     | Accepted   |
+| [0008](0008-datascript-plus-app-db-split.md) | Superseded split state: DataScript-owned docs/tabs                       | Superseded |
 | [0009](0009-mediator-ipc-over-point-to-point.md) | A single `window.vv` mediator seam over point-to-point IPC          | Accepted   |
+| [0010](0010-bounded-content-retention-and-render-metadata.md) | Bound content retention to tab histories and emit Markdown render metadata | Accepted |
 
 ---
 
 ## How the ADRs relate
 
-These nine decisions reinforce one another into a coherent reactive architecture:
+These ten decisions reinforce one another into a coherent reactive architecture:
 
 - **0001** sets the platform (modern Electron), which **enables** the contextBridge seam in **0009** and
   the in-renderer rendering in **0002**.
-- **0008** establishes the two-store split; **0004** is the bridge that makes the DataScript store
-  reactive to re-frame; **0005** is the discipline that keeps that store clean.
+- **0008** established the original two-store split; **0010** updates that split for the current
+  tab-history model. **0004** is still the bridge that makes the DataScript cache reactive to re-frame;
+  **0005** is the discipline that keeps that cache clean.
 - **0002** puts rendering in the renderer; **0003** is how the rendered HTML reaches the screen.
-- **0006** is the live-refresh mechanism; it flows content into the **0008** SSOT without disturbing the
-  app-db UI state — which is *why* live-refresh preserves your scroll position and tabs.
+- **0006** is the live-refresh mechanism; **0010** bounds its watcher and cache lifetimes to retained
+  tab histories while preserving scroll position and tabs.
 - **0007** is a focused UI decision (the empty-state watermark) that rides on the same theme-token
   system used everywhere else.
+- **0010** refines **0006** and **0008** for the current tab model: tab histories define retained file
+  ownership, while DataScript is a bounded content cache with render metadata.
 
 For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md) and the
 theory pillar under [`docs/theory/`](../theory/).

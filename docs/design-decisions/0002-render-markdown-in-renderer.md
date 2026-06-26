@@ -16,12 +16,28 @@ main process, meanwhile, already has a clear, narrow job: read files and watch t
 **Render in the renderer.** The pipeline lives in `vinary.renderer.markdown/render`:
 
 ```text
-unified → remark-parse → remark-gfm → remark-rehype → rehype-slug → rehype-highlight → rehype-stringify
+normalize GitHub math escapes
+→ unified
+→ remark-parse
+→ remark-gfm
+→ remark-math
+→ remark-rehype
+→ rehype-slug
+→ rehype-highlight
+→ rehype-stringify
+→ MathJax SVG replacement
+→ Mermaid SVG replacement
+→ tree-sitter fenced-code replacement
 ```
 
-It is a **pure transform** with no DOM access and returns a **`Promise<string>`** of HTML. It is invoked
-from a re-frame **effect** (`:markdown/render` in `vinary.app.fx`), which `.then`s the result back into
-the loop as `[:content/rendered path html]` and `.catch`es failures as `[:content/error …]`.
+It is an asynchronous renderer-side transform and returns a **`Promise<{:html :toc :assets}>`**. The
+function parses its serialized HTML with `DOMParser` before the final DOM commit so it can replace
+math placeholders, render Mermaid diagrams, produce a Table of Contents (TOC), collect linked assets,
+and enrich fenced code blocks without adding privileged filesystem access.
+
+The render is invoked from a re-frame **effect** (`:markdown/render` in `vinary.app.fx`), which `.then`s
+the result back into the loop as `[:content/rendered path stamp result]` and `.catch`es failures as
+`[:content/error …]`.
 
 The **main process stays a thin IO service** (`vinary.main.service`): it reads the file
 (`fs.readFileSync … "utf8"`) and sends the **raw text** to the renderer over `vv:content`; it does
@@ -39,6 +55,12 @@ The **main process stays a thin IO service** (`vinary.main.service`): it reads t
 - **Security analysis is localized.** Since rendering and the `innerHTML` write are both in the renderer,
   the XSS analysis (no `rehype-raw`, so raw HTML is not passed through) is a single, contained argument —
   see [security/threat-model.md](../security/threat-model.md).
+- **Math and diagrams are renderer-local presentation features.** MathJax converts GFM-compatible
+  TeX expressions such as ``$`x^2`$`` and `$$x^2$$` into SVG, and Mermaid converts fenced
+  `mermaid` blocks into SVG with strict security mode. Neither feature expands the main process IPC
+  surface.
+- **The result carries render metadata.** The `:html` field is committed to the preview, `:toc`
+  powers navigation, and `:assets` drives retained asset watchers for live refresh.
 - The renderer receives text and produces HTML; the **image** kind sends no text at all (the renderer
   loads images by `file://` path), and the **text** kind is HTML-escaped into `<pre>` rather than parsed.
 

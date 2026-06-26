@@ -10,7 +10,8 @@ vinary-viewer renders **GitHub-Flavored Markdown** to HTML using the
 [unified](https://unifiedjs.com/) / [remark](https://github.com/remarkjs/remark) /
 [rehype](https://github.com/rehypejs/rehype) ecosystem: tables, task lists, and strikethrough
 (GFM); stable `id`s on every heading (so the [scroll-spy TOC](10-scroll-spy-toc.md) and in-document
-links work); and syntax highlighting on fenced code blocks. The rendered HTML is themed entirely
+links work); syntax highlighting on fenced code blocks; GitHub-compatible math rendered to MathJax
+SVG; and Mermaid diagrams rendered inline from fenced code blocks. The rendered HTML is themed entirely
 through CSS variables, so Markdown re-colors with the active theme
 ([feature 06](06-themes-and-live-switching.md)) — including code, which is highlighted with
 highlight.js token classes that map onto the `--vv-*` palette.
@@ -27,7 +28,10 @@ file change re-renders and the new HTML flows back into the document.
 2. The rendered document appears in the content area; headings, tables, lists, blockquotes, links,
    inline code, and fenced code blocks are all styled by the active theme.
 3. Fenced code blocks with a language hint (e.g. ```` ```clojure ````) are syntax-highlighted.
-4. Edit and save; the preview re-renders in place ([feature 01](01-live-refresh.md)).
+4. Write inline math with `$x^2$`, display math with `$$...$$`, fenced math with
+   ```` ```math ```` blocks, or GitHub's backtick-dollar escape form such as ``$`x^2`$``.
+5. Write Mermaid diagrams with ```` ```mermaid ```` fenced blocks.
+6. Edit and save; the preview re-renders in place ([feature 01](01-live-refresh.md)).
 
 **Example.** A code block like:
 
@@ -40,6 +44,35 @@ file change re-renders and the new HTML flows back into the document.
 renders as a highlighted `<pre><code class="hljs language-clojure">…</code></pre>`, with keywords,
 strings, and symbols colored from the theme palette.
 
+Math renders before the HTML is inserted into the preview body:
+
+```markdown
+Euler's identity: $e^{i\pi} + 1 = 0$
+
+$$
+\frac{a}{b}
+$$
+```
+
+The renderer converts each expression to an SVG `<mjx-container>` through MathJax and keeps a bounded
+cache keyed by display mode and TeX source. This avoids a post-DOM "typeset after insertion" pass.
+
+Mermaid diagrams render from Markdown fences:
+
+````markdown
+```mermaid
+flowchart LR
+  A[Start] --> B[Done]
+```
+````
+
+The generated SVG replaces the original fenced block before `markdown-body` receives the final HTML.
+If a diagram cannot parse, the preview shows an inline error block with the original diagram source.
+
+Badge rows follow GitHub's paragraph behavior. A paragraph containing several linked or unlinked
+badge images keeps them inline; a paragraph containing one standalone image still centers it as a
+figure.
+
 > **Raw embedded HTML is not passed through.** The pipeline does **not** include `rehype-raw`, so
 > literal HTML written inside a Markdown file is not injected into the output as live markup. This
 > is a deliberate safety property (see Design notes and
@@ -51,28 +84,36 @@ strings, and symbols colored from the theme palette.
 
 ### The unified pipeline
 
-`src/vinary/renderer/markdown.cljs` builds the pipeline and returns a `Promise<string>`:
+`src/vinary/renderer/markdown.cljs` builds the pipeline and returns a
+`Promise<{:html string :toc vector :assets vector}>`:
 
 ```clojure
 (ns vinary.renderer.markdown
   (:require ["unified" :refer [unified]]
             ["remark-parse$default"     :as remark-parse]
             ["remark-gfm$default"       :as remark-gfm]
+            ["remark-math$default"      :as remark-math]
             ["remark-rehype$default"    :as remark-rehype]
             ["rehype-slug$default"      :as rehype-slug]
             ["rehype-highlight$default" :as rehype-highlight]
-            ["rehype-stringify$default" :as rehype-stringify]))
+            ["rehype-stringify$default" :as rehype-stringify]
+            [vinary.renderer.math :as math]
+            [vinary.renderer.mermaid :as mermaid]
+            [vinary.renderer.syntax :as syntax]))
 
 (defn render [^String md]
   (-> (unified)
       (.use remark-parse)
       (.use remark-gfm)
+      (.use remark-math)
       (.use remark-rehype)
       (.use rehype-slug)
       (.use rehype-highlight)
       (.use rehype-stringify)
-      (.process md)
-      (.then (fn [file] (str file)))))
+      (.process (math/normalize-github-math-escapes md))
+      (.then (fn [file] (math/render-html-math (str file))))
+      (.then mermaid/render-html-diagrams)
+      (.then syntax/highlight-html-code-blocks)))
 ```
 
 The plugins run in this **exact order**, each doing one job:
@@ -81,19 +122,29 @@ The plugins run in this **exact order**, each doing one job:
    Syntax Tree). *mdast* is the remark AST: a tree of nodes like headings, paragraphs, lists, code.
 2. **`remark-gfm`** — adds **GitHub-Flavored Markdown** extensions to the mdast: tables, task-list
    checkboxes, strikethrough, autolinks, and footnotes.
-3. **`remark-rehype`** — transforms the Markdown tree (mdast) into an HTML tree (**hast**, the
+3. **`remark-math`** — adds math nodes for inline `$...$`, display `$$...$$`, and fenced `math`
+   blocks. GitHub's backtick-dollar escape form is normalized before parsing.
+4. **`remark-rehype`** — transforms the Markdown tree (mdast) into an HTML tree (**hast**, the
    HTML Abstract Syntax Tree). This is the bridge from "Markdown structure" to "HTML structure".
-4. **`rehype-slug`** — walks the hast and gives every heading (`h1`–`h6`) a stable, URL-safe `id`
+5. **`rehype-slug`** — walks the hast and gives every heading (`h1`–`h6`) a stable, URL-safe `id`
    derived from its text. These ids are what the [TOC](10-scroll-spy-toc.md) targets and what
    in-document anchor links point to.
-5. **`rehype-highlight`** — applies [highlight.js](https://highlightjs.org/) to fenced code blocks,
+6. **`rehype-highlight`** — applies [highlight.js](https://highlightjs.org/) to fenced code blocks,
    wrapping tokens in `hljs-*` classes (e.g. `hljs-keyword`, `hljs-string`). It adds classes only;
    the *colors* come from CSS (below).
-6. **`rehype-stringify`** — serializes the hast back into an HTML **string**.
+7. **`rehype-stringify`** — serializes the hast back into an HTML **string**.
+8. **MathJax postprocess** — replaces `remark-math` placeholders with cached MathJax SVG.
+9. **Mermaid postprocess** — replaces Mermaid fenced-code blocks with SVG diagrams.
+10. **Tree-sitter fenced-code postprocess** — replaces known fenced code with the shared source
+    grammar highlighter where a tree-sitter grammar is registered.
 
 `.process md` runs the chain asynchronously and yields a vfile; `(.then (fn [file] (str file)))`
 extracts the HTML string. The `$default` interop suffix (`"remark-parse$default"`) imports each
 package's ESM default export under shadow-cljs.
+
+The math and Mermaid postprocessors parse the generated HTML with `DOMParser`, replace only the
+specific placeholder nodes they own, and serialize the body back to a string. The final preview still
+arrives at `markdown-body` as one HTML string.
 
 ### Wired as an async effect
 
@@ -103,15 +154,15 @@ at the edge and the result is dispatched back into the loop:
 ```clojure
 (rf/reg-fx
  :markdown/render
- (fn [{:keys [text path on-done]}]
-   (-> (md/render text)
-       (.then (fn [html] (rf/dispatch (conj on-done html))))
+ (fn [{:keys [text path stamp on-done]}]
+   (-> (md/render text (md/dir-of path) stamp)
+       (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 ```
 
-- **`.then` → `(conj on-done html)`** — on success, dispatch the `on-done` event vector with the
-  HTML appended. In `:content/received`, `on-done` is `[:content/rendered path]`, so the dispatch
-  becomes `[:content/rendered path html]`.
+- **`.then` → `(conj on-done result)`** — on success, dispatch the `on-done` event vector with the
+  render result appended. In `:content/received`, `on-done` is `[:content/rendered path stamp]`, so
+  the dispatch becomes `[:content/rendered path stamp {:html ... :toc ... :assets ...}]`.
 - **`.catch` → `[:content/error …]`** — a render failure becomes a recoverable error state (shown
   by the content-view's error branch), not a crash.
 
@@ -120,18 +171,28 @@ This effect is added only for the `markdown` kind in `:content/received`
 
 ```clojure
 :fx (cond-> [[:ds/transact tx]]
-      (= kind "markdown") (conj [:markdown/render {:text text :path path :on-done [:content/rendered path]}])
-      (= kind "text")     (conj [:ds/transact [{:doc/path path :doc/html (plain-html text)}]]))
+      (= kind "markdown") (conj [:markdown/render {:text text
+                                                   :path path
+                                                   :stamp stamp
+                                                   :on-done [:content/rendered path stamp]}]))
 ```
 
 ### The HTML is transacted onto the document
 
-`:content/rendered` writes the HTML onto the doc's `:doc/html`:
+`:content/rendered` writes the HTML, TOC metadata, and embedded asset list onto the cached document,
+but only when the completed render's stamp still matches the current document stamp:
 
 ```clojure
 (rf/reg-event-fx
  :content/rendered
- (fn [_ [_ path html]] {:fx [[:ds/transact [{:doc/path path :doc/html html}]]]}))
+ (fn [_ [_ path stamp {:keys [html toc assets]}]]
+   (let [snap (ds/snapshot)]
+     (when-let [eid (ds/eid-for-path snap path)]
+       (when (= stamp (ds/doc-attr snap path :doc/stamp))
+         {:fx [[:ds/transact [[:db/add eid :doc/html html]
+                               [:db/add eid :doc/toc (vec toc)]
+                               [:db/add eid :doc/assets (vec assets)]]]
+               [:vv/watch-assets {:doc-path path :paths assets}]]})))))
 ```
 
 That transaction bumps `:ds/rev`, the `:doc/active` subscription recomputes, and the content view
@@ -238,9 +299,10 @@ See the [ADR index](../design-decisions/README.md) for the full list.
 
 - **Sequence — render a Markdown file:** [`../diagrams/seq-markdown-render.puml`](../diagrams/seq-markdown-render.puml)
   (written by the architecture pillar). `:content/received` (markdown) → `:markdown/render` fx →
-  `unified → parse → gfm → rehype → slug → highlight → stringify` → `Promise<string>` →
-  `:content/rendered` → `[:ds/transact {:doc/html …}]` → `:doc/active` recompute → `markdown-body`
-  `innerHTML`, with the `.catch → :content/error` branch shown.
+  `unified → parse → gfm → math → rehype → slug → highlight → stringify → MathJax → Mermaid` →
+  `Promise<{:html :toc :assets}>` → `:content/rendered` →
+  `[:ds/transact {:doc/html … :doc/toc … :doc/assets …}]` → `:doc/active` recompute →
+  `markdown-body` `innerHTML`, with the `.catch → :content/error` branch shown.
 
 ![Markdown render sequence](../diagrams/seq-markdown-render.svg)
 

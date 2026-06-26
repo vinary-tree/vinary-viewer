@@ -1,0 +1,35 @@
+@startuml component-native-pdf
+'' PlantUML over Mermaid because this component view uses the shared per-concept color theme and shows the native Electron surface beside the renderer DOM placeholder.
+!include _vv-theme.iuml
+
+title Native PDF preview with a main-owned WebContentsView
+
+skinparam componentStyle rectangle
+
+package "Renderer process" RENDERER_COLOR {
+  [content-view Strategy\n:doc/kind = "pdf"] as Strategy RENDERER_COLOR
+  [pdf-host placeholder\nmeasures DOM bounds] as Placeholder REFRAME_COLOR
+  [window.vv mediator\npdfShow / pdfBounds / pdfHide] as VV IPC_COLOR
+}
+
+package "Main process" MAIN_COLOR {
+  [vinary.main.pdf\nPDF service] as Pdf MAIN_COLOR
+  [WebContentsView\nChromium PDF viewer] as View MAIN_COLOR
+  [retained file watcher\nreload on change] as Watcher FS_COLOR
+}
+
+Strategy -[#4F97D7,thickness=2]-> Placeholder : render placeholder
+Placeholder -[#B1951D,thickness=2]-> VV : path + bounds
+VV -[#B1951D,thickness=2]-> Pdf : vv:pdf-show / vv:pdf-bounds / vv:pdf-hide
+Pdf -[#3A5BA0,thickness=2]-> View : load file:// PDF\nsetBounds(...)
+Watcher -[#9F8766,thickness=2]-> Pdf : reload!(path)
+
+legend
+  |<#2D9574>| renderer owns DOM strategy selection |
+  |<#4F97D7>| re-frame/Reagent view measures placeholder geometry |
+  |<#B1951D>| IPC mediator carries only path and bounds data |
+  |<#3A5BA0>| main owns the native WebContentsView |
+  |<#9F8766>| retained-path watcher drives live reload |
+endlegend
+
+@enduml

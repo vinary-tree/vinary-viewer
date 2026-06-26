@@ -6,8 +6,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
-            [vinary.input.keymaps-registry :as registry]
-            [vinary.renderer.toc :as toc]))
+            [vinary.input.keymaps-registry :as registry]))
 
 (rf/reg-sub :ds/rev         (fn [db _] (:ds/rev db)))
 (rf/reg-sub :ui/theme       (fn [db _] (get-in db [:ui :theme])))
@@ -94,11 +93,11 @@
 (rf/reg-sub :ui/web-toc (fn [db _] (get-in db [:ui :web-toc])))
 
 ;; the Contents/TOC outline of the active document: the web view's headings for an HTTP page, else the
-;; Markdown headings parsed from the rendered HTML
+;; Markdown headings captured during rendering
 (rf/reg-sub
  :doc/toc
  :<- [:ui/active-uri] :<- [:doc/active] :<- [:ui/web-toc]
  (fn [[active-uri doc web-toc] _]
    (if (uri/http? active-uri)
      (vec (or web-toc []))
-     (toc/extract (:doc/html doc)))))
+     (vec (or (:doc/toc doc) [])))))

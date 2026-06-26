@@ -260,10 +260,26 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .markdown-body th, .markdown-body td { border: 1px solid var(--vv-border); padding: 6px 12px; }
 .markdown-body tr:nth-child(2n) { background: var(--vv-bg2); }
 .markdown-body hr { border: none; height: 2px; background: var(--vv-border); }
-/* center figures at natural size (width owned by figures/scale-figures! for SVGs, max-width for rasters);
-   emoji stay inline */
-.markdown-body img:not([src^="emoji"]) { display: block; margin-left: auto; margin-right: auto;
-  max-width: 100%; height: auto; }
+/* Figure images keep their natural size; badge runs inside one paragraph flow inline like GitHub. */
+.markdown-body img:not([src^="emoji"]) { max-width: 100%; height: auto; }
+.markdown-body .vv-figure-link { max-width: 100%; }
+.markdown-body p > img:not([src^="emoji"]),
+.markdown-body p > a.vv-figure-link > img:not([src^="emoji"]) {
+  display: inline-block; margin: 0 0.35em 0.35em 0; vertical-align: middle; }
+.markdown-body p > img:not([src^="emoji"]):only-child,
+.markdown-body p > a.vv-figure-link:only-child { display: block; margin-left: auto; margin-right: auto; }
+.markdown-body p > a.vv-figure-link:only-child > img:not([src^="emoji"]) {
+  display: block; margin-left: auto; margin-right: auto; }
+.markdown-body .vv-math-inline mjx-container { margin: 0 0.12em; }
+.markdown-body .vv-math-display { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; text-align: center; }
+.markdown-body .vv-math-display mjx-container { margin: 0 auto; }
+.markdown-body .vv-mermaid { max-width: 100%; overflow-x: auto; margin: 16px 0; text-align: center; }
+.markdown-body .vv-mermaid svg { max-width: 100%; height: auto; }
+.vv-mermaid-view { padding: 24px; overflow: auto; }
+.vv-mermaid-view .vv-mermaid { max-width: 100%; overflow-x: auto; text-align: center; }
+.vv-mermaid-view .vv-mermaid svg { max-width: 100%; height: auto; }
+.vv-math-error, .vv-mermaid-error { color: var(--vv-error); background: var(--vv-bg2);
+  border: 1px solid var(--vv-error); border-radius: 4px; padding: 12px; overflow: auto; }
 .markdown-body .vv-plain { white-space: pre-wrap; color: var(--vv-fg); }
 
 /* ----- highlight.js classes (rehype-highlight), Spacemacs palette ----- */

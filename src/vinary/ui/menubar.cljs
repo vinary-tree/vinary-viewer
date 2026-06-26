@@ -270,65 +270,81 @@
     (.addEventListener js/window "keydown" handle-keydown! true)
     (.addEventListener js/window "keyup" handle-keyup! true)))
 
+(defn- submenu-dropdown [rows access-active? sub-focus]
+  (into [:div.vv-menu-subdropdown {:role "menu"}]
+        (map (fn [[j row]]
+               (if (= row :sep)
+                 ^{:key j} [:div.vv-menu-sep]
+                 ^{:key j} [row-item row access-active? (= sub-focus j)
+                            #(rf/dispatch [:menu/submenu-focus j])])))
+        (map-indexed vector rows)))
+
+(defn- dropdown-item [item i sub-open focus sub-focus access-active?]
+  (cond
+    (= item :sep)
+    ^{:key i} [:div.vv-menu-sep]
+
+    (:submenu item)
+    ^{:key i}
+    [:div
+     (merge {:class          (menu-item-class "vv-menu-item vv-menu-item-submenu" (= focus i))
+             :role           "menuitem"
+             :aria-haspopup  "menu"
+             :aria-expanded  (= sub-open (:submenu item))
+             :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
+                                  (rf/dispatch [:menu/submenu (:submenu item)]))
+             :on-mouse-over  #(do (rf/dispatch [:menu/focus i])
+                                  (rf/dispatch [:menu/submenu (:submenu item)]))
+             :on-click       (fn [e]
+                               (.preventDefault e)
+                               (.stopPropagation e)
+                               (rf/dispatch [:menu/focus i])
+                               (rf/dispatch [:menu/submenu (:submenu item)]))}
+            (access/access-attrs (:access-key item)))
+     [:span.vv-menu-item-label [access/label (:submenu item) (:access-key item) access-active?]]
+     [:span.vv-menu-item-arrow ">"]
+     (when (= sub-open (:submenu item))
+       (submenu-dropdown (vec (remove nil? (radio-rows (:radio item)))) access-active? sub-focus))]
+
+    :else
+    ^{:key i}
+    [:div
+     (merge {:class          (menu-item-class "vv-menu-item" (= focus i))
+             :role           "menuitem"
+             :on-click       #(act! (:event item))
+             :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
+                                  (rf/dispatch [:menu/submenu nil]))}
+            (access/access-attrs (:access-key item)))
+     [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
+     (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))
+
+(defn- menu-dropdown [items sub-open focus sub-focus access-active?]
+  (into [:div.vv-menu-dropdown {:role "menu"}]
+        (map (fn [[i item]] (dropdown-item item i sub-open focus sub-focus access-active?)))
+        (map-indexed vector items)))
+
+(defn- top-menu [open sub-open focus sub-focus access-active? {:keys [label items access-key]}]
+  ^{:key label}
+  [:div.vv-menu
+   [:div.vv-menu-label (merge {:class          (when (= open label) "vv-menu-label-open")
+                               :role           "menuitem"
+                               :aria-haspopup  "menu"
+                               :aria-expanded  (= open label)
+                               :on-click       #(rf/dispatch [:menu/toggle label])
+                               :on-mouse-enter #(when open (rf/dispatch [:menu/open label]))}
+                              (access/access-attrs access-key))
+    [access/label label access-key access-active?]]
+   (when (= open label)
+     (menu-dropdown items sub-open focus sub-focus access-active?))])
+
 (defn menubar []
   (let [open @(rf/subscribe [:ui/menu])
         sub-open @(rf/subscribe [:ui/menu-submenu])
         focus @(rf/subscribe [:ui/menu-focus])
         sub-focus @(rf/subscribe [:ui/menu-submenu-focus])
-        access-active? @(rf/subscribe [:ui/access-keys-active?])]
-    [:div.vv-menubar {:role "menubar"}
-     (when open [:div.vv-menu-overlay {:on-click #(rf/dispatch [:menu/close])}])
-     (for [{:keys [label items access-key]} menus]
-       ^{:key label}
-       [:div.vv-menu
-        [:div.vv-menu-label (merge {:class          (when (= open label) "vv-menu-label-open")
-                                    :role           "menuitem"
-                                    :aria-haspopup  "menu"
-                                    :aria-expanded  (= open label)
-                                    :on-click       #(rf/dispatch [:menu/toggle label])
-                                    :on-mouse-enter #(when open (rf/dispatch [:menu/open label]))}
-                                   (access/access-attrs access-key))
-         [access/label label access-key access-active?]]
-        (when (= open label)
-          [:div.vv-menu-dropdown {:role "menu"}
-           (for [[i item] (map-indexed vector items)]
-             (cond
-               (= item :sep) ^{:key i} [:div.vv-menu-sep]
-               (:submenu item)
-               ^{:key i}
-               [:div
-                (merge {:class          (menu-item-class "vv-menu-item vv-menu-item-submenu" (= focus i))
-                        :role           "menuitem"
-                        :aria-haspopup  "menu"
-                        :aria-expanded  (= sub-open (:submenu item))
-                        :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
-                                             (rf/dispatch [:menu/submenu (:submenu item)]))
-                        :on-mouse-over  #(do (rf/dispatch [:menu/focus i])
-                                             (rf/dispatch [:menu/submenu (:submenu item)]))
-                        :on-click       (fn [e]
-                                          (.preventDefault e)
-                                          (.stopPropagation e)
-                                          (rf/dispatch [:menu/focus i])
-                                          (rf/dispatch [:menu/submenu (:submenu item)]))}
-                       (access/access-attrs (:access-key item)))
-                [:span.vv-menu-item-label [access/label (:submenu item) (:access-key item) access-active?]]
-                [:span.vv-menu-item-arrow ">"]
-                (when (= sub-open (:submenu item))
-                  (let [rows (vec (remove nil? (radio-rows (:radio item))))]
-                    [:div.vv-menu-subdropdown {:role "menu"}
-                     (for [[j row] (map-indexed vector rows)]
-                       (if (= row :sep)
-                         ^{:key j} [:div.vv-menu-sep]
-                         ^{:key j} [row-item row access-active? (= sub-focus j)
-                                    #(rf/dispatch [:menu/submenu-focus j])]))]))]
-               :else
-               ^{:key i}
-               [:div
-                (merge {:class          (menu-item-class "vv-menu-item" (= focus i))
-                        :role           "menuitem"
-                        :on-click       #(act! (:event item))
-                        :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
-                                             (rf/dispatch [:menu/submenu nil]))}
-                       (access/access-attrs (:access-key item)))
-                [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
-                (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))])])]))
+        access-active? @(rf/subscribe [:ui/access-keys-active?])
+        root (cond-> [:div.vv-menubar {:role "menubar"}]
+               open (conj [:div.vv-menu-overlay {:on-click #(rf/dispatch [:menu/close])}]))]
+    (into root
+          (map (fn [menu] (top-menu open sub-open focus sub-focus access-active? menu)))
+          menus)))

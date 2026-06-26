@@ -1,8 +1,7 @@
 (ns vinary.main.pdf
-  "Native PDF preview. A main-owned WebContentsView (the modern, non-deprecated form of BrowserView)
-   loads file://…pdf in Chromium's built-in PDF viewer and is positioned over the renderer's content
-   area. The renderer sends show/hide + bounds over the IPC seam; live-refresh reloads it on change.
-   (Plan: main owns the view; renderer sends bounds; reload on file change.)"
+  "Native PDF preview. A main-owned WebContentsView loads file://…pdf in Chromium's built-in PDF viewer
+   and is positioned over the renderer's content
+   area. The renderer sends show/hide + bounds over the IPC seam; live-refresh reloads it on change."
   (:require ["electron" :refer [ipcMain WebContentsView]]))
 
 (defonce ^:private state (atom {:view nil :win nil :path nil}))

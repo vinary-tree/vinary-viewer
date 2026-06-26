@@ -1,18 +1,22 @@
 (ns vinary.renderer.markdown
-  "Markdown → HTML via the unified/remark/rehype pipeline (GFM + heading slugs + syntax highlighting).
+  "Markdown → HTML via the unified/remark/rehype pipeline (GFM + math + heading slugs + syntax highlighting).
    Rehype transforms rewrite relative URLs to source-relative file:// URIs, wrap bare preview images in
    links, and preserve Markdown source positions as data attributes for preview context-menu actions.
    Runs in the renderer (Chromium): the all-ESM remark stack bundles cleanly and the browser URL
-   constructor resolves relative paths without Node path APIs. Pure transform; returns Promise<string>."
+   constructor resolves relative paths without Node path APIs. Pure transform; returns
+   Promise<{:html :toc :assets}>."
   (:require ["unified" :refer [unified]]
             ["remark-parse$default"     :as remark-parse]
             ["remark-gfm$default"       :as remark-gfm]
+            ["remark-math$default"      :as remark-math]
             ["remark-rehype$default"    :as remark-rehype]
             ["rehype-slug$default"      :as rehype-slug]
             ["rehype-highlight$default" :as rehype-highlight]
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
             [vinary.renderer.media :as media]
+            [vinary.renderer.math :as math]
+            [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.syntax :as syntax]))
 
 (defn dir-of
@@ -135,6 +139,44 @@
               (aset kids i wrapped))
             (wrap-unlinked-images! child tag)))))))
 
+(defn- hast-text
+  "Text content for a HAST subtree, matching the browser's rendered text closely enough for TOC labels."
+  [^js node]
+  (cond
+    (nil? node) ""
+    (= "text" (.-type node)) (or (.-value node) "")
+    :else
+    (if-let [^js kids (.-children node)]
+      (apply str (for [i (range (.-length kids))] (hast-text (aget kids i))))
+      "")))
+
+(defn- heading-level [tag]
+  (when-let [[_ n] (and (string? tag) (re-matches #"h([1-6])" tag))]
+    (js/parseInt n)))
+
+(defn- collect-metadata!
+  "Collect derived render metadata from the already-mutated HAST tree. This avoids reparsing the final
+   HTML just to find headings and local media paths."
+  [state ^js node]
+  (when node
+    (when (= "element" (.-type node))
+      (let [tag   (.-tagName node)
+            props (.-properties node)]
+        (when-let [level (heading-level tag)]
+          (when-let [id (and props (aget props "id"))]
+            (when-not (str/blank? id)
+              (swap! state update :toc conj {:level level :text (str/trim (hast-text node)) :id id}))))
+        (when-let [attrs (seq (for [[media-tag attr] media-url-attrs
+                                    :when (= media-tag tag)]
+                                attr))]
+          (doseq [attr attrs
+                  :let [url (and props (aget props attr))
+                        path (media/local-media-path url)]
+                  :when path]
+            (swap! state update :assets conj path)))))
+    (when-let [^js kids (.-children node)]
+      (dotimes [i (.-length kids)] (collect-metadata! state (aget kids i))))))
+
 (defn- rewrite-urls
   "A rehype (hast) transformer plugin: rewrite relative element URLs to absolute file:// against base-dir."
   [base-dir cache-token]
@@ -160,20 +202,38 @@
       (annotate-source! tree)
       tree)))
 
+(defn- collect-metadata
+  "A rehype transformer plugin: collect TOC headings and local media asset paths after URL rewriting."
+  [state]
+  (fn [_opts]
+    (fn [tree _file]
+      (collect-metadata! state tree)
+      tree)))
+
 (defn render
-  "Render a Markdown string to an HTML string. base-dir (the source doc's absolute directory, or nil) is
-   used to resolve relative img/link URLs to absolute file://. Returns a Promise<string>."
+  "Render a Markdown string. base-dir (the source doc's absolute directory, or nil) is used to resolve
+   relative img/link URLs to absolute file://. Returns a Promise resolving to
+   {:html string :toc [{:level :text :id}] :assets [absolute-path ...]}."
   ([^String md base-dir] (render md base-dir nil))
   ([^String md base-dir cache-token]
-   (-> (unified)
-       (.use remark-parse)
-       (.use remark-gfm)
-       (.use remark-rehype)
-       (.use rehype-slug)
-       (.use rehype-highlight)
-       (.use (rewrite-urls base-dir cache-token))
-       (.use (wrap-images))
-       (.use (source-positions))
-       (.use rehype-stringify)
-       (.process md)
-       (.then (fn [file] (syntax/highlight-html-code-blocks (str file)))))))
+   (let [metadata (atom {:toc [] :assets #{}})]
+     (-> (unified)
+         (.use remark-parse)
+         (.use remark-gfm)
+         (.use remark-math)
+         (.use remark-rehype)
+         (.use rehype-slug)
+         (.use rehype-highlight)
+         (.use (rewrite-urls base-dir cache-token))
+         (.use (wrap-images))
+         (.use (source-positions))
+         (.use (collect-metadata metadata))
+         (.use rehype-stringify)
+         (.process (math/normalize-github-math-escapes md))
+         (.then (fn [file] (math/render-html-math (str file))))
+         (.then mermaid/render-html-diagrams)
+         (.then syntax/highlight-html-code-blocks)
+         (.then (fn [html]
+                  {:html html
+                   :toc (:toc @metadata)
+                   :assets (vec (:assets @metadata))}))))))

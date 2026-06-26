@@ -7,7 +7,7 @@
 '' green #67B11D markdown, purple #A45BAD DataScript).
 !include _vv-theme.iuml
 
-title Live refresh — editor save ⟶ painted DOM (one full round trip)\nINVARIANT: only :doc/* is mutated; :ui/* (scroll, find, theme) is untouched
+title Live refresh — editor save -> painted DOM (one full round trip)\nINVARIANT: content cache changes; UI/navigation state is untouched
 
 autonumber "<b>[0]"
 
@@ -36,10 +36,10 @@ activate BR
 BR -> RF : rf/dispatch\n**[:content/received {…}]**
 deactivate BR
 
-== transact (DataScript SSOT) ==
+== transact (DataScript content cache) ==
 activate RF
 RF -> RF : handler (PURE): build base via cond->\n(omit :doc/text if nil; retract stale :doc/error)
-RF -> DS : fx **:ds/transact**\n{:doc/path :doc/kind :doc/text :doc/open? :doc/order}
+RF -> DS : fx **:ds/transact**\n{:doc/path :doc/kind :doc/text :doc/stamp}
 activate DS
 DS -[#B1951D]-> RF : tx-report → [:ds/changed]\n(:ds/rev inc)  — subs :tabs/:doc/active recompute
 deactivate DS
@@ -48,11 +48,11 @@ deactivate DS
 RF -> MD : fx **:markdown/render** {:text :path :on-done}
 deactivate RF
 activate MD
-MD -> MD : unified()\n.use parse·gfm·rehype·slug·highlight·stringify
-MD -->> RF : Promise<html> .then\n→ rf/dispatch **[:content/rendered path html]**
+MD -> MD : unified()\ncollect {:html :toc :assets}
+MD -->> RF : Promise<result> .then\n-> rf/dispatch **[:content/rendered path stamp result]**
 deactivate MD
 activate RF
-RF -> DS : fx :ds/transact {:doc/path :doc/html html}
+RF -> DS : fx :ds/transact\n{:doc/html :doc/toc :doc/assets}
 activate DS
 DS -[#B1951D]-> RF : [:ds/changed] → :ds/rev inc
 deactivate DS
@@ -78,6 +78,6 @@ legend right
   |<#2D9574>| renderer / reagent view |
   |<#4F97D7>| re-frame events + effects |
   |<#67B11D>| Markdown (unified/remark/rehype) |
-  |<#A45BAD>| DataScript SSOT |
+  |<#A45BAD>| DataScript content cache |
 endlegend
 @enduml

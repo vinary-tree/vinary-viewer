@@ -1,74 +1,99 @@
 @startuml component-main-service
-'' ============================================================================
-'' vinary-viewer — Component view of the MAIN process (core + service)
-''
-'' PlantUML over Mermaid because: we mix *concrete* components (slate) with
-'' «planned» ones (dashed grey stereotype) in one diagram, plus an amber band of
-'' ipcMain handlers that bridge to the renderer. PlantUML's `component<<planned>>`
-'' skinparam (defined in _vv-theme.iuml) makes Forthcoming ports visually obvious;
-'' Mermaid has no per-node stereotype styling.
-'' ============================================================================
+'' Main process component view. PlantUML is used for colored component groups,
+'' notes, and explicit IPC/native-resource boundaries.
 !include _vv-theme.iuml
 
-title MAIN process — components (`vinary.main.*`)  ·  dashed = Forthcoming
+title MAIN process components (`vinary.main.*`) — current native/IO services
 
 skinparam component {
   BorderThickness 1.5
 }
 
-component "vinary.main.core" as Core MAIN_COLOR {
-}
+component "vinary.main.core" as Core MAIN_COLOR
 note bottom of Core
-  `main` — app bootstrap
-  `create-window!` — BrowserWindow
-    (contextIsolation, preload)
-  `initial-file` — parse argv
+  app lifecycle
+  BrowserWindow creation
+  initial argv file
 end note
 
 component "vinary.main.service" as Svc MAIN_COLOR
 note bottom of Svc
-  `kind-of` — md / image / text
-  `send-content!` — read + push
-  `repo-tree` / `send-tree!` — git
-  `open!` / `close!` — chokidar watch
-  `init!` — register ipcMain handlers
+  read + classify files
+  reconcile retained watchers
+  watch Markdown assets
+  send content/errors/tree
 end note
+
+component "vinary.main.file-kind" as Kind MAIN_COLOR
+component "vinary.main.pdf" as Pdf MAIN_COLOR
+component "vinary.main.web" as Web MAIN_COLOR
+component "vinary.main.config" as Config MAIN_COLOR
+component "vinary.main.settings" as Settings MAIN_COLOR
+component "vinary.main.grammars" as Grammars MAIN_COLOR
 
 component "ipcMain handlers" as Ipc IPC_COLOR {
   portin "vv:open" as POpen
-  portin "vv:close" as PClose
+  portin "vv:retained-files" as PRetained
+  portin "vv:watch-assets" as PAssets
+  portin "vv:pdf-*" as PPdf
+  portin "vv:http-*" as PHttp
+  portin "vv:keymap-*" as PKeymap
+  portin "vv:settings-*" as PSettings
+  portin "vv:grammars-request" as PGrammars
 }
-
-cloud "Node built-ins\n(fs · path · child_process)" as Node FS_COLOR
-cloud "chokidar\n(per-path watcher)" as Chk FS_COLOR
-cloud "git CLI\n(rev-parse · ls-files)" as Git FS_COLOR
 
 component "preload\ncontextBridge `window.vv`" as Preload IPC_COLOR
 
-'' ---- Forthcoming ports (planned, not built) ----
-component "PDF port\n(BrowserView)" as Pdf <<planned>>
-component "Diagram port\n(d2 / plantuml / mermaid → SVG)" as Dia <<planned>>
-component "Grammar registry\n(~/.config/vinary-viewer)" as Reg <<planned>>
+cloud "Node built-ins\n(fs · path · child_process)" as Node FS_COLOR
+cloud "chokidar\n(retained file + asset watchers)" as Chk FS_COLOR
+cloud "git CLI\n(rev-parse · ls-files)" as Git FS_COLOR
+cloud "Electron native views\nWebContentsView" as Native FS_COLOR
+database "~/.config/vinary-viewer" as Conf FS_COLOR
 
-Core --> Svc          : `service/init!`,\n`service/open!`
-Core --> Preload      : `webPreferences.preload`
-Svc  --> Node         : read file · dirname
-Svc  --> Chk          : watch open path
-Svc  --> Git          : repo tree
-Svc  --> Ipc          : `init!` registers
-POpen --> Svc         : `open!` (read + watch)
-PClose --> Svc        : `close!` (stop watcher)
-Svc ..> Preload       : `webContents.send`\n(amber: vv:content / vv:error / vv:tree)
+Core --> Svc : init and initial open
+Core --> Preload : webPreferences.preload
+Core --> Pdf : init
+Core --> Web : init
+Core --> Config : init
+Core --> Settings : init
+Core --> Grammars : init
 
-Svc ..> Pdf  : «planned»
-Svc ..> Dia  : «planned»
-Svc ..> Reg  : «planned»
+Svc --> Kind : classify
+Svc --> Node : read files
+Svc --> Chk : retained watchers
+Svc --> Git : repo tree
+Pdf --> Native : PDF WebContentsView
+Web --> Native : HTTP WebContentsView
+Config --> Conf : keybindings.edn
+Settings --> Conf : settings.edn
+Grammars --> Conf : grammars/<lang>\nfiletypes.edn
+
+Svc --> Ipc : register handlers
+Pdf --> Ipc
+Web --> Ipc
+Config --> Ipc
+Settings --> Ipc
+Grammars --> Ipc
+
+POpen --> Svc
+PRetained --> Svc
+PAssets --> Svc
+PPdf --> Pdf
+PHttp --> Web
+PKeymap --> Config
+PSettings --> Settings
+PGrammars --> Grammars
+
+Svc ..> Preload : vv:content / vv:error / vv:tree
+Web ..> Preload : vv:http-navigated / vv:web-toc
+Config ..> Preload : vv:keymap
+Settings ..> Preload : vv:settings
+Grammars ..> Preload : vv:grammars
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node IO component |
-  | <#B1951D> | IPC seam (ipcMain / preload) |
-  | <#9F8766> | external resource (fs · git · chokidar) |
-  | <#DDDDDD> | Forthcoming (planned, dashed) |
+  | <#3A5BA0> | MAIN / Node service |
+  | <#B1951D> | IPC seam |
+  | <#9F8766> | external/native resource |
 endlegend
 @enduml

@@ -174,7 +174,7 @@ and the default lives in `src/vinary/app/db.cljs`: `:theme "spacemacs-dark"`.
   `:root` instantly affects every rule that references them — including masked SVGs and
   `::highlight()` — with no per-element work.
 - **Trade-off — two built-in themes.** v1 ships exactly Dark and Light. A user-supplied theme
-  registry (analogous to the planned [grammar registry](14-grammar-registry.md)) is a natural
+  registry (analogous to the available [grammar registry](14-grammar-registry.md)) is a natural
   future extension; today, adding a theme means adding a file and an entry to the `themes` vector.
 
 The theming approach is documented alongside the watermark CSS-mask decision in

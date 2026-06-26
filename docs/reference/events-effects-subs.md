@@ -29,33 +29,36 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:content/received` | fx | `{:path :kind (:text)}` | DataScript snapshot (`eid-for-path`, `doc-attr`, `order-for-path`, `next-order`) | `:ui :active-path`, `:ui :history` (via `nav-to`) | `[:ds/transact tx]` (upsert `:doc/*`, retract stale `:doc/error`); markdown→`[:markdown/render …]`; text→`[:ds/transact {:doc/html (plain-html)}]` |
-| `:content/rendered` | fx | `path html` | — | — | `[:ds/transact [{:doc/path path :doc/html html}]]` |
-| `:content/error` | fx | `{:path :message}` | — | — | when `path`: `[:ds/transact [{:doc/path path :doc/error message}]]`; else `{}` |
+| `:content/received` | fx | `{:path :kind (:text) (:html) :stamp}` | DataScript snapshot (`eid-for-path`, `doc-attr`), current tabs | first content may create the first tab in `app-db` | `[:ds/transact tx]`; markdown → `[:markdown/render …]`; after tab changes → `[:vv/sync-retained-files paths]` plus cache eviction txs |
+| `:content/rendered` | fx | `path stamp {:html :toc :assets}` | DataScript snapshot (`eid-for-path`, `doc-attr :doc/stamp`) | — | when stamp still matches: add `:doc/html`, `:doc/toc`, `:doc/assets`; then `[:vv/watch-assets {:doc-path path :paths assets}]` |
+| `:content/error` | fx | `{:path :message :stamp}` | DataScript snapshot, current tabs | first path error may create the first tab in `app-db` | when `path`: transact `:doc/error`; then sync retained files and evict unretained cache |
 
 ### 1.3 Documents & tabs
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:doc/open` | fx | `path` | — | — | `[:vv/open path]` |
-| `:doc/open-in-tab` **[input]** | fx | `path _new?` | — | — | `[:vv/open path]` (per-path-tab model: new vs replace both reduce to open) |
-| `:tab/activate` | db | `path` | `:ui :history` | `:ui :active-path`, `:ui :history` (`nav-to`) | — |
-| `:tab/close` | fx | `path` | snapshot (`eid-for-path`, `open-docs`), `:ui :active-path` | `:ui :active-path` ← `new-active` | when eid: `[:ds/transact [[:db/retractEntity eid]]]`; always `[:vv/close path]` |
-| `:tab/next` **[input]** | db | — | snapshot `open-docs`, `:ui :active-path` | `:ui :active-path`, `:ui :history` (`nav-to` to next tab, wrapping) | — |
-| `:tab/prev` **[input]** | db | — | snapshot `open-docs`, `:ui :active-path` | `:ui :active-path`, `:ui :history` (`nav-to` to previous tab, wrapping) | — |
+| `:doc/open` | fx | `uri/path` | current tab, content scroll | active tab/history | focus existing tab or navigate active tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync |
+| `:doc/open-new` | fx | `uri/path` | current tab, content scroll | tabs/history | focus existing tab or open a new tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync |
+| `:doc/open-in-tab` **[input]** | fx | `path new?` | — | — | dispatches `:doc/open-new` when `new?`, else `:doc/open` |
+| `:tab/navigate` | fx | `uri` | active tab, content scroll | active tab/history | local files → `[:vv/open path]`; also scroll restore and retained sync |
+| `:tab/open` | fx | `uri` | active tab, content scroll | tabs/history | add a new tab, load local files, restore top scroll, sync retained |
+| `:tab/activate` | fx | `id` | content scroll | `:ui :active-tab`, saved leaving scroll | restore target scroll for local files and sync retained |
+| `:tab/close` | fx | `id` | tab list/history | tabs, active tab | sync retained files and evict no-longer-retained cached docs |
+| `:tab/next` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate next tab id |
+| `:tab/prev` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate previous tab id |
 
 ### 1.4 Navigation history
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:history/back` | db | — | `:ui :history` | `:ui :history :idx` ← dec, `:ui :active-path` ← `stack[idx-1]` (when `idx>0`) | — |
-| `:history/forward` | db | — | `:ui :history` | `:ui :history :idx` ← inc, `:ui :active-path` ← `stack[idx+1]` (when `idx<count-1`) | — |
+| `:history/back` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
+| `:history/forward` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
 
 ### 1.5 Theme
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:theme/set` | fx | `theme` | — | `:ui :theme` ← theme | `[:theme/apply theme]` |
+| `:theme/set` | fx | `theme` | current settings | `:ui :theme` ← theme, `:ui :settings :theme` ← theme | `[:theme/apply theme]`, `[:vv/save-settings edn]` |
 | `:theme/cycle` **[input]** | fx | — | `:ui :theme` | — | `[:dispatch [:theme/set <next-in-cycle>]]` (cycles `["spacemacs-dark" "spacemacs-light"]`) |
 
 ### 1.6 Git file-tree
@@ -65,7 +68,7 @@
 | `:tree/received` | db | `{:root :files}` | — | `:ui :tree` ← `{:root :files(vec)}` | — |
 | `:tree/filter` | db | `q` | — | `:ui :tree-filter` ← q | — |
 | `:tree/move` **[input]** | db | `dir` | `:ui :tree`, `:ui :tree-filter`, `:ui :tree-selected` | `:ui :tree-selected` ← next visible path (wrapping over the **filtered** list) | — |
-| `:tree/activate` **[input]** | fx | — | `:ui :tree-selected` | — | when selected: `[:vv/open sel]` |
+| `:tree/activate` **[input]** | fx | — | `:ui :tree-selected` | — | when selected: dispatch `[:doc/open sel]` |
 
 ### 1.7 In-page find
 
@@ -113,11 +116,11 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:keymap/config-received` | db | `cfg` | — | installs the keymap (`keymap/install-user!` if `cfg` non-empty, else bundled `:default`); `:ui :input :mode` ← `keymap/initial-mode` | — |
+| `:keymap/config-received` | fx | EDN text or map | — | `:ui :keymaps` ← normalized registry envelope | `[:keymap/install-active]` |
 
 > Triggered by the renderer's `onKeymap` IPC handler and by the `window.__vvkeymap "vim"` dev hook.
-> See [§4](#4-the-input--command-layer-available--in-progress) and
-> [ipc-channels.md `vv:keymap`](./ipc-channels.md#2-channel-catalog).
+> See [§4](#4-the-input--command-layer) and
+> [ipc-channels.md `vv:keymap`](./ipc-channels.md#2-main--renderer).
 
 ### 1.12 Command palette **[input]**
 
@@ -145,7 +148,8 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | Effect | Arg | Side effect | Re-dispatch |
 | --- | --- | --- | --- |
 | `:ds/transact` | `tx` (tx-data vector) | `d/transact! ds/conn tx` (the sole DataScript write path) | — (the conn listener dispatches `[:ds/changed]`) |
-| `:markdown/render` | `{:text :path :on-done}` | `md/render text` (unified pipeline → `Promise`) | `.then` → `(conj on-done html)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
+| `:scroll/restore` | `n` | remember a pending content scrollTop for the next render | — |
+| `:markdown/render` | `{:text :path :stamp :on-done}` | `md/render text` (unified pipeline → `Promise<{:html :toc :assets}>`) | `.then` → `(conj on-done result)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
 | `:theme/apply` | `theme` (string) | `set! (.-href #vv-theme-link) "css/themes/<theme>.css"` | — |
 | `:find/run` | `q` | `finder/search! q` | `[:find/count <count>]` |
 | `:find/cycle` | `dir` (+1/-1) | `finder/cycle! dir` | `[:find/idx <new-1-based-idx>]` |
@@ -153,6 +157,9 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:toc/scroll` | `id` | `getElementById id` → `scrollIntoView {block:"start" behavior:"smooth"}` | — |
 | `:vv/open` | `path` | `window.vv.open(path)` → `vv:open` IPC (guarded on `window.vv`) | — |
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
+| `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
+| `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
+| `:vv/http-toc-goto` | `id` | `window.vv.httpTocGoto(id)` → `vv:http-toc-goto` IPC | — |
 
 ### 2.2 `vinary.input.fx` **[input]**
 
@@ -160,6 +167,8 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | --- | --- | --- | --- |
 | `:input/arm-timeout` | `ms` | `setTimeout #(dispatch [:input/timeout]) ms` | `[:input/set-timeout-id id]` |
 | `:input/cancel-timeout` | `id` | `clearTimeout id` (when id) | — |
+| `:keymap/install-active` | `_` | install the active app-db keymap registry entry into the live keymap atom and dispatch its initial mode | `[:input/set-mode mode]` |
+| `:keymap/persist` | EDN string | debounce and save keymap registry through `window.vv.saveKeymap` | — |
 | `:dom/scroll` | `{:dy :to}` | scroll `.vv-content`: `:to :top`/`:bottom` → `scrollTo`; `:dy :page`/`:-page` (±0.9·clientH), `:half`/`:-half` (±0.5·clientH), or a number → `scrollBy` | — |
 | `:dom/focus` | `target` | `:tree` → focus `.vv-tree-filter`; `:content` → focus `.vv-content`; `:toggle` → swap focus between them | — |
 
@@ -182,7 +191,7 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | Sub | Inputs | Output |
 | --- | --- | --- |
 | `:ds/rev` | `app-db` | the DataScript revision int |
-| `:ui/active-path` | `app-db` | active tab path \| nil |
+| `:ui/active-path` | `app-db` | active URI when it is a local file path, else nil |
 | `:ui/theme` | `app-db` | theme name string |
 | `:ui/tree` | `app-db` | `{:root :files}` \| nil |
 | `:ui/tree-filter` | `app-db` | filter query string \| nil |
@@ -197,20 +206,20 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:history/can-back?` | `app-db` | `(and idx (pos? idx))` → bool |
 | `:history/can-forward?` | `app-db` | `(and idx (< idx (dec (count stack))))` → bool |
 
-### 3.2 DataScript (layer-3) subscriptions
+### 3.2 Tab/document derived subscriptions
 
 | Sub | Inputs | Output |
 | --- | --- | --- |
-| `:tabs` | `:<- [:ds/rev]` | `ds/open-docs` → `[{:path :order :kind}]` ordered |
-| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-path]` | `ds/active-doc` → `{:doc/path :doc/kind :doc/html :doc/error}` \| nil |
-| `:doc/toc` | `:<- [:doc/active]` | `toc/extract (:doc/html)` → `[{:level :text :id}]` |
+| `:tabs` | `:<- [:ui/tabs]` | app-db tab vector |
+| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-path]` | `ds/active-doc` → `{:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/error :doc/stamp}` \| nil |
+| `:doc/toc` | `:<- [:ui/active-uri]` `:<- [:doc/active]` `:<- [:ui/web-toc]` | HTTP page headings from `:ui/web-toc`, else stored Markdown `:doc/toc` metadata |
 
-> `:doc/toc` depends on `:doc/active` (not `app-db`), so the `DOMParser` heading extraction runs only
-> when the active document's HTML changes — re-frame de-duplicates the rest.
+> Markdown TOC metadata is captured during rendering and stored on the document entity. Scroll-spy
+> active-heading detection uses a measured offset cache rather than reparsing the HTML during scroll.
 
 ---
 
-## 4. The input / command layer (Available + in-progress)
+## 4. The input / command layer
 
 The keybinding system replaces the original hand-rolled `Ctrl+F` / `Alt+←→` listener with a
 data-driven **command registry** + **keymap resolver**. The pieces:
@@ -231,7 +240,7 @@ keydown ─▶ resolver/handle ─▶ keys/event->chord ─▶ step(modes,mode,s
 
 A command is reified data `{:id :title :category :dispatch|:handler|:prompt :when :arg}`. `run` checks
 the `:when` predicate against a *resolution context* and dispatches. `all-visible` populates the
-(forthcoming) palette. Predicates: `:always`, `:has-tabs`, `:can-back?`, `:can-forward?`,
+command palette. Predicates: `:always`, `:has-tabs`, `:can-back?`, `:can-forward?`,
 `:find-visible?`, `:palette-open?`, `:not-in-input?`.
 
 | Category | Command ids |
@@ -268,7 +277,7 @@ classpath during compilation, not at runtime). A user config can `:extends` a pr
 deltas (with `:unbind` to remove an inherited binding). The active keymap lives in an atom; modal
 state lives in `app-db`.
 
-### 4.4 What is wired vs pending
+### 4.4 Current status
 
 | Piece | Status |
 | --- | --- |

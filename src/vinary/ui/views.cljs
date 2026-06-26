@@ -21,6 +21,7 @@
             [vinary.renderer.toc :as toc]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.media :as media]
+            [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.syntax :as syntax]))
 
 (defn- set-inner! [^js node html]
@@ -145,6 +146,16 @@
        :text text
        :source-location (source-location source path a nil nil)})))
 
+(defn- source-location-for-pos [path view pos]
+  (some->> (syntax/line-info-at view pos)
+           (preview-ctx/location-string path)))
+
+(defn- source-term-at [view pos]
+  (when-let [{:keys [text line-from]} (syntax/line-info-at view pos)]
+    (when-let [{term-text :text start :start} (preview-ctx/term-at text (- pos line-from))]
+      {:text term-text
+       :pos (+ line-from start)})))
+
 (defn markdown-body
   "A .markdown-body whose innerHTML tracks the HTML passed in (content-view holds the subscription).
    Intercepts link clicks (→ in-pane navigation, never replacing the window), shows the hovered link's URI
@@ -155,21 +166,32 @@
         html* (atom nil)
         source* (atom nil)
         path* (atom nil)
+        render-token (atom 0)
         raf  (atom false)
         resize-observer (atom nil)
         last-link (atom nil)
+        refresh-toc! (fn []
+                       (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                         (toc/refresh! content)))
+        after-figures! (fn [token f]
+                         (-> (figures/scale-figures! @node)
+                             (.then (fn [_]
+                                      (when (and @node (or (nil? token) (= token @render-token)))
+                                        (refresh-toc!)
+                                        (when f (f)))))))
         render-html! (fn [html]
-                       (reset! html* html)
-                       (set-inner! @node html)
-                       (figures/scale-figures! @node)
-                       (scroll/apply! @node))
+                       (let [token (swap! render-token inc)]
+                         (reset! html* html)
+                         (set-inner! @node html)
+                         (after-figures! token #(scroll/apply! @node))))
         on-resize (fn []
                     (when (and @node (not @raf))
                       (reset! raf true)
                       (js/requestAnimationFrame
                        (fn []
                          (reset! raf false)
-                         (when @node (figures/scale-figures! @node))))))
+                         (when @node
+                           (after-figures! nil nil))))))
         observe-resize! (fn []
                           (if (exists? js/ResizeObserver)
                             (let [o (js/ResizeObserver. (fn [_] (on-resize)))]
@@ -302,17 +324,59 @@
   "A read-only CodeMirror 6 view of a source file, highlighted via web-tree-sitter when a grammar is
    registered for its extension. Re-created on live-refresh (text change)."
   [_text _path]
-  (let [node (atom nil) view (atom nil)]
+  (let [node (atom nil) view (atom nil) path* (atom nil)]
     (letfn [(build! [this]
               (let [[_ text path] (r/argv this)]
+                (reset! path* path)
                 (reset! view (syntax/create-source-view @node text (syntax/grammar-for path)))))
-            (destroy! [] (when @view (.destroy ^js @view) (reset! view nil)))]
+            (destroy! [] (when @view (.destroy ^js @view) (reset! view nil)))
+            (on-ctx [^js e]
+              (.preventDefault e)
+              (.stopPropagation e)
+              (let [v        @view
+                    path     @path*
+                    selected (syntax/selected-text v)
+                    sel-pos  (syntax/selection-start v)
+                    pos      (or sel-pos (syntax/pos-at-coords v (.-clientX e) (.-clientY e)))
+                    term     (when-not (seq selected) (source-term-at v pos))
+                    text     (or selected (:text term) "")
+                    loc-pos  (or sel-pos (:pos term) pos)]
+                (rf/dispatch [:context-menu/show {:x (.-clientX e)
+                                                  :y (.-clientY e)
+                                                  :target {:kind :source-body
+                                                           :path path
+                                                           :text text
+                                                           :source-location (source-location-for-pos path v loc-pos)}}])))]
       (r/create-class
        {:display-name           "vv-source-view"
         :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))
         :component-did-update    (fn [this] (destroy!) (build! this) (scroll/apply! @node))
         :component-will-unmount  (fn [_] (destroy!))
-        :reagent-render          (fn [_text _path] [:div.vv-source {:ref (fn [el] (reset! node el))}])}))))
+        :reagent-render          (fn [_text _path] [:div.vv-source {:ref (fn [el] (reset! node el))
+                                                                     :on-context-menu on-ctx}])}))))
+
+(defn mermaid-view
+  "A directly-opened Mermaid source file rendered to inline SVG in the renderer."
+  [_source _path]
+  (let [node (atom nil)
+        token (atom 0)]
+    (letfn [(render! [source]
+              (let [t (swap! token inc)]
+                (-> (mermaid/render-source source)
+                    (.then (fn [svg]
+                             (when (and @node (= t @token))
+                               (set-inner! @node (str "<div class=\"vv-mermaid\">" svg "</div>"))
+                               (scroll/apply! @node))))
+                    (.catch (fn [e]
+                              (when (and @node (= t @token))
+                                (set-inner! @node (mermaid/error-html (.-message e) source))
+                                (scroll/apply! @node)))))))]
+      (r/create-class
+       {:display-name "vv-mermaid-view"
+        :component-did-mount  (fn [this] (render! (second (r/argv this))))
+        :component-did-update (fn [this] (render! (second (r/argv this))))
+        :component-will-unmount (fn [_] (swap! token inc))
+        :reagent-render (fn [_source _path] [:div.vv-mermaid-view {:ref (fn [el] (reset! node el))}])}))))
 
 (defn image-view
   "A directly-opened image filling the content width; consumes any pending scroll-restore on mount."
@@ -351,6 +415,8 @@
        (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
                                    [image-view (:doc/path doc) (:doc/stamp doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
+       (= "mermaid" (:doc/kind doc)) ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                     [mermaid-view (:doc/text doc) (:doc/path doc)]
        (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
        ;; "View Source" on a markdown doc → show its raw source in the pane (not replacing the window)
        (and vs? (= "markdown" (:doc/kind doc)) (:doc/text doc))

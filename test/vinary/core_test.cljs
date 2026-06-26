@@ -20,6 +20,7 @@
             [vinary.renderer.hints :as hints]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
+            [vinary.renderer.math :as math]
             [vinary.renderer.media :as media]
             [vinary.ui.access-keys :as access]
             [vinary.ui.context-menu :as context-menu]
@@ -122,7 +123,10 @@
     (is (= 2 (ds/next-order @conn)) "next-order = max+1")
     (is (= ["/a" "/b"] (mapv :path (ds/open-docs @conn))) "ordered by :doc/order")
     (is (some? (ds/eid-for-path @conn "/a")))
-    (is (= "markdown" (ds/doc-attr @conn "/a" :doc/kind)))))
+    (is (= "markdown" (ds/doc-attr @conn "/a" :doc/kind)))
+    (is (= #{"/a" "/b"} (set (ds/doc-paths @conn))))
+    (is (= 1 (count (ds/retract-unretained-tx @conn #{"/a"})))
+        "unretained cached docs get an eviction transaction")))
 
 (deftest content-error-transactions
   (testing "an error for an uncached path creates a visible document entity"
@@ -198,6 +202,22 @@
              (get-in (nav/active-tab db1) [:hist :stack])))
       (is (= "/diagram.png" (:uri (second tabs)))))))
 
+(deftest nav-retained-file-paths
+  (testing "retained files include every local URI reachable from open tab histories"
+    (let [db (-> empty-tabs
+                 (nav/add-tab "/a.md")
+                 (nav/nav-active "/b.md" 10)
+                 (nav/add-tab "https://example.com")
+                 (nav/nav-active "/c.md" 0))]
+      (is (= ["/a.md" "/b.md" "/c.md"] (nav/retained-file-paths db)))))
+  (testing "history truncation drops no-longer-reachable files from the retained set"
+    (let [db0 (-> empty-tabs
+                  (nav/add-tab "/a.md")
+                  (nav/nav-active "/b.md" 10))
+          [db1 _uri _scroll] (nav/step db0 -1 20)
+          db2 (nav/nav-active db1 "/c.md" 30)]
+      (is (= ["/a.md" "/c.md"] (nav/retained-file-paths db2))))))
+
 (deftest nav-reorder-and-source
   (let [db (-> empty-tabs (nav/add-tab "/a") (nav/add-tab "/b") (nav/add-tab "/c"))]  ; ids 0,1,2
     (testing "reorder moves a tab to an insertion gap"
@@ -249,7 +269,8 @@
                              ["workflow.d2" "source"]
                              ["workflow.puml" "source"]
                              ["workflow.plantuml" "source"]
-                             ["workflow.mmd" "source"]
+                             ["workflow.mmd" "mermaid"]
+                             ["workflow.mermaid" "mermaid"]
                              ["workflow.dot" "source"]
                              ["grammar.cf" "source"]
                              ["grammar.bnfc" "source"]
@@ -288,7 +309,32 @@
     (is (= "markdown-inline" (:id (grammar-catalog/grammar-for-language "markdown_inline"
                                                                          grammar-catalog/bundled-grammars))))
     (is (= "javascript" (:id (grammar-catalog/grammar-for-language "js" grammar-catalog/bundled-grammars))))
-    (is (= "markdown" (:id (grammar-catalog/grammar-for-language "gfm" grammar-catalog/bundled-grammars))))))
+    (is (= "markdown" (:id (grammar-catalog/grammar-for-language "gfm" grammar-catalog/bundled-grammars)))))
+  (testing "filename and glob filetype mappings resolve before extension lookup"
+    (is (= "toml" (:id (grammar-catalog/grammar-for-path "/tmp/Cargo.lock"
+                                                          grammar-catalog/bundled-grammars)))
+        "Cargo.lock is highlighted as TOML by default")
+    (is (= "toml" (:id (grammar-catalog/grammar-for-path
+                        "/tmp/service.custom"
+                        grammar-catalog/bundled-grammars
+                        {:patterns {"*.custom" "toml"}}))))
+    (is (= "json" (:id (grammar-catalog/grammar-for-path
+                        "/tmp/service/custom.lock"
+                        grammar-catalog/bundled-grammars
+                        {:filenames {"custom.lock" "json"}}))))
+    (is (nil? (grammar-catalog/grammar-for-path
+               "/tmp/service.custom"
+               grammar-catalog/bundled-grammars
+               {:patterns {"*.custom" "not-a-real-filetype"}})))))
+
+(deftest mathjax-svg-rendering
+  (testing "MathJax renders cached SVG without DOM typesetting"
+    (let [svg (math/render-tex "x^2" false)]
+      (is (str/includes? svg "MathJax"))
+      (is (str/includes? svg "<svg"))
+      (is (= svg (math/render-tex "x^2" false)))))
+  (testing "GitHub backtick-dollar math escapes normalize for remark-math"
+    (is (= "Inline $x^2$." (math/normalize-github-math-escapes "Inline $`x^2`$.")))))
 
 (deftest menu-access-keys
   (testing "top-level Alt access keys resolve to menus"
@@ -498,16 +544,23 @@
   (async done
     (-> (js/Promise.all
          #js [(markdown/render "Hello **world**\n\n![Alt](img.png)\n" "/tmp" 1)
-              (markdown/render "[![Alt](img.png)](target.md)\n" "/tmp" 1)])
-        (.then (fn [htmls]
-                 (let [bare   (aget htmls 0)
-                       linked (aget htmls 1)]
-                   (is (str/includes? bare "data-vv-source-start-line=\"1\""))
-                   (is (str/includes? bare "data-vv-source-kind=\"text\""))
-                   (is (re-find #"<a[^>]+href=\"file:///tmp/img\.png\?vv-cache=1\"" bare)
+              (markdown/render "# Title\n\n[![Alt](img.png)](target.md)\n" "/tmp" 1)
+              (markdown/render "[diagram](diagram.svg)\n" "/tmp" 1)])
+        (.then (fn [results]
+                 (let [bare   (aget results 0)
+                       linked (aget results 1)
+                       plain-link (aget results 2)
+                       bare-html (:html bare)
+                       linked-html (:html linked)]
+                   (is (str/includes? bare-html "data-vv-source-start-line=\"1\""))
+                   (is (str/includes? bare-html "data-vv-source-kind=\"text\""))
+                   (is (re-find #"<a[^>]+href=\"file:///tmp/img\.png\?vv-cache=1\"" bare-html)
                        "bare images are wrapped in links to their resolved preview URI")
-                   (is (= 1 (count (re-seq #"<a " linked)))
-                       "already-linked images are not wrapped again"))
+                   (is (= ["/tmp/img.png"] (:assets bare)) "local media paths are emitted with cache tokens stripped")
+                   (is (= [{:level 1 :text "Title" :id "title"}] (:toc linked)) "headings are emitted as TOC metadata")
+                   (is (= 1 (count (re-seq #"<a " linked-html)))
+                       "already-linked images are not wrapped again")
+                   (is (empty? (:assets plain-link)) "plain links to media files are not watched as embedded assets"))
                  (done)))
         (.catch (fn [e]
                   (is false (str "Markdown render failed: " (.-message e)))

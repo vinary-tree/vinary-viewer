@@ -1,6 +1,7 @@
 (ns vinary.app.db
-  "The re-frame app-db default value — ephemeral UI only. The documents/tabs live in DataScript
-   (vinary.app.ds); :ds/rev is the DataScript-transaction revision the conn-reading subs depend on.")
+  "The re-frame app-db default value. Tabs/history and ephemeral UI live here; DataScript
+   (vinary.app.ds) is the bounded content cache. :ds/rev is the DataScript-transaction revision the
+   conn-reading subs depend on.")
 
 (def default-db
   {:ds/rev 0

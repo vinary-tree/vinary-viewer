@@ -57,6 +57,13 @@
     [{:label "Copy"                 :event [:clipboard/copy (or text "")]}
      (when source-location
        {:label "Copy source location" :event [:clipboard/copy source-location]})]
+    :source-body
+    [{:label "Copy"                 :event [:clipboard/copy (or text "")]}
+     (when source-location
+       {:label "Copy source location" :event [:clipboard/copy source-location]})
+     :sep
+     {:label "Copy file path"       :event [:clipboard/copy path]}
+     {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
     ;; a tab (right-clicked in either the horizontal strip or the vertical Tabs panel)
     :tab  (tab-items target)
     ;; the active markdown document (right-clicked in the content pane, not on a link)

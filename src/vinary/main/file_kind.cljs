@@ -4,8 +4,9 @@
 
 (def ^:private markdown-exts #{".md" ".markdown" ".mdx"})
 (def ^:private image-exts #{".png" ".jpg" ".jpeg" ".gif" ".svg" ".webp" ".bmp" ".ico" ".avif"})
+(def ^:private mermaid-exts #{".mmd" ".mermaid"})
 (def ^:private source-diagram-exts
-  #{".d2" ".puml" ".plantuml" ".pu" ".iuml" ".wsd" ".mmd" ".mermaid" ".dot" ".gv" ".graphviz"})
+  #{".d2" ".puml" ".plantuml" ".pu" ".iuml" ".wsd" ".dot" ".gv" ".graphviz"})
 
 (defn extension [file-path]
   (some-> (re-find #"(\.[^./\\]+)$" (str file-path))
@@ -20,6 +21,7 @@
       (contains? markdown-exts ext) "markdown"
       (contains? image-exts ext) "image"
       (= ".pdf" ext) "pdf"
+      (contains? mermaid-exts ext) "mermaid"
       (or (contains? source-diagram-exts ext)
           (source? file-path)) "source"
       :else "text")))

@@ -1,65 +1,47 @@
 @startuml seq-tab-close
-'' ============================================================================
-'' vinary-viewer — Sequence: close a tab (retract the doc + stop its watcher +
-'' choose the new active tab).
-''
-'' PlantUML over Mermaid because: the handler computes the *new* active tab
-'' BEFORE retracting the entity (order matters), splits into a DataScript write
-'' and an IPC close, and the `:tabs` subscription recomputes only because the
-'' retraction bumps `:ds/rev`. Activation bars + an explicit `:ds/rev` note make
-'' that ordering legible; Mermaid blurs the pre/post-retraction read.
-'' ============================================================================
+'' Current tab-close flow: app-db tab removal plus retained-path sync.
 !include _vv-theme.iuml
 
-title Close a tab — `:tab/close`
+title Close a tab — app-db tab removal, retained watcher/cache reconciliation
 
 autonumber "0:"
 
 actor User #white
-participant "ui.tabs\n(× button)" as Tabs RENDERER_COLOR
-participant "re-frame\nevents/fx" as RF REFRAME_COLOR
-participant "app.db\n(active-path)" as Db APPDB_COLOR
-participant "DataScript\nconn" as DS DATASCRIPT_COLOR
-participant "preload `window.vv`" as Vv IPC_COLOR
+participant "tab item\n(× button)" as Tabs RENDERER_COLOR
+participant "re-frame\n:tab/close" as RF REFRAME_COLOR
+collections "app-db\n[:ui :tabs]" as DB APPDB_COLOR
+participant "nav/close" as Nav APPDB_COLOR
+database "DataScript\ncontent cache" as DS DATASCRIPT_COLOR
+participant "preload\nwindow.vv" as Vv IPC_COLOR
 participant "main.service" as Svc MAIN_COLOR
 participant "reagent UI" as UI RENDERER_COLOR
 
-User -> Tabs : click ×\n(`stopPropagation`)
-Tabs -> RF : dispatch `[:tab/close path]`
+User -> Tabs : click ×\n(stopPropagation)
+Tabs -> RF : dispatch [:tab/close id]
 activate RF
-
-== compute before retract ==
-RF -> DS : read `open-docs` (snapshot)
-DS --> RF : ordered open docs
-RF -> RF : `remaining` = open-docs ∖ {path}\n`new-active` = (active==path) ?\n  (:path (last remaining)) : active
-RF -> Db : `assoc-in [:ui :active-path] new-active`
-
-== retract + stop watcher ==
-RF -> DS : `:ds/transact`\n`[[:db/retractEntity eid]]`  (when eid)
-RF -> Vv : `:vv/close path`
+RF -> DB : read tabs + active tab
+RF -> Nav : close db id
+Nav --> RF : [db' closed-uri still-open?]
+RF -> RF : retained = nav/retained-file-paths(db')\ntx = ds/retract-unretained-tx(...)
+RF -> DB : write updated tabs / active tab
+RF -> DS : optional :ds/transact\nretract unretained cached docs
+RF -> Vv : :vv/sync-retained-files retained
 deactivate RF
-Vv -> Svc : `ipcRenderer.send` **vv:close**
-Svc -> Svc : `close!` — stop chokidar\nwatcher, `dissoc` from `watchers`
 
-== reactive recompute ==
-DS -> RF : `d/listen!` → `[:ds/changed]`\n(`:ds/rev` ++)
-RF -> UI : `:tabs` recomputes (one fewer tab)
-RF -> UI : `:doc/active` recomputes\n(reads new active-path)
-UI -> UI : tab-strip re-renders;\nif no tabs ⟶ watermark
+Vv -> Svc : vv:retained-files
+Svc -> Svc : sync-retained!\nclose unretained watchers
 
-note over RF, DS
-  The entity is **fully retracted** — closing a tab discards
-  the document's cached HTML/text from DataScript. Re-opening
-  re-reads + re-renders from disk.
-end note
+DS -> RF : :ds/changed when cache tx exists
+RF -> UI : subscriptions recompute
+UI -> UI : tab strip re-renders;\nwatermark if no tabs remain
 
 legend right
   |= Colour |= Concept |
   | <#2D9574> | Renderer / UI |
   | <#4F97D7> | re-frame |
-  | <#7590DB> | app-db (active-path) |
-  | <#A45BAD> | DataScript SSOT |
+  | <#7590DB> | app-db tabs/history |
+  | <#A45BAD> | DataScript content cache |
   | <#B1951D> | IPC seam |
-  | <#3A5BA0> | MAIN (stop watcher) |
+  | <#3A5BA0> | MAIN watchers |
 endlegend
 @enduml

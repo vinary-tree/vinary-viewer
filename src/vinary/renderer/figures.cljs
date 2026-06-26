@@ -64,6 +64,15 @@
     (.removeProperty style "height")
     (.removeProperty style "aspect-ratio")))
 
+(defn- set-style! [^js style prop value]
+  (when (not= (.getPropertyValue style prop) value)
+    (.setProperty style prop value)))
+
+(defn- set-style-important! [^js style prop value]
+  (when (or (not= (.getPropertyValue style prop) value)
+            (not= (.getPropertyPriority style prop) "important"))
+    (.setProperty style prop value "important")))
+
 (defn- target-width [v f avail doc-font]
   (if (and (positive-number? f) (positive-number? avail))
     (let [matched (* doc-font (/ v f))]
@@ -76,11 +85,11 @@
     (if (positive-number? v)
       (let [width (target-width v f avail doc-font)
             style (.-style img)]
-          (.setProperty style "width" (str (js/Math.round width) "px"))
+        (set-style! style "width" (str (js/Math.round width) "px"))
         (if (positive-number? h)
           (let [height (* width (/ h v))]
-            (.setProperty style "height" (str (js/Math.round height) "px") "important")
-            (.setProperty style "aspect-ratio" (str v " / " h)))
+            (set-style-important! style "height" (str (js/Math.round height) "px"))
+            (set-style! style "aspect-ratio" (str v " / " h)))
           (do
             (.removeProperty style "height")
             (.removeProperty style "aspect-ratio"))))
@@ -91,13 +100,14 @@
    per <img> (fetch); applies width + height from metadata when the fetch resolves. No-op inside the
    diagram view and for emoji / non-file / non-svg images (those clear inline sizing -> CSS owns them)."
   [^js body]
-  (when (and body (not (.closest body ".vv-diagram")))
+  (if (and body (not (.closest body ".vv-diagram")))
     (let [cs       (js/getComputedStyle body)
           avail    (- (.-clientWidth body)
                       (js/parseFloat (or (.-paddingLeft cs) "0"))
                       (js/parseFloat (or (.-paddingRight cs) "0")))
           doc-font (or (js/parseFloat (.-fontSize cs)) 16)
-          imgs     (.querySelectorAll body "img")]
+          imgs     (.querySelectorAll body "img")
+          jobs     #js []]
       (dotimes [i (.-length imgs)]
         (let [^js img (aget imgs i)
               src     (or (.getAttribute img "src") "")
@@ -110,5 +120,9 @@
             (not (re-find #"(?i)^file://" url)) (clear-size! img)
             (not (re-find #"(?i)\.svg$" path))  (clear-size! img)
             :else
-            (-> (fetch-meta url)
-                (.then (fn [meta] (apply-svg-size! body img avail doc-font meta))))))))))
+            (.push jobs
+                   (-> (fetch-meta url)
+                       (.then (fn [meta] (apply-svg-size! body img avail doc-font meta)))
+                       (.catch (fn [_] nil)))))))
+      (js/Promise.all jobs))
+    (js/Promise.resolve nil)))

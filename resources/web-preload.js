@@ -9,25 +9,42 @@ function headingEls() {
   return Array.prototype.slice.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
 }
 
-// Build the outline (assigning ids to anchorless headings so the app can scroll to them).
-function outline() {
-  return headingEls().map(function (h, i) {
+let headingCache = [];
+
+function refreshHeadings() {
+  headingCache = headingEls().map(function (h, i) {
     if (!h.id) h.id = 'vv-h-' + i;
     return { level: parseInt(h.tagName.slice(1), 10),
              text: (h.textContent || '').trim().slice(0, 200),
-             id: h.id };
+             id: h.id,
+             offset: window.scrollY + h.getBoundingClientRect().top };
+  });
+  return headingCache;
+}
+
+// Build the outline from the measured heading cache.
+function outline() {
+  return (headingCache.length ? headingCache : refreshHeadings()).map(function (h) {
+    return { level: h.level, text: h.text, id: h.id };
   });
 }
 
-function reportToc() { try { ipcRenderer.send('vv:web-toc', outline()); } catch (e) {} }
+function reportToc() { try { refreshHeadings(); ipcRenderer.send('vv:web-toc', outline()); } catch (e) {} }
 
 // The last heading whose top is within 100px of the viewport top (mirrors the Markdown scroll-spy).
 function activeHeading() {
-  const ctop = 100;
+  const target = window.scrollY + 100;
   let active = null;
-  const hs = headingEls();
-  for (let i = 0; i < hs.length; i++) {
-    if (hs[i].getBoundingClientRect().top <= ctop) active = hs[i].id; else break;
+  const hs = headingCache.length ? headingCache : refreshHeadings();
+  let lo = 0, hi = hs.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (hs[mid].offset <= target) {
+      active = hs[mid].id;
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
   }
   return active;
 }
@@ -42,6 +59,22 @@ function reportActive() {
 window.addEventListener('DOMContentLoaded', function () { reportToc(); reportActive(); });
 window.addEventListener('load', function () { reportToc(); reportActive(); });
 window.addEventListener('scroll', reportActive, true);
+window.addEventListener('resize', function () { reportToc(); reportActive(); });
+
+let tocTimer = null;
+function scheduleTocRefresh() {
+  if (tocTimer) clearTimeout(tocTimer);
+  tocTimer = setTimeout(function () {
+    tocTimer = null;
+    reportToc();
+    reportActive();
+  }, 80);
+}
+window.addEventListener('DOMContentLoaded', function () {
+  if (window.MutationObserver && document.body) {
+    new MutationObserver(scheduleTocRefresh).observe(document.body, { childList: true, subtree: true });
+  }
+});
 
 // app TOC click → scroll the page to that heading id
 ipcRenderer.on('vv:web-scroll-to', function (_e, id) {

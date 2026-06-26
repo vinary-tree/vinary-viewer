@@ -195,7 +195,7 @@ function installIpc(state) {
   ipcMain.on('vv:watch-assets', () => {});
   ipcMain.on('vv:context-open-link', () => {});
   ipcMain.on('vv:context-open-link-new-tab', () => {});
-  ipcMain.on('vv:copy-text', (_event, text) => {
+  ipcMain.on('vv:clipboard-write', (_event, text) => {
     state.lastCopiedText = text;
   });
 }
@@ -230,6 +230,17 @@ async function main() {
 
   win.webContents.on('render-process-gone', (_event, details) => {
     throw new Error(`Renderer process gone: ${details.reason}`);
+  });
+  win.webContents.on('console-message', (details) => {
+    const level = details.level;
+    if (level >= 2 || level === 'warning' || level === 'error') {
+      console.error(
+        `[renderer:${level}] ${details.message} (${details.sourceId}:${details.lineNumber || details.line})`
+      );
+    }
+  });
+  win.webContents.on('did-fail-load', (_event, code, description, url) => {
+    throw new Error(`Renderer failed to load ${url}: ${code} ${description}`);
   });
 
   await win.loadFile(INDEX);
@@ -356,6 +367,107 @@ async function main() {
     'blank tab view'
   );
   console.log('[ok] Ctrl+T opens a blank tab');
+
+  const badgeSvg = encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="92" height="20" role="img">' +
+      '<rect width="92" height="20" fill="#2563eb"/>' +
+      '<text x="46" y="14" font-size="11" fill="#fff" text-anchor="middle">badge</text>' +
+    '</svg>'
+  );
+  const featureDocPath = path.join(ROOT, 'test', 'fixtures', 'markdown-features.md');
+  state.contentByPath.set(featureDocPath, {
+    path: featureDocPath,
+    kind: 'markdown',
+    text: '# Markdown Features\n\n' +
+      `![One](data:image/svg+xml,${badgeSvg}) ![Two](data:image/svg+xml,${badgeSvg})\n\n` +
+      'Copyable preview text lives here.\n\n' +
+      'Inline math $`x^2`$ and display math:\n\n$$\n\\frac{a}{b}\n$$\n\n' +
+      '```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n',
+    stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'`),
+    'markdown feature fixture'
+  );
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))`),
+    'inline MathJax SVG'
+  );
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-display mjx-container svg'))`),
+    'display MathJax SVG'
+  );
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`),
+    'Mermaid SVG'
+  );
+  const markdownFeatureLayout = await evalIn(win, `(() => {
+    const badges = Array.from(document.querySelectorAll('.markdown-body p:first-of-type img'));
+    const rects = badges.map((img) => img.getBoundingClientRect());
+    return {
+      badgeCount: badges.length,
+      sameRow: rects.length === 2 && Math.abs(rects[0].top - rects[1].top) < 2,
+      secondAfterFirst: rects.length === 2 && rects[1].left > rects[0].left,
+      mermaidText: document.querySelector('.vv-mermaid')?.textContent || ''
+    };
+  })()`);
+  assert.strictEqual(markdownFeatureLayout.badgeCount, 2, 'badge fixture must render two images');
+  assert.strictEqual(markdownFeatureLayout.sameRow, true, 'badge images must stay on one row');
+  assert.strictEqual(markdownFeatureLayout.secondAfterFirst, true, 'badge images must flow horizontally');
+  assert.ok(markdownFeatureLayout.mermaidText.includes('Start'), 'Mermaid output should contain diagram labels');
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => {
+    const walker = document.createTreeWalker(document.querySelector('.markdown-body'), NodeFilter.SHOW_TEXT);
+    let node = null;
+    while ((node = walker.nextNode())) {
+      const index = node.nodeValue.indexOf('Copyable preview text');
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + 'Copyable preview text'.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return true;
+      }
+    }
+    return false;
+  })()`);
+  assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C must be handled for preview selections');
+  await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
+  console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
+
+  const sourceDocPath = path.join(ROOT, 'test', 'fixtures', 'source-copy.toml');
+  state.contentByPath.set(sourceDocPath, {
+    path: sourceDocPath,
+    kind: 'source',
+    text: '[package]\nname = "demo"\n',
+    stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [sourceDocPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.vv-source .cm-line')?.textContent.includes('[package]')`),
+    'source copy fixture'
+  );
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => {
+    const line = Array.from(document.querySelectorAll('.vv-source .cm-line'))
+      .find((node) => node.textContent.includes('name = "demo"'));
+    if (!line) {
+      return false;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  })()`);
+  assert.strictEqual(await dispatchWindowKey(win, 'C', { ctrlKey: true, shiftKey: true }), true,
+    'Ctrl+Shift+C must be handled for source selections');
+  await waitFor(() => state.lastCopiedText === 'name = "demo"', 'source Ctrl+Shift+C clipboard write');
+  console.log('[ok] source Ctrl+Shift+C copies selected text');
 
   const scrollDocPath = path.join(ROOT, 'test', 'fixtures', 'scroll-jank.md');
   const scrollSvg = encodeURIComponent(
@@ -592,7 +704,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 25000);
+}, 35000);
 
 main()
   .then(() => {

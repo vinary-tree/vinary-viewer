@@ -1,62 +1,66 @@
 @startuml activity-content-strategy
-'' PlantUML over Mermaid because the content-view Strategy is an ORDERED cond (first matching arm wins),
-'' so a top-to-bottom decision cascade with dashed «planned» future branches is the right shape; PlantUML
-'' activity if/elseif preserves the precedence order and lets planned arms be drawn dashed/grey.
-'' Literal palette hexes: teal #2D9574 renderer outputs, green #67B11D markdown, red #E0211D error,
-'' grey #DDDDDD «planned».
+'' Ordered Strategy selector for vinary.ui.views/content-view.
 !include _vv-theme.iuml
 
-title content-view Strategy — selecting the document body by precedence (first match wins)\n(vinary.ui.views/content-view)
+title content-view Strategy — current document body precedence
 
 start
-:render content-view\n(doc = @[:doc/active], tabs = @[:tabs]);
+:read active tab URI,\nactive doc,\nview-source flag;
 
-if (tabs empty?) then (yes)
-  :[watermark]\n.vv-watermark / .vv-shield; <<#2D9574>>
+if (no open tabs?) then (yes)
+  :watermark; <<#2D9574>>
   stop
-else (no)
 endif
 
-if (:doc/error present?) then (yes)
-  :[:div.vv-error "Error: …"]; <<#E0211D>>
+if (doc has :doc/error?) then (yes)
+  :error view; <<#E0211D>>
   stop
-else (no)
+endif
+
+if (active URI is HTTP/HTTPS?) then (yes)
+  :HTTP web-host\n(main-owned WebContentsView); <<#3A5BA0>>
+  stop
+endif
+
+if (:doc/kind = "pdf"?) then (yes)
+  :PDF host\n(main-owned WebContentsView); <<#3A5BA0>>
+  stop
 endif
 
 if (:doc/kind = "image"?) then (yes)
-  :[:div.vv-image-view\n[:img {:src "file://"+path}]]; <<#2D9574>>
+  :image preview; <<#2D9574>>
   stop
-else (no)
+endif
+
+if (:doc/kind = "source"?) then (yes)
+  :CodeMirror source view\n(tree-sitter when grammar exists); <<#2D9574>>
+  stop
+endif
+
+if (Markdown View Source?) then (yes)
+  :source view over cached Markdown text; <<#2D9574>>
+  stop
 endif
 
 if (:doc/html present?) then (yes)
-  :[markdown-body html]\n(form-3; set! innerHTML); <<#67B11D>>
+  :markdown/text HTML body\n(form-3 innerHTML sink); <<#67B11D>>
   stop
-else (no — render in flight)
-  :[:div.vv-empty "Rendering…"]; <<#DDDDDD>>
+else (no)
+  :Rendering placeholder; <<#DDDDDD>>
   stop
 endif
 
-'' ----- Forthcoming branches (planned): drawn detached + dashed/grey -----
-partition "Forthcoming (planned) registry arms" #line.dashed;line:999999 {
-  :«planned» kind = "pdf"\n→ native BrowserView; <<#DDDDDD>>
-  :«planned» kind = "diagram"\n→ d2/PlantUML/Mermaid → SVG; <<#DDDDDD>>
-  :«planned» kind = "source"\n→ tree-sitter view; <<#DDDDDD>>
-  note right #EEEEEE
-    Today the Strategy is a fixed cond; the planned
-    "registry as data" replaces these arms with a
-    {kind → render-fn} table (open for extension,
-    closed for modification).
-  end note
+partition "Planned future branch" #line.dashed;line:999999 {
+  :diagram source -> SVG strategy; <<#DDDDDD>>
   detach
 }
 
 legend right
   |= Colour |= Branch / concept |
-  |<#2D9574>| renderer view output (watermark, image) |
-  |<#67B11D>| Markdown body (rendered :doc/html) |
-  |<#E0211D>| error view (:doc/error) |
-  |<#DDDDDD>| "Rendering…" placeholder + «planned» future arms |
-  Arms are tried top-to-bottom; the FIRST matching condition wins.
+  |<#2D9574>| renderer UI strategy |
+  |<#3A5BA0>| main-owned native view |
+  |<#67B11D>| Markdown/text HTML |
+  |<#E0211D>| error view |
+  |<#DDDDDD>| placeholder or planned future branch |
 endlegend
 @enduml

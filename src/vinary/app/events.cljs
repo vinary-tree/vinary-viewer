@@ -27,6 +27,18 @@
   [uri]
   (if-let [p (uri/file-path uri)] [[:vv/open p]] []))
 
+(defn- retention-fx
+  "Sync main-process file watchers and evict unretained cached docs after a tab/history change."
+  [db]
+  (let [retained (nav/retained-file-paths db)
+        tx       (ds/retract-unretained-tx (ds/snapshot) retained)]
+    (cond-> []
+      (seq tx) (conj [:ds/transact tx])
+      true     (conj [:vv/sync-retained-files retained]))))
+
+(defn- with-retention [result db]
+  (update result :fx #(into (vec (or % [])) (retention-fx db))))
+
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html stamp]}]]
@@ -35,28 +47,34 @@
          cur-err (and eid (ds/doc-attr snap path :doc/error))
          stamp   (if (some? stamp) stamp (js/Date.now))
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
-         ;; Synchronous html (text/diagram) goes straight in; markdown's html arrives async (:content/rendered).
+         ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered).
          attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
                    text            (assoc :doc/text text)
-                   html            (assoc :doc/html html)                ; diagram: pre-rendered SVG
-                   (= kind "text") (assoc :doc/html (plain-html text)))  ; plain text
+                   html            (assoc :doc/html html)
+                   (= kind "text") (assoc :doc/html (plain-html text))   ; plain text
+                   (not= kind "markdown") (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
          tx      (cond-> [base] cur-err (conj [:db/retract eid :doc/error cur-err]))]
      ;; the CLI/initial file arrives before any tab exists → it opens the first tab
-     {:db (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
-      :fx (cond-> [[:ds/transact tx]]
-            (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
-                                                          :on-done [:content/rendered path stamp]}]))})))
+     (let [db' (if (empty? (nav/tabs db)) (nav/add-tab db path) db)]
+       (with-retention
+         {:db db'
+          :fx (cond-> [[:ds/transact tx]]
+                (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
+                                                              :on-done [:content/rendered path stamp]}]))}
+         db')))))
 
 (rf/reg-event-fx
  :content/rendered
- (fn [_ [_ path stamp {:keys [html assets]}]]
+ (fn [_ [_ path stamp {:keys [html toc assets]}]]
    (let [snap (ds/snapshot)]
      (when-let [eid (ds/eid-for-path snap path)]
        (when (= stamp (ds/doc-attr snap path :doc/stamp))
-         {:fx [[:ds/transact [[:db/add eid :doc/html html]]]   ; add by entity-id, not :doc/path upsert
+         {:fx [[:ds/transact [[:db/add eid :doc/html html]   ; add by entity-id, not :doc/path upsert
+                               [:db/add eid :doc/toc (vec (or toc []))]
+                               [:db/add eid :doc/assets (vec (or assets []))]]]
                [:vv/watch-assets {:doc-path path :paths assets}]]})))))
 
 (defn content-error-tx
@@ -77,12 +95,17 @@
  (fn [{:keys [db]} [_ {:keys [path message stamp]}]]
    (let [tx    (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)))
          db'   (if (and path (empty? (nav/tabs db))) (nav/add-tab db path) db)]
-     (cond-> {:db db'}
-       (seq tx) (assoc :fx [[:ds/transact tx]])))))
+     (with-retention
+       (cond-> {:db db'}
+         (seq tx) (assoc :fx [[:ds/transact tx]]))
+       db'))))
 
 ;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
 ;; scrolls itself, so http never requests a content-pane restore.
 (defn- nav-fx [uri scroll] (cond-> (load-fx uri) (uri/file-path uri) (conj [:scroll/restore scroll])))
+
+(defn- nav-result [db uri scroll]
+  {:db db :fx (into (retention-fx db) (nav-fx uri scroll))})
 
 ;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none. The leaving
 ;; scroll is saved into history; the new entry starts at the top.
@@ -90,21 +113,23 @@
  :tab/navigate
  [(rf/inject-cofx :content-scroll)]
  (fn [{:keys [db content-scroll]} [_ uri]]
-   {:db (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))
-    :fx (nav-fx uri 0)}))
+   (let [db' (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))]
+     (nav-result db' uri 0))))
 
 ;; open uri in a NEW tab (Ctrl+click) — save the current tab's scroll first
 (rf/reg-event-fx
  :tab/open
  [(rf/inject-cofx :content-scroll)]
  (fn [{:keys [db content-scroll]} [_ uri]]
-   {:db (nav/add-tab (nav/save-scroll db content-scroll) uri) :fx (nav-fx uri 0)}))
+   (let [db' (nav/add-tab (nav/save-scroll db content-scroll) uri)]
+     (nav-result db' uri 0))))
 
 (rf/reg-event-fx
  :tab/new-blank
  [(rf/inject-cofx :content-scroll)]
  (fn [{:keys [db content-scroll]} _]
-   {:db (nav/add-tab (nav/save-scroll db content-scroll) nil)}))
+   (let [db' (nav/add-tab (nav/save-scroll db content-scroll) nil)]
+     (with-retention {:db db'} db'))))
 
 ;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its scroll), else navigate
 (rf/reg-event-fx
@@ -113,9 +138,11 @@
  (fn [{:keys [db content-scroll]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
      (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
-       {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))})
-     {:db (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))
-      :fx (nav-fx uri 0)})))
+       (with-retention
+         {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))}
+         db'))
+     (let [db' (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))]
+       (nav-result db' uri 0)))))
 
 ;; "Open in new tab" (Ctrl+click / context menu): focus an existing tab for uri, else a new tab
 (rf/reg-event-fx
@@ -124,8 +151,11 @@
  (fn [{:keys [db content-scroll]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
      (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
-       {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))})
-     {:db (nav/add-tab (nav/save-scroll db content-scroll) uri) :fx (nav-fx uri 0)})))
+       (with-retention
+         {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))}
+         db'))
+     (let [db' (nav/add-tab (nav/save-scroll db content-scroll) uri)]
+       (nav-result db' uri 0)))))
 
 ;; switch tabs — save the leaving tab's scroll, restore the target tab's
 (rf/reg-event-fx
@@ -134,7 +164,9 @@
  (fn [{:keys [db content-scroll]} [_ id]]
    (let [db'    (nav/activate (nav/save-scroll db content-scroll) id)
          target (nav/active-uri db')]
-     {:db db' :fx (cond-> [] (uri/file-path target) (conj [:scroll/restore (nav/cur-scroll db')]))})))
+     (with-retention
+       {:db db' :fx (cond-> [] (uri/file-path target) (conj [:scroll/restore (nav/cur-scroll db')]))}
+       db'))))
 
 (rf/reg-event-fx
  :tab/duplicate
@@ -143,17 +175,17 @@
    (let [db'    (cond-> db (= id (nav/active-id db)) (nav/save-scroll content-scroll))
          db''   (nav/duplicate-tab db' id)
          target (nav/active-uri db'')]
-     {:db db''
-      :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
-            (conj [:scroll/restore (nav/cur-scroll db'')]))})))
+     (with-retention
+       {:db db''
+        :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
+              (conj [:scroll/restore (nav/cur-scroll db'')]))}
+       db''))))
 
 (rf/reg-event-fx
  :tab/close
  (fn [{:keys [db]} [_ id]]
-   (let [[db' uri still?] (nav/close db id)]
-     {:db db'
-      ;; stop watching the closed uri only if no remaining tab still shows it (content stays cached)
-      :fx (cond-> [] (and uri (not still?) (uri/file-path uri)) (conj [:vv/close (uri/file-path uri)]))})))
+   (let [[db' _uri _still?] (nav/close db id)]
+     (with-retention {:db db'} db'))))
 
 (rf/reg-event-fx
  :tab/close-active
@@ -191,13 +223,17 @@
  :history/back
  [(rf/inject-cofx :content-scroll)]
  (fn [{:keys [db content-scroll]} _]
-   (if-let [[db' uri sc] (nav/step db -1 content-scroll)] {:db db' :fx (nav-fx uri sc)} {})))
+   (if-let [[db' uri sc] (nav/step db -1 content-scroll)]
+     (nav-result db' uri sc)
+     {})))
 
 (rf/reg-event-fx
  :history/forward
  [(rf/inject-cofx :content-scroll)]
  (fn [{:keys [db content-scroll]} _]
-   (if-let [[db' uri sc] (nav/step db 1 content-scroll)] {:db db' :fx (nav-fx uri sc)} {})))
+   (if-let [[db' uri sc] (nav/step db 1 content-scroll)]
+     (nav-result db' uri sc)
+     {})))
 
 ;; URI bar: parse the typed text (http kept; file:// stripped; else a path) + navigate the active tab
 (rf/reg-event-fx
@@ -208,12 +244,13 @@
 ;; ---- in-app HTTP web view ----
 ;; the web view navigated (a link clicked on the remote page) → sync the active tab's URI + push history
 ;; (our own loadURL also fires this, but url then equals the active uri → no-op)
-(rf/reg-event-db
+(rf/reg-event-fx
  :http/navigated
- (fn [db [_ {:keys [url]}]]
+ (fn [{:keys [db]} [_ {:keys [url]}]]
    (if (and url (uri/http? url) (not= url (nav/active-uri db)))
-     (nav/nav-active db url 0)   ; the web view scrolls itself; nothing to save into the content pane
-     db)))
+     (let [db' (nav/nav-active db url 0)]   ; the web view scrolls itself; nothing to save into the content pane
+       (with-retention {:db db'} db'))
+     {:db db})))
 
 ;; the web view's heading outline (for the Contents/TOC tab — HTML sections, like Markdown)
 (rf/reg-event-db :web/toc (fn [db [_ headings]] (assoc-in db [:ui :web-toc] (vec headings))))

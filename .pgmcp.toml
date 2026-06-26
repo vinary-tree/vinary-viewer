@@ -1,0 +1,15 @@
+[indexer]
+exclude_patterns = [
+  "node_modules/**",
+  ".shadow-cljs/**",
+  ".cpcache/**",
+  ".cache/**",
+  "target/**",
+  "dist/**",
+  "resources/public/js/**",
+  "resources/public/grammars/**",
+  "resources/grammars-src/**",
+]
+
+[git]
+index_history = true

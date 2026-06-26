@@ -1,69 +1,47 @@
 @startuml component-keybindings-inprogress
-'' ============================================================================
-'' PlantUML over Mermaid because: this mixes a STATE machine (modal/chord
-'' resolution) with a COMPONENT pipeline (keydown → resolver → command registry
-'' → re-frame dispatch), and the feature is PARTIALLY built — some boxes are
-'' landed (solid, palette-colored) and some are «planned» (dashed grey via the
-'' reusable stereotype). PlantUML expresses both shapes in one diagram with the
-'' fixed palette; Mermaid cannot share a "planned" stereotype skin across nodes.
-'' ============================================================================
+'' Current custom-keybinding architecture.
 !include _vv-theme.iuml
 
-title Custom keybindings (now available) — command registry + modal/chord resolver
+title Custom keybindings — command registry, palette, resolver, editor, persistence
 
-'' ---- already landed (solid) ----
-rectangle "global keydown listener\n(renderer/core keybindings!)" as KD #2D9574 {
-  card "TODAY (baseline, landed):\nCtrl+F → [:find/toggle]\nAlt+← → [:history/back]\nAlt+→ → [:history/forward]" as BASELINE
-}
+rectangle "DOM keydown" as KD #2D9574
+rectangle "vinary.input.keys\nKeyboardEvent -> canonical chord" as KEYS #2D9574
+rectangle "vinary.input.resolver\nmodal/chord state machine" as RES #2D9574
+rectangle "vinary.input.keymap\nactive keymap atom" as KM #A45BAD
+rectangle "resources/keymaps/*.edn\nStandard / Vim / Emacs" as PRESETS #A45BAD
+rectangle "vinary.input.keymaps-registry\napp-db registry helpers" as REG #7590DB
+rectangle "vinary.app.commands\ncommand registry" as CMD #4F97D7
+rectangle "vinary.ui.palette\ncommand/file palette" as PAL #2D9574
+rectangle "vinary.ui.keybindings-editor\nvisual editor + undo/redo" as EDIT #2D9574
+rectangle "vinary.main.config\nkeybindings.edn watch/save" as CONFIG #3A5BA0
+database "~/.config/vinary-viewer/keybindings.edn" as EDN #9F8766
+rectangle "re-frame dispatch/effects" as RF #4F97D7
 
-rectangle "app-db :ui/:input  (landed scaffolding)" as INPUT #7590DB {
-  card "{:mode :normal\n :sequence []\n :count nil\n :in-input? false\n :timeout-id nil}" as INPUTSTATE
-}
-
-rectangle "vinary.input.fx  (landed)" as FX #4F97D7 {
-  card ":dom/scroll {dy|to}\n(page/half/top/bottom)\n:dom/focus :tree|:content|:toggle" as FXBODY
-}
-
-'' ---- planned (dashed grey) ----
-rectangle "vinary.input.commands  (command registry)" as CMD <<planned>> {
-  card "named command → re-frame dispatch\ne.g. :scroll-down → [:dom/scroll {:dy :half}]\n     :find        → [:find/toggle]\n     :next-tab    → [:tab/activate …]" as CMDBODY
-}
-
-rectangle "vinary.input.keymap  (keymaps)" as KM <<planned>> {
-  card "preset vim + emacs keymaps\n(key-sequence → command name)\n⊕ user ~/.config/vinary-viewer/keybindings.edn\n(loaded main → renderer over IPC)" as KMBODY
-}
-
-rectangle "vinary.input.resolver  (modal/chord)" as RES <<planned>> {
-  card "longest-prefix match over :sequence\nrespect :mode (normal/insert)\nchord timeout (:timeout-id)\nignore keys while :in-input?" as RESBODY
-}
-
-rectangle "command palette  (M-x / :)" as PAL <<planned>> {
-  card "app-db :ui/:palette (landed slot)\nfuzzy-filter command names → dispatch" as PALBODY
-}
-
-'' ---- wiring ----
-KD  -[#999999,dashed,thickness=2]-> RES : (planned) feed each key into the resolver
-RES -[#7590DB,dashed,thickness=2]-> INPUT : (planned) read/update :sequence, :mode, :count
-RES -[#999999,dashed,thickness=2]-> KM  : (planned) match sequence in active keymap
-KM  -[#999999,dashed,thickness=2]-> CMD : (planned) resolved command name
-CMD -[#4F97D7,thickness=2]-> FX        : dispatch → effect (FX already exists)
-PAL -[#999999,dashed,thickness=2]-> CMD : (planned) pick command by fuzzy search
-KD  -[#4F97D7,thickness=2]-> FX         : TODAY: baseline keys dispatch existing events
+PRESETS --> KM : compile-time defaults
+CONFIG --> EDN : read/write/watch
+CONFIG --> REG : vv:keymap
+EDIT --> REG : edit custom sets
+PAL --> CMD : choose command
+KD --> KEYS
+KEYS --> RES
+RES --> KM : read modes/trie
+RES --> CMD : resolved command id
+REG --> KM : install active set
+CMD --> RF : dispatch command
 
 note bottom
-  **Status: Available now.** The full system is wired end-to-end: the IO-at-the-edge effects
-  (`vinary.input.fx`), the ephemeral app-db state slots (`:ui/:input`, `:ui/:palette`), the command
-  registry (`vinary.app.commands`), the preset keymaps (`resources/keymaps/*.edn` embedded at compile
-  time), the EDN user config (`vinary.main.config` → `vv:keymap`), the modal/chord resolver
-  (`vinary.input.resolver`), and the command palette (`vinary.ui.palette`). The `default` keymap keeps
-  Ctrl+F / Alt+←/→ as the baseline; `:extends :vim`/`:emacs` swap in the modal/chord keymaps.
+  The system is available now: built-in sets, custom sets, persisted EDN,
+  modal/chord resolver, command palette, visual editor, and live installation
+  of the active keymap.
 end note
 
 legend right
-  |= color/style |= concept |
-  | <#2D9574> | renderer (Chromium) — keydown listener + palette |
-  | <#7590DB> | app-db ephemeral input/palette state |
-  | <#4F97D7> | re-frame machinery / fx |
-  | <#A45BAD> | command registry + keymaps |
+  |= color |= concept |
+  | <#2D9574> | renderer UI/input |
+  | <#7590DB> | app-db registry state |
+  | <#A45BAD> | keymap data |
+  | <#4F97D7> | re-frame command/effect layer |
+  | <#3A5BA0> | main process config service |
+  | <#9F8766> | user config file |
 endlegend
 @enduml

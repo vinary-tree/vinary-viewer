@@ -1,10 +1,11 @@
 @startuml seq-markdown-render
 '' ============================================================================
-'' vinary-viewer — Sequence: Markdown → HTML render (the unified plugin chain)
-'' and its return into DataScript + the imperative innerHTML body.
 ''
-'' PlantUML over Mermaid because: the unified pipeline is an ordered six-stage
-'' chain best shown as a self-call ladder on one lifeline, and the async boundary
+'' vinary-viewer — Sequence: Markdown → render result (unified plus renderer-side
+'' postprocessors) and its return into DataScript + the imperative innerHTML body.
+''
+'' PlantUML over Mermaid because: the Markdown pipeline is an ordered chain best
+'' shown as a self-call ladder on one lifeline, and the async boundary
 '' (Promise `.then` / `.catch`) needs a return arrow that re-enters the re-frame
 '' loop. PlantUML's nested activations + a `group` for the plugin chain express
 '' both; Mermaid cannot nest the chain inside the async hop cleanly.
@@ -24,26 +25,31 @@ participant "ui.views\nmarkdown-body" as UI RENDERER_COLOR
 
 Fx -> MD : `render text`
 activate MD
-MD -> U : build processor
+MD -> U : normalize GitHub math escapes\nand build processor
 
 group unified plugin chain (in order)
   U -> U : `remark-parse`   — Markdown → mdast
   U -> U : `remark-gfm`     — tables / strikethrough / tasklists
+  U -> U : `remark-math`    — inline/display TeX placeholders
   U -> U : `remark-rehype`  — mdast → hast
   U -> U : `rehype-slug`    — stable heading ids (for TOC + find)
   U -> U : `rehype-highlight` — code-block syntax classes
   U -> U : `rehype-stringify` — hast → HTML string
+  U -> U : `DOMParser`      — parse serialized HTML for replacements
+  U -> U : `MathJax`        — TeX → SVG
+  U -> U : `Mermaid`        — diagrams → SVG
+  U -> U : `tree-sitter`    — fenced-code spans
 end
 
-U --> MD : `Promise<string>`
+U --> MD : HTML + TOC + asset metadata
 MD --> Fx : Promise
 deactivate MD
 
 alt fulfilled
-  Fx -> Ev : `.then` → dispatch\n`[:content/rendered path html]`
-  Ev -> DS : `:ds/transact {:doc/path :doc/html html}`
+  Fx -> Ev : `.then` → dispatch\n`[:content/rendered path stamp result]`
+  Ev -> DS : `:ds/transact {:doc/path :doc/html :doc/toc :doc/assets}`
   DS -> UI : `:doc/active` recomputes (via `:ds/rev`)
-  UI -> UI : `did-update` → `set! innerHTML html`\n(**not** VDOM-diffed)
+  UI -> UI : `did-update` → `set! innerHTML (:html result)`\n(**not** VDOM-diffed)
 else rejected
   Fx -> Ev : `.catch` → dispatch\n`[:content/error {path message:"render error: …"}]`
   Ev -> DS : `:ds/transact {:doc/path :doc/error message}`
@@ -54,13 +60,15 @@ note over MD, U
   Runs in the **renderer** (Chromium): the all-ESM remark/rehype
   stack bundles cleanly there. No `rehype-raw` in the chain ⟶
   raw HTML embedded in Markdown is **not** re-parsed/injected.
+  MathJax and Mermaid SVG generation happen after stringification
+  and before the preview DOM is committed.
 end note
 
 legend right
   |= Colour |= Concept |
   | <#67B11D> | markdown / unified pipeline |
   | <#4F97D7> | re-frame |
-  | <#A45BAD> | DataScript SSOT |
+  | <#A45BAD> | DataScript content cache |
   | <#2D9574> | Renderer / UI |
   | <#E0211D> | (error branch text) |
 endlegend

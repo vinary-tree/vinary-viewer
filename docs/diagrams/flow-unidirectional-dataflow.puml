@@ -63,7 +63,7 @@ legend right
   |<#9F8766>| World / DOM / filesystem (user + browser events) |
   |<#4F97D7>| re-frame machinery (dominoes ①②③④b⑥) |
   |<#7590DB>| app-db — ephemeral UI state (domino ④a) |
-  |<#A45BAD>| DataScript SSOT effect (:ds/transact) |
+  |<#A45BAD>| DataScript content-cache effect (:ds/transact) |
   |<#2D9574>| reagent view (the f in view ≔ f(state)) |
   |<#B1951D>| async fx → follow-up event (the back-edge) |
   Data flows ONE way: event → handler → effect → state → sub → view → (event).

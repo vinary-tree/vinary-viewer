@@ -140,8 +140,8 @@ LightningBug tooling baseline).
 
 | Package | Role | Process bundled into |
 | --- | --- | --- |
-| `chokidar` `^5.0.0` | Filesystem watcher (one per open path) | MAIN (`require`) |
-| `react`, `react-dom` `^19.1.1` | React 19 runtime (reagent renders onto it) | RENDERER (bundled) |
+| `chokidar` `^5.0.0` | Filesystem watcher for retained local files and Markdown assets | MAIN (`require`) |
+| `react`, `react-dom` `^19.2.7` | React 19 runtime (reagent renders onto it) | RENDERER (bundled) |
 | `unified` `^11.0.5` | Pluggable text-processing engine | RENDERER (bundled) |
 | `remark-parse` `^11` | Markdown → mdast | RENDERER |
 | `remark-gfm` `^4.0.1` | GitHub-Flavoured Markdown (tables, tasklists, …) | RENDERER |

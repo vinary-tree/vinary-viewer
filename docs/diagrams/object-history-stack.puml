@@ -9,7 +9,7 @@
 '' ============================================================================
 !include _vv-theme.iuml
 
-title :ui/history evolution — A → B → C → back → D truncates the forward branch
+title one tab history evolution — A -> B -> C -> back -> D truncates the forward branch
 
 '' Each object is one snapshot of {:stack [...] :idx n}. The bracketed «idx»
 '' marks the entry the current active-path points at.
@@ -54,14 +54,14 @@ object "S5 · nav D (divergent)" as S5 #E0211D {
   (forward branch C\n **truncated**)
 }
 
-S0 -[#A45BAD,thickness=2]-> S1 : nav-to A\nrecord-nav: conj A
-S1 -[#A45BAD,thickness=2]-> S2 : nav-to B\nrecord-nav: conj B
-S2 -[#A45BAD,thickness=2]-> S3 : nav-to C\nrecord-nav: conj C
+S0 -[#A45BAD,thickness=2]-> S1 : nav-active A\npush entry A
+S1 -[#A45BAD,thickness=2]-> S2 : nav-active B\npush entry B
+S2 -[#A45BAD,thickness=2]-> S3 : nav-active C\npush entry C
 S3 -[#4F97D7,thickness=2]-> S4 : :history/back\nidx ← idx−1   (stack unchanged)
-S4 -[#E0211D,thickness=2]-> S5 : nav-to D\nrecord-nav truncates:\nstack' ≔ (conj (vec (take (inc idx) stack)) D)\n      = (conj [A B] D)
+S4 -[#E0211D,thickness=2]-> S5 : nav-active D\ntruncate + push:\nstack' ≔ (conj (vec (take (inc idx) stack)) D)\n      = (conj [A B] D)
 
 note bottom of S5
-  **record-nav** keeps only `take (inc idx)` of the old stack before appending
+  **nav-active** keeps only `take (inc idx)` of the old stack before appending
   the new path, then sets `idx ≔ (dec (count stack'))`. This is exactly the
   browser-history rule: navigating after a Back **discards** the forward branch.
   Navigating to the path you are already on is a no-op (no duplicate entry).

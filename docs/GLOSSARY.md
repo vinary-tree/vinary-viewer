@@ -15,8 +15,9 @@ definition you can return to. Symbols and notation are collected at the end.
 ## A
 
 **app-db** — The single ClojureScript map that holds **all ephemeral UI state**
-for the renderer: the active tab path, the theme, the in-page find state, the
-navigation history, the git tree, and the `:ds/rev` revision counter. It is
+for the renderer: tabs, the active tab id, per-tab history stacks, saved scroll
+entries, the theme, the in-page find state, the git tree, and the `:ds/rev`
+revision counter. It is
 re-frame's one application-state value; subscriptions read it, events return a new
 version of it. In vinary-viewer the *documents themselves* do **not** live here —
 they live in DataScript (see **SSOT**). The initial value is
@@ -52,9 +53,10 @@ detailed in `architecture/02-process-and-build-topology.md`.*
 ## C
 
 **chokidar** — The Node file-watching library vinary-viewer uses in the main
-process. One watcher is created **per open file path** (`ignoreInitial true`,
-`awaitWriteFinish` set); it listens for `change` and `add` events and re-sends the
-file's content on each. *First introduced in `theory/03-live-refresh-spine.md`.*
+process. Watchers are reconciled to the renderer's **retained local file paths**
+and Markdown asset paths; they listen for `change` and `add` events and re-send
+the owning content on each. *First introduced in
+`theory/03-live-refresh-spine.md`.*
 
 **coeffect** — In re-frame, an **input** an event handler needs from the world
 (the current `app-db`, the current time, a random seed, …), supplied to the
@@ -97,7 +99,8 @@ catalogued in `reference/css-variables.md`.*
 **DataScript** — An immutable, in-memory database for ClojureScript with a
 Datalog query engine, modelled on Datomic. Data is stored as **datoms**; you query
 with `d/q` (Datalog) and read entities with `d/pull`; you write with `d/transact!`.
-In vinary-viewer it is the **single source of truth** for open documents and tabs.
+In vinary-viewer it is the content cache for loaded local documents, keyed by
+`:doc/path`. Tabs and tab histories live in app-db.
 *First introduced in `theory/01-reactive-architecture.md`; primer in
 `theory/02-state-model-datascript-app-db.md`. See
 [github.com/tonsky/datascript](https://github.com/tonsky/datascript).*
@@ -114,12 +117,11 @@ on concrete IO. In re-frame, **effects** and **coeffects** are the DI mechanism:
 handlers declare *what* they need and *what* should happen, and the framework
 injects the doing. *First introduced in `theory/04-hexagonal-and-ipc-mediator.md`.*
 
-**:doc/* (doc attributes)** — The DataScript attributes describing one open
-document, all keyed off the unique `:doc/path`: `:doc/kind`
-(`"markdown" | "image" | "text"`), `:doc/text` (raw file text; absent for
-images), `:doc/html` (rendered HTML), `:doc/error` (an error message, retracted
-when gone), `:doc/open?` (is it a tab?), and `:doc/order` (tab position). *First
-introduced in `theory/02-state-model-datascript-app-db.md`.*
+**:doc/* (doc attributes)** — The DataScript attributes describing one cached
+local document, all keyed off the unique `:doc/path`: `:doc/kind`,
+`:doc/text`, `:doc/html`, `:doc/toc`, `:doc/assets`, `:doc/error`, and
+`:doc/stamp`. *First introduced in
+`theory/02-state-model-datascript-app-db.md`.*
 
 **:ds/rev** — The integer revision counter in `app-db` that is the **bridge**
 between DataScript and re-frame: a conn listener bumps it (`(update db :ds/rev
@@ -278,10 +280,11 @@ on). vinary-viewer's `resources/preload.js` uses `contextBridge` to expose
 `theory/04-hexagonal-and-ipc-mediator.md`.*
 
 **Promise** — A JavaScript object representing an eventually-available value. The
-Markdown renderer returns a `Promise<string>` of HTML; the `:markdown/render`
-effect attaches `.then` (dispatch `[:content/rendered …]`) and `.catch` (dispatch
-`[:content/error …]`), so async rendering rejoins the unidirectional loop as a new
-event. *First introduced in `theory/03-live-refresh-spine.md`.*
+Markdown renderer returns a promise of `{:html ... :toc ... :assets ...}`; the
+`:markdown/render` effect attaches `.then` (dispatch `[:content/rendered …]`) and
+`.catch` (dispatch `[:content/error …]`), so async rendering rejoins the
+unidirectional loop as a new event. *First introduced in
+`theory/03-live-refresh-spine.md`.*
 
 ## R
 
@@ -332,10 +335,11 @@ the term appears where bounding the history is discussed as a future option.
 ## S
 
 **scroll-spy** — A UI technique that highlights, in a table of contents, the
-section currently scrolled into view. vinary-viewer computes it
-(`toc/spy!`, rAF-throttled) by finding the last heading whose top is within 100 px
-of the content area's top. *First introduced in `theory/01-reactive-architecture.md`;
-detailed in the TOC feature/architecture docs.*
+section currently scrolled into view. vinary-viewer caches heading offsets after
+render/figure sizing, coalesces scroll work with `requestAnimationFrame`, and
+uses binary search to find the active heading. *First introduced in
+`theory/01-reactive-architecture.md`; detailed in the TOC feature/architecture
+docs.*
 
 **shadow-cljs** — The ClojureScript build tool used by vinary-viewer. It defines
 two builds — `:main` (`:node-script`) and `:renderer` (`:browser`) — and provides
@@ -354,9 +358,9 @@ heading; the TOC and `:toc/scroll` use those ids. *First introduced in
 `theory/05-strategy-renderer-registry.md`.*
 
 **SSOT (Single Source of Truth)** — The principle that each piece of state has
-exactly one authoritative home. vinary-viewer has a deliberate split: **DataScript
-is the SSOT for documents/tabs**, and **app-db is the SSOT for ephemeral UI**. No
-fact is duplicated across the two. *First introduced in
+exactly one authoritative home. vinary-viewer has a deliberate split: **app-db
+owns UI/navigation**, **DataScript owns cached document content**, and **main
+owns OS/native resources**. No fact is duplicated across those owners. *First introduced in
 `theory/01-reactive-architecture.md`.*
 
 **Strategy (pattern)** — A *GoF* behavioural pattern that selects an interchangeable
@@ -382,9 +386,11 @@ effects, re-frame can re-run a recorded sequence of events to reproduce any stat
 visited paths). *First introduced in `theory/01-reactive-architecture.md`;
 the history model is `theory/07-command-history-model.md`.*
 
-**TOC (Table of Contents)** — The right-hand panel listing a document's headings
-(parsed from the rendered HTML via `DOMParser`), with **scroll-spy** highlighting
-and click-to-scroll. *First introduced in `theory/01-reactive-architecture.md`.*
+**TOC (Table of Contents)** — The panel listing a document's headings. Markdown
+TOC data is collected during render and stored as `:doc/toc`; HTTP content
+reports its heading outline from the web preload. The panel supports scroll-spy
+highlighting and click-to-scroll. *First introduced in
+`theory/01-reactive-architecture.md`.*
 
 **transact! (`d/transact!`)** — DataScript's write operation: apply a vector of
 *tx-data* (maps to upsert, `[:db/retract …]` / `[:db/retractEntity …]` to remove)
@@ -463,5 +469,4 @@ sources are cited by ISBN or canonical URL, as noted.
 > The tree-sitter / incremental-parsing citation — Wagner & Graham, *Efficient and
 > Flexible Incremental Parsing*, ACM TOPLAS 20(2), 1998, **DOI
 > [10.1145/276393.276394](https://doi.org/10.1145/276393.276394)** — belongs to
-> the *Forthcoming* source-preview feature and is cited there, not in the theory
-> pillar.
+> the source-preview feature and is cited there, not in the theory pillar.

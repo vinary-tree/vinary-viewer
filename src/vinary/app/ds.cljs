@@ -1,7 +1,6 @@
 (ns vinary.app.ds
-  "DataScript — the relational single-source-of-truth for documents/tabs. app-db holds only ephemeral
-   UI (active tab, theme, find). One open file = one :doc entity keyed by :doc/path; tabs are the open
-   docs ordered by :doc/order.
+  "DataScript — the renderer's bounded content cache. app-db owns tabs/history and other ephemeral UI;
+   one cached local file = one :doc entity keyed by :doc/path.
 
    Reactivity bridge: every transaction bumps :ds/rev in app-db (via a conn listener → re-frame event);
    the conn-reading subscriptions list [:ds/rev] as an input, so they recompute on each change. This is
@@ -42,9 +41,26 @@
 (defn doc-attr [db path attr]
   (d/q '[:find ?v . :in $ ?p ?a :where [?e :doc/path ?p] [?e ?a ?v]] db path attr))
 
+(defn doc-paths
+  "All cached document paths."
+  [db]
+  (->> (d/q '[:find ?p :where [_ :doc/path ?p]] db)
+       (map first)
+       vec))
+
+(defn retract-unretained-tx
+  "Retract cached documents whose paths are no longer retained by any open tab history."
+  [db retained-paths]
+  (let [retained (set retained-paths)]
+    (vec (keep (fn [path]
+                 (when-not (contains? retained path)
+                   (when-let [eid (eid-for-path db path)]
+                     [:db/retractEntity eid])))
+               (doc-paths db)))))
+
 (defn active-doc
-  "Pull the doc entity for path as {:doc/path :doc/kind :doc/html :doc/error}, or nil. Pulls by entity
-   id (not a [:doc/path …] lookup-ref) — the lookup-ref form does not resolve under :advanced."
+  "Pull the doc entity for path, or nil. Pulls by entity id (not a [:doc/path ...] lookup-ref) because
+   the lookup-ref form does not resolve under :advanced."
   [db path]
   (when-let [eid (eid-for-path db path)]
-    (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/error :doc/stamp] eid)))
+    (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/error :doc/stamp] eid)))

@@ -23,11 +23,19 @@
   (when-let [n @pending]
     (reset! pending nil)
     (when-let [^js c (content-el node)]
-      (let [set-it (fn [] (set! (.-scrollTop c) n))]
+      (let [applied (atom nil)
+            set-it  (fn []
+                      (set! (.-scrollTop c) n)
+                      (reset! applied (.-scrollTop c)))
+            retry   (fn []
+                      (when (or (nil? @applied)
+                                (= (.-scrollTop c) @applied))
+                        (set-it)))]
         ;; apply next frame, and once more after late layout (figures/fonts) settles, so a tall document
-        ;; doesn't clamp the target to a not-yet-complete scrollHeight
+        ;; doesn't clamp the target to a not-yet-complete scrollHeight. If the user scrolls after the
+        ;; first apply, skip the late retry instead of snapping them back.
         (js/requestAnimationFrame set-it)
-        (js/setTimeout set-it 80)))))
+        (js/setTimeout retry 80)))))
 
 (defn current
   "The content scroller's current scrollTop — read at nav time to save the leaving history entry."

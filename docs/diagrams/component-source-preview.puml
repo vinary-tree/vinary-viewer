@@ -1,0 +1,37 @@
+@startuml component-source-preview
+'' PlantUML over Mermaid because this component view shares the repository-wide color vocabulary and needs explicit renderer/main/process boundaries.
+!include _vv-theme.iuml
+
+title Read-only source preview and tree-sitter highlighting
+
+skinparam componentStyle rectangle
+
+package "Main process" MAIN_COLOR {
+  [file classifier\nkind = source] as Classifier MAIN_COLOR
+  [grammar registry scan\n~/.config/vinary-viewer/grammars] as MainRegistry FS_COLOR
+}
+
+package "Renderer process" RENDERER_COLOR {
+  [source-view\nread-only CodeMirror 6] as SourceView RENDERER_COLOR
+  [grammar catalog\nbundled + user configs] as Registry DATASCRIPT_COLOR
+  [web-tree-sitter\nLanguage / Parser / Query] as TreeSitter MARKDOWN_COLOR
+  [CodeMirror decorations\ncapture -> CSS class] as Decorations REFRAME_COLOR
+}
+
+Classifier -[#B1951D,thickness=2]-> SourceView : vv:content {:kind "source" :text}
+MainRegistry -[#B1951D,thickness=2]-> Registry : vv:grammars EDN
+SourceView -[#4F97D7,thickness=2]-> Registry : grammar-for(path)
+Registry -[#67B11D,thickness=2]-> TreeSitter : wasm-url + highlights.scm
+TreeSitter -[#67B11D,thickness=2]-> Decorations : captures
+Decorations -[#4F97D7,thickness=2]-> SourceView : read-only highlighted view
+
+legend
+  |<#3A5BA0>| main classifies source files |
+  |<#9F8766>| filesystem/user grammar directory |
+  |<#B1951D>| IPC mediator transfers content and grammar configs |
+  |<#A45BAD>| renderer grammar catalog |
+  |<#67B11D>| tree-sitter parse/query pipeline |
+  |<#4F97D7>| CodeMirror/re-frame rendering support |
+endlegend
+
+@enduml

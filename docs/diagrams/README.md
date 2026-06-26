@@ -105,8 +105,8 @@ A color **always** means one concept, suite-wide. Every diagram also carries its
 | `#3A5BA0`    | **MAIN process / Node IO** (slate)               | `main.core`, `main.service`, fs reads, chokidar, git            |
 | `#2D9574`    | **Renderer / Chromium UI** (teal)                | reagent views, the Chromium process, the rendered document body |
 | `#B1951D`    | **IPC seam** (amber) — preload / contextBridge / Mediator | the `window.vv` boundary; **every IPC arrow is amber**          |
-| `#A45BAD`    | **DataScript SSOT** (purple)                     | the documents/tabs relational store (`vinary.app.ds`)           |
-| `#7590DB`    | **app-db ephemeral** (blue-violet)               | re-frame `app-db` UI state (active tab, theme, find, history)   |
+| `#A45BAD`    | **DataScript content cache** (purple)            | bounded document content (`vinary.app.ds`)                      |
+| `#7590DB`    | **app-db UI/navigation state** (blue-violet)     | tabs, history, active tab, theme, find, scroll-spy state        |
 | `#4F97D7`    | **re-frame machinery** (blue)                    | events · subscriptions · effects; also shadow-cljs in build views |
 | `#9F8766`    | **Filesystem / editor** (tan)                    | the watched file, the external editor that saves it             |
 | `#67B11D`    | **Markdown / unified** (green)                   | the remark→rehype pipeline, rendered HTML                       |
@@ -146,17 +146,20 @@ every committed figure**, themed through `_vv-theme.iuml`.
 
 ## 5. Diagram catalog
 
-The table lists each diagram and the document(s) that embed it. Diagrams are authored by several
-writers; entries marked *(planned)* are referenced by a doc and will be rendered once their `.puml`
-lands. Reference paths from a doc are always relative, e.g. `../diagrams/<name>.puml`.
+The table lists each diagram and the document(s) that embed it. Reference paths
+from a doc are always relative, e.g. `../diagrams/<name>.puml`.
 
 | Diagram (`.puml`)                     | Kind                         | Embedded by (doc)                                                                 |
 |---------------------------------------|------------------------------|-----------------------------------------------------------------------------------|
 | `_vv-theme.iuml`                       | shared theme include             | *(included by every diagram; not embedded directly)*                              |
 | `system-context.puml`                  | C4 system context                | `architecture/01-overview.md`                                                     |
 | `container-two-build.puml`             | C4 container / build             | `usage/02-installation-and-build.md`, `architecture/02-process-and-build-topology.md` |
+| `component-grammar-registry.puml`      | component (grammar registry)     | `features/14-grammar-registry.md`                                                |
 | `component-main-service.puml`          | component (main process)         | `architecture/06-renderer-runtime.md`, `features/04-git-file-tree-and-filter.md`  |
+| `component-native-pdf.puml`            | component (native PDF runtime)   | `features/11-native-pdf.md`                                                       |
 | `component-renderer.puml`              | component (renderer)             | `architecture/06-renderer-runtime.md`                                             |
+| `component-source-preview.puml`        | component (source preview)       | `features/13-source-preview-tree-sitter.md`                                       |
+| `component-content-retention.puml`     | component (retention and metadata) | `design-decisions/0010-bounded-content-retention-and-render-metadata.md`        |
 | `class-state-model.puml`               | class / state model              | `architecture/04-state-schema-reference.md`, `theory/02-state-model-datascript-app-db.md` |
 | `object-ds-rev-bridge.puml`            | object (the `:ds/rev` bridge)    | `theory/02-state-model-datascript-app-db.md`, `design-decisions/0004-ds-rev-bridge-vs-re-posh.md` |
 | `object-history-stack.puml`            | object (history stack)           | `theory/07-command-history-model.md`, `features/07-navigation-history.md`          |
@@ -179,15 +182,13 @@ lands. Reference paths from a doc are always relative, e.g. `../diagrams/<name>.
 | `deploy-electron-processes.puml`       | deployment (trust boundary)      | `security/threat-model.md`                                                        |
 | `component-keybindings-inprogress.puml`| component *(now available)*  | `features/15-custom-keybindings.md`, `usage/04-keyboard-shortcuts.md`              |
 | `component-diagram-rendering-planned.puml` | component *(planned)*        | `features/12-diagram-rendering.md`                                               |
-| `component-grammar-registry-planned.puml`  | component *(planned)*        | `features/14-grammar-registry.md`                                                |
-| `component-native-pdf-planned.puml`    | component *(planned)*            | `features/11-native-pdf.md`                                                       |
-| `component-tree-sitter-planned.puml`   | component *(planned)*            | `features/13-source-preview-tree-sitter.md`                                       |
+| `component-grammar-registry-planned.puml`  | legacy component design      | superseded by `component-grammar-registry.puml`                                  |
+| `component-native-pdf-planned.puml`    | legacy component design          | superseded by `component-native-pdf.puml`                                         |
+| `component-tree-sitter-planned.puml`   | legacy component design          | superseded by `component-source-preview.puml`                                     |
 
-The three diagrams embedded by the documents in this assignment — `seq-open-file.puml`,
-`container-two-build.puml`, `seq-theme-switch.puml`, and `deploy-electron-processes.puml` — are present
-on disk; the remaining rows above are authored by the diagram and pillar writers and are catalogued
-here for completeness. Rows marked *(planned)* / *(now available)* render Forthcoming features and
-carry the `«planned»` stereotype per §1.
+Rows marked as legacy design diagrams are retained so older docs and review
+history remain intelligible, but current documentation embeds the non-legacy
+runtime diagrams listed above.
 
 > This README owns only the *prose* convention and catalog (it is the one non-`.puml` file in this
 > directory); it does **not** itself emit `.puml` sources. If a diagram is added or renamed, update this

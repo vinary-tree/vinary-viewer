@@ -22,6 +22,16 @@
   {:tabs (tabs db) :active-tab (active-id db) :active-path (active-path db)
    :can-back? (can-back? db) :can-forward? (can-forward? db)})
 
+(defn retained-file-paths
+  "Every local file path still reachable from any open tab history. This is the ownership set for
+   main-process file watchers and the renderer content cache."
+  [db]
+  (->> (tabs db)
+       (mapcat #(get-in % [:hist :stack]))
+       (keep (comp uri/file-path :uri))
+       distinct
+       vec))
+
 ;; ---- transforms (pure db→db, or db→[db' …]) ----
 (defn activate [db id] (assoc-in db [:ui :active-tab] id))
 

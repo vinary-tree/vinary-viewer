@@ -26,14 +26,14 @@ package "re-frame machinery" {
 }
 
 package "state" {
-  database "app.db\n(re-frame app-db:\nephemeral UI · `:ds/rev`)" as Db APPDB_COLOR
-  database "app.ds\n(DataScript conn:\ndocs / tabs SSOT)" as Ds DATASCRIPT_COLOR
+  database "app.db\n(re-frame app-db:\ntabs · history · UI · `:ds/rev`)" as Db APPDB_COLOR
+  database "app.ds\n(DataScript conn:\nbounded content cache)" as Ds DATASCRIPT_COLOR
 }
 
 package "renderer services" {
   component "renderer.markdown\n(unified pipeline)" as Md MARKDOWN_COLOR
   component "renderer.find\n(CSS Custom Highlight)" as Find RENDERER_COLOR
-  component "renderer.toc\n(extract · scroll-spy)" as Toc RENDERER_COLOR
+  component "renderer.toc\n(offset cache · scroll-spy)" as Toc RENDERER_COLOR
 }
 
 package "reagent UI (React 19)" {
@@ -51,11 +51,10 @@ package "input / keybindings" {
   component "input.keymap\n(presets ⊕ user · modes)" as Kmap RENDERER_COLOR
   component "input.events / input.fx\n(:input/* · :palette/* · :dom/*)" as Iev REFRAME_COLOR
 }
-'' command-palette VIEW is the one pending piece (events+state exist; no view yet).
-component "ui.palette\n(command-palette view)" as Pal <<planned>>
+component "ui.palette\n(command-palette view)" as Pal RENDERER_COLOR
 
 Core --> Ev   : `dispatch-sync [:db/init]`
-Core --> Vv   : `bridge!` wires onContent/onError/onTree
+Core --> Vv   : `bridge!` wires content/tree/config/web channels
 Vv ..> Ev     : amber: payload ⟶ `[:content/received]` …
 Ev --> Db     : updates ephemeral UI
 Ev --> Fx     : `:fx` vector
@@ -63,13 +62,13 @@ Fx --> Ds     : `:ds/transact`
 Fx --> Md     : `:markdown/render`
 Fx --> Find   : `:find/run` · `:find/cycle` · `:find/clear`
 Fx --> Toc    : `:toc/scroll`
-Fx ..> Vv     : `:vv/open` · `:vv/close` (amber)
+Fx ..> Vv     : `:vv/open` · retained sync · shell/config fx (amber)
 Md ..> Ev     : `.then` ⟶ `[:content/rendered]`
 Ds ..> Db     : `d/listen!` ⟶ `[:ds/changed]` (bumps `:ds/rev`)
 
 Sub ..> Db    : reads ephemeral UI
 Sub ..> Ds    : reads conn (gated on `:<- [:ds/rev]`)
-Sub ..> Toc   : `:doc/toc` ⟶ `toc/extract`
+Sub ..> Ds    : `:doc/toc` reads stored render metadata
 
 Views ..> Sub : `subscribe`
 Tabs ..> Sub  : `subscribe`
@@ -85,18 +84,17 @@ Res --> Cmd   : `commands/run` (decision → command id)
 Res --> Kmap  : active keymap `modes`
 Cmd --> Ev    : `rf/dispatch` resolved command's event
 Iev --> Db    : modal / palette state
-Vv ..> Iev    : amber: `onKeymap` ⟶ `[:keymap/config-received]` (pending main sender)
-Iev ..> Pal   : «planned» drives the palette view
+Vv ..> Iev    : amber: `onKeymap` ⟶ `[:keymap/config-received]`
+Iev ..> Pal   : palette state drives visible command picker
 
 legend right
   |= Colour |= Concept |
   | <#2D9574> | Renderer / UI / services / input |
   | <#4F97D7> | re-frame machinery |
-  | <#A45BAD> | DataScript SSOT |
-  | <#7590DB> | app-db (ephemeral UI) |
+  | <#A45BAD> | DataScript content cache |
+  | <#7590DB> | app-db (tabs, history, UI) |
   | <#67B11D> | markdown / unified |
   | <#B1951D> | IPC seam |
-  | <#DDDDDD> | Forthcoming (palette view) |
   Solid = dispatch / effect · Dotted = subscribe / listen
 endlegend
 @enduml

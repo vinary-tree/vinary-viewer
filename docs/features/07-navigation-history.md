@@ -2,242 +2,96 @@
 
 **Status: Available now.**
 
----
-
-## 1 · What it is
-
-vinary-viewer keeps a **browser-style back/forward history** over the documents you visit. As you
-open files and switch tabs, each navigation is recorded; the toolbar `←` / `→` buttons (and
-`Alt+←` / `Alt+→`) walk you backward and forward through that trail. The semantics match a web
-browser exactly, including the subtle rule that **navigating somewhere new after going Back
-discards the forward branch** — you cannot "redo forward" to a path you abandoned by branching.
-
-Conceptually this is the **Command pattern**: each navigation is a reified, replayable change to a
-small history value `{:stack [...] :idx n}` in the re-frame app-db. Back/forward are just moves of
-the index over a frozen stack; a new navigation appends (and truncates). The deeper rationale —
-why navigation is modeled as commands over an explicit stack rather than, say, browser history —
-is in [theory/07-command-history-model.md](../theory/07-command-history-model.md); this page walks
-the code.
+Each tab owns its own browser-like history stack. Back/Forward act on the active
+tab, restore the target URI, and restore the saved scroll position for that
+history entry.
 
 ---
 
-## 2 · How to use it
+## 1. History entry shape
 
-- **Go back:** click the toolbar **`←`** button, or press **`Alt+←`**.
-- **Go forward:** click **`→`**, or press **`Alt+→`**.
+History entries are maps:
 
-The buttons are **disabled** when there is nowhere to go (you are at the start or end of the
-trail).
+```clojure
+{:uri "/abs/path/to/doc.md"
+ :scroll 420}
+```
 
-**Example.** Open A, then open B, then open C (trail: A → B → C, you are on C). Press `Alt+←`
-twice — you are back on A, with the forward branch B → C still available. Now open D: the trail
-becomes A → D, and B → C are **gone** (the forward branch was truncated by the new navigation).
-`→` is now disabled because D is the end of the trail.
+A tab stores them as:
+
+```clojure
+{:hist {:stack [{:uri "/a.md" :scroll 0}
+                {:uri "/b.md" :scroll 420}]
+        :idx 1}}
+```
+
+`idx` identifies the current entry. Opening a new URI after stepping back
+truncates entries after `idx`, just like a web browser.
 
 ---
 
-## 3 · How it works internally
+## 2. User behavior
 
-### The history value
+| Action | Input |
+|--------|-------|
+| Back | Toolbar Back, `Alt+Left`, or mouse back button. |
+| Forward | Toolbar Forward, `Alt+Right`, or mouse forward button. |
+| Open link in same tab | Left-click. |
+| Open link in new tab | `Ctrl+click` or middle-click. |
 
-The history lives in app-db (`src/vinary/app/db.cljs`):
-
-```clojure
-:history {:stack [] :idx -1}
-```
-
-- **`:stack`** — a vector of visited paths, oldest first.
-- **`:idx`** — the index of the *current* entry within `:stack` (the path the active document
-  corresponds to). It starts at `-1` (empty history, nothing current).
-
-### Recording a navigation (with forward-branch truncation)
-
-Every navigation goes through `record-nav` (`src/vinary/app/events.cljs`):
-
-```clojure
-(defn- record-nav
-  "Push path onto the history if it differs from the current entry (truncating any forward branch)."
-  [db path]
-  (let [{:keys [stack idx]} (get-in db [:ui :history])]
-    (if (= path (get stack idx))
-      db
-      (let [stack' (conj (vec (take (inc idx) stack)) path)]
-        (assoc-in db [:ui :history] {:stack stack' :idx (dec (count stack'))})))))
-```
-
-Reading it carefully:
-
-- **`(= path (get stack idx))` → `db`** — if you navigate to the path you are *already* on, nothing
-  changes (no duplicate entry). `(get stack idx)` is the current entry; `(get stack -1)` is `nil`,
-  so from an empty history any path is "new".
-- **`stack' ≔ (conj (vec (take (inc idx) stack)) path)`** — the truncation. `(take (inc idx)
-  stack)` keeps the stack up to and including the current entry, **dropping everything after it**
-  (the forward branch). Then `path` is appended. This is exactly the browser rule: branching after
-  Back forgets the abandoned future.
-- **`:idx ≔ (dec (count stack'))`** — the new current index is the last element of the new stack
-  (the path we just appended).
-
-Worked example, matching the usage above. Start `{:stack [A B C] :idx 2}` (on C). Go back twice →
-`{:stack [A B C] :idx 0}` (on A; **stack unchanged**, only `idx` moved — see below). Now navigate
-to D: `idx` is `0`, so `(take 1 [A B C])` = `[A]`, then `(conj [A] D)` = `[A D]`, and `idx` becomes
-`1`. Result `{:stack [A D] :idx 1}` — B and C are gone.
-
-### Navigating *is* recording
-
-The helper `nav-to` sets the active path and records, in one step:
-
-```clojure
-(defn- nav-to [db path]
-  (-> db (assoc-in [:ui :active-path] path) (record-nav path)))
-```
-
-`nav-to` is called from the places that change which document is shown — receiving content
-([feature 01](01-live-refresh.md)) and activating a tab ([feature 02](02-multi-tab-previews.md)):
-
-```clojure
-(rf/reg-event-db :tab/activate (fn [db [_ path]] (nav-to db path)))
-;; …and inside :content/received: {:db (nav-to db path) …}
-```
-
-So opening a file or clicking a tab both feed the same history.
-
-### Back and forward move the index over a frozen stack
-
-```clojure
-(rf/reg-event-db
- :history/back
- (fn [db _]
-   (let [{:keys [stack idx]} (get-in db [:ui :history])]
-     (if (and idx (pos? idx))
-       (-> db (assoc-in [:ui :history :idx] (dec idx)) (assoc-in [:ui :active-path] (get stack (dec idx))))
-       db))))
-
-(rf/reg-event-db
- :history/forward
- (fn [db _]
-   (let [{:keys [stack idx]} (get-in db [:ui :history])]
-     (if (and idx (< idx (dec (count stack))))
-       (-> db (assoc-in [:ui :history :idx] (inc idx)) (assoc-in [:ui :active-path] (get stack (inc idx))))
-       db))))
-```
-
-- **Back** is allowed only when `(pos? idx)` (there is an earlier entry). It decrements `idx` and
-  sets the active path to `(get stack (dec idx))`. The **stack is not modified** — going back is a
-  pure index move, which is what *preserves* the forward branch until you branch.
-- **Forward** is allowed only when `(< idx (dec (count stack)))` (there is a later entry). It
-  increments `idx` and re-points the active path.
-
-Because back/forward set `:ui/active-path`, the content view re-derives via `:doc/active`
-([feature 02](02-multi-tab-previews.md)) and shows the document at the new index.
-
-### The buttons reflect availability
-
-`src/vinary/app/subs.cljs` exposes whether back/forward are possible:
-
-```clojure
-(rf/reg-sub :history/can-back?
-            (fn [db _] (let [{:keys [idx]} (get-in db [:ui :history])] (boolean (and idx (pos? idx))))))
-(rf/reg-sub :history/can-forward?
-            (fn [db _] (let [{:keys [stack idx]} (get-in db [:ui :history])]
-                         (boolean (and idx (< idx (dec (count stack))))))))
-```
-
-The toolbar disables each button accordingly (`src/vinary/ui/views.cljs`):
-
-```clojure
-(defn toolbar []
-  (let [… back? @(rf/subscribe [:history/can-back?])
-            fwd?  @(rf/subscribe [:history/can-forward?])]
-    [:div.vv-toolbar
-     [:button.vv-nav-btn {:disabled (not back?) :title "Back (Alt+←)"
-                          :on-click #(rf/dispatch [:history/back])} "←"]
-     [:button.vv-nav-btn {:disabled (not fwd?) :title "Forward (Alt+→)"
-                          :on-click #(rf/dispatch [:history/forward])} "→"]
-     …]))
-```
-
-And the global key handler maps `Alt+←` / `Alt+→` to the same events
-(`src/vinary/renderer/core.cljs`, shown in [feature 05](05-in-page-find.md#the-find-bar-view-and-its-events)):
-
-```clojure
-(.-altKey e)
-(case (.-key e)
-  "ArrowLeft"  (do (.preventDefault e) (rf/dispatch [:history/back]))
-  "ArrowRight" (do (.preventDefault e) (rf/dispatch [:history/forward]))
-  nil)
-```
+Back/Forward are disabled when the active tab has no earlier/later entry.
 
 ---
 
-## 4 · Design notes / trade-offs
+## 3. Scroll capture and restore
 
-- **Why an explicit stack in app-db rather than the browser's history API?** vinary-viewer's
-  "navigation" is *document* navigation within a single renderer page, not URL navigation. An
-  explicit `{:stack :idx}` value is simple, inspectable (visible in re-frame-10x/re-frisk), and
-  replayable — the Command-pattern shape — and it does not entangle document history with
-  Electron/Chromium page history. See [theory/07](../theory/07-command-history-model.md).
-- **Why truncate the forward branch on a divergent navigation?** It matches the universally-learned
-  browser model: after going Back and then going somewhere new, the old forward path is abandoned.
-  Keeping it would create a tree the linear `←`/`→` buttons could not represent unambiguously.
-- **Why dedupe consecutive same-path navigations?** Re-receiving content for the *current* document
-  (a live-refresh re-send, [feature 01](01-live-refresh.md)) calls `nav-to` with the path you are
-  already on; `record-nav` returns `db` unchanged, so live refresh does not spam the history with
-  duplicates.
-- **Trade-off — unbounded stack.** The stack grows with each distinct navigation for the session.
-  For an interactive previewer this is negligible; a bounded ring-buffer is a possible refinement
-  if very long sessions become a concern.
+Navigation events use a `:content-scroll` coeffect to read the current content
+pane's `scrollTop` before leaving an entry. The target entry's saved scroll is
+then restored after the destination content has rendered and figure sizing has
+settled.
 
-The history value is ephemeral `app-db` state (not DataScript), per
-[ADR-0008 DataScript + app-db split](../design-decisions/0008-datascript-plus-app-db-split.md); the
-Command-pattern model is developed in [theory/07](../theory/07-command-history-model.md). See the
-[ADR index](../design-decisions/README.md) for the full list.
+The important ordering is:
+
+1. Save the leaving tab's current scroll.
+2. Change the active tab/history entry.
+3. Load local content if needed.
+4. Apply scroll restore after layout, with a retry that skips if the user has
+   already scrolled.
+
+This keeps back/forward useful in long Markdown files with many embedded SVGs.
 
 ---
 
-## 5 · Diagrams
+## 4. Event flow
 
-- **Sequence — back / forward / branch:** [`../diagrams/seq-history.puml`](../diagrams/seq-history.puml)
-  (written by the theory pillar). `nav-to` (append + truncate) · `:history/back` (idx−1) ·
-  `:history/forward` (idx+1) · the disabled-button subscriptions.
-- **Object — the stack evolving (A → B → C → back → D):**
-  [`../diagrams/object-history-stack.puml`](../diagrams/object-history-stack.puml) (owned by this
-  pillar). Snapshots of `{:stack :idx}` through each operation, showing the forward branch being
-  truncated on the divergent navigation to D.
+| Event | Behavior |
+|-------|----------|
+| `:tab/navigate` | Navigate active tab to a URI and push a new `{uri, scroll}` entry. |
+| `:tab/open` | Save current scroll, create a new active tab, and load its URI. |
+| `:doc/open` | Focus an existing tab for the URI when possible, otherwise navigate active tab. |
+| `:doc/open-new` | Focus an existing tab for the URI when possible, otherwise open a new tab. |
+| `:history/back` | Step active tab history by `-1` and restore target scroll. |
+| `:history/forward` | Step active tab history by `+1` and restore target scroll. |
+| `:http/navigated` | Sync in-app HTTP view navigation into active tab history. |
 
-![Navigation history stack snapshots](../diagrams/object-history-stack.svg)
-
-Palette: **blue-violet** = the app-db history snapshots, **purple** arrows = a forward navigation
-(`record-nav` appends), **blue** arrows = a back/forward index move, **red** = the divergent
-navigation that truncates. See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).
+Local-file destinations request `[:vv/open path]` and `[:scroll/restore n]`.
+HTTP destinations are displayed in the main-owned web view and scroll themselves.
 
 ---
 
-## Per-tab history + scroll restore (new this round)
+## 5. Retention effect
 
-History is **per tab** (each tab in `nav.cljs` owns its own `{:stack :idx}`), and each stack entry is now
-`{:uri :scroll}` rather than a bare URI — so back/forward restore **both the document and where you were
-scrolled in it**. The leaving scroll position is captured at navigation time (a `:content-scroll` cofx
-reads `.vv-content`'s `scrollTop`), and the destination's saved position is re-applied after the new
-document lays out (one frame + a short settle, to avoid clamping against a not-yet-complete height).
+History affects file ownership. A local path in a background tab's back stack is
+still retained, watched, and cached. After history or tab changes, the renderer
+sends the complete retained local path set to main.
 
-Three related fixes ship alongside:
+This is why Back can return to a prior local document without reviving a closed
+watcher or reintroducing stale cache state.
 
-- **Clicking a link** in a rendered Markdown document now opens the target **in the preview pane** —
-  in-page for `#anchors`, the same tab for files/URLs, a new tab on `Ctrl`/middle-click — instead of letting
-  Electron replace the whole window with raw page source. This restores the per-tab history that
-  `Alt+←/→` traverse. The hovered link's URL appears **bottom-left**, like a browser's status bar.
-- **Mouse thumb buttons** — button 3 → Back, button 4 → Forward (a capture-phase `mousedown` listener that
-  `preventDefault`s Chromium's own navigation).
-- **A web (HTTP) tab** still scrolls itself; the content-pane restore is requested only for local files.
+---
 
-**Diagram — link click → in-pane open + scroll restore:**
-[`../diagrams/seq-link-click-scroll.puml`](../diagrams/seq-link-click-scroll.puml). The click is intercepted
-(`link/classify` + `.preventDefault`), the `:content-scroll` cofx captures the leaving `scrollTop`, the new
-entry pushes `{:uri :scroll 0}`, and `scroll/apply!` restores the destination position after layout; Back
-mirrors it by restoring the entry's saved scroll.
+## 6. Related diagram
 
 ![Link click scroll restoration sequence](../diagrams/seq-link-click-scroll.svg)
 
-Palette: **tan** = the User, **teal** = the `markdown-body` view, **blue** = the re-frame event + scroll fx,
-**blue-violet** = the per-tab history entries `{:uri :scroll}`, **amber** = loading/rendering the document.
-See [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).
+*Diagram source: [`../diagrams/seq-link-click-scroll.puml`](../diagrams/seq-link-click-scroll.puml).*

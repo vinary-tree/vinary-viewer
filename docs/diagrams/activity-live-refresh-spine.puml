@@ -11,7 +11,7 @@ title Live-refresh spine — layer ownership of one file-change → re-render
 |#9F8766|Filesystem|
 start
 :editor writes file;
-:chokidar watcher (per open path)\nfires "change"/"add"\nafter awaitWriteFinish (80ms);
+:chokidar watcher (retained path)\nfires "change"/"add"\nafter awaitWriteFinish (80ms);
 
 |#3A5BA0|Main (Node)|
 :kind-of path;
@@ -40,10 +40,10 @@ endif
 :bridge → [:ds/changed] → :ds/rev inc;
 if (kind = markdown?) then (yes)
   |#2D9574|Renderer (re-frame)|
-  :fx :markdown/render (async unified pipeline);
-  :.then → [:content/rendered path html];
+  :fx :markdown/render\n(async unified + SVG pipeline);
+  :.then → [:content/rendered path stamp result];
   |#A45BAD|Stores|
-  :**:ds/transact** {:doc/path :doc/html html};
+  :**:ds/transact** {:doc/path :doc/html :doc/toc :doc/assets};
 elseif (kind = text?) then (yes)
   |#A45BAD|Stores|
   :**:ds/transact** {:doc/html <pre vv-plain escaped>};
@@ -54,7 +54,7 @@ endif
 
 |#7590DB|DOM|
 :content-view Strategy picks the body by :doc/kind;
-:markdown-body component-did-update\nset! innerHTML html (no VDOM diff);
+:markdown-body component-did-update\nset! innerHTML (:html result) (no VDOM diff);
 floating note
   **UI untouched.** :ui/find ranges, scroll offset,
   :ui/theme, :ui/history all live in app-db and are

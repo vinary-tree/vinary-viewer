@@ -29,7 +29,7 @@ rectangle "git repository\n(`git ls-files` →\nfile-tree sidebar)" as Git FS_CO
 
 User --> App : launches `vv README.md`,\nclicks tabs / tree / TOC,\nfinds, switches theme
 Editor --> FS : saves the file\nthe user is editing
-App --> FS : **reads** file content;\n**watches** each open path\n(chokidar)
+App --> FS : **reads** file content;\n**watches** retained paths\n(chokidar)
 FS ..> App : `change` / `add` events\n⟶ live refresh
 App --> Git : `git rev-parse` +\n`git ls-files`
 Git ..> App : repo root + tracked files

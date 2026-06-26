@@ -5,10 +5,11 @@
 > (`vv README.md`), and it shows a live, always-current preview: edit the file in
 > any editor and the rendered view refreshes the instant you save — **without
 > losing your scroll position, your in-page search, or your theme**. It previews
-> **Markdown** (GitHub-flavoured, with heading anchors and syntax highlighting),
-> **images**, and **plain text**, across **multiple tabs**, with a **git file
+> **Markdown** (GitHub-flavoured, with heading anchors, syntax highlighting, and
+> embedded SVG figure sizing), **images**, **PDFs**, **source files**, **plain
+> text**, and **HTTP/HTTPS links**, across **multiple tabs**, with a **git file
 > tree**, an **in-page find**, a **table-of-contents scroll-spy**, **navigation
-> history**, and **live theme switching**.
+> history**, live theme switching, and custom keybindings.
 
 ---
 
@@ -17,27 +18,25 @@
 | Field | Value |
 |-------|-------|
 | Version | **`0.2.0-dev`** — ClojureScript / re-frame / Electron rewrite (`package.json`) |
-| Predecessor | `0.1.0` was a *vmd-patching* tool; that codebase is **superseded** and its old top-level `docs/01..09-*.md` describe the *previous* product, not this one |
+| Predecessor | `0.1.0` was a *vmd-patching* tool; that codebase is **superseded** and preserved at git tag `v0.1.0` |
 | Live runtime | `src/vinary/**` (ClojureScript) + `resources/**` (`preload.js`, `public/`) |
 | Build | `shadow-cljs` two-build (`:main` → Electron main; `:renderer` → Chromium) |
 
-This suite documents the **live `0.2.0-dev` application only**. Throughout, every
-capability is tagged so you always know what runs today versus what is on the
-roadmap:
+This suite documents the **live `0.2.0-dev` application**. Capabilities are
+tagged so you can distinguish current behavior from intentionally future work:
 
-- **Available now** — implemented in the source you can read today (this includes the full
-  **custom-keybinding system**: a command registry, preset default/vim/emacs keymaps, a modal/chord
-  resolver, a `~/.config/vinary-viewer/keybindings.edn` config, and a command palette).
-- **Forthcoming (planned)** — designed but not built: the `vv` / `vinary-viewer`
-  launcher binaries, the `~/.config/vinary-viewer` **grammar registry**, **native
-  PDF** (Electron `BrowserView`), **diagram rendering** (d2 / PlantUML / Mermaid →
-  SVG), and a **tree-sitter source view**.
+- **Available now** — implemented in `src/vinary/**` and `resources/**`.
+- **Forthcoming (planned)** — designed but not built. At the time of this
+  revision, source-diagram rendering from `.d2`, `.puml`, `.mmd`, and `.dot`
+  files is still planned; those files currently open in the read-only source
+  preview. Some older pages and diagrams keep `planned` in their filename
+  because they began as design documents, but their status text is authoritative.
 
 > Anything not explicitly tagged *Forthcoming* is **Available now**.
 
 ### What the app can do today
 
-The use-case diagram below partitions every feature into **Available now**
+The use-case diagram below partitions the feature set into **Available now**
 (teal) and **Forthcoming (planned)** (dashed grey). Source:
 [`diagrams/usecase-features.puml`](diagrams/usecase-features.puml).
 
@@ -76,8 +75,9 @@ invariants — independent of any one file. Read it in order:
    and **Observer** patterns; the single-source-of-truth equation
    `view ≔ f(state)`.
 2. [`theory/02-state-model-datascript-app-db.md`](theory/02-state-model-datascript-app-db.md)
-   — the **two stores** (DataScript for documents, app-db for ephemeral UI), the
-   minimal schema, and the **`:ds/rev` bridge** that ties them together.
+   — the **two stores** (`app-db` for tabs/history and UI; DataScript for the
+   bounded content cache), the minimal schema, and the **`:ds/rev` bridge** that
+   ties them together.
 3. [`theory/03-live-refresh-spine.md`](theory/03-live-refresh-spine.md) — the
    **flagship spine**: editor-save → painted DOM, and the invariant that a content
    refresh mutates only `:doc/*`, never `:ui/*`.
@@ -110,9 +110,9 @@ Then read the **architecture pillar** for the concrete realisation:
   [`css-variables.md`](reference/css-variables.md),
   [`namespaces.md`](reference/namespaces.md).
 - [`design-decisions/`](design-decisions/README.md) — the numbered ADR-style log
-  (`0001`…`0009`) recording *why* each pivotal choice was made (DataScript over
-  plain app-db, the hand-rolled `:ds/rev` bridge over re-posh, imperative
-  `innerHTML` over VDOM, rendering in the renderer, etc.).
+  (`0001`…`0010`) recording *why* each pivotal choice was made: rendering in the
+  renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative
+  `innerHTML` over VDOM, the IPC mediator, and bounded content retention.
 - [`security/threat-model.md`](security/threat-model.md) — the Electron security
   posture and recommended hardenings.
 
@@ -127,10 +127,10 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`README.md`](README.md) | entry | This index, status, reading paths, conventions |
 | [`GLOSSARY.md`](GLOSSARY.md) | entry | Every term, acronym, and symbol, defined once |
 | [`theory/01-reactive-architecture.md`](theory/01-reactive-architecture.md) | theory | Unidirectional flow; six dominoes; Command + Observer; `view ≔ f(state)` |
-| [`theory/02-state-model-datascript-app-db.md`](theory/02-state-model-datascript-app-db.md) | theory | Two stores; DataScript primer; minimal schema; `:ds/rev` bridge; nil-as-absence |
+| [`theory/02-state-model-datascript-app-db.md`](theory/02-state-model-datascript-app-db.md) | theory | Two stores; `app-db` tabs/history; DataScript content cache; `:ds/rev` bridge; nil-as-absence |
 | [`theory/03-live-refresh-spine.md`](theory/03-live-refresh-spine.md) | theory | The save→render→paint spine; the `:doc/*`-only invariant; convergence/LWW |
 | [`theory/04-hexagonal-and-ipc-mediator.md`](theory/04-hexagonal-and-ipc-mediator.md) | theory | Ports/adapters; effects at the edge; the Mediator `contextBridge` seam |
-| [`theory/05-strategy-renderer-registry.md`](theory/05-strategy-renderer-registry.md) | theory | Strategy-by-`:doc/kind`; content-view precedence; planned registry-as-data |
+| [`theory/05-strategy-renderer-registry.md`](theory/05-strategy-renderer-registry.md) | theory | Strategy-by-`:doc/kind`; content-view precedence; future registry-as-data |
 | [`theory/06-find-css-custom-highlight.md`](theory/06-find-css-custom-highlight.md) | theory | Painting Ranges without DOM mutation; `collect-ranges`/`paint!`/`cycle!` |
 | [`theory/07-command-history-model.md`](theory/07-command-history-model.md) | theory | Navigation as Commands; `{:stack :idx}`; truncate-on-new-path |
 | [`architecture/01-overview.md`](architecture/01-overview.md) | architecture | System-level component map |
@@ -139,7 +139,7 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`architecture/04-state-schema-reference.md`](architecture/04-state-schema-reference.md) | architecture | DataScript schema + full `app-db` shape |
 | [`architecture/05-data-flows.md`](architecture/05-data-flows.md) | architecture | Open / refresh / find / history flows end-to-end |
 | [`architecture/06-renderer-runtime.md`](architecture/06-renderer-runtime.md) | architecture | Renderer boot order, reagent mount, dev hooks |
-| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0009` | design | Why each pivotal choice was made |
+| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0010` | design | Why each pivotal choice was made |
 | [`usage/01..06`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting |
 | [`features/README.md`](features/README.md) + `01`…`15` | features | One page per feature (live refresh … custom keybindings) |
 | [`reference/events-effects-subs.md`](reference/events-effects-subs.md) | reference | Every re-frame event, effect, subscription |

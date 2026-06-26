@@ -1,33 +1,32 @@
 @startuml component-tree-sitter-planned
 '' ============================================================================
 '' PlantUML over Mermaid because: this is a layered component pipeline (file →
-'' incremental parser → capture → CSS style-map → CodeMirror decorations) where
-'' the WHOLE feature is «planned». PlantUML's reusable dashed-grey <<planned>>
-'' stereotype keeps every box uniformly marked Forthcoming, while the editor/
-'' filesystem tan and renderer teal colors carry their fixed palette meaning.
+'' incremental parser → capture → CSS style-map → CodeMirror decorations). This
+'' is a superseded legacy design retained for comparison with
+'' component-source-preview.puml.
 '' ============================================================================
 !include _vv-theme.iuml
 
-title Source preview via tree-sitter (Forthcoming / «planned») — read-only CodeMirror 6 + WASM
+title Source preview via tree-sitter (superseded legacy design)
 
 rectangle "Electron RENDERER (Chromium)" as REND #2D9574 {
   component "source-view\nStrategy entry" as SV <<planned>>
 
   package "read-only CodeMirror 6 editor" <<planned>> {
-    component "EditorState\n(doc text from :doc/text)" as STATE <<planned>>
-    component "ViewPlugin\n(viewport-cached decorations)" as VP <<planned>>
-    component "StateField\n(incremental parse tree)" as SF <<planned>>
+    component "EditorState\n(doc text from :doc/text)\n(legacy plan)" as STATE <<planned>>
+    component "ViewPlugin\n(viewport-cached decorations)\n(legacy plan)" as VP <<planned>>
+    component "StateField\n(incremental parse tree)\n(legacy plan)" as SF <<planned>>
   }
 
   package "web-tree-sitter (WASM)" <<planned>> {
-    component "Parser\nParser.parse(text, oldTree)\n[incremental: Wagner & Graham 1998]" as PARSER <<planned>>
-    component "Query (highlights.scm)\ncapture → name" as QUERY <<planned>>
-    component "capture → CSS class\nstyle-map" as STYLEMAP <<planned>>
+    component "Parser\nParser.parse(text, oldTree)\n[incremental: Wagner & Graham 1998]\n(legacy plan)" as PARSER <<planned>>
+    component "Query (highlights.scm)\ncapture → name\n(legacy plan)" as QUERY <<planned>>
+    component "capture → CSS class\nstyle-map\n(legacy plan)" as STYLEMAP <<planned>>
   }
 }
 
 rectangle "grammar source" as GR #9F8766 {
-  component "Language.load(<name>.wasm)" as LANG <<planned>>
+  component "Language.load(<name>.wasm)\n(legacy plan)" as LANG <<planned>>
 }
 
 LANG  -[#999999,dashed,thickness=2]-> PARSER : (1) load grammar WASM\n(bundled base64 or user registry)
@@ -39,16 +38,14 @@ STYLEMAP -[#2D9574,dashed,thickness=2]-> VP  : (6) class per range → Decoratio
 VP    -[#2D9574,dashed,thickness=2]-> SV     : (7) styled, read-only source
 
 note bottom of REND
-  On an edit (live-refresh), only the **changed region** is re-parsed:
-  `Parser.parse(newText, oldTree)` reuses unchanged subtrees, then the query
-  re-runs over the affected range — incremental, not a full re-highlight. The
-  capture→class style-map reuses the **same hljs-style --vv-* token colors**.
+  Superseded by component-source-preview.puml. Current runtime provides
+  read-only CodeMirror 6 source previews with grammar registry integration.
 end note
 
 legend right
   |= color/style |= concept |
   | <#2D9574> | renderer (Chromium UI) |
   | <#9F8766> | grammar source (filesystem / registry) |
-  | dashed grey <<planned>> | NOT yet built (Forthcoming) |
+  | dashed grey <<planned>> | superseded legacy planned component |
 endlegend
 @enduml

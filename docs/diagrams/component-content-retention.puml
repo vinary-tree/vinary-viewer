@@ -1,0 +1,43 @@
+@startuml component-content-retention
+'' PlantUML over Mermaid because this component view needs the shared color-by-concept theme and an explicit IPC boundary.
+!include _vv-theme.iuml
+
+title Bounded content retention and render metadata
+
+skinparam componentStyle rectangle
+
+package "Renderer process" RENDERER_COLOR {
+  [app-db tabs/history\n(:ui :tabs)] as Tabs APPDB_COLOR
+  [DataScript content cache\n(:doc/html :doc/toc :doc/assets)] as DS DATASCRIPT_COLOR
+  [Markdown render pipeline\nunified / rehype / tree-sitter post-pass] as MD MARKDOWN_COLOR
+  [TOC scroll-spy cache\nmeasured heading offsets] as Toc REFRAME_COLOR
+}
+
+package "Preload IPC mediator" IPC_COLOR {
+  [window.vv\nJSON IPC boundary] as VV IPC_COLOR
+}
+
+package "Main process" MAIN_COLOR {
+  [retained file set] as Retained MAIN_COLOR
+  [file watchers\nchokidar by path] as Watchers FS_COLOR
+  [asset watchers\nref-counted by owner doc] as Assets FS_COLOR
+}
+
+Tabs -[#4F97D7,thickness=2]-> DS : evict docs not in retained histories
+Tabs -[#B1951D,thickness=2]-> VV : syncRetainedFiles(paths)
+VV -[#B1951D,thickness=2]-> Retained : vv:retained-files
+Retained -[#3A5BA0,thickness=2]-> Watchers : close unretained paths
+Retained -[#3A5BA0,thickness=2]-> Assets : release doc asset owners
+MD -[#67B11D,thickness=2]-> DS : {:html :toc :assets}
+DS -[#4F97D7,thickness=2]-> Toc : stored :doc/toc
+Toc -[#4F97D7,thickness=2]-> Tabs : active heading event
+
+legend
+  |<#7590DB>| app-db owns tab histories and therefore retention |
+  |<#A45BAD>| DataScript stores bounded rendered content metadata |
+  |<#B1951D>| IPC mediator is the only renderer-main channel |
+  |<#3A5BA0>| MAIN owns filesystem watchers |
+  |<#67B11D>| Markdown render emits structured metadata |
+endlegend
+
+@enduml

@@ -4,6 +4,7 @@
   (:require [reagent.dom.client :as rdomc]
             [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [clojure.string :as str]
             [vinary.app.ds :as ds]
             [vinary.app.events]
             [vinary.app.subs]
@@ -18,6 +19,7 @@
 
 (defonce root (atom nil))
 (defonce last-history-input (atom {:dir nil :time 0}))
+(defonce copy-shortcuts-installed? (atom false))
 
 (defn- dispatch-history-nav! [dir]
   (let [[state accepted?] (history-input/accept @last-history-input dir (.now js/Date))]
@@ -68,6 +70,55 @@
   []
   (resolver/install!))
 
+(defn- element-for-node [^js node]
+  (when node
+    (if (= 1 (.-nodeType node))
+      node
+      (.-parentElement node))))
+
+(defn- selectable-root [^js node]
+  (some-> (element-for-node node)
+          (.closest ".markdown-body, .vv-source")))
+
+(defn- focused-source-selection []
+  (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]
+    (some-> (syntax/view-from-dom editor) syntax/selected-text)))
+
+(defn- dom-selection-text []
+  (when-let [sel (.getSelection js/window)]
+    (when (and (pos? (.-rangeCount sel)) (not (.-isCollapsed sel)))
+      (let [range (.getRangeAt sel 0)
+            text  (str sel)
+            start (selectable-root (.-startContainer range))
+            end   (selectable-root (.-endContainer range))]
+        (when (and (seq text) start end (identical? start end))
+          text)))))
+
+(defn- selected-preview-or-source-text []
+  (or (some-> (focused-source-selection) not-empty)
+      (some-> (dom-selection-text) not-empty)))
+
+(defn- copy-key? [^js e]
+  (and (or (.-ctrlKey e) (.-metaKey e))
+       (= "c" (str/lower-case (or (.-key e) "")))))
+
+(defn copy-shortcuts!
+  "Copy selected text from preview/source panes through the app clipboard IPC.
+
+   The listener is capture-phase so it can preserve selected text copying in modal modes; it only handles
+   selections inside the rendered preview or source view."
+  []
+  (when-not @copy-shortcuts-installed?
+    (reset! copy-shortcuts-installed? true)
+    (.addEventListener js/window "keydown"
+                       (fn [^js e]
+                         (when (copy-key? e)
+                           (when-let [text (selected-preview-or-source-text)]
+                             (.preventDefault e)
+                             (.stopPropagation e)
+                             (rf/dispatch [:clipboard/copy text]))))
+                       true)))
+
 (defn mouse-nav!
   "Mouse thumb buttons: button 3 → Back, button 4 → Forward (like a browser). preventDefault on the
    capture-phase mousedown cancels Chromium's own back/forward so it never replaces the page."
@@ -108,6 +159,7 @@
   (set! (.-__vvds js/window) (fn [] (clj->js (ds/open-docs (ds/snapshot)))))
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (bridge!)
+  (copy-shortcuts!)
   (keybindings!)
   (menubar/install-access-keys!)
   (mouse-nav!)

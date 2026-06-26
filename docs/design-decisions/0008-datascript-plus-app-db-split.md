@@ -1,8 +1,12 @@
-# 0008 — Split state: DataScript SSOT for docs/tabs, app-db for ephemeral UI
+# 0008 — Superseded split state: DataScript-owned docs/tabs
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0010](0010-bounded-content-retention-and-render-metadata.md)
 - **Date:** 2026-06-24
 - **Deciders:** vinary-viewer maintainers
+
+> This ADR records the earlier design where DataScript owned open tabs. The
+> current accepted model is [ADR-0010](0010-bounded-content-retention-and-render-metadata.md):
+> app-db owns tabs/history, while DataScript is a bounded content cache.
 
 ## Context
 
@@ -24,11 +28,11 @@ active tab, find) — the very thing live-refresh must preserve.
 **Two stores, each suited to its data, joined by the bridge from
 [ADR-0004](0004-ds-rev-bridge-vs-re-posh.md):**
 
-- **DataScript** (`vinary.app.ds`) is the **single source of truth for documents/tabs**. One open file =
+- **DataScript** (`vinary.app.ds`) was the **single source of truth for documents/tabs**. One open file =
   one `:doc` entity keyed by `:doc/path` (`schema = {:doc/path {:db/unique :db.unique/identity}}`; the
   other `:doc/*` attributes are schema-less scalars). Tabs are derived by query
   (`ds/open-docs` → docs with `:doc/open? true`, ordered by `:doc/order`).
-- **re-frame `app-db`** (`vinary.app.db`) holds **only ephemeral UI**: `:ui {:active-path, :theme,
+- **re-frame `app-db`** (`vinary.app.db`) held **only ephemeral UI**: `:ui {:active-path, :theme,
   :active-heading, :sidebar-visible?, :tree-selected, :history, :find, :input, :palette}` plus the
   `:ds/rev` revision counter.
 

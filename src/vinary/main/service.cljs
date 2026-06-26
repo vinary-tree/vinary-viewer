@@ -1,8 +1,8 @@
 (ns vinary.main.service
   "Main-process IO service: read files, push their content to the renderer over the Mediator IPC seam,
-   and watch every OPEN file (one chokidar watcher per path) so edits stream back live. Rendering
-   happens in the renderer (the ESM remark pipeline is browser-friendly), so main stays a thin,
-   side-effect-at-the-edge service."
+   and watch every retained local file path so edits stream back live. Rendering happens in the renderer
+   (the ESM remark pipeline is browser-friendly), so main stays a thin, side-effect-at-the-edge
+   service."
   (:require ["electron" :refer [ipcMain]]
             ["fs" :as fs]
             ["path" :as path]
@@ -15,6 +15,7 @@
             [vinary.main.grammars :as grammars]))
 
 (defonce ^:private watchers (atom {}))   ; path -> chokidar watcher
+(defonce ^:private retained-paths (atom #{})) ; local file paths reachable from open renderer tabs/history
 (defonce ^:private doc-webcontents (atom {})) ; open doc path -> current sender webContents
 (defonce ^:private doc-assets (atom {}))      ; markdown doc path -> #{local media paths}
 (defonce ^:private asset-watchers (atom {}))  ; local media path -> {:watcher chokidar :owners #{doc paths}}
@@ -64,7 +65,7 @@
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)})))))))
 
 (defn- send-open-content! [path]
-  (when-let [wc (get @doc-webcontents path)]
+  (when-let [wc (and (contains? @retained-paths path) (get @doc-webcontents path))]
     (send-content! wc path)))
 
 (defn- refresh-asset-owners! [asset-path]
@@ -101,7 +102,7 @@
        set))
 
 (defn- watch-assets! [doc-path paths]
-  (when (and (string? doc-path) (get @doc-webcontents doc-path))
+  (when (and (string? doc-path) (contains? @retained-paths doc-path) (get @doc-webcontents doc-path))
     (let [old (get @doc-assets doc-path #{})
           new (asset-paths paths)]
       (doseq [asset-path (set/difference old new)]
@@ -111,6 +112,32 @@
       (if (seq new)
         (swap! doc-assets assoc doc-path new)
         (swap! doc-assets dissoc doc-path)))))
+
+(defn- retained-path-set [paths]
+  (->> paths
+       (filter string?)
+       (remove str/blank?)
+       set))
+
+(defn- unwatch-file! [path]
+  (when-let [^js w (get @watchers path)]
+    (.close w)
+    (swap! watchers dissoc path))
+  (release-doc-assets! path)
+  (swap! doc-webcontents dissoc path))
+
+(defn sync-retained!
+  "Replace the retained local-file set. Watchers and media ownership are released for paths no open tab
+   history can still reach."
+  [^js wc paths]
+  (let [old @retained-paths
+        new (retained-path-set paths)]
+    (reset! retained-paths new)
+    (swap! doc-webcontents
+           (fn [m]
+             (reduce (fn [acc p] (assoc acc p wc)) m new)))
+    (doseq [path (set/difference old new)]
+      (unwatch-file! path))))
 
 (defn open!
   "Send the file's content now, and watch it (once) so changes re-send live (and on re-create — many
@@ -126,13 +153,13 @@
       (swap! watchers assoc path w))))
 
 (defn close! [path]
-  (when-let [^js w (get @watchers path)] (.close w) (swap! watchers dissoc path))
-  (release-doc-assets! path)
-  (swap! doc-webcontents dissoc path))
+  (swap! retained-paths disj path)
+  (unwatch-file! path))
 
 (defn init! []
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [_e path] (close! path)))
+  (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]
          (let [{:keys [docPath paths]} (js->clj payload :keywordize-keys true)]

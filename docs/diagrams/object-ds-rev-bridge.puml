@@ -14,7 +14,7 @@ database "DataScript\nconn" as CONN #A45BAD
 participant "conn listener\n::reframe" as LIS #A45BAD
 participant ":ds/changed\n(reg-event-db)" as EV #4F97D7
 collections "app-db\n{:ds/rev n}" as DB #7590DB
-participant ":tabs / :doc/active\nsubscriptions" as SUB #7590DB
+participant ":doc/active / :doc/toc\nsubscriptions" as SUB #7590DB
 participant "reagent\nviews" as VIEW #2D9574
 
 == Mutate the source of truth ==
@@ -37,7 +37,7 @@ activate DB
 DB --> SUB : :ds/rev changed → invalidate\nsubs that declared :<- [:ds/rev]
 deactivate DB
 activate SUB
-SUB -> CONN : re-query @conn\n(ds/open-docs / ds/active-doc)
+SUB -> CONN : re-query @conn\n(ds/active-doc)
 activate CONN
 CONN --> SUB : fresh tabs / active doc
 deactivate CONN
@@ -57,7 +57,7 @@ end note
 legend right
   |= Colour |= Concept |
   |<#4F97D7>| re-frame machinery (fx + event) |
-  |<#A45BAD>| DataScript SSOT (conn + listener) |
+  |<#A45BAD>| DataScript content cache (conn + listener) |
   |<#7590DB>| app-db ephemeral (:ds/rev + subs) |
   |<#2D9574>| reagent view |
   |<#B1951D>| the bridge hop (listener → [:ds/changed]) |

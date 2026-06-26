@@ -62,11 +62,21 @@
 (def ^:private bundled-grammars grammar-catalog/bundled-grammars)
 
 (defonce ^:private user-grammars (atom []))
+(defonce ^:private user-filetypes (atom {}))
 
 (defn register-user!
-  "Install the user grammar list pushed from main (vv:grammars)."
-  [grammars]
-  (reset! user-grammars (vec grammars)))
+  "Install the user grammar/filetype registry pushed from main (vv:grammars).
+
+   Older preload/main pairs sent only a grammar vector; accept both shapes so live reloads do not strand
+   an already-open renderer."
+  [payload]
+  (if (map? payload)
+    (do
+      (reset! user-grammars (vec (:grammars payload)))
+      (reset! user-filetypes (grammar-catalog/normalize-filetype-config (:filetypes payload))))
+    (do
+      (reset! user-grammars (vec payload))
+      (reset! user-filetypes {}))))
 
 (defn- all-grammars []
   (concat @user-grammars bundled-grammars))
@@ -74,7 +84,13 @@
 (defn grammar-for
   "The grammar config whose extensions include path's extension, or nil (→ a plain read-only view)."
   [path]
-  (grammar-catalog/grammar-for-path path (all-grammars)))
+  (grammar-catalog/grammar-for-path path (all-grammars) @user-filetypes))
+
+(defn view-from-dom
+  "Return the CodeMirror EditorView associated with node, if node is inside one."
+  [^js node]
+  (when (and node (.-findFromDOM EditorView))
+    (.findFromDOM EditorView node)))
 
 (defn- grammar-by-id [id]
   (grammar-catalog/grammar-for-id id (all-grammars)))
@@ -282,6 +298,47 @@
         (-> (js/Promise.all jobs)
             (.then (fn [_] (.-innerHTML (.-body doc)))))
         (js/Promise.resolve html)))))
+
+(defn selected-text
+  "Return the selected text in a CodeMirror view, or nil when all ranges are empty."
+  [^js view]
+  (when view
+    (let [state  (.-state view)
+          ranges (.. state -selection -ranges)
+          pieces (->> (range (.-length ranges))
+                      (keep (fn [i]
+                              (let [r (.at ranges i)
+                                    from (.-from r)
+                                    to   (.-to r)]
+                                (when (< from to)
+                                  (.sliceDoc state from to))))))]
+      (when (seq pieces)
+        (str/join "\n" pieces)))))
+
+(defn selection-start
+  "Return the first selected position in a CodeMirror view, or nil."
+  [^js view]
+  (when view
+    (let [ranges (.. view -state -selection -ranges)]
+      (some (fn [i]
+              (let [r (.at ranges i)]
+                (when (< (.-from r) (.-to r)) (.-from r))))
+            (range (.-length ranges))))))
+
+(defn pos-at-coords [^js view x y]
+  (when view
+    (.posAtCoords view #js {:x x :y y})))
+
+(defn line-info-at
+  "Return {:line :column :text :line-from} for a CodeMirror document position."
+  [^js view pos]
+  (when (and view (number? pos))
+    (let [doc  (.. view -state -doc)
+          line (.lineAt doc pos)]
+      {:line (.-number line)
+       :column (inc (- pos (.-from line)))
+       :text (.-text line)
+       :line-from (.-from line)})))
 
 (defn- highlight-field [decos]
   (.define StateField
