@@ -16,6 +16,7 @@
    "C-o"     :file/open-dialog
    "C-S-o"   :file/open-dialog-new-tab
    "C-r"     :doc/reload
+   "C-l"     :focus/uri
    "C-p"     :palette/files
    "C-S-p"   :palette/open
    "C-b"     :sidebar/toggle

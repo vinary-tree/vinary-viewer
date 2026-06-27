@@ -85,7 +85,12 @@
     (doseq [preset [:default :vim :emacs]]
       (keymap/install! preset)
       (is (= :tab/new-blank (get-in (keymap/modes) [:all "C-t"]))
-          (str preset " C-t")))))
+          (str preset " C-t"))))
+  (testing "Ctrl-l focuses the URI bar across bundled keymaps"
+    (doseq [preset [:default :vim :emacs]]
+      (keymap/install! preset)
+      (is (= :focus/uri (get-in (keymap/modes) [:all "C-l"]))
+          (str preset " C-l")))))
 
 (deftest resolver-step
   (let [modes {:normal {"j" :nav/scroll-down "g" {"g" :nav/scroll-top}} :all {"escape" :input/escape}}]

@@ -43,6 +43,7 @@
    :nav/half-page-up  {:id :nav/half-page-up :title "Half page up" :category "Navigation" :dispatch [:nav/scroll] :arg {:dy :-half}}
    :nav/scroll-top    {:id :nav/scroll-top :title "Go to top" :category "Navigation" :dispatch [:nav/scroll] :arg {:to :top}}
    :nav/scroll-bottom {:id :nav/scroll-bottom :title "Go to bottom" :category "Navigation" :dispatch [:nav/scroll] :arg {:to :bottom}}
+   :focus/uri     {:id :focus/uri :title "Focus URI bar" :category "Navigation" :dispatch [:nav/focus :uri]}
    :focus/sidebar {:id :focus/sidebar :title "Focus sidebar" :category "Navigation" :dispatch [:nav/focus :tree]}
    :focus/content {:id :focus/content :title "Focus content" :category "Navigation" :dispatch [:nav/focus :content]}
    :focus/toggle  {:id :focus/toggle :title "Toggle focus" :category "Navigation" :dispatch [:nav/focus :toggle]}

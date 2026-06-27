@@ -56,6 +56,9 @@
  :dom/focus
  (fn [target]
    (case target
+     :uri     (when-let [^js el (.querySelector js/document ".vv-uri-input")]
+                (.focus el)
+                (.select el))
      :tree    (some-> ^js (.querySelector js/document ".vv-tree-filter") .focus)
      :content (some-> ^js (content-el) .focus)
      :toggle  (let [active (.-activeElement js/document)

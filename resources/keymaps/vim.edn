@@ -48,6 +48,7 @@
   {"escape" :input/escape
    "C-o" :file/open-dialog
    "C-S-o" :file/open-dialog-new-tab
+   "C-l" :focus/uri
    "C-t" :tab/new-blank
    ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
    "C-0" :view/zoom-reset

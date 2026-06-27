@@ -25,6 +25,7 @@
    "M-b" {:id :tab/prev :when :not-in-input?}
    "C-o" :file/open-dialog
    "C-S-o" :file/open-dialog-new-tab
+   "C-l" :focus/uri
    "C-t" :tab/new-blank
    "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
    "C-g" :input/escape

@@ -356,6 +356,25 @@ async function main() {
   assert.strictEqual(openMode, 'new-tab', 'Ctrl+Shift+O must request the new-tab open mode');
   console.log('[ok] Ctrl+Shift+O works from preview content');
 
+  await sendChord(win, 'L', ['control']);
+  await waitFor(
+    () => evalIn(win, `document.activeElement === document.querySelector('.vv-uri-input')`),
+    'Ctrl+L URI input focus'
+  );
+  const uriFocus = await evalIn(win, `(() => {
+    const input = document.querySelector('.vv-uri-input');
+    return {
+      active: document.activeElement === input,
+      valueLength: input?.value.length ?? -1,
+      selectionStart: input?.selectionStart ?? -1,
+      selectionEnd: input?.selectionEnd ?? -1
+    };
+  })()`);
+  assert.strictEqual(uriFocus.active, true, 'Ctrl+L must focus the URI input');
+  assert.strictEqual(uriFocus.selectionStart, 0, 'Ctrl+L must select from the start of the URI');
+  assert.strictEqual(uriFocus.selectionEnd, uriFocus.valueLength, 'Ctrl+L must select the full URI');
+  console.log('[ok] Ctrl+L focuses and selects the URI input');
+
   const tabCountBefore = await evalIn(win, `document.querySelectorAll('.vv-tab').length`);
   await sendChord(win, 'T', ['control']);
   await waitFor(
