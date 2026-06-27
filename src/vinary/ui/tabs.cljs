@@ -4,7 +4,8 @@
    Click activates; × closes; right-click → context menu; drag reorders (the two representations share one
    ordered model, so reordering one reorders the other)."
   (:require [re-frame.core :as rf]
-            [vinary.app.uri :as uri]))
+            [vinary.app.uri :as uri]
+            [vinary.ui.icons :as icons]))
 
 (defn tab-item
   "One tab row. `horizontal?` selects the strip vs. the vertical Tabs panel; the behavior (activate / close
@@ -33,7 +34,7 @@
                               (when-not (js/isNaN from) (rf/dispatch [:tab/reorder from id after?]))))}
    [:span.vv-tab-name (uri/basename uri)]
    [:span.vv-tab-close {:title    "Close tab"
-                        :on-click (fn [e] (.stopPropagation e) (rf/dispatch [:tab/close id]))} "×"]])
+                        :on-click (fn [e] (.stopPropagation e) (rf/dispatch [:tab/close id]))} (icons/icon :close)]])
 
 (defn tab-strip []
   (let [tabs   @(rf/subscribe [:ui/tabs])
@@ -47,4 +48,4 @@
                           :title "New Tab"
                           :aria-label "New Tab"
                           :on-click #(rf/dispatch [:tab/new-blank])}
-      "+"]]))
+      (icons/icon :new-tab)]]))

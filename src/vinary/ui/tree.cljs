@@ -6,7 +6,8 @@
    active file's ancestor folders auto-expand and it scrolls into view (reveal-active!, additive)."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [vinary.ui.icons :as icons]))
 
 (defn- build-tree
   "Flat repo-relative paths → nested map. A folder node has :children; a file node has :file."
@@ -31,7 +32,7 @@
           (if (:children v)
             (let [dpath (str dir-prefix "/" k)]
               [:details.vv-dir (when open? {:open true})
-               [:summary.vv-dir-name {:on-context-menu (ctx! :dir dpath)} k]
+               [:summary.vv-dir-name {:on-context-menu (ctx! :dir dpath)} (icons/folder-icon) k]
                (nodes->hiccup (:children v) root active open? dpath)])
             (let [full (str root "/" (:file v))]
               ;; left-click navigates the active tab; Ctrl+click opens a new tab; right-click → context menu
@@ -41,13 +42,13 @@
                            :on-click         (fn [^js e]
                                                (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full]))
                            :on-context-menu  (ctx! :file full)}
-               k])))))
+               (icons/file-icon k) k])))))
 
 (defn- project-tree [{:keys [root files]} active ql]
   (let [shown (cond->> files ql (filter #(str/includes? (str/lower-case %) ql)))]
     (when (seq shown)
       [:details.vv-project {:open true}
-       [:summary.vv-project-name {:on-context-menu (ctx! :dir root)} (last (str/split root #"/"))]
+       [:summary.vv-project-name {:on-context-menu (ctx! :dir root)} (icons/folder-icon) (last (str/split root #"/"))]
        (nodes->hiccup (build-tree shown) root active (boolean ql) root)])))
 
 (defn- reveal-active!

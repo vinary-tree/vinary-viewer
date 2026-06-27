@@ -7,6 +7,7 @@
             [re-frame.db :as rfdb]
             [vinary.input.keymaps-registry :as registry]
             [vinary.ui.access-keys :as access]
+            [vinary.ui.icons :as icons]
             [vinary.ui.menu-focus :as menu-focus]))
 
 (def ^:private themes
@@ -302,7 +303,7 @@
                                (rf/dispatch [:menu/submenu (:submenu item)]))}
             (access/access-attrs (:access-key item)))
      [:span.vv-menu-item-label [access/label (:submenu item) (:access-key item) access-active?]]
-     [:span.vv-menu-item-arrow ">"]
+     [:span.vv-menu-item-arrow (icons/icon :submenu)]
      (when (= sub-open (:submenu item))
        (submenu-dropdown (vec (remove nil? (radio-rows (:radio item)))) access-active? sub-focus))]
 

@@ -17,6 +17,12 @@ resources/public/js/cljs-runtime/
 resources/public/js/main.js
 resources/public/js/manifest.edn
 
+# Vendored static assets (Font Awesome + self-hosted fonts), copied from node_modules.
+# Regenerate with `npm run assets:sync`. (assets/fonts/fonts.css is hand-authored and tracked.)
+resources/public/assets/fa/
+resources/public/assets/fonts/noto-sans/
+resources/public/assets/fonts/fira-code/
+
 # --- legacy v0.1.0 (patch-overlay tool) native addon artifacts ---
 src/mouse-forward-back/build/
 src/mouse-forward-back/node_modules/

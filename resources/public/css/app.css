@@ -2,7 +2,7 @@
    (resources/public/css/themes/<name>.css); this file references var(--vv-*) only. */
 
 /* font preferences (Settings ▸ Preferences overrides these on :root via JS) */
-:root { --vv-font-variable: "Inter", system-ui, sans-serif;
+:root { --vv-font-variable: "Noto Sans", system-ui, sans-serif;
   --vv-font-fixed: "Fira Code", "JetBrains Mono", monospace;
   --vv-font-size: 15px; --vv-code-font-size: 13px; }
 html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv-fg);
@@ -459,3 +459,38 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
   background: var(--vv-head1); color: var(--vv-bg2); border: 1px solid var(--vv-bg2);
   box-shadow: 0 1px 5px rgba(0,0,0,0.55); text-transform: uppercase; white-space: nowrap; }
 .vv-hint-typed { opacity: 0.45; }
+
+/* ===== Font Awesome icon integration =====
+   <i class="fa-solid fa-…"> emitted by vinary.ui.icons. Glyphs inherit `color`
+   (theme palette + the existing :hover accent rules recolor them for free) and
+   `font-size` per surface; FA's base gives them display:inline-block. The class
+   `.vv-ico-gap` spaces a glyph from a following text label. */
+.vv-ico-gap { margin-right: 6px; }
+
+/* icon-only action buttons — toolbar / find / tabs / sidebar rail / menu arrow / kb */
+.vv-nav-btn i, .vv-find-btn i, .vv-tab-new i { font-size: 13px; }
+.vv-tab-close i { font-size: 12px; }
+.vv-sidebar-rail i, .vv-sidebar-collapse i { font-size: 12px; }
+.vv-menu-item-arrow i { font-size: 10px; }
+.vv-kb-iconbtn i, .vv-kb-modmove i, .vv-kb-modx i, .vv-kb-btn i, .vv-kb-chip-x i { font-size: 11px; }
+
+/* glyphs that sit inline with a text label align to the text baseline */
+.vv-sidebar-tab i, .vv-file > i, .vv-dir-name > i, .vv-project-name > i,
+.vv-kb-btn i, .vv-kb-iconbtn i, .vv-ico-gap { vertical-align: -0.1em; }
+
+/* sidebar section tabs (Files / Contents / Tabs) */
+.vv-sidebar-tab i { font-size: 12px; margin-right: 6px; --fa-width: 1em; }
+
+/* file-tree: muted file/folder glyphs that brighten on hover / active */
+.vv-file > i, .vv-dir-name > i, .vv-project-name > i {
+  font-size: 12px; margin-right: 7px; --fa-width: 1em; color: var(--vv-fg-dim); }
+.vv-file:hover > i, .vv-file-active > i,
+.vv-dir-name:hover > i, .vv-project-name:hover > i { color: inherit; }
+
+/* CSS-only folder open/closed swap driven by native <details>[open] (no JS):
+   render both glyphs, reveal whichever matches the disclosure state. */
+.vv-dir-name > .vv-folder-open, .vv-project-name > .vv-folder-open { display: none; }
+details[open] > .vv-dir-name > .vv-folder-closed,
+details[open] > .vv-project-name > .vv-folder-closed { display: none; }
+details[open] > .vv-dir-name > .vv-folder-open,
+details[open] > .vv-project-name > .vv-folder-open { display: inline-block; }

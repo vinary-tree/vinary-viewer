@@ -14,8 +14,9 @@ and not a full-featured IDE or web browser. It should support everything you
 need to preview the documents and links in your repository and is intended to be
 used as a sibling tool to an editor so you can preview your changes in a
 live-coding environment (i.e. document previews automatically refresh as their
-sources are edited). It has a simple, functional, and clean design, a responsive
-feel, and will never become laden with extraneous or heavy features.
+sources are edited). It has a simple, functional, and clean design (minimalist
+aesthetics), a responsive feel, and will never become laden with extraneous or
+heavy features.
 
 > Status: `0.2.0-dev`. This is the v0.2 rewrite: a standalone ClojureScript /
 > re-frame / Electron application. The old v0.1.0 vmd-patching tool is preserved

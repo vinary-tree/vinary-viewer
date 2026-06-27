@@ -6,6 +6,11 @@
   <!-- Active theme first (defines --vv-*), then the structural stylesheet that references it.
        Theme selection becomes reactive (re-frame) in P2; spacemacs-dark is the default. -->
   <link id="vv-theme-link" rel="stylesheet" href="css/themes/spacemacs-dark.css">
+  <!-- Self-hosted fonts + Font Awesome, vendored locally by `npm run assets:sync`
+       (no CDN). Loaded before app.css so it can reference --vv-font-* + icon glyphs. -->
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/fa/css/fontawesome.min.css">
+  <link rel="stylesheet" href="assets/fa/css/solid.min.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>

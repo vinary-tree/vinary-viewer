@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0011**.
+The next free number is **0012**.
 
 ---
 
@@ -68,12 +68,13 @@ The next free number is **0011**.
 | [0008](0008-datascript-plus-app-db-split.md) | Superseded split state: DataScript-owned docs/tabs                       | Superseded |
 | [0009](0009-mediator-ipc-over-point-to-point.md) | A single `window.vv` mediator seam over point-to-point IPC          | Accepted   |
 | [0010](0010-bounded-content-retention-and-render-metadata.md) | Bound content retention to tab histories and emit Markdown render metadata | Accepted |
+| [0011](0011-font-awesome-icons-self-hosted-fonts.md) | Font Awesome icons + self-hosted fonts, vendored at build time; no CSS framework | Accepted |
 
 ---
 
 ## How the ADRs relate
 
-These ten decisions reinforce one another into a coherent reactive architecture:
+These eleven decisions reinforce one another into a coherent reactive architecture:
 
 - **0001** sets the platform (modern Electron), which **enables** the contextBridge seam in **0009** and
   the in-renderer rendering in **0002**.
@@ -87,6 +88,10 @@ These ten decisions reinforce one another into a coherent reactive architecture:
   system used everywhere else.
 - **0010** refines **0006** and **0008** for the current tab model: tab histories define retained file
   ownership, while DataScript is a bounded content cache with render metadata.
+- **0011** dresses the chrome: a self-hosted Font Awesome icon set + self-hosted Noto Sans / Fira Code
+  fonts, both vendored at build time by the same mechanism as the tree-sitter grammars (**0001**'s modern
+  Electron makes the `file://` self-host viable), and themed through the same `--vv-*` token system used
+  everywhere else — the bespoke CSS kept over any framework.
 
 For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md) and the
 theory pillar under [`docs/theory/`](../theory/).

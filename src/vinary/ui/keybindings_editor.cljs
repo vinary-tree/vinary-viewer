@@ -17,6 +17,7 @@
             [vinary.input.keymaps-registry :as registry]
             [vinary.input.keys :as keys]
             [vinary.ui.access-keys :as access]
+            [vinary.ui.icons :as icons]
             [vinary.ui.menu-focus :as menu-focus]))
 
 ;; ---------- chord display ----------
@@ -112,10 +113,10 @@
       [:span "Key Binding Sets"]
       [:span.vv-kb-pane-actions
        [:button.vv-kb-iconbtn (merge {:title "New set (Alt+N)" :on-click #(rf/dispatch [:kbedit/add])}
-                                     (access/access-attrs "n")) "+"]
+                                     (access/access-attrs "n")) (icons/icon :add)]
        [:button.vv-kb-iconbtn (merge {:title "Delete the selected set (Alt+D)" :disabled (not sel-custom?)
                                       :on-click #(when sel-custom? (rf/dispatch [:kbedit/delete sel]))}
-                                     (access/access-attrs "d")) "−"]]]
+                                     (access/access-attrs "d")) (icons/icon :delete)]]]
      [:div.vv-kb-set-list
       (for [{:keys [id] :as s} sets]
         ^{:key id} [set-row s (= id editing)])]]))
@@ -125,12 +126,12 @@
   [:span.vv-kb-modchip
    [:button.vv-kb-modmove {:title "Move left"  :disabled (zero? i)
                            :on-click #(swap! builder update :mods (fn [v] (let [a (get v (dec i)) b (get v i)]
-                                                                            (assoc v (dec i) b i a))))} "◀"]
+                                                                            (assoc v (dec i) b i a))))} (icons/icon :move-left)]
    [:span.vv-kb-modname m]
    [:button.vv-kb-modmove {:title "Move right" :disabled (= i (dec (count (:mods @builder))))
                            :on-click #(swap! builder update :mods (fn [v] (let [a (get v (inc i)) b (get v i)]
-                                                                            (assoc v (inc i) b i a))))} "▶"]
-   [:button.vv-kb-modx {:title "Remove" :on-click #(swap! builder update :mods (fn [v] (vec (concat (subvec v 0 i) (subvec v (inc i))))))} "×"]])
+                                                                            (assoc v (inc i) b i a))))} (icons/icon :move-right)]
+   [:button.vv-kb-modx {:title "Remove" :on-click #(swap! builder update :mods (fn [v] (vec (concat (subvec v 0 i) (subvec v (inc i))))))} (icons/icon :close)]])
 
 (defn- builder-row [builder]
   [:div.vv-kb-builder
@@ -166,7 +167,7 @@
              [:span.vv-kb-capture-empty "(press keys…)"])]
           [builder-row builder]
           [:div.vv-kb-capture-btns
-           [:button.vv-kb-btn {:disabled (empty? chords) :on-click #(rf/dispatch [:kbedit/capture-pop])} "⌫ Remove last"]
+           [:button.vv-kb-btn {:disabled (empty? chords) :on-click #(rf/dispatch [:kbedit/capture-pop])} (icons/icon :backspace {:class "vv-ico-gap"}) "Remove last"]
            [:span.vv-kb-spacer]
            [:button.vv-kb-btn {:on-click #(rf/dispatch [:kbedit/capture-cancel])} "Cancel"]
            [:button.vv-kb-btn.vv-kb-btn-primary {:disabled (empty? chords)
@@ -184,7 +185,7 @@
         (pretty-seq chords)
         (when custom?
           [:span.vv-kb-chip-x {:title "Remove this binding"
-                               :on-click #(rf/dispatch [:kbedit/unbind id mode chords])} "×"])])
+                               :on-click #(rf/dispatch [:kbedit/unbind id mode chords])} (icons/icon :close)])])
      (when (empty? bindings) [:span.vv-kb-chip-none "—"])]))
 
 (defn- action-row [{:keys [id custom? default-mode] :as focused} action-spec idx]
@@ -197,7 +198,7 @@
        [:div.vv-kb-action-btns
         [:button.vv-kb-iconbtn {:title "Capture a key binding"
                                 :on-click #(rf/dispatch [:kbedit/capture-start {:set-id id :mode default-mode :action action}])}
-         "⌨ Capture"]])]))
+         (icons/icon :keyboard {:class "vv-ico-gap"}) "Capture"]])]))
 
 (defn- actions-pane []
   (let [{:keys [id name builtin? custom? modal?] :as focused} @(rf/subscribe [:kbedit/focused])
@@ -337,11 +338,11 @@
             [:button.vv-kb-btn (merge {:disabled (not can-undo?) :title "Undo (Ctrl+Z, Alt+U)"
                                        :on-click #(rf/dispatch [:kbedit/undo])}
                                       (access/access-attrs "u"))
-             "↶ " [access/label "Undo" "u" access-active?]]
+             (icons/icon :undo {:class "vv-ico-gap"}) [access/label "Undo" "u" access-active?]]
             [:button.vv-kb-btn (merge {:disabled (not can-redo?) :title "Redo (Ctrl+Shift+Z, Alt+R)"
                                        :on-click #(rf/dispatch [:kbedit/redo])}
                                       (access/access-attrs "r"))
-             "↷ " [access/label "Redo" "r" access-active?]]
+             (icons/icon :redo {:class "vv-ico-gap"}) [access/label "Redo" "r" access-active?]]
             [:button.vv-kb-btn (merge {:on-click #(rf/dispatch [:kbedit/close])}
                                       (access/access-attrs "c"))
              [access/label "Close" "c" access-active?]]]]

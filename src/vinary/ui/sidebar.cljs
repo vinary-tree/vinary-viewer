@@ -4,6 +4,7 @@
    live in app-db (persisted via settings in Phase 5)."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
+            [vinary.ui.icons :as icons]
             [vinary.ui.tree :as tree]
             [vinary.ui.tabs :as tabs-ui]))
 
@@ -59,17 +60,17 @@
         tab      @(rf/subscribe [:ui/sidebar-tab])]
     (if-not visible?
       ;; collapsed → a thin rail with a re-open affordance
-      [:div.vv-sidebar-rail {:title "Show sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} "›"]
+      [:div.vv-sidebar-rail {:title "Show sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :expand)]
       [:div.vv-sidebar {:style {:width (str (or width 280) "px")}}
        [:div.vv-sidebar-tabs
         [:div.vv-sidebar-tab {:class    (when (= tab :files) "vv-sidebar-tab-active")
-                              :on-click #(rf/dispatch [:sidebar/tab :files])} "Files"]
+                              :on-click #(rf/dispatch [:sidebar/tab :files])} (icons/icon :section-files) "Files"]
         [:div.vv-sidebar-tab {:class    (when (= tab :contents) "vv-sidebar-tab-active")
-                              :on-click #(rf/dispatch [:sidebar/tab :contents])} "Contents"]
+                              :on-click #(rf/dispatch [:sidebar/tab :contents])} (icons/icon :section-contents) "Contents"]
         [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
-                              :on-click #(rf/dispatch [:sidebar/tab :tabs])} "Tabs"]
+                              :on-click #(rf/dispatch [:sidebar/tab :tabs])} (icons/icon :section-tabs) "Tabs"]
         [:div.vv-sidebar-tabs-spacer]
-        [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} "‹"]]
+        [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :collapse)]]
        [:div.vv-sidebar-body
         (case tab
           :contents [contents-panel]

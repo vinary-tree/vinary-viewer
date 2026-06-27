@@ -9,6 +9,7 @@
             [vinary.app.link :as link]
             [vinary.renderer.scroll :as scroll]
             [vinary.ui.tabs :as tabs]
+            [vinary.ui.icons :as icons]
             [vinary.ui.sidebar :as sidebar]
             [vinary.ui.palette :as palette]
             [vinary.ui.menubar :as menubar]
@@ -437,10 +438,10 @@
             shown      (if (nil? @draft) (uri/display active-uri) @draft)]
         [:div.vv-uribar
          [:button.vv-nav-btn {:disabled (not back?) :title "Back (Alt+←)"
-                              :on-click #(rf/dispatch [:history/back])} "←"]
+                              :on-click #(rf/dispatch [:history/back])} (icons/icon :back)]
          [:button.vv-nav-btn {:disabled (not fwd?) :title "Forward (Alt+→)"
-                              :on-click #(rf/dispatch [:history/forward])} "→"]
-         [:button.vv-nav-btn {:title "Reload (Ctrl+R)" :on-click #(rf/dispatch [:tab/reload])} "⟳"]
+                              :on-click #(rf/dispatch [:history/forward])} (icons/icon :forward)]
+         [:button.vv-nav-btn {:title "Reload (Ctrl+R)" :on-click #(rf/dispatch [:tab/reload])} (icons/icon :reload)]
          [:input.vv-uri-input
           {:value       shown
            :placeholder "Enter a file path or http(s):// URL"
@@ -473,9 +474,9 @@
                           "Escape" (do (.stopPropagation e) (rf/dispatch [:find/close]))
                           nil))}]
        [:span.vv-find-count (if (pos? count) (str idx "/" count) "0/0")]
-       [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} "↑"]
-       [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} "↓"]
-       [:button.vv-find-btn {:title "Close (Esc)" :on-click #(rf/dispatch [:find/close])} "×"]])))
+       [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} (icons/icon :find-prev)]
+       [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} (icons/icon :find-next)]
+       [:button.vv-find-btn {:title "Close (Esc)" :on-click #(rf/dispatch [:find/close])} (icons/icon :close)]])))
 
 (defn mode-line
   "Shows the modal state + any pending key-sequence (hidden in non-modal insert with no pending)."
