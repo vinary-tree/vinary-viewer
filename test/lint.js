@@ -26,23 +26,36 @@ for (const f of jsFiles) {
   catch (e) { log(false, `parse error: ${f}\n${(e.stderr || e.message).toString().trim()}`); }
 }
 
-// 2. CSS braces balance
-const css = fs.readFileSync(path.join(root, 'src/style.css'), 'utf8');
-const open = (css.match(/{/g) || []).length;
-const close = (css.match(/}/g) || []).length;
-log(open === close, `style.css braces balanced (${open} open / ${close} close)`);
+// 2 & 3. CSS — brace balance + theme-var completeness, for BOTH surfaces. Each stylesheet uses the same
+//    --vv-* palette but a different class system, paired with its own theme dir:
+//      • resources/public/css/app.css + resources/public/css/themes/ — the standalone v0.2 app (.vv-*),
+//        linked by index.html; THE SHIPPED PRODUCT (previously NOT linted — that was the gap).
+//      • src/style.css + src/themes/ — the legacy v0.1.0 vmd-patch sidebar (src/sidebar.js, .vmd-*),
+//        injected into vmd's renderer; kept for users still on that tool.
+//    A theme must define every --vv-* var its stylesheet references, EXCEPT vars the stylesheet defines
+//    itself in :root (the font defaults, overridden at runtime by Settings).
+const cssTargets = [
+  { css: 'resources/public/css/app.css', themes: 'resources/public/css/themes' },
+  { css: 'src/style.css',                themes: 'src/themes' },
+];
+for (const t of cssTargets) {
+  const css = fs.readFileSync(path.join(root, t.css), 'utf8');
+  const open = (css.match(/{/g) || []).length, close = (css.match(/}/g) || []).length;
+  log(open === close, `${t.css} braces balanced (${open} open / ${close} close)`);
 
-// 3. theme completeness — no theme may omit a variable the stylesheet uses
-const used = new Set([...css.matchAll(/var\(\s*(--vv-[a-z0-9-]+)/g)].map(m => m[1]));
-const themesDir = path.join(root, 'src/themes');
-const themes = fs.readdirSync(themesDir).filter(f => f.endsWith('.css'));
-log(themes.length > 0, `found ${themes.length} theme(s) in src/themes/`);
-for (const tf of themes) {
-  const tcss = fs.readFileSync(path.join(themesDir, tf), 'utf8');
-  const def = new Set([...tcss.matchAll(/(--vv-[a-z0-9-]+)\s*:/g)].map(m => m[1]));
-  const missing = [...used].filter(v => !def.has(v));
-  log(missing.length === 0,
-    `theme ${tf} defines all ${used.size} used vars` + (missing.length ? ` — MISSING: ${missing.join(', ')}` : ''));
+  const used = new Set([...css.matchAll(/var\(\s*(--vv-[a-z0-9-]+)/g)].map(m => m[1]));
+  const selfDefined = new Set([...css.matchAll(/(--vv-[a-z0-9-]+)\s*:/g)].map(m => m[1])); // :root defaults
+  const themed = [...used].filter(v => !selfDefined.has(v));
+  const themesDir = path.join(root, t.themes);
+  const themeFiles = fs.readdirSync(themesDir).filter(f => f.endsWith('.css'));
+  log(themeFiles.length > 0, `${t.css}: found ${themeFiles.length} theme(s) in ${t.themes}/`);
+  for (const tf of themeFiles) {
+    const tcss = fs.readFileSync(path.join(themesDir, tf), 'utf8');
+    const def = new Set([...tcss.matchAll(/(--vv-[a-z0-9-]+)\s*:/g)].map(m => m[1]));
+    const missing = themed.filter(v => !def.has(v));
+    log(missing.length === 0,
+      `${t.themes}/${tf} defines all ${themed.length} themed vars used by ${t.css}` + (missing.length ? ` — MISSING: ${missing.join(', ')}` : ''));
+  }
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');
