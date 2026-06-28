@@ -124,19 +124,23 @@
     (.appendChild div s)))
 
 (defn- render-page! [state idx]
-  (let [{:keys [doc page-divs rendered destroyed?]} @state]
+  (let [{:keys [doc page-divs rendered destroyed? gen]} @state]
     (when (and (not destroyed?) doc (< idx (count page-divs)) (not (contains? rendered idx)))
       (swap! state update :rendered conj idx)
       (-> (.getPage ^js doc (inc idx))
           (.then (fn [^js pg]
-                   (when-not (:destroyed? @state)
+                   ;; bail if the controller was torn down OR a rescale bumped the generation while getPage
+                   ;; was in flight — a stale resolve would otherwise delete the canvas a re-render just made
+                   (when (and (not (:destroyed? @state)) (= gen (:gen @state)))
                      (let [^js div (nth (:page-divs @state) idx)
                            scale   (:scale @state)
                            vp      (.getViewport pg #js {:scale scale})
                            dpr     (or (.-devicePixelRatio js/window) 1)
                            canvas  (js/document.createElement "canvas")
-                           ctx     (.getContext canvas "2d")]
-                       ;; clear any canvas/status left by a prior failed attempt → idempotent re-render
+                           ;; willReadFrequently → a CPU-backed 2D surface on the normal raster path; avoids
+                           ;; the GPU "blank canvas until a forced repaint" compositing bug (Linux/Electron)
+                           ctx     (.getContext canvas "2d" #js {:willReadFrequently true})]
+                       ;; clear any canvas/status left by a prior attempt → idempotent re-render
                        (when-let [^js old (.querySelector div "canvas.vv-pdf-canvas")] (.remove old))
                        (clear-status! div)
                        (set! (.-className canvas) "vv-pdf-canvas")
@@ -158,26 +162,32 @@
                          (-> (.-promise task)
                              (.then (fn []
                                       (js/clearTimeout slow)
-                                      (clear-status! div)
-                                      (swap! state update :tasks dissoc idx)
-                                      (build-text-layer! state idx pg vp)
-                                      (build-link-layer! state idx pg vp)))
+                                      ;; only act if THIS task is still the live one (a rescale may have
+                                      ;; replaced it with a newer task for the same idx)
+                                      (when (identical? (get-in @state [:tasks idx]) task)
+                                        (clear-status! div)
+                                        (swap! state update :tasks dissoc idx)
+                                        (build-text-layer! state idx pg vp)
+                                        (build-link-layer! state idx pg vp))))
                              (.catch (fn [^js err]
                                        (js/clearTimeout slow)
-                                       (swap! state update :tasks dissoc idx)
+                                       (when (identical? (get-in @state [:tasks idx]) task)
+                                         (swap! state update :tasks dissoc idx))
                                        (if (= "RenderingCancelledException" (.-name err))
                                          (clear-status! div)   ; expected — scrolled away / rescaled
                                          (do (js/console.error "[pdf] page" (inc idx) "render failed:" err)
-                                             (swap! state update :rendered disj idx)   ; allow a retry
-                                             (show-status! div "vv-pdf-status-error"
-                                                           "⚠ failed to render — click to retry"
-                                                           (fn [] (clear-status! div) (render-page! state idx)))))))))))))
+                                             (when (= gen (:gen @state))
+                                               (swap! state update :rendered disj idx)   ; allow a retry
+                                               (show-status! div "vv-pdf-status-error"
+                                                             "⚠ failed to render — click to retry"
+                                                             (fn [] (clear-status! div) (render-page! state idx))))))))))))))
           (.catch (fn [^js err]
-                    (swap! state update :rendered disj idx)
+                    (when (= gen (:gen @state)) (swap! state update :rendered disj idx))
                     (js/console.error "[pdf] page" (inc idx) "load failed:" err)
-                    (when-let [^js div (nth (:page-divs @state) idx nil)]
-                      (show-status! div "vv-pdf-status-error" "⚠ failed to load — click to retry"
-                                    (fn [] (clear-status! div) (render-page! state idx))))))))))
+                    (when (and (= gen (:gen @state)) (not (:destroyed? @state)))
+                      (when-let [^js div (nth (:page-divs @state) idx nil)]
+                        (show-status! div "vv-pdf-status-error" "⚠ failed to load — click to retry"
+                                      (fn [] (clear-status! div) (render-page! state idx)))))))))))
 
 (defn- release-canvas!
   "Drop a page's canvas when it scrolls out of the overscan band (bounds memory on large PDFs). The text
@@ -335,6 +345,20 @@
         (swap! state assoc :scale sc :fit mode)
         (rf/dispatch [:pdf/scale-resolved sc])))))
 
+(defn- render-visible!
+  "Render every page currently in (or near) the viewport, computed directly from geometry (idempotent via
+   the :rendered guard). Used after a resize/rescale so visible pages re-render deterministically instead of
+   waiting on an IntersectionObserver re-fire that can miss or mis-report mid-layout-change."
+  [state]
+  (let [{:keys [container rects]} @state
+        scroller (scroller-of container)]
+    (when (and scroller (seq rects))
+      (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
+            vh      (.-clientHeight scroller)
+            [lo hi] (layout/visible-range rects doc-top vh (* overscan vh))]
+        (when (<= 0 lo)
+          (doseq [idx (range lo (inc hi))] (render-page! state idx)))))))
+
 (defn- rescale!
   "Re-layout placeholders + re-render visible pages at the current :scale, preserving the reading anchor
    (the page nearest the viewport top)."
@@ -347,13 +371,15 @@
                                             (when (< anchor-top (+ top height)) i))
                                           rects)))]
     (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
-    (swap! state assoc :tasks {} :rendered #{} :text-built #{})
+    ;; bump :gen so any in-flight getPage/render from the OLD layout bails instead of clobbering the new one
+    (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built #{}) (update :gen inc)))
     (doseq [^js div page-divs] (set! (.-innerHTML div) ""))
     (apply-layout! state)
     (when (and scroller anchor-idx) (scroll-to-page! state (inc anchor-idx)))
     (when observer
       (.disconnect observer)
-      (doseq [^js div page-divs] (.observe observer div)))))
+      (doseq [^js div page-divs] (.observe observer div)))
+    (render-visible! state)))   ; deterministic re-render — don't rely on the IO re-fire after re-observe
 
 (defn- refit!
   "Re-resolve a fit-mode scale against the (resized) scroller and re-render only if it changed. No-op for
@@ -374,7 +400,7 @@
             obs   (js/ResizeObserver.
                    (fn [_]
                      (when-let [t @timer] (js/clearTimeout t))
-                     (reset! timer (js/setTimeout (fn [] (when-not (:destroyed? @state) (refit! state))) 120))))]
+                     (reset! timer (js/setTimeout (fn [] (when-not (:destroyed? @state) (refit! state) (render-visible! state))) 120))))]
         (.observe obs scroller)
         (swap! state assoc :resize-observer obs)))))
 
@@ -388,7 +414,7 @@
                      :sizes [] :rects [] :page-divs []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
-                     :rendered #{} :text-built #{} :tasks {} :observer nil :destroyed? false})
+                     :rendered #{} :text-built #{} :tasks {} :observer nil :destroyed? false :gen 0})
         ensure-fn (fn [] (ensure-all-text! state))]
     (swap! state assoc :ensure-fn ensure-fn)
     (cache/set-ensurer! ensure-fn)

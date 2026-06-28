@@ -43,6 +43,9 @@
                                :autoHideMenuBar true
                                :webPreferences {:contextIsolation true
                                                 :nodeIntegration false
+                                                ;; keep the compositor live so off-screen-rendered PDF
+                                                ;; canvases don't hold a stale/blank GPU surface
+                                                :backgroundThrottling false
                                                 :preload (preload-path)}}
                               ;; restore last position/size (clamped on-screen); defaults to 1280×860
                               (window/options))))]

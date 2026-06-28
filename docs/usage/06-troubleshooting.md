@@ -93,6 +93,12 @@ Checks:
 pdf.js parses on a worker but paints on the main thread, so a figure-dense page can block briefly;
 `isEvalSupported true` speeds up shaded figures (see [feature 11](../features/11-native-pdf.md)).
 
+Pages that render **white** and only appear when DevTools opens (or after an action), then white out again,
+were a **GPU 2D-canvas compositing** bug — the page canvas is now CPU-backed (`willReadFrequently`) with
+`backgroundThrottling` off, which fixes it. If anything like it recurs, confirm GPU involvement by launching
+with `VV_SOFTWARE_GL=1` (forces software rendering); white pages vanishing under it points back at the GPU
+compositor.
+
 ---
 
 ## 6. Source highlighting is missing

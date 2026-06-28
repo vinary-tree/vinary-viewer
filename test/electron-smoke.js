@@ -468,6 +468,15 @@ async function main() {
     'PDF re-renders after returning to its tab', 15000);
   console.log('[ok] PDF re-renders after switching tabs away and back');
 
+  // Bug A (round 4) — a zoom rescale clears + re-renders; the visible page must not be left blank (A2
+  // re-asserts visible renders deterministically rather than relying on an IntersectionObserver re-fire)
+  await sendChord(win, '=', ['control']);   // Ctrl+= zoom in → :view/zoom → pdf rescale
+  await waitFor(() => evalIn(win, `(() => { const c = document.querySelector('.vv-pdf-doc .vv-pdf-page canvas.vv-pdf-canvas'); return Boolean(c) && c.getBoundingClientRect().width > 0 && c.getBoundingClientRect().height > 0; })()`),
+    'PDF page canvas survives a zoom rescale (re-rendered, not left blank)', 8000);
+  await sendChord(win, '0', ['control']);   // reset zoom for the following tests
+  await delay(120);
+  console.log('[ok] PDF page stays rendered through a zoom rescale');
+
   const dialogsBefore = state.openDialogs;
   await sendChord(win, 'O', ['control', 'shift']);
   await waitFor(() => state.openDialogs > dialogsBefore, 'Ctrl+Shift+O dialog request');
@@ -992,6 +1001,34 @@ async function main() {
     state.httpShow.url.startsWith('file://') && state.httpShow.url.includes('local-page.html'),
     'web view loads the local HTML via its file:// URL');
   console.log('[ok] local HTML opens in the web view (file:// URL, edge-to-edge)');
+
+  // ── Bug B (round 4): a web page's late did-navigate updates its OWNER (http) tab, not the active tab ──
+  await sendChord(win, 'T', ['control']);
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-empty')?.textContent.trim() === 'New Tab'`), 'fresh tab for owner-routing test');
+  state.httpShow = null;
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-uri-input'); i.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'http://127.0.0.1:9/owner'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await delay(60);
+  await evalIn(win, `document.querySelector('.vv-uri-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+  await waitFor(() => state.httpShow && Number.isInteger(state.httpShow.tabId), 'httpShow carries the owner tab id');
+  const ownerTab = state.httpShow.tabId;
+  await sendChord(win, 'T', ['control']);   // a different active tab; the http tab's late nav must not hijack it
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] !== ${ownerTab}`), 'a non-owner tab is active');
+  const activeTab = await evalIn(win, `window.__vvdb().ui['active-tab']`);
+  win.webContents.send('vv:http-navigated', { url: 'http://127.0.0.1:9/loaded-late', tab: ownerTab });
+  await waitFor(() => evalIn(win, `(window.__vvdb().ui.tabs.find(t => t.id === ${ownerTab}) || {}).uri === 'http://127.0.0.1:9/loaded-late'`),
+    'the owner http tab receives the late navigation');
+  const activeUri = await evalIn(win, `(window.__vvdb().ui.tabs.find(t => t.id === ${activeTab}) || {}).uri`);
+  assert.ok(activeUri == null || !String(activeUri).startsWith('http'),
+    'the active (non-owner) tab must NOT be hijacked by the web view navigation');
+  // a relay for a closed/unknown tab id is a harmless no-op
+  const tabsBeforeGhost = await evalIn(win, `JSON.stringify(window.__vvdb().ui.tabs.map(t => [t.id, t.uri || null]))`);
+  win.webContents.send('vv:http-navigated', { url: 'http://127.0.0.1:9/ghost', tab: 987654 });
+  await delay(80);
+  const tabsAfterGhost = await evalIn(win, `JSON.stringify(window.__vvdb().ui.tabs.map(t => [t.id, t.uri || null]))`);
+  assert.strictEqual(tabsAfterGhost, tabsBeforeGhost, 'a navigation for a closed/unknown tab id must be a no-op');
+  console.log('[ok] web-view navigation updates its owner tab, never the active tab');
 
   win.close();
 }

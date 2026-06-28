@@ -99,6 +99,26 @@
           (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0})]
             (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})))))))
 
+(defn nav-tab
+  "Point the tab with `id` at uri, pushing a history entry (a repeat just refreshes the uri) — like
+   `nav-active` but keyed on a supplied id, NOT the active tab, and without capturing scroll (the owner tab
+   isn't the one being viewed). Records the web view's navigation onto its OWNER tab while the user may be on
+   a different tab. No-op if no tab has that id."
+  [db id uri]
+  (if (some #(= (:id %) id) (tabs db))
+    (update-in db [:ui :tabs]
+               (fn [ts]
+                 (mapv (fn [t]
+                         (if (= (:id t) id)
+                           (let [{:keys [stack idx]} (:hist t)]
+                             (if (= uri (:uri (get stack idx)))
+                               (assoc t :uri uri)
+                               (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0})]
+                                 (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))}))))
+                           t))
+                       ts)))
+    db))
+
 (defn step
   "Move the active tab back (-1) / forward (+1), saving the leaving entry's `scroll`. Returns
    [db' uri target-scroll] or nil at an end."

@@ -59,6 +59,7 @@ bar or `Ctrl` `+` / `-` / `0` ([feature 22](22-zoom-and-fit.md)). The same web s
 | Scroll keys + `f` hints (self-contained, in the page context) | `resources/web-preload.js` |
 | `Alt`-arrow history forwarding | `vinary.main.web` (`before-input-event`) |
 | App `Ctrl`/`Cmd` chord forwarding (`vv:web-key` → synthetic `window` keydown → resolver) | `vinary.main.web` (`before-input-event` → `web-app-chord`) → `resources/preload.js` (`onWebKey`) → `vinary.renderer.core` (`replay-web-key!`) |
+| Page navigation recorded onto its **owner** tab (not the active tab — a slow page that finishes loading after you switch tabs updates its own tab, never the one you moved to) | `vinary.main.web` (`:owner-tab` via `vv:http-show`, relay `{:url :tab}`) → `:http/navigated` → `vinary.app.nav/nav-tab` |
 | Right-click Copy menu (native) | `vinary.main.web` (`context-menu` handler) |
 | Persistent session | `vinary.main.web` (`webPreferences {:partition "persist:vinary-web"}`) |
 | Edge-to-edge layout (web + local HTML) | `.vv-content-web` (drops the gutter) in `resources/public/css/app.css` |

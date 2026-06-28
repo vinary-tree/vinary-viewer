@@ -56,6 +56,8 @@ Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on d
 | Window-resize re-fit (`ResizeObserver` on the scroller → debounced `refit!`; fit-mode PDFs only) | `vinary.renderer.pdf/observe-resize!` |
 | Per-mount byte clone (no blank PDF after switching tabs away and back) | `vinary.renderer.pdf/mount!` (`(.slice bytes 0)`) |
 | Per-page status chip ("rendering…" while a `RenderTask` is in flight; click-to-retry on a real render error, distinguished from a cancellation) | `vinary.renderer.pdf/render-page!` (`show-status!`/`clear-status!`) + `.vv-pdf-status*` in `app.css` |
+| CPU-backed page canvas (`willReadFrequently`) + `backgroundThrottling false` — avoids a blank/stale GPU canvas that only paints on a forced repaint | `vinary.renderer.pdf/render-page!` + `vinary.main.core` renderer `webPreferences` |
+| Generation epoch + deterministic visible-page re-render on resize/rescale (not reliant on an IntersectionObserver re-fire) | `vinary.renderer.pdf` (`:gen` guards, `render-visible!` via `pdf-layout/visible-range`) |
 | pdf.js `isEvalSupported true` — JIT-compile a PDF's PostScript/Type-4 shading functions (large speedup on shaded/mesh figures) | `vinary.renderer.pdf/get-document` |
 | Vendored worker + cmaps/fonts/wasm/iccs | `scripts/sync-pdfjs.mjs` → `resources/public/pdf/` |
 

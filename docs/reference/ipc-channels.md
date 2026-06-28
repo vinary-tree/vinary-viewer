@@ -36,7 +36,7 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:ext-action-clicked` / `vv:ext-popup-close` | `extActionClicked(id, popup, bounds)` / `extPopupClose()` | `{id, popup, bounds}` / none | `vinary.main.ext-popup` | Open / close a browser-action popup. |
 | `vv:adblock-set-enabled` / `vv:adblock-set-lists` / `vv:adblock-refresh` | `adblockSetEnabled(on)` / `adblockSetLists(kw)` / `adblockRefresh()` | bool / string / none | `vinary.main.adblock` | Toggle / set list-set / refresh the ad-blocker. |
 | `vv:pdf-show` / `vv:pdf-hide` / `vv:pdf-bounds` | `pdfShow` / `pdfHide` / `pdfBounds` | — | *RETIRED* | Native PDF view seam — retired for in-renderer pdf.js (ADR-0013); no main listener (harmless no-ops). |
-| `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. |
+| `vv:http-show` | `httpShow(url, bounds, tabId)` | `{url, bounds, tabId}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. `tabId` is the **owning** tab (the active http tab at show time); main stores it so the navigation relay updates that tab even after the user switches away mid-load. |
 | `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
 | `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web/set-bounds!` | Reposition the in-app HTTP view. |
 | `vv:http-zoom` / `vv:http-zoom-set` | `httpZoom(dir)` / `httpZoomSet(f)` | direction / factor | `vinary.main.web` (`setZoomFactor`) | Zoom the web PAGE (the native view's own webContents), not the app chrome; reports the new factor on `vv:zoom-changed`. |
@@ -65,7 +65,7 @@ fields derived from `getBoundingClientRect()`.
 | `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received ...]` | Deliver git file-tree data. |
 | `vv:keymap` | `onKeymap(cb)` | keymap registry map/string | `[:keymap/config-received ...]` | Deliver persisted keybinding config. |
 | `vv:grammars` | `onGrammars(cb)` | EDN string map `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
-| `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated ...]` | Sync in-app HTTP navigation into active tab history. |
+| `vv:http-navigated` | `onHttpNavigated(cb)` | `{url, tab}` | `[:http/navigated ...]` | Record in-app HTTP navigation onto the **owner** tab's history (`tab` = the tab that owns the web-view load, NOT necessarily the active tab — a slow page may finish loading after the user switched to another tab). |
 | `vv:http-snapshot-ready` | `onHttpSnapshotReady(cb)` | JPEG data-URL | `web-host` (`pre-snap`) | Push a fresh page raster (captured after load + on scroll-settle) so opening any overlay freezes the page **instantly** — a synchronous DOM swap, no capture on the open path. |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc ...]` | Deliver heading outline from the HTTP web view. |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading ...]` | Deliver active HTTP heading. |

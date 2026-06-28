@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('vv', {
   pdfShow: (path, bounds) => ipcRenderer.send('vv:pdf-show', { path, bounds }),
   pdfHide: () => ipcRenderer.send('vv:pdf-hide'),
   pdfBounds: (bounds) => ipcRenderer.send('vv:pdf-bounds', { bounds }),
-  httpShow: (url, bounds) => ipcRenderer.send('vv:http-show', { url, bounds }),
+  httpShow: (url, bounds, tabId) => ipcRenderer.send('vv:http-show', { url, bounds, tabId }),
   httpHide: () => ipcRenderer.send('vv:http-hide'),
   httpBounds: (bounds) => ipcRenderer.send('vv:http-bounds', { bounds }),
   httpSnapshot: () => ipcRenderer.invoke('vv:http-snapshot'),

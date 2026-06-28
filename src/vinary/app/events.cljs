@@ -389,16 +389,18 @@
                          (update :entries vec)))})))
 
 ;; ---- in-app HTTP web view ----
-;; the web view navigated (a link clicked on the remote page) → sync the active tab's URI + push history
-;; (our own loadURL also fires this, but url then equals the active uri → no-op)
+;; the web view navigated → record it onto the tab that OWNS the view (`tab`), NOT the active tab: the http
+;; tab may have been switched away from (to a PDF/etc.) while the page was still loading, so applying it to
+;; the active tab would hijack THAT tab. No-op if the owner tab was closed, or the url already equals its uri
+;; (our own loadURL echoes did-navigate). The web view scrolls itself; we only record browser history.
 (rf/reg-event-fx
  :http/navigated
- (fn [{:keys [db]} [_ {:keys [url]}]]
-   (if (and url (uri/http? url) (not= url (nav/active-uri db)))
-     ;; the web view scrolls itself; nothing to save into the content pane — but record browser history
-     (let [db' (record-web-history (nav/nav-active db url 0) url)]
-       (with-retention {:db db' :fx [[:vv/save-recent (pr-str (get-in db' [:ui :recent]))]]} db'))
-     {:db db})))
+ (fn [{:keys [db]} [_ {:keys [url tab]}]]
+   (let [owner (some #(when (= (:id %) tab) %) (nav/tabs db))]
+     (if (and url (uri/http? url) owner (not= url (:uri owner)))
+       (let [db' (record-web-history (nav/nav-tab db tab url) url)]
+         (with-retention {:db db' :fx [[:vv/save-recent (pr-str (get-in db' [:ui :recent]))]]} db'))
+       {:db db}))))
 
 ;; the web view's heading outline (for the Contents/TOC tab — HTML sections, like Markdown)
 (rf/reg-event-db :web/toc (fn [db [_ headings]] (assoc-in db [:ui :web-toc] (vec headings))))

@@ -8,7 +8,7 @@
   (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard]]
             ["path" :as path]))
 
-(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false}))
+(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false :owner-tab nil}))
 (defonce ^:private inited (atom false))
 (defonce ^:private last-history-nav (atom {:dir nil :time 0}))
 
@@ -125,10 +125,12 @@
                                                 ;; from the app's own session (and host browser extensions)
                                                 :partition        "persist:vinary-web"}}))
             ^js wc (.-webContents v)
-            ;; in-page navigation (a link clicked on the remote page) → track the url + sync the active tab
+            ;; navigation → record it onto the OWNER tab (the http tab that showed this view), not the active
+            ;; tab — the user may have switched to another tab while the page was still loading.
             relay  (fn [_e url]
                      (swap! state assoc :url url)
-                     (when-let [^js awc (app-wc)] (.send awc "vv:http-navigated" (clj->js {:url url}))))]
+                     (when-let [^js awc (app-wc)]
+                       (.send awc "vv:http-navigated" (clj->js {:url url :tab (:owner-tab @state)}))))]
         (.addChildView ^js (.-contentView win) v)
         (.setVisible v false)
         (.on wc "did-navigate"          relay)
@@ -158,11 +160,11 @@
                             :width  (js/Math.round (:width bounds))
                             :height (js/Math.round (:height bounds))}))))
 
-(defn show! [^js win url bounds]
+(defn show! [^js win url bounds tab-id]
   (let [^js v (ensure-view! win)]
     (set-bounds! v bounds)
     (.setVisible v true)
-    (swap! state assoc :visible? true)
+    (swap! state assoc :visible? true :owner-tab tab-id)   ; remember which tab owns the view (for nav routing)
     (when (not= url (:url @state))
       (.loadURL ^js (.-webContents v) url)
       (swap! state assoc :url url :snapshot nil))   ; new page → invalidate the cached snapshot
@@ -179,7 +181,7 @@
     (reset! inited true)
     ;; ---- app renderer → web view ----
     (.on ipcMain "vv:http-show"
-         (fn [_e ^js p] (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m)))))
+         (fn [_e ^js p] (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m) (:tabId m)))))
     (.on ipcMain "vv:http-hide"   (fn [_e] (hide!)))
     (.on ipcMain "vv:http-bounds"
          (fn [_e ^js p] (set-bounds! (:view @state) (:bounds (js->clj p :keywordize-keys true)))))

@@ -329,8 +329,9 @@
         unsub    (atom nil)           ; onHttpSnapshotReady unsubscribe
         last-url (atom nil)
         overlay? (atom false)
+        owner-id (atom nil)          ; the tab id that owns the web view (this host's tab; captured in render)
         vv       (fn [] (.-vv js/window))
-        show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
+        show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node) @owner-id))))
         hide!    (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
         bounds!  (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
         ;; defer the native-view hide until the snapshot <img> has painted (double rAF) — otherwise the
@@ -380,6 +381,7 @@
                                 (.removeEventListener js/window "resize" bounds!))
       :reagent-render         (fn [_url]
                                 (reset! overlay? @(rf/subscribe [:ui/overlay-open?]))
+                                (reset! owner-id @(rf/subscribe [:ui/active-tab-id]))
                                 [:div.vv-web-host {:ref (fn [el] (reset! node el))}
                                  (when @snap [:img.vv-web-snap {:src @snap}])])})))
 
