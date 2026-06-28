@@ -329,6 +329,26 @@ async function main() {
   );
   console.log('[ok] Settings pointer submenus open');
 
+  // Fix 5 — the always-visible zoom bar + the View ▸ Fit submenu
+  const zoomBar = await evalIn(win, `(() => {
+    const i = document.querySelector('.vv-bottombar .vv-zoom-input');
+    return { present: Boolean(i), value: i ? i.value : null,
+             buttons: document.querySelectorAll('.vv-bottombar .vv-zoom-btn').length };
+  })()`);
+  assert.strictEqual(zoomBar.present, true, 'the zoom bar must be present in every view');
+  assert.strictEqual(zoomBar.buttons, 2, 'the zoom bar must have − and + buttons');
+  assert.ok(/^\d+$/.test(zoomBar.value || ''), 'the zoom field must show a numeric percentage');
+  await dispatchWindowKey(win, 'v', { altKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu open');
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-menu-dropdown')?.textContent.includes('Fit')`), 'View dropdown rendered');
+  assert.strictEqual(await hoverMenuItem(win, 'Fit'), true, 'View menu must have a Fit submenu');
+  await waitFor(() => evalIn(win, `(() => { const d = document.querySelector('.vv-menu-subdropdown');
+    return Boolean(d) && d.textContent.includes('Fit Width') && d.textContent.includes('Fit Page'); })()`),
+    'Fit submenu lists Fit Width / Fit Page');
+  await dispatchWindowKey(win, 'Escape');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed');
+  console.log('[ok] zoom bar present + View ▸ Fit submenu works');
+
   // PDF — rendered IN-DOM via pdf.js (parity with markdown: canvas + selectable text layer + find +
   // copy), NOT the retired native WebContentsView. Bytes are streamed on vv:content.
   const pdfFixture = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
@@ -396,6 +416,26 @@ async function main() {
   await evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
     i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
   console.log('[ok] in-page find matches PDF text');
+
+  // Fix 2 — the PDF pane is edge-to-edge (drops the 45px document reading gutter)
+  const pdfEdge = await evalIn(win, `(() => {
+    const c = document.querySelector('.vv-content');
+    return { flush: c.classList.contains('vv-content-pdf-flush'), pad: getComputedStyle(c).paddingLeft };
+  })()`);
+  assert.strictEqual(pdfEdge.flush, true, 'PDF content pane must be edge-to-edge (.vv-content-pdf-flush)');
+  assert.strictEqual(pdfEdge.pad, '0px', 'edge-to-edge PDF pane must drop the reading gutter');
+  console.log('[ok] PDF pane is edge-to-edge');
+
+  // Fix 7 — switching away from the PDF tab and back must re-render. pdf.js detaches the byte buffer on
+  // load; we now clone it, so the cached bytes survive a remount. Open a blank tab (PDF unmounts), close
+  // it (PDF tab reactivates → remount from the cached bytes), and assert the canvas re-renders.
+  await sendChord(win, 'T', ['control']);
+  await waitFor(() => evalIn(win, `!document.querySelector('.vv-pdf-canvas')`), 'PDF unmounts when switched away');
+  await sendChord(win, 'W', ['control']);
+  await waitFor(
+    () => evalIn(win, `(() => { const c = document.querySelector('.vv-pdf-doc .vv-pdf-page canvas.vv-pdf-canvas'); return Boolean(c) && c.getBoundingClientRect().width > 0; })()`),
+    'PDF re-renders after returning to its tab', 15000);
+  console.log('[ok] PDF re-renders after switching tabs away and back');
 
   const dialogsBefore = state.openDialogs;
   await sendChord(win, 'O', ['control', 'shift']);
@@ -835,6 +875,9 @@ async function main() {
   await waitFor(() => state.httpShow && state.httpShow.bounds && state.httpShow.bounds.width > 100,
     'web view show + bounds sent');
   await waitFor(() => state.httpVisible === true, 'web view initially shown');
+  // simulate main's proactive snapshot push so web-host has a pre-cached image (the instant-freeze path)
+  win.webContents.send('vv:http-snapshot-ready', state.snapshotDataUrl);
+  await delay(60);
 
   // bug 1 — edge-to-edge: the content pane drops its document reading gutter and the host fills it exactly,
   // so the bounds handed to the native view carry no 45/32px inset.
@@ -868,7 +911,7 @@ async function main() {
     const img = document.querySelector('img.vv-web-snap');
     return { src: (img && img.getAttribute('src')) || '', insideHost: Boolean(img && img.closest('.vv-web-host')) };
   })()`);
-  assert.ok(frozen.src.startsWith('data:image/png'), 'snapshot img must show the captured page raster');
+  assert.ok(frozen.src.startsWith('data:image'), 'snapshot img must show the captured page raster');
   assert.strictEqual(frozen.insideHost, true, 'snapshot img must render inside the web host');
   assert.strictEqual(state.httpVisible, false, 'native view must hide while the frozen snapshot is shown');
   console.log('[ok] opening a menu freezes a page snapshot (the page does not disappear)');
@@ -880,15 +923,36 @@ async function main() {
   await waitFor(() => state.httpVisible === true, 'live web view restored on menu close');
   console.log('[ok] closing the menu restores the live web view');
 
-  // bug 2c — a full-window MODAL (command palette) hides the view outright, with NO snapshot
+  // bug 2c — a full-window MODAL (command palette) ALSO freezes the page (shows the snapshot behind its
+  // dimmed backdrop), not blank — unified overlay handling.
   await sendChord(win, 'P', ['control', 'shift']);
   await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.palette && window.__vvdb().ui.palette['open?'])`),
     'command palette (modal) open');
   await waitFor(() => state.httpVisible === false, 'native view hidden under a modal');
-  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`), false,
-    'a modal must hide the view outright (no page snapshot)');
-  await dispatchWindowKey(win, 'Escape');
-  console.log('[ok] a modal dialog hides the web view outright (no snapshot)');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`),
+    'a modal freezes the page snapshot (not blank)');
+  // close the palette via its own input (a window-dispatched Escape doesn't reach it while it's open)
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-palette-input');
+    if (i) i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `!(window.__vvdb().ui.palette && window.__vvdb().ui.palette['open?'])`), 'palette closed');
+  await waitFor(() => state.httpVisible === true, 'live web view restored after the modal closes');
+  console.log('[ok] a modal dialog freezes the page snapshot (unified overlay handling)');
+
+  // Fix 6 — a local .html file opens in the (edge-to-edge) web view via its file:// URL, not as source
+  const htmlPath = path.join(ROOT, 'test', 'fixtures', 'local-page.html');
+  state.contentByPath.set(htmlPath, { path: htmlPath, kind: 'html' });
+  state.httpShow = null;
+  win.webContents.send('vv:open-files', { paths: [htmlPath] });
+  await waitFor(() => evalIn(win, `(() => {
+    const c = document.querySelector('.vv-content');
+    return Boolean(document.querySelector('.vv-web-host')) && Boolean(c) &&
+           c.classList.contains('vv-content-web') &&
+           window.__vvdb().ui.tabs.some((t) => (t.uri || '').includes('local-page.html'));
+  })()`), 'local HTML renders in the edge-to-edge web view');
+  await waitFor(() => state.httpShow && typeof state.httpShow.url === 'string' &&
+    state.httpShow.url.startsWith('file://') && state.httpShow.url.includes('local-page.html'),
+    'web view loads the local HTML via its file:// URL');
+  console.log('[ok] local HTML opens in the web view (file:// URL, edge-to-edge)');
 
   win.close();
 }

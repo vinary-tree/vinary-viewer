@@ -6,6 +6,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
+            [vinary.app.zoom :as zoom]
             [vinary.input.keymaps-registry :as registry]))
 
 (rf/reg-sub :ds/rev         (fn [db _] (:ds/rev db)))
@@ -13,6 +14,7 @@
 (rf/reg-sub :ui/tree-filter (fn [db _] (get-in db [:ui :tree-filter])))
 (rf/reg-sub :ui/find           (fn [db _] (get-in db [:ui :find])))
 (rf/reg-sub :pdf/view-state    (fn [db _] (get-in db [:ui :pdf])))
+(rf/reg-sub :view/zoom-percent (fn [db _] (zoom/percent db)))   ; live zoom % for the active surface (zoom bar)
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
@@ -48,17 +50,6 @@
                            (get-in db [:ui :kbedit :open?])
                            (get-in db [:ui :extensions-open?])
                            (get-in db [:ui :palette :open?])))))
-(defn modal-open?
-  "True when a FULL-WINDOW modal overlay (settings/about/keybinding dialog or the command palette) is open —
-   as opposed to a transient menu-bar dropdown or context menu. web-host hides the native web view outright
-   for these (it must not paint over a dialog); for a menu it instead freezes a page snapshot."
-  [db]
-  (boolean (or (get-in db [:ui :settings-open?])
-               (get-in db [:ui :about-open?])
-               (get-in db [:ui :kbedit :open?])
-               (get-in db [:ui :extensions-open?])
-               (get-in db [:ui :palette :open?]))))
-(rf/reg-sub :ui/modal-open? (fn [db _] (modal-open? db)))
 (rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
 

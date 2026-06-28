@@ -1,0 +1,49 @@
+@startuml seq-instant-overlay-snapshot
+'' Sequence: instant, flash-free overlay compositing over the always-on-top web view.
+'' The in-app web view is a main-owned WebContentsView that always paints ABOVE the renderer DOM, so a
+'' DOM menu / context-menu / dialog / palette cannot draw over it. Main PROACTIVELY captures the live page
+'' to a JPEG raster (after load + debounced on scroll-settle) and PUSHES it to the renderer
+'' (vv:http-snapshot-ready); web-host caches it, so opening ANY overlay is a SYNCHRONOUS DOM swap to the
+'' frozen image + hide the native view — instant, no behind-then-front flash, never blank. The live view
+'' is restored on close. Unified: dialogs freeze the (dimmed) page too, instead of going blank.
+'' (PlantUML over Mermaid: participant colouring + activation lanes for the capture→push→freeze handoff.)
+!include _vv-theme.iuml
+
+title Instant overlay compositing over the web view (pre-cached pushed snapshot)
+
+actor User
+participant "main\nweb.cljs (web view)" as WEB #3A5BA0
+participant "preload\nonHttpSnapshotReady" as IPC #B1951D
+participant "web-host\n(.vv-web-host)" as HOST #2D9574
+participant ":ui/overlay-open?\n(app-db)" as DB #7590DB
+
+== Proactive capture — page live + visible ==
+WEB -> WEB : did-stop-loading / scroll-settle\n→ capture-soon! (debounced 150 ms)
+activate WEB
+WEB -> WEB : capturePage → toJPEG(70)\n→ data:image/jpeg data-URL
+WEB -> IPC : vv:http-snapshot-ready (data-URL)
+deactivate WEB
+IPC -> HOST : onHttpSnapshotReady
+activate HOST
+HOST -> HOST : cache in pre-snap (atom)\n— no DOM change yet
+deactivate HOST
+
+== Overlay opens — menu / context-menu / dialog / palette ==
+User -> DB : open a menu or modal
+DB -> HOST : :ui/overlay-open? = true
+activate HOST
+HOST -> HOST : freeze! — (reset! snap @pre-snap)\n→ render <img.vv-web-snap>
+HOST -> WEB : vv:http-hide (httpHide)
+WEB -> WEB : setVisible false\n(native view hidden)
+note over HOST #FFF6D6 : INSTANT synchronous swap — the frozen page shows\nunder the overlay; no capture on this path, no flash,\nnever blank (a dialog dims it via its backdrop).\nCold start (no push yet): freeze! pulls main's cache\nvia the vv:http-snapshot invoke, then hides.
+deactivate HOST
+
+== Overlay closes ==
+User -> DB : close the overlay
+DB -> HOST : :ui/overlay-open? = false
+activate HOST
+HOST -> HOST : (reset! snap nil) — drop the still
+HOST -> WEB : vv:http-show (httpShow url + bounds)
+WEB -> WEB : setVisible true\n(live, scrollable page restored)
+deactivate HOST
+@enduml

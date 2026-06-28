@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('vv', {
   quit: () => ipcRenderer.send('vv:quit'),
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),
   zoom: (dir) => ipcRenderer.send('vv:zoom', dir),
+  zoomSet: (f) => ipcRenderer.send('vv:zoom-set', f),
+  httpZoom: (dir) => ipcRenderer.send('vv:http-zoom', dir),
+  httpZoomSet: (f) => ipcRenderer.send('vv:http-zoom-set', f),
 
   // main → renderer (each returns an unsubscribe fn)
   onContent: (cb) => {
@@ -80,6 +83,11 @@ contextBridge.exposeInMainWorld('vv', {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:http-navigated', h);
     return () => ipcRenderer.removeListener('vv:http-navigated', h);
+  },
+  onHttpSnapshotReady: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:http-snapshot-ready', h);
+    return () => ipcRenderer.removeListener('vv:http-snapshot-ready', h);
   },
   onWebToc: (cb) => {
     const h = (_e, payload) => cb(payload);
@@ -115,6 +123,8 @@ contextBridge.exposeInMainWorld('vv', {
   onExtState: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-state', h); return () => ipcRenderer.removeListener('vv:ext-state', h); },
   onExtInstallResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-install-result', h); return () => ipcRenderer.removeListener('vv:ext-install-result', h); },
   onExtUpdateResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-update-result', h); return () => ipcRenderer.removeListener('vv:ext-update-result', h); },
+  onAdblockStatus: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:adblock-status', h); return () => ipcRenderer.removeListener('vv:adblock-status', h); },
+  onZoomChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:zoom-changed', h); return () => ipcRenderer.removeListener('vv:zoom-changed', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:app-info', h);

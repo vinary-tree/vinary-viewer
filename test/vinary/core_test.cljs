@@ -11,7 +11,6 @@
             [vinary.input.kbedit-history :as hist]
             [vinary.app.commands :as commands]
             [vinary.app.events :as events]
-            [vinary.app.subs :as subs]
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.app.ds :as ds]
@@ -274,6 +273,8 @@
                              ["diagram.png" "image"]
                              ["diagram.svg" "image"]
                              ["manual.pdf" "pdf"]
+                             ["index.html" "html"]
+                             ["page.htm" "html"]
                              ["workflow.d2" "source"]
                              ["workflow.puml" "source"]
                              ["workflow.plantuml" "source"]
@@ -343,21 +344,6 @@
       (is (= svg (math/render-tex "x^2" false)))))
   (testing "GitHub backtick-dollar math escapes normalize for remark-math"
     (is (= "Inline $x^2$." (math/normalize-github-math-escapes "Inline $`x^2`$.")))))
-
-(deftest modal-open?-distinguishes-menus-from-dialogs
-  ;; web-host hides the native web view for full-window MODALS, but only FREEZES a snapshot for transient
-  ;; menus / context-menus — so :ui/modal-open? must EXCLUDE :menu and :context-menu.
-  (testing "transient menu / context-menu are NOT modal"
-    (is (false? (subs/modal-open? {:ui {:menu "Settings"}})))
-    (is (false? (subs/modal-open? {:ui {:context-menu {:x 1 :y 2}}})))
-    (is (false? (subs/modal-open? {:ui {}})))
-    (is (false? (subs/modal-open? {}))))
-  (testing "full-window dialogs + command palette ARE modal"
-    (is (true? (subs/modal-open? {:ui {:settings-open? true}})))
-    (is (true? (subs/modal-open? {:ui {:about-open? true}})))
-    (is (true? (subs/modal-open? {:ui {:kbedit {:open? true}}})))
-    (is (true? (subs/modal-open? {:ui {:extensions-open? true}})))
-    (is (true? (subs/modal-open? {:ui {:palette {:open? true}}})))))
 
 (deftest menu-access-keys
   (testing "top-level Alt access keys resolve to menus"

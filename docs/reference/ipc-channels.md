@@ -39,7 +39,8 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. |
 | `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
 | `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web/set-bounds!` | Reposition the in-app HTTP view. |
-| `vv:http-snapshot` *(invoke)* | `httpSnapshot()` | none → PNG data-URL | `vinary.main.web` (`capturePage`→`toDataURL`) | Capture the live page to an inert raster so the renderer can freeze it under an open menu while the always-on-top native view hides. |
+| `vv:http-zoom` / `vv:http-zoom-set` | `httpZoom(dir)` / `httpZoomSet(f)` | direction / factor | `vinary.main.web` (`setZoomFactor`) | Zoom the web PAGE (the native view's own webContents), not the app chrome; reports the new factor on `vv:zoom-changed`. |
+| `vv:http-snapshot` *(invoke)* | `httpSnapshot()` | none → JPEG data-URL | `vinary.main.web` (cached `capturePage`→`toJPEG`) | Cold-cache fallback: return the latest cached page raster (a proactive capture+push keeps it fresh) so the renderer can freeze the page under any overlay while the always-on-top native view hides. |
 | `vv:http-toc-goto` | `httpTocGoto(id)` | heading id string | `vinary.main.web` | Scroll the HTTP page to a heading. |
 | `vv:open-dialog` | `openDialog()` | none | `vinary.main.shell` | Open the multi-file native dialog. |
 | `vv:clipboard-write` | `copyText(text)` | string | `vinary.main.shell` | Copy text to the OS clipboard. |
@@ -48,7 +49,7 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:app-info-request` | `requestAppInfo()` | none | `vinary.main.shell` | Request app metadata for About UI. |
 | `vv:quit` | `quit()` | none | `vinary.main.shell` | Quit the Electron app. |
 | `vv:devtools` | `toggleDevtools()` | none | `vinary.main.shell` | Toggle renderer devtools. |
-| `vv:zoom` | `zoom(dir)` | direction value | `vinary.main.shell` | Adjust Chromium zoom. |
+| `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | direction / factor | `vinary.main.shell` | Adjust the app-window zoom (DOM views); reports the new factor on `vv:zoom-changed`. |
 
 `bounds` payloads are plain maps with numeric `x`, `y`, `width`, and `height`
 fields derived from `getBoundingClientRect()`.
@@ -65,6 +66,7 @@ fields derived from `getBoundingClientRect()`.
 | `vv:keymap` | `onKeymap(cb)` | keymap registry map/string | `[:keymap/config-received ...]` | Deliver persisted keybinding config. |
 | `vv:grammars` | `onGrammars(cb)` | EDN string map `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated ...]` | Sync in-app HTTP navigation into active tab history. |
+| `vv:http-snapshot-ready` | `onHttpSnapshotReady(cb)` | JPEG data-URL | `web-host` (`pre-snap`) | Push a fresh page raster (captured after load + on scroll-settle) so opening any overlay freezes the page **instantly** — a synchronous DOM swap, no capture on the open path. |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc ...]` | Deliver heading outline from the HTTP web view. |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading ...]` | Deliver active HTTP heading. |
 | `vv:history-nav` | `onHistoryNav(cb)` | `"back"` or `"forward"` | history dispatch | Forward browser-like navigation from native/web surfaces. |
@@ -74,6 +76,8 @@ fields derived from `getBoundingClientRect()`.
 | `vv:ext-config` | `onExtConfig(cb)` | EDN string | `[:ext-config/received ...]` | Deliver persisted ad-block + extension prefs (`extensions.edn`). |
 | `vv:ext-state` | `onExtState(cb)` | EDN string | `[:ext/state-received ...]` | Deliver the installed-extensions list + master toggle. |
 | `vv:ext-install-result` / `vv:ext-update-result` | `onExtInstallResult` / `onExtUpdateResult` | object | `[:ext/install-result ...]` / `[:ext/update-result ...]` | Install / update outcome. |
+| `vv:adblock-status` | `onAdblockStatus(cb)` | `{:status :updating\|:ok\|:offline\|:error :last-updated? :error?}` | `[:adblock/status-received ...]` | Ad-block refresh feedback for the Extensions dialog ("Updating…" → "✓ Updated" / "⚠ Offline" / "✗ …"). |
+| `vv:zoom-changed` | `onZoomChanged(cb)` | `{:context "window"\|"web" :factor n}` | `[:view/zoom-changed ...]` | Report the resolved app-window / web-view zoom factor so the zoom bar shows the live %. |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata map | `[:app-info/received ...]` | Deliver app metadata. |
 
 ---
@@ -89,7 +93,8 @@ for directories, which `vinary.main.service/send-content!` detects first (via
 | any path that is a directory | `"directory"` | not read as text; payload is `{:path :kind "directory" :entries [...] :stamp}`, where each entry is `{:name :path :dir? :size :mtime :symlink}`. Stored on the document entity as `:doc/entries` and rendered in-pane by the directory browser. |
 | `.md`, `.markdown`, `.mdx` | `"markdown"` | text is read and rendered in the renderer. |
 | image extensions such as `.png`, `.jpg`, `.svg`, `.webp`, `.avif` | `"image"` | binary is not read as text; renderer uses `file://` URL. |
-| `.pdf` | `"pdf"` | binary is not read as text; main-owned PDF view loads `file://` URL. |
+| `.pdf` | `"pdf"` | bytes streamed to the renderer (`:bytes`) and rendered in-DOM by pdf.js (ADR-0013); never read as text. |
+| `.html`, `.htm`, `.xhtml` | `"html"` | not read as text; rendered as a live page in the in-app web view via its `file://` URL (edge-to-edge), with the ad-blocker + extensions applied. |
 | `.mmd`, `.mermaid` | `"mermaid"` | text is read and rendered to SVG by the renderer-side Mermaid strategy. |
 | bundled/user source extensions, configured filetype mappings, and non-Mermaid diagram-source extensions | `"source"` | text is read into the read-only source view. |
 | everything else | `"text"` | text is escaped into plain HTML. |

@@ -14,8 +14,15 @@ the document lives in the app's own DOM, a PDF behaves like every other document
 - **App keymap + smooth scrolling** — bare arrows, `j`/`k`, Space/PageDown, `g g`/`G`, etc.
 - **In-page find** (`Ctrl+F`) across the whole document (text is materialized on demand).
 - **Text selection + Copy** — select with the mouse, `Ctrl+C`, or right-click → **Copy** (the themed menu).
-- **Zoom / fit / dark-invert** and **bookmarks** in the Contents tab.
+- **Zoom, fit & dark-invert** — the bottom **zoom bar** and the **View ▸ Fit** submenu (Fit Width / Fit
+  Page / Actual Size) drive the pdf.js scale; see [feature 22](22-zoom-and-fit.md). **Bookmarks** are in
+  the Contents tab.
 - **Themes** — the page letterbox follows the active palette.
+
+**Layout.** Unlike the Markdown reading gutter, a PDF renders **edge-to-edge** — the `.vv-content-pdf-flush`
+class drops the L/R/bottom padding so pages fill the pane (no overflow off the right/bottom). A fit-mode
+PDF (**Fit Width** / **Fit Page**) also **re-fits when the window resizes**, so the page size tracks the
+window instead of staying frozen at its open-time size.
 
 ## 2 · How you use it
 
@@ -24,8 +31,8 @@ Open a `.pdf` file (CLI `vv report.pdf`, the file tree, or a link). Then:
 | Action | Keys / UI |
 |---|---|
 | Scroll | arrows, `j`/`k`, Space / `Shift`+Space, Page keys, `Home`/`End` |
-| Zoom in / out / reset | `Ctrl` `+` / `-` / `0` (context-aware: zooms the PDF) |
-| Fit width / page / actual size | **View** menu |
+| Zoom in / out / reset | `Ctrl` `+` / `-` / `0`, or the bottom **zoom bar** (context-aware: zooms the PDF — [feature 22](22-zoom-and-fit.md)) |
+| Fit width / page / actual size | **View ▸ Fit** (radio-marks the active mode); re-fits on window resize |
 | Invert (dark PDF) | **View ▸ Invert PDF** (canvas only; text/selection stay normal) |
 | Find | `Ctrl+F` |
 | Copy selection | `Ctrl+C` or right-click ▸ Copy |
@@ -42,6 +49,9 @@ Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on d
 | Render engine (worker bootstrap, canvas/text/link layers, virtualization, zoom, outline) | `vinary.renderer.pdf` |
 | Pure geometry/zoom/outline helpers (DOM-free, unit-tested) | `vinary.renderer.pdf-layout` |
 | `pdf-view` Reagent component (mounts inside `.vv-content`) | `vinary.ui.views/pdf-view` |
+| Edge-to-edge layout (`.vv-content-pdf-flush` drops the `.vv-content` gutter, keeping the scroller) | `vinary.ui.views/content-view` + `resources/public/css/app.css` |
+| Window-resize re-fit (`ResizeObserver` on the scroller → debounced `refit!`; fit-mode PDFs only) | `vinary.renderer.pdf/observe-resize!` |
+| Per-mount byte clone (no blank PDF after switching tabs away and back) | `vinary.renderer.pdf/mount!` (`(.slice bytes 0)`) |
 | Vendored worker + cmaps/fonts/wasm/iccs | `scripts/sync-pdfjs.mjs` → `resources/public/pdf/` |
 
 The pdf.js module + worker are **vendored** (the legacy ES5 build) and loaded at runtime via a blob-URL
@@ -50,3 +60,9 @@ ESM `import()` — Closure `:simple` cannot bundle pdf.js's internal dynamic `im
 offscreen canvases are released to bound memory. See [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md)
 for the full rationale, and the smoke coverage in `test/electron-smoke.js` (canvas + aligned text layer +
 copy + find).
+
+**Robustness — surviving a tab switch.** pdf.js *transfers* (detaches) the input byte buffer to its
+worker on first load, which empties the renderer's copy. So re-mounting the same PDF — e.g. after
+switching to another tab and back — handed the engine an empty buffer and rendered nothing (a blank
+page). `mount!` now passes a fresh copy each time (`(.slice bytes 0)`), keeping the path-keyed cached
+original pristine for every re-mount; the byte cache itself is untouched.

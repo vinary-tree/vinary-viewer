@@ -22,6 +22,8 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-content-pdf { padding: 0; overflow: hidden; }   /* RETIRED with the native PDF view (ADR 0013) — now unused */
 /* web (http) view: the native WebContentsView is edge-to-edge — drop the document reading gutter */
 .vv-content.vv-content-web { padding: 0; overflow: hidden; }
+/* PDF view: edge-to-edge (drop the reading gutter) but KEEP overflow:auto for vertical page scrolling */
+.vv-content.vv-content-pdf-flush { padding: 0; }
 
 /* in-renderer PDF view (pdf.js): pages render to <canvas> inside the scrolling .vv-content, with a
    transparent text layer (real selection/find/copy) + a link layer overlaid — parity with markdown. */
@@ -190,6 +192,31 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
   border-left: 1px solid var(--vv-border); border-top-left-radius: 4px; }
 .vv-modeline-mode { color: var(--vv-head1); font-weight: 700; }
 .vv-modeline-seq { color: var(--vv-head2); font-family: "Fira Code", monospace; }
+
+/* ----- bottom bar: the always-visible zoom control (right-aligned) ----- */
+.vv-bottombar { flex: 0 0 auto; display: flex; justify-content: flex-end; align-items: center;
+  padding: 2px 8px; background: var(--vv-bg2); border-top: 1px solid var(--vv-border); }
+.vv-zoom { position: relative; display: flex; align-items: center; gap: 2px; }
+.vv-zoom-btn { background: transparent; color: var(--vv-fg); border: none; cursor: pointer;
+  padding: 1px 7px; border-radius: 3px; font-size: 14px; line-height: 1; }
+.vv-zoom-btn:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-zoom-field { position: relative; display: flex; align-items: center; background: var(--vv-bg1);
+  border: 1px solid var(--vv-border); border-radius: 3px; padding: 0 2px 0 4px; }
+.vv-zoom-field:focus-within { border-color: var(--vv-head1); }
+.vv-zoom-input { width: 32px; background: transparent; color: var(--vv-fg); border: none; outline: none;
+  text-align: right; font-size: 12px; font-family: "Fira Code", monospace; padding: 1px 0; }
+.vv-zoom-pct { color: var(--vv-fg-dim); font-size: 11px; padding-right: 2px; }
+.vv-zoom-caret { background: transparent; color: var(--vv-fg-dim); border: none; cursor: pointer;
+  padding: 0 2px; font-size: 10px; line-height: 1; }
+.vv-zoom-caret:hover { color: var(--vv-head1); }
+/* preset dropdown — opens UPWARD (the bar sits at the bottom of the window) */
+.vv-zoom-menu { position: absolute; bottom: calc(100% + 4px); right: 0; z-index: 30; margin: 0;
+  padding: 4px 0; list-style: none; min-width: 64px; background: var(--vv-bg2);
+  border: 1px solid var(--vv-border); border-radius: 6px; box-shadow: 0 -6px 20px rgba(0,0,0,0.4); }
+.vv-zoom-opt { padding: 3px 12px; cursor: pointer; font-size: 12px; color: var(--vv-fg);
+  font-family: "Fira Code", monospace; text-align: right; white-space: nowrap; }
+.vv-zoom-opt:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-zoom-opt-sel { color: var(--vv-head1); }
 
 /* toolbar */
 .vv-toolbar { display: flex; align-items: center; flex: 0 0 auto; padding: 4px 10px;

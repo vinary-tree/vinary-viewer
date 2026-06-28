@@ -17,6 +17,7 @@
             [vinary.ui.sidebar :as sidebar]
             [vinary.ui.palette :as palette]
             [vinary.ui.menubar :as menubar]
+            [vinary.ui.zoombar :as zoombar]
             [vinary.ui.context-menu :as ctx-menu]
             [vinary.ui.preview-context :as preview-ctx]
             [vinary.ui.preview-navigation :as preview-nav]
@@ -315,42 +316,48 @@
    On mount/update we send show+url+bounds; a ResizeObserver + window resize keep bounds synced; on unmount
    we hide the view.
 
-   Because the native view always paints above the DOM, a DOM overlay cannot draw over it. A full-window
-   MODAL (settings/about/keybinding dialog or the command palette) hides the view outright. A transient
-   MENU / context-menu instead FREEZES the page: we capture it to an inert raster (vv:http-snapshot), show
-   that <img> here, and hide the native view — so the menu floats over the still page — then restore the
-   live view (and drop the snapshot) once the overlay closes."
+   Because the native view always paints above the DOM, NO DOM overlay can draw over it. So for ANY overlay
+   (menu, context-menu, dialog, or palette) we FREEZE the page: instantly swap in a PRE-CACHED raster pushed
+   from main (vv:http-snapshot-ready) and hide the native view — the overlay then floats over the still,
+   present page (dimmed under a dialog's backdrop). No capture on the open path → instant, no flash, never
+   blank. The live view is restored (and the snapshot dropped) once every overlay closes."
   [_url]
-  (let [node    (atom nil)
-        obs     (atom nil)
-        snap    (r/atom nil)          ; frozen-page data-URL while a menu/context-menu is open, else nil
-        modal?  (atom false)
-        menu?   (atom false)
-        vv      (fn [] (.-vv js/window))
-        show!   (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
-        hide!   (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
-        bounds! (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
-        sync!   (fn [this]
-                  (let [url (second (r/argv this))]
-                    (cond
-                      ;; a full-window dialog/palette covers the content — hide the native view entirely
-                      @modal? (do (hide!) (when @snap (reset! snap nil)))
-                      ;; a menu/context-menu is open — capture, then hide the view so the DOM menu shows over
-                      ;; the still image (skip if already frozen; re-check on resolve in case it closed first)
-                      @menu?  (when (not @snap)
-                                (when-let [^js v (vv)]
-                                  (when (.-httpSnapshot v)
-                                    (-> (.httpSnapshot v)
-                                        (.then (fn [data]
-                                                 (when (and data @menu? (not @modal?))
-                                                   (reset! snap data)
-                                                   (hide!))))))))
-                      ;; nothing open — show the live view on top, then drop the (now-occluded) snapshot
-                      :else   (do (show! url) (when @snap (reset! snap nil))))))]
+  (let [node     (atom nil)
+        obs      (atom nil)
+        snap     (r/atom nil)         ; the frozen-page <img> shown while an overlay is open (else nil)
+        pre-snap (atom nil)           ; latest snapshot pushed from main — swapped into `snap` instantly
+        unsub    (atom nil)           ; onHttpSnapshotReady unsubscribe
+        last-url (atom nil)
+        overlay? (atom false)
+        vv       (fn [] (.-vv js/window))
+        show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
+        hide!    (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
+        bounds!  (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
+        freeze!  (fn []
+                   ;; instant path: a pushed snapshot is already cached → swap it in + hide the native view.
+                   (if-let [data @pre-snap]
+                     (do (reset! snap data) (hide!))
+                     ;; cold start (no push yet): pull main's cache via invoke, then hide (only if still open).
+                     (if-let [^js v (vv)]
+                       (if (.-httpSnapshot v)
+                         (-> (.httpSnapshot v)
+                             (.then (fn [data] (when @overlay? (when data (reset! snap data)) (hide!)))))
+                         (hide!))
+                       (hide!))))
+        sync!    (fn [this]
+                   (let [url (second (r/argv this))]
+                     ;; navigation → drop a stale snapshot so an overlay can't freeze the previous page
+                     (when (not= url @last-url) (reset! last-url url) (reset! pre-snap nil) (reset! snap nil))
+                     (if @overlay?
+                       (when-not @snap (freeze!))
+                       (do (show! url) (when @snap (reset! snap nil))))))]
     (r/create-class
      {:display-name "vv-web-host"
       :component-did-mount
       (fn [this]
+        (when-let [^js v (vv)]
+          (when (.-onHttpSnapshotReady v)
+            (reset! unsub (.onHttpSnapshotReady v (fn [data] (reset! pre-snap data))))))
         (sync! this)
         (when (exists? js/ResizeObserver)
           (let [o (js/ResizeObserver. (fn [_] (bounds!)))] (.observe o @node) (reset! obs o)))
@@ -359,12 +366,11 @@
       :component-did-update   (fn [this] (sync! this))
       :component-will-unmount (fn [_]
                                 (hide!)
+                                (when-let [u @unsub] (u))
                                 (when @obs (.disconnect ^js @obs))
                                 (.removeEventListener js/window "resize" bounds!))
       :reagent-render         (fn [_url]
-                                (reset! modal? @(rf/subscribe [:ui/modal-open?]))
-                                (reset! menu? (boolean (or @(rf/subscribe [:ui/menu])
-                                                           @(rf/subscribe [:ui/context-menu]))))
+                                (reset! overlay? @(rf/subscribe [:ui/overlay-open?]))
                                 [:div.vv-web-host {:ref (fn [el] (reset! node el))}
                                  (when @snap [:img.vv-web-snap {:src @snap}])])})))
 
@@ -564,12 +570,18 @@
         uri  @(rf/subscribe [:ui/active-uri])
         vs?  @(rf/subscribe [:ui/active-view-source?])]
     [:div.vv-content
-     {:class (when (uri/http? uri) "vv-content-web")   ; web view is edge-to-edge (no document gutter)
+     {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
+                   (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
+                   :else                                           nil)
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
        (nil? uri)                  [:div.vv-empty "New Tab"]
        (uri/http? uri)             [web-host uri]
+       ;; local .html → render live in the web view via its file:// URL (keyed by stamp so a live-refresh
+       ;; remounts the host and reloads the page), not shown as escaped source
+       (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [web-host (media/path->file-url (:doc/path doc))]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        (= "pdf" (:doc/kind doc))   ^{:key (str "pdf:" (:doc/path doc))}
                                    [pdf-view (:doc/path doc) (:doc/stamp doc)]
@@ -817,7 +829,8 @@
       [content-view]
       [find-bar]]
      [status-bar]
-     [mode-line]]]
+     [mode-line]
+     [zoombar/zoombar]]]
    [palette/command-palette]
    [ctx-menu/context-menu]
    [settings-ui/dialog]

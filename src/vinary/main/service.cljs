@@ -92,6 +92,11 @@
       (= "image" kind)
       (.send wc "vv:content" (clj->js {:path path :kind "image" :stamp stamp}))
 
+      ;; html — render live in the web view (loaded by its file:// URL), not shown as escaped source.
+      ;; Live-refresh re-sends with a new stamp → content-view remounts the web host → the page reloads.
+      (= "html" kind)
+      (.send wc "vv:content" (clj->js {:path path :kind "html" :stamp stamp}))
+
       ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
       ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)

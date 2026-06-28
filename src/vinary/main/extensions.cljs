@@ -1,7 +1,12 @@
 (ns vinary.main.extensions
   "Scoped Chrome-extension runtime (GPL-free). Electron 42 provides the extension APIs natively
    (chrome.runtime/storage/action/tabs/i18n + content scripts + MV3 service workers — verified by the
-   spike), so we DON'T ship any chrome.* shim or session preloads. We add only: Web-Store install +
+   spike). For the APIs Electron does NOT implement (windows/webNavigation/cookies/notifications/contextMenus/
+   privacy) we inject an inert chrome.* polyfill into extension PAGE/popup main worlds via a frame session
+   preload (resources/ext-frame-preload.js + ext-chrome-polyfill.js). NB: Electron 42 does not run session
+   preloads inside extension BACKGROUND service workers, so an extension whose SW touches those APIs (e.g.
+   LastPass) is not fully supported yet — the SW preload is registered as a forward-compatible no-op
+   (ADR-0015). We add: Web-Store install +
    periodic auto-update (electron-chrome-web-store, MIT), reading each extension's MANIFEST to drive a
    first-party toolbar (Electron renders no browser-action UI), and a popup WebContentsView host. All
    loading happens on the persistent web session (persist:vinary-web). Provenance: Web-Store-only
@@ -20,6 +25,8 @@
 
 (defn- ext-session [] (.fromPartition session "persist:vinary-web"))
 (defn- extensions-path [] (path/join (.getPath app "userData") "Extensions"))
+(defn- sw-preload-path    [] (path/join js/__dirname ".." ".." "resources" "ext-sw-preload.js"))
+(defn- frame-preload-path [] (path/join js/__dirname ".." ".." "resources" "ext-frame-preload.js"))
 
 ;; ---- icon reading (untrusted manifest → magic-byte sniff + size cap, render as a data URL) ----
 (defn- sniff-mime [^js buf]
@@ -110,6 +117,15 @@
     ;; register load/unload listeners BEFORE installChromeWebStore (which loads stored extensions)
     (.on ^js (.-extensions sess) "extension-loaded"   (fn [_e ^js ext] (cache-path! ext) (push-state!)))
     (.on ^js (.-extensions sess) "extension-unloaded" (fn [_e ^js _ext] (push-state!)))
+    ;; chrome.* polyfill for the APIs Electron lacks (windows/webNavigation/cookies/…), registered BEFORE
+    ;; extensions load. The FRAME preload polyfills extension popups/pages (works). The SERVICE-WORKER preload
+    ;; is a forward-compatible no-op on Electron 42 — session SW preloads don't run inside extension
+    ;; background workers, so an extension whose SW touches those APIs (e.g. LastPass) isn't fully supported
+    ;; yet; it stays registered so a future Electron that runs them fixes it automatically (ADR-0015).
+    (when-not @inited
+      (try (.registerPreloadScript sess #js {:type "service-worker" :filePath (sw-preload-path)})
+           (.registerPreloadScript sess #js {:type "frame"          :filePath (frame-preload-path)})
+           (catch :default e (js/console.error "[extensions] chrome.* polyfill preload registration failed" e))))
     (-> (installChromeWebStore
          #js {:session sess
               :extensionsPath (extensions-path)

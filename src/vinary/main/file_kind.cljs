@@ -5,6 +5,7 @@
 (def ^:private markdown-exts #{".md" ".markdown" ".mdx"})
 (def ^:private image-exts #{".png" ".jpg" ".jpeg" ".gif" ".svg" ".webp" ".bmp" ".ico" ".avif"})
 (def ^:private mermaid-exts #{".mmd" ".mermaid"})
+(def ^:private html-exts #{".html" ".htm" ".xhtml"})   ; rendered live in the web view, not shown as source
 (def ^:private source-diagram-exts
   #{".d2" ".puml" ".plantuml" ".pu" ".iuml" ".wsd" ".dot" ".gv" ".graphviz"})
 
@@ -21,6 +22,7 @@
       (contains? markdown-exts ext) "markdown"
       (contains? image-exts ext) "image"
       (= ".pdf" ext) "pdf"
+      (contains? html-exts ext) "html"
       (contains? mermaid-exts ext) "mermaid"
       (or (contains? source-diagram-exts ext)
           (source? file-path)) "source"

@@ -11,6 +11,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
+            [vinary.app.zoom :as zoom]
             [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.app.fx]
             [vinary.input.fx]))
@@ -566,10 +567,29 @@
 (rf/reg-event-fx
  :view/zoom
  (fn [{:keys [db]} [_ dir]]
-   ;; context-aware: a PDF zooms its in-renderer view; everything else zooms the Chromium webview
-   (if (= "pdf" (some-> (nav/active-path db) (#(ds/doc-attr (ds/snapshot) % :doc/kind))))
-     {:fx [[:dispatch [:pdf/zoom (case dir 1 :in -1 :out :reset)]]]}
-     {:fx [[:vv/zoom dir]]})))
+   ;; context-aware: PDF → in-renderer pdf scale; web tab → the native web view; else → app window
+   (case (zoom/context db)
+     :pdf    {:fx [[:dispatch [:pdf/zoom (case dir 1 :in -1 :out :reset)]]]}
+     :web    {:fx [[:vv/http-zoom dir]]}
+     :window {:fx [[:vv/zoom dir]]})))
+
+(rf/reg-event-fx
+ :view/zoom-set
+ (fn [{:keys [db]} [_ pct]]
+   ;; absolute zoom to `pct`% (zoom-bar input / preset), routed to the active surface
+   (let [f (/ (max 10 (min 800 pct)) 100.0)]
+     (case (zoom/context db)
+       :pdf    {:db (-> db (assoc-in [:ui :pdf :scale] (pdf-layout/clamp-zoom f)) (assoc-in [:ui :pdf :fit] nil))}
+       :web    {:fx [[:vv/http-zoom-set f]]}
+       :window {:fx [[:vv/zoom-set f]]}))))
+
+;; main reports the resolved app-window / web-view zoom factor so the bar shows the live %
+(rf/reg-event-db
+ :view/zoom-changed
+ (fn [db [_ p]]
+   (let [m (js->clj p :keywordize-keys true)]
+     (assoc-in db [:ui (if (= "web" (:context m)) :web-zoom :window-zoom)] (or (:factor m) 1.0)))))
+
 (rf/reg-event-fx :view/devtools    (fn [_ _] {:fx [[:vv/devtools]]}))
 
 ;; ---- in-renderer PDF view-state (zoom / fit / dark-invert); fit + invert persist in settings.edn ----
@@ -579,6 +599,12 @@
    {:db (-> db
             (assoc-in [:ui :pdf :scale] (pdf-layout/zoom-step (get-in db [:ui :pdf :scale] 1.0) dir))
             (assoc-in [:ui :pdf :fit] nil))}))   ; an explicit zoom overrides the fit mode
+
+;; the pdf engine reports its fit-resolved scale back so the zoom bar shows the live % even while fitting
+;; (keeps :fit so the View ▸ Fit radio stays marked)
+(rf/reg-event-db
+ :pdf/scale-resolved
+ (fn [db [_ scale]] (assoc-in db [:ui :pdf :scale] scale)))
 
 (rf/reg-event-fx
  :pdf/fit
@@ -671,7 +697,7 @@
 (defn- ext-config-edn
   "Serialize the persisted extension/ad-block prefs (extensions.edn) from app-db."
   [db]
-  (pr-str {:adblock    (get-in db [:ui :adblock])
+  (pr-str {:adblock    (select-keys (get-in db [:ui :adblock]) [:enabled? :lists :last-updated :update-every-hours])
            :extensions {:enabled?     (get-in db [:ui :extensions :enabled?])
                         :disabled-ids (->> (get-in db [:ui :extensions :installed])
                                            (remove :enabled?) (map :id) set)}}))
@@ -698,6 +724,17 @@
 
 (rf/reg-event-db :ext/install-result (fn [db [_ p]] (assoc-in db [:ui :extensions :install-status] (js->clj p :keywordize-keys true))))
 (rf/reg-event-db :ext/update-result  (fn [db [_ p]] (assoc-in db [:ui :extensions :update-status]  (js->clj p :keywordize-keys true))))
+
+(rf/reg-event-fx
+ :adblock/status-received
+ (fn [{:keys [db]} [_ p]]
+   (let [m   (js->clj p :keywordize-keys true)
+         db' (cond-> (assoc-in db [:ui :adblock :status] (keyword (:status m)))   ; clj->js stringified the kw
+               (:last-updated m) (assoc-in [:ui :adblock :last-updated] (:last-updated m)))]
+     ;; persist only when a real update landed (:last-updated present); ext-config-edn filters out the
+     ;; transient :status so "updating" can never leak into extensions.edn
+     (cond-> {:db db'}
+       (:last-updated m) (assoc :fx [[:vv/save-ext-config (ext-config-edn db')]])))))
 
 (rf/reg-event-fx :extensions/install        (fn [_ [_ s]]  {:fx [[:vv/ext-install s]]}))
 (rf/reg-event-fx :extensions/remove         (fn [_ [_ id]] {:fx [[:vv/ext-remove id]]}))

@@ -60,8 +60,10 @@ runtime boots with the user's saved prefs, not defaults.
 ## Consequences
 
 - **Apache-2.0 stays clean** — no GPL dependency in the shipped binary.
-- The implementation is **far simpler** than planned (no shim/preloads/bus): five small main namespaces
-  (`ext-util`, `ext-config`, `adblock`, `extensions`, `ext-popup`) + two UI namespaces.
+- The implementation is **far simpler** than planned (no GPL bus / no SW message-routing): five small main
+  namespaces (`ext-util`, `ext-config`, `adblock`, `extensions`, `ext-popup`) + two UI namespaces — plus a
+  small **frame** chrome.* polyfill preload added post-ship for the page/popup APIs Electron lacks (see
+  Documented limitations).
 - Verified end-to-end by `test/extensions-smoke.js`: loadExtension → content-script injection → popup
   with native `chrome.runtime/storage/action`, plus the ad-blocker dropping a known ad host.
 - **The `vvext:*` channels and shim files in the design plan were never built** — superseded by the spike.
@@ -72,7 +74,17 @@ runtime boots with the user's saved prefs, not defaults.
   in Electron. Cloud-login managers' **autofill** (content script) + **vault popup** work.
 - **Dynamic action badge/icon** (`chrome.action.setBadgeText/setIcon` at runtime) is a no-op for display
   — Electron has no toolbar to render it; our toolbar shows the **static manifest icon**.
-- Some MV3 background APIs (`offscreen`, `nativeMessaging`, `sidePanel`, `webNavigation`) are absent.
+- **Missing chrome.* surfaces (post-ship finding).** Electron does not implement `chrome.windows`,
+  `webNavigation`, `cookies`, `notifications`, `contextMenus`, `privacy` (nor `offscreen`/`nativeMessaging`/
+  `sidePanel`). We inject an inert chrome.* polyfill (`resources/ext-chrome-polyfill.js`) into extension
+  PAGE/popup main worlds via a **frame** session preload (`ext-frame-preload.js`, `contextBridge.execute­
+  InMainWorld`) so popups/options pages that touch them don't crash — verified by `test/extensions-smoke.js`.
+  **But Electron 42 does not run session preloads inside extension BACKGROUND service workers** (verified via
+  a filesystem-marker spike), so an extension whose SW touches those APIs at startup — e.g. **LastPass** →
+  `chrome.windows.onFocusChanged` — still fails SW registration, and its popup (which talks to that worker)
+  stays unfilled. `ext-sw-preload.js` is registered as a **forward-compatible no-op** (a future Electron that
+  runs SW preloads in extension workers fixes it automatically). Patching the extension's SW file on disk was
+  **rejected** (modifying a third-party password manager's code — security/integrity/auto-update fragility).
 - Auto-update polls Google's **unofficial** update endpoint (via `electron-chrome-web-store`, startup +
   ~5h) with CRX3 verification — see the threat model.
 

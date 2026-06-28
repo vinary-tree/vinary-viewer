@@ -265,12 +265,19 @@ explicit.
   Node/OS API.
 - **Remote content stays in the native view.** Remote pages are *never* loaded into the first-party app
   renderer; the analysis of §1–§5 (which assumes the renderer loads only the local bundle) is unaffected.
-- **Menu snapshots are inert rasters.** Because the native view always paints *above* the DOM, a menu-bar
-  dropdown (or context menu) is shown over the page by briefly displaying a `capturePage` **still image**
-  (`vv:http-snapshot`) in the first-party renderer while the native view hides, then restoring the live
-  view on close. That image is a flat PNG — **no script, DOM, or interactivity** — carrying only pixels the
-  user was already viewing, so it does **not** execute or re-host remote content in the renderer and does
-  not extend this trust boundary.
+- **Local HTML runs as a live page in the web session.** Opening a local `.html`/`.htm`/`.xhtml` file
+  renders it in the same isolated web view via its `file://` URL (it **executes scripts**) rather than as
+  escaped source. This is the **same isolation/session** as remote pages (`persist:vinary-web`,
+  `contextIsolation: true`, `nodeIntegration: false`, no `window.vv`), and the ad-blocker + extensions
+  apply. So an untrusted local `.html` carries the trust posture of *remote* content (its scripts run, in
+  the sandboxed web view), not that of a trusted first-party document.
+- **Overlay snapshots are inert rasters.** Because the native view always paints *above* the DOM, ANY DOM
+  overlay (menu, context menu, or a modal dialog) is shown over the page by displaying a `capturePage`
+  **still image** in the first-party renderer while the native view hides, then restoring the live view on
+  close. The image is captured proactively (after load + on scroll-settle) and pushed to the renderer
+  (`vv:http-snapshot-ready`) so the swap is instant. It is a flat JPEG — **no script, DOM, or
+  interactivity** — carrying only pixels the user was already viewing, so it does **not** execute or re-host
+  remote content in the renderer and does not extend this trust boundary.
 
 ### New attack surface (extensions) — and its mitigations
 

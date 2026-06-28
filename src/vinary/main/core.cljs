@@ -62,7 +62,7 @@
     (let [prefs (ext-config/load-config)]
       (ext-popup/init! win)
       (extensions/init! win prefs)
-      (adblock/init! (:adblock prefs)))
+      (adblock/init! win (:adblock prefs)))
     (web/init! win)
     (shell/init! win)
     (reset! main-window win)

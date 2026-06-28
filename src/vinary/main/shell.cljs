@@ -44,4 +44,10 @@
              (let [d (js->clj dir)]
                (.setZoomFactor c (cond (= d 0)  1.0
                                        (pos? d) (min 3.0 (+ (.getZoomFactor c) 0.1))
-                                       :else    (max 0.4 (- (.getZoomFactor c) 0.1))))))))))
+                                       :else    (max 0.4 (- (.getZoomFactor c) 0.1))))
+               (.send c "vv:zoom-changed" (clj->js {:context "window" :factor (.getZoomFactor c)}))))))
+    (.on ipcMain "vv:zoom-set"
+         (fn [_e f]
+           (when-let [^js c (wc)]
+             (.setZoomFactor c (max 0.4 (min 3.0 (js->clj f))))
+             (.send c "vv:zoom-changed" (clj->js {:context "window" :factor (.getZoomFactor c)})))))))

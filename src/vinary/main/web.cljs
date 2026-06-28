@@ -8,12 +8,37 @@
   (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard]]
             ["path" :as path]))
 
-(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil}))
+(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false}))
 (defonce ^:private inited (atom false))
 (defonce ^:private last-history-nav (atom {:dir nil :time 0}))
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
 (defn- app-wc    []   (some-> ^js (:win @state) .-webContents))
+
+;; ---- pre-cached page snapshot ------------------------------------------------------------------
+;; The native view always paints above the DOM, so an overlay is shown by hiding the view and painting this
+;; raster in the DOM. We capture it PROACTIVELY (after load + after scroll, while the page is live + visible)
+;; and push it to the app renderer, so opening a menu/dialog is a synchronous swap — no capture on the
+;; critical path, no behind-then-front flash.
+(defn- capture!
+  "Capture the live, visible web page to a JPEG data-URL; cache it and push it to the app renderer."
+  []
+  (when-let [^js v (:view @state)]
+    (when (and (:visible? @state) (.-webContents v))
+      (-> (.capturePage ^js (.-webContents v))
+          (.then (fn [^js img]
+                   (let [^js buf (.toJPEG img 70)
+                         data    (str "data:image/jpeg;base64," (.toString buf "base64"))]
+                     (swap! state assoc :snapshot data)
+                     (when-let [^js awc (app-wc)] (.send awc "vv:http-snapshot-ready" data)))))
+          (.catch (fn [_] nil))))))
+
+(defonce ^:private capture-timer (atom nil))
+(defn- capture-soon!
+  "Debounced capture! — coalesces scroll frames / repeated shows and gives the page a moment to paint."
+  []
+  (when-let [t @capture-timer] (js/clearTimeout t))
+  (reset! capture-timer (js/setTimeout capture! 150)))
 
 (defn- send-history-nav! [dir]
   (let [now (.now js/Date)
@@ -84,6 +109,7 @@
         (.setVisible v false)
         (.on wc "did-navigate"          relay)
         (.on wc "did-navigate-in-page"  relay)
+        (.on wc "did-stop-loading"      (fn [_] (capture-soon!)))   ; load done → refresh the frozen-page snapshot
         (attach-web-input! wc)
         ;; right-click → a Copy context menu (the native view paints over the DOM, so this is a native
         ;; Electron menu rather than the renderer's themed menu; same affordance as the markdown preview).
@@ -112,15 +138,17 @@
   (let [^js v (ensure-view! win)]
     (set-bounds! v bounds)
     (.setVisible v true)
+    (swap! state assoc :visible? true)
     (when (not= url (:url @state))
       (.loadURL ^js (.-webContents v) url)
-      (swap! state assoc :url url))))
+      (swap! state assoc :url url :snapshot nil))   ; new page → invalidate the cached snapshot
+    (capture-soon!)))                               ; keep the frozen-page snapshot fresh for the next overlay
 
-(defn hide! [] (when-let [^js v (:view @state)] (.setVisible v false)))
+(defn hide! [] (when-let [^js v (:view @state)] (.setVisible v false) (swap! state assoc :visible? false)))
 
 (defn init! [^js win]
   ;; a recreated window invalidates the old view (it belonged to the closed window)
-  (when (not= win (:win @state)) (swap! state assoc :view nil :url nil))
+  (when (not= win (:win @state)) (swap! state assoc :view nil :url nil :snapshot nil :visible? false))
   (swap! state assoc :win win)
   (attach-app-command! win)
   (when-not @inited
@@ -131,20 +159,43 @@
     (.on ipcMain "vv:http-hide"   (fn [_e] (hide!)))
     (.on ipcMain "vv:http-bounds"
          (fn [_e ^js p] (set-bounds! (:view @state) (:bounds (js->clj p :keywordize-keys true)))))
-    ;; capture the live page to an inert raster (PNG data-URL) so the renderer can freeze it under a menu
-    ;; while the native view hides — the only way a DOM overlay shows over the always-on-top web view.
+    ;; zoom the web PAGE (the native view's own webContents), not the app chrome; report the factor back
+    (.on ipcMain "vv:http-zoom"
+         (fn [_e dir]
+           (when-let [^js v (:view @state)]
+             (let [^js c (.-webContents v)
+                   d (js->clj dir)
+                   f (cond (= d 0)  1.0
+                           (pos? d) (min 3.0 (+ (.getZoomFactor c) 0.1))
+                           :else    (max 0.4 (- (.getZoomFactor c) 0.1)))]
+               (.setZoomFactor c f)
+               (when-let [^js awc (app-wc)] (.send awc "vv:zoom-changed" (clj->js {:context "web" :factor f})))))))
+    (.on ipcMain "vv:http-zoom-set"
+         (fn [_e f]
+           (when-let [^js v (:view @state)]
+             (let [^js c (.-webContents v)
+                   nf (max 0.4 (min 3.0 (js->clj f)))]
+               (.setZoomFactor c nf)
+               (when-let [^js awc (app-wc)] (.send awc "vv:zoom-changed" (clj->js {:context "web" :factor nf})))))))
+    ;; cold-cache fallback: return the latest cached snapshot (the proactive capture+push keeps it fresh);
+    ;; capture on-demand only if nothing is cached yet and the page is live-visible.
     (.handle ipcMain "vv:http-snapshot"
              (fn [_e]
-               (let [^js v (:view @state)]
-                 (if (and v (.-webContents v))
-                   (-> (.capturePage ^js (.-webContents v))
-                       (.then (fn [^js img] (.toDataURL img)))
-                       (.catch (fn [_] nil)))
-                   (js/Promise.resolve nil)))))
+               (or (:snapshot @state)
+                   (let [^js v (:view @state)]
+                     (if (and v (:visible? @state) (.-webContents v))
+                       (-> (.capturePage ^js (.-webContents v))
+                           (.then (fn [^js img]
+                                    (let [^js buf (.toJPEG img 70)]
+                                      (str "data:image/jpeg;base64," (.toString buf "base64")))))
+                           (.catch (fn [_] nil)))
+                       (js/Promise.resolve nil))))))
     (.on ipcMain "vv:http-toc-goto"
          (fn [_e ^js id] (when-let [^js v (:view @state)] (.send (.-webContents v) "vv:web-scroll-to" id))))
     ;; ---- web view (its preload) → app renderer (relayed) ----
     (.on ipcMain "vv:web-toc"
          (fn [_e ^js headings] (when-let [^js awc (app-wc)] (.send awc "vv:web-toc" headings))))
     (.on ipcMain "vv:web-active-heading"
-         (fn [_e ^js id] (when-let [^js awc (app-wc)] (.send awc "vv:web-active-heading" id))))))
+         (fn [_e ^js id]
+           (when-let [^js awc (app-wc)] (.send awc "vv:web-active-heading" id))
+           (capture-soon!)))))   ; page scrolled → refresh the frozen-page snapshot

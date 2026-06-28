@@ -34,9 +34,7 @@
             {:label "Zoom Out"       :access-key "o" :accel "Ctrl+-" :event [:view/zoom -1]}
             {:label "Reset Zoom"     :access-key "r" :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
-            {:label "Fit Width (PDF)"   :access-key "w" :event [:pdf/fit :width]}
-            {:label "Fit Page (PDF)"    :access-key "p" :event [:pdf/fit :page]}
-            {:label "Actual Size (PDF)" :access-key "a" :event [:pdf/fit :actual]}
+            {:submenu "Fit" :access-key "f" :radio :sub/fit}
             {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle]}
             :sep
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
@@ -81,6 +79,10 @@
                                       :sep
                                       {:label "Clear Recent" :event [:recent/clear]})
                                 [{:label "No recent files" :event [:menu/close]}]))
+               :sub/fit     (let [cur (get-in db [:ui :pdf :fit])]
+                              [{:label "Fit Width"   :access-key "w" :selected? (= :width cur)  :event [:pdf/fit :width]}
+                               {:label "Fit Page"    :access-key "p" :selected? (= :page cur)   :event [:pdf/fit :page]}
+                               {:label "Actual Size" :access-key "a" :selected? (= :actual cur) :event [:pdf/fit :actual]}])
                nil)]
     (access/annotate-rows (or rows []) submenu-preferred-keys)))
 

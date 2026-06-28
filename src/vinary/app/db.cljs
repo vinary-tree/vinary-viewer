@@ -49,6 +49,8 @@
         :find {:visible? false :query "" :count 0 :idx 0}
         ;; in-renderer PDF view-state (zoom scale / fit mode / dark-invert); fit + invert persist in settings.edn
         :pdf {:scale 1.0 :fit :width :invert? false}
+        :window-zoom 1.0   ; app-renderer (DOM views) zoom factor, reported back from main
+        :web-zoom 1.0      ; in-app web view's zoom factor, reported back from main
         ;; keybinding / modal / sequence state (ephemeral UI; the keymap itself lives in
         ;; vinary.input.keymap's atom, not here)
         ;; :mode starts :insert (matches the non-modal default keymap; the active keymap's
@@ -60,6 +62,6 @@
         ;; extension runtime + ad-blocking (state pushed from main over vv:ext-state / vv:ext-config)
         :extensions-open? false
         :extensions {:enabled? true :installed [] :install-status nil :update-status nil}
-        :adblock {:enabled? true :lists :ads-and-tracking :last-updated nil}
+        :adblock {:enabled? true :lists :ads-and-tracking :last-updated nil :status nil}
         ;; command palette / fuzzy finder
         :palette {:open? false :source :command :prefix "" :query "" :items [] :selected 0}}})

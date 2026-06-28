@@ -49,6 +49,12 @@ async function main() {
   await app.whenReady();
   const ses = session.fromPartition('persist:vv-ext-smoke');
 
+  // register the chrome.* polyfill preloads (ADR-0015) BEFORE loading the extension. The FRAME preload
+  // polyfills extension pages/popups (works); the service-worker preload is a forward-compatible no-op on
+  // Electron 42 (it does not run inside extension background workers — verified).
+  ses.registerPreloadScript({ type: 'service-worker', filePath: path.join(ROOT, 'resources', 'ext-sw-preload.js') });
+  ses.registerPreloadScript({ type: 'frame', filePath: path.join(ROOT, 'resources', 'ext-frame-preload.js') });
+
   // (1) load the unpacked MV3 extension
   const ext = await ses.extensions.loadExtension(EXT_DIR);
   assert.ok(ext && ext.id, 'session.extensions.loadExtension must return an extension');
@@ -73,6 +79,11 @@ async function main() {
   assert.strictEqual(popup.hasStorage, true, 'popup must have native chrome.storage');
   assert.strictEqual(popup.hasAction, true, 'popup must have native chrome.action');
   console.log('[ok] action popup loads with native chrome.runtime/storage/action');
+
+  // (3b) the frame preload's chrome.* polyfill defines the APIs Electron lacks (e.g. chrome.windows) in
+  // extension-page main worlds, so extension popups/options pages that touch them don't crash (ADR-0015)
+  assert.strictEqual(popup.frameWindows, true, 'the frame polyfill must define chrome.windows in extension pages');
+  console.log('[ok] frame polyfill defines chrome.windows in extension pages');
 
   // (4) ad-blocker blocks a known ad host (network-gated: building the engine fetches filter lists)
   if (await networkUp()) {

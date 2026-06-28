@@ -49,6 +49,7 @@ See [ipc-channels.md](ipc-channels.md).
 | `vinary.app.ds` | DataScript content cache, `:ds/rev` bridge, content-cache helpers. |
 | `vinary.app.nav` | Pure browser-tab and per-tab-history transforms over app-db. |
 | `vinary.app.uri` | URI/path normalization and local-vs-HTTP predicates. |
+| `vinary.app.zoom` | Pure context-aware zoom helpers (`context` → `:pdf`/`:web`/`:window`, `percent`, `presets`) shared by the zoom events and the `:view/zoom-percent` sub. |
 | `vinary.app.events` | re-frame events for content, tabs, history, settings, menu, tree, TOC, find, hints, shell commands. |
 | `vinary.app.fx` | re-frame effects for DataScript transactions, Markdown render, IPC, DOM/media/find/theme work. |
 | `vinary.app.subs` | Subscriptions over app-db and DataScript snapshots. |
@@ -103,7 +104,8 @@ See [ipc-channels.md](ipc-channels.md).
 | `vinary.ui.sidebar` | Sidebar shell and panel switching. |
 | `vinary.ui.tree` | Git file-tree view and filtering. |
 | `vinary.ui.context-menu` | Context menu targets and actions. |
-| `vinary.ui.menubar` | Custom menu bar and submenu behavior. |
+| `vinary.ui.menubar` | Custom menu bar and submenu behavior (incl. the `View ▸ Fit` radio submenu). |
+| `vinary.ui.zoombar` | The always-visible bottom zoom bar: − / editable % field / preset dropdown / +, dispatching the context-aware `[:view/zoom …]`/`[:view/zoom-set …]`. |
 | `vinary.ui.palette` | Command/file palette overlay. |
 | `vinary.ui.settings` | Preferences dialog. |
 | `vinary.ui.extensions` | Settings ▸ Extensions dialog: ad-blocking controls + the Chrome-extension manager. |

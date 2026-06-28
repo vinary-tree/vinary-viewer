@@ -47,10 +47,13 @@
                               (set! (.. m -GlobalWorkerOptions -workerSrc) url)
                               m))))))))
 
-(defn- get-document [bytes]
+(defn- get-document [^js bytes]
   (-> worker-init
       (.then (fn [^js m]
-               (-> (.getDocument m #js {:data                bytes
+               ;; pass a COPY: pdf.js transfers (detaches) the :data ArrayBuffer to its worker, which would
+               ;; empty the cached Uint8Array → a remount (tab switch away+back) would get a 0-length buffer
+               ;; and render nothing. Slicing keeps the cached original pristine for every (re)mount.
+               (-> (.getDocument m #js {:data                (.slice bytes 0)
                                         :cMapUrl              (pdf-asset "cmaps/")
                                         :cMapPacked           true
                                         :standardFontDataUrl  (pdf-asset "standard_fonts/")
@@ -275,15 +278,19 @@
     (swap! state assoc :observer obs)))
 
 (defn- apply-fit!
-  "Set :scale from a fit mode (:width | :page | :actual) against the scroller's content box."
+  "Set :scale from a fit mode (:width | :page | :actual) against the scroller's content box, and report the
+   resolved scale to app-db so the zoom bar shows the live % while fitting (re-frame's = check dedups the
+   echo render, so this can't loop)."
   [state mode]
   (let [{:keys [container sizes]} @state
         scroller (scroller-of container)]
     (when (and scroller (seq sizes))
       (let [[pw ph] (first sizes)
             cw (max 1 (- (.-clientWidth scroller) (* 2 gap)))
-            ch (max 1 (.-clientHeight scroller))]
-        (swap! state assoc :scale (layout/clamp-zoom (layout/fit-scale cw ch pw ph mode)) :fit mode)))))
+            ch (max 1 (.-clientHeight scroller))
+            sc (layout/clamp-zoom (layout/fit-scale cw ch pw ph mode))]
+        (swap! state assoc :scale sc :fit mode)
+        (rf/dispatch [:pdf/scale-resolved sc])))))
 
 (defn- rescale!
   "Re-layout placeholders + re-render visible pages at the current :scale, preserving the reading anchor
@@ -304,6 +311,29 @@
     (when observer
       (.disconnect observer)
       (doseq [^js div page-divs] (.observe observer div)))))
+
+(defn- refit!
+  "Re-resolve a fit-mode scale against the (resized) scroller and re-render only if it changed. No-op for
+   manual-zoom PDFs (no :fit)."
+  [state]
+  (when-let [mode (:fit @state)]
+    (let [old (:scale @state)]
+      (apply-fit! state mode)
+      (when (not= (:scale @state) old) (rescale! state)))))
+
+(defn- observe-resize!
+  "Re-fit the PDF when the scroller (content pane) resizes — e.g. the window grows/shrinks — so the page
+   size tracks the window. Debounced so a drag-resize doesn't thrash re-render; only fit-mode PDFs re-fit."
+  [state]
+  (when (and (exists? js/ResizeObserver) (not (:resize-observer @state)))
+    (when-let [scroller (scroller-of (:container @state))]
+      (let [timer (atom nil)
+            obs   (js/ResizeObserver.
+                   (fn [_]
+                     (when-let [t @timer] (js/clearTimeout t))
+                     (reset! timer (js/setTimeout (fn [] (when-not (:destroyed? @state) (refit! state))) 120))))]
+        (.observe obs scroller)
+        (swap! state assoc :resize-observer obs)))))
 
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------
 (defn mount!
@@ -332,6 +362,7 @@
                                       (when (:fit view-state) (apply-fit! state (:fit view-state)))
                                       (build-placeholders! state)
                                       (observe! state)
+                                      (observe-resize! state)
                                       (extract-outline! state doc path)))))))))
         (.catch (fn [e] (js/console.error "[pdf] load failed" e))))
     state))
@@ -365,4 +396,5 @@
   (swap! state assoc :destroyed? true)
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
   (when-let [^js obs (:observer @state)] (.disconnect obs))
+  (when-let [^js ro (:resize-observer @state)] (.disconnect ro))
   (when-let [^js doc (:doc @state)] (try (.destroy doc) (catch :default _ nil))))

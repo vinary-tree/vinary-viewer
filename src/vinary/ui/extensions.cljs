@@ -8,6 +8,14 @@
 (def ^:private subscribe rf/subscribe)
 (def ^:private dispatch  rf/dispatch)
 
+(defn- adblock-status-text [{:keys [status last-updated]}]
+  (case status
+    :updating "Updating…"
+    :ok       (str "✓ Updated" (when last-updated (str " " (.toLocaleTimeString (js/Date. last-updated)))))
+    :offline  "⚠ Offline — using cached lists"
+    :error    "✗ Update failed"
+    nil))
+
 (defn- adblock-section []
   (let [ab @(subscribe [:ui/adblock])]
     [:div.vv-ext-sect
@@ -23,7 +31,9 @@
       [:label.vv-ext-radio
        [:input {:type "radio" :name "vv-ab-lists" :checked (= (:lists ab) :ads-only)
                 :on-change #(dispatch [:adblock/set-lists :ads-only])}] " Ads only"]]
-     [:button.vv-btn {:on-click #(dispatch [:adblock/refresh])} "Update filter lists"]]))
+     [:div.vv-ext-row
+      [:button.vv-btn {:on-click #(dispatch [:adblock/refresh])} "Update filter lists"]
+      (when-let [s (adblock-status-text ab)] [:span.vv-ext-status s])]]))
 
 (defn- ext-section []
   (let [draft (r/atom "")]
