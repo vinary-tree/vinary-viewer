@@ -404,7 +404,16 @@ async function main() {
   assert.strictEqual(pdfLayout.noNativeHost, true, 'the native PDF host (.vv-pdf-host) must be retired');
   assert.ok(pdfLayout.canvasW > 0, 'PDF canvas must have a visible width');
   assert.strictEqual(pdfLayout.textOverlapsCanvas, true, 'PDF text layer must align over the canvas');
-  console.log('[ok] PDF renders in-DOM: canvas + aligned text layer (no native view)');
+  // the canvas must carry REAL painted pixels, not a blank/white surface (guards the white-page class —
+  // the render completes before this point, gated by the text-layer wait above)
+  const pdfNonWhite = await evalIn(win, `(() => {
+    const c = document.querySelector('.vv-pdf-doc .vv-pdf-page canvas.vv-pdf-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let p = 0; p < d.length; p += 4) { if (d[p] < 235 || d[p+1] < 235 || d[p+2] < 235) n++; }
+    return n;
+  })()`);
+  assert.ok(pdfNonWhite > 0, 'PDF canvas must contain rendered pixels (not a blank/white canvas)');
+  console.log('[ok] PDF renders in-DOM: canvas + aligned text layer + real pixels (no native view)');
 
   // B6 — now a PDF IS the active view → its Fit submenu + Invert PDF appear, and the Fit submenu works
   await dispatchWindowKey(win, 'v', { altKey: true });
