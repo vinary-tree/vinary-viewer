@@ -94,10 +94,15 @@ pdf.js parses on a worker but paints on the main thread, so a figure-dense page 
 `isEvalSupported true` speeds up shaded figures (see [feature 11](../features/11-native-pdf.md)).
 
 Pages that render **white** and only appear when DevTools opens (or after an action), then white out again,
-were a **GPU 2D-canvas compositing** bug — the page canvas is now CPU-backed (`willReadFrequently`) with
-`backgroundThrottling` off, which fixes it. If anything like it recurs, confirm GPU involvement by launching
-with `VV_SOFTWARE_GL=1` (forces software rendering); white pages vanishing under it points back at the GPU
-compositor.
+were the in-renderer **virtualization** stranding pages: docking DevTools (a resize) clears and re-lays-out
+the page canvases (`rescale!`), and a too-aggressive reliance on the `IntersectionObserver` re-firing — plus
+two async render races — could leave them blank until a scroll. The fix re-renders the visible pages
+**deterministically** after a resize/rescale (`render-visible!`) and guards the async renders with a
+generation epoch. (The page canvas is additionally CPU-backed via `willReadFrequently` with
+`backgroundThrottling` off — *defensive* hardening for GPU-compositing setups; note this machine (NVIDIA +
+Wayland) runs Electron with **software** compositing — `app.getGPUFeatureStatus().gpu_compositing` =
+`disabled_software` — so the bug here was the virtualization path, not the GPU compositor. `VV_SOFTWARE_GL=1`
+forces software rendering if you ever need to rule the GPU out.)
 
 ---
 
