@@ -179,6 +179,7 @@
 (defn- overlay-open-now? []
   (let [ui (:ui @rfdb/app-db)]
     (boolean (or (:menu ui) (:context-menu ui) (:settings-open? ui) (:about-open? ui)
+                 (:extensions-open? ui)
                  (get-in ui [:kbedit :open?]) (get-in ui [:palette :open?])
                  (get-in ui [:hints :active?])))))
 

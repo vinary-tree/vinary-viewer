@@ -39,6 +39,7 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. |
 | `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
 | `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web/set-bounds!` | Reposition the in-app HTTP view. |
+| `vv:http-snapshot` *(invoke)* | `httpSnapshot()` | none → PNG data-URL | `vinary.main.web` (`capturePage`→`toDataURL`) | Capture the live page to an inert raster so the renderer can freeze it under an open menu while the always-on-top native view hides. |
 | `vv:http-toc-goto` | `httpTocGoto(id)` | heading id string | `vinary.main.web` | Scroll the HTTP page to a heading. |
 | `vv:open-dialog` | `openDialog()` | none | `vinary.main.shell` | Open the multi-file native dialog. |
 | `vv:clipboard-write` | `copyText(text)` | string | `vinary.main.shell` | Copy text to the OS clipboard. |

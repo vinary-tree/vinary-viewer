@@ -265,6 +265,12 @@ explicit.
   Node/OS API.
 - **Remote content stays in the native view.** Remote pages are *never* loaded into the first-party app
   renderer; the analysis of §1–§5 (which assumes the renderer loads only the local bundle) is unaffected.
+- **Menu snapshots are inert rasters.** Because the native view always paints *above* the DOM, a menu-bar
+  dropdown (or context menu) is shown over the page by briefly displaying a `capturePage` **still image**
+  (`vv:http-snapshot`) in the first-party renderer while the native view hides, then restoring the live
+  view on close. That image is a flat PNG — **no script, DOM, or interactivity** — carrying only pixels the
+  user was already viewing, so it does **not** execute or re-host remote content in the renderer and does
+  not extend this trust boundary.
 
 ### New attack surface (extensions) — and its mitigations
 

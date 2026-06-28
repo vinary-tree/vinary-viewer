@@ -48,6 +48,17 @@
                            (get-in db [:ui :kbedit :open?])
                            (get-in db [:ui :extensions-open?])
                            (get-in db [:ui :palette :open?])))))
+(defn modal-open?
+  "True when a FULL-WINDOW modal overlay (settings/about/keybinding dialog or the command palette) is open —
+   as opposed to a transient menu-bar dropdown or context menu. web-host hides the native web view outright
+   for these (it must not paint over a dialog); for a menu it instead freezes a page snapshot."
+  [db]
+  (boolean (or (get-in db [:ui :settings-open?])
+               (get-in db [:ui :about-open?])
+               (get-in db [:ui :kbedit :open?])
+               (get-in db [:ui :extensions-open?])
+               (get-in db [:ui :palette :open?]))))
+(rf/reg-sub :ui/modal-open? (fn [db _] (modal-open? db)))
 (rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
 

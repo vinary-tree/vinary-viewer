@@ -311,19 +311,42 @@
                                 [:div.vv-pdf-host {:ref (fn [el] (reset! node el))}])})))
 
 (defn web-host
-  "A placeholder div over which the main-owned HTTP web view is positioned (mirrors pdf-host). On
-   mount/update we send show+url+bounds; a ResizeObserver + window resize keep bounds synced; on unmount
-   we hide the web view. The remote page renders inside the opaque native view on top of this div."
+  "A placeholder div over which the main-owned HTTP web view is positioned (the native view paints on top).
+   On mount/update we send show+url+bounds; a ResizeObserver + window resize keep bounds synced; on unmount
+   we hide the view.
+
+   Because the native view always paints above the DOM, a DOM overlay cannot draw over it. A full-window
+   MODAL (settings/about/keybinding dialog or the command palette) hides the view outright. A transient
+   MENU / context-menu instead FREEZES the page: we capture it to an inert raster (vv:http-snapshot), show
+   that <img> here, and hide the native view — so the menu floats over the still page — then restore the
+   live view (and drop the snapshot) once the overlay closes."
   [_url]
-  (let [node     (atom nil)
-        obs      (atom nil)
-        overlay? (atom false)
-        vv       (fn [] (.-vv js/window))
-        show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
-        hide!    (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
-        bounds!  (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
-        ;; the native view always paints above the DOM, so hide it while any menu/dialog overlay is open
-        sync!    (fn [this] (if @overlay? (hide!) (show! (second (r/argv this)))))]
+  (let [node    (atom nil)
+        obs     (atom nil)
+        snap    (r/atom nil)          ; frozen-page data-URL while a menu/context-menu is open, else nil
+        modal?  (atom false)
+        menu?   (atom false)
+        vv      (fn [] (.-vv js/window))
+        show!   (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
+        hide!   (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
+        bounds! (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
+        sync!   (fn [this]
+                  (let [url (second (r/argv this))]
+                    (cond
+                      ;; a full-window dialog/palette covers the content — hide the native view entirely
+                      @modal? (do (hide!) (when @snap (reset! snap nil)))
+                      ;; a menu/context-menu is open — capture, then hide the view so the DOM menu shows over
+                      ;; the still image (skip if already frozen; re-check on resolve in case it closed first)
+                      @menu?  (when (not @snap)
+                                (when-let [^js v (vv)]
+                                  (when (.-httpSnapshot v)
+                                    (-> (.httpSnapshot v)
+                                        (.then (fn [data]
+                                                 (when (and data @menu? (not @modal?))
+                                                   (reset! snap data)
+                                                   (hide!))))))))
+                      ;; nothing open — show the live view on top, then drop the (now-occluded) snapshot
+                      :else   (do (show! url) (when @snap (reset! snap nil))))))]
     (r/create-class
      {:display-name "vv-web-host"
       :component-did-mount
@@ -339,8 +362,11 @@
                                 (when @obs (.disconnect ^js @obs))
                                 (.removeEventListener js/window "resize" bounds!))
       :reagent-render         (fn [_url]
-                                (reset! overlay? @(rf/subscribe [:ui/overlay-open?]))
-                                [:div.vv-web-host {:ref (fn [el] (reset! node el))}])})))
+                                (reset! modal? @(rf/subscribe [:ui/modal-open?]))
+                                (reset! menu? (boolean (or @(rf/subscribe [:ui/menu])
+                                                           @(rf/subscribe [:ui/context-menu]))))
+                                [:div.vv-web-host {:ref (fn [el] (reset! node el))}
+                                 (when @snap [:img.vv-web-snap {:src @snap}])])})))
 
 (defn source-view
   "A read-only CodeMirror 6 view of a source file, highlighted via web-tree-sitter when a grammar is
@@ -538,7 +564,8 @@
         uri  @(rf/subscribe [:ui/active-uri])
         vs?  @(rf/subscribe [:ui/active-view-source?])]
     [:div.vv-content
-     {:on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
+     {:class (when (uri/http? uri) "vv-content-web")   ; web view is edge-to-edge (no document gutter)
+      :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
        (nil? uri)                  [:div.vv-empty "New Tab"]

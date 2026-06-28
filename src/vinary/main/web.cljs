@@ -131,6 +131,16 @@
     (.on ipcMain "vv:http-hide"   (fn [_e] (hide!)))
     (.on ipcMain "vv:http-bounds"
          (fn [_e ^js p] (set-bounds! (:view @state) (:bounds (js->clj p :keywordize-keys true)))))
+    ;; capture the live page to an inert raster (PNG data-URL) so the renderer can freeze it under a menu
+    ;; while the native view hides — the only way a DOM overlay shows over the always-on-top web view.
+    (.handle ipcMain "vv:http-snapshot"
+             (fn [_e]
+               (let [^js v (:view @state)]
+                 (if (and v (.-webContents v))
+                   (-> (.capturePage ^js (.-webContents v))
+                       (.then (fn [^js img] (.toDataURL img)))
+                       (.catch (fn [_] nil)))
+                   (js/Promise.resolve nil)))))
     (.on ipcMain "vv:http-toc-goto"
          (fn [_e ^js id] (when-let [^js v (:view @state)] (.send (.-webContents v) "vv:web-scroll-to" id))))
     ;; ---- web view (its preload) → app renderer (relayed) ----

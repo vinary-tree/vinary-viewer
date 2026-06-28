@@ -29,17 +29,22 @@
 
 (defn refresh!
   "(Re)build the engine (fetch + re-serialize to cache, or fall back to cache / empty) and (re)enable it
-   on the session when enabled. Returns a Promise."
+   on the session when enabled. Disables the PREVIOUS engine BEFORE enabling the new one — `build` returns a
+   fresh ElectronBlocker whose per-instance idempotency guard is empty, so enabling it while the old engine's
+   process-global `ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters')` is still registered throws
+   'Attempted to register a second handler'; disabling first calls `ipcMain.removeHandler` so re-registration
+   is clean. Returns a Promise that never rejects (terminal catch), so callers/scheduler can't leak one."
   []
   (let [{:keys [sess enabled? lists]} @state]
     (-> (build lists)
         (.catch (fn [_] (.parse ElectronBlocker "")))   ; offline + no usable cache → empty engine (no-op)
         (.then (fn [^js b]
                  (let [old (:blocker @state)]
+                   (when (and old (not= old b)) (disable! old sess))   ; remove old global handlers first
                    (swap! state assoc :blocker b)
                    (when enabled? (enable! b sess))
-                   (when (and old (not= old b)) (disable! old sess))
-                   b))))))
+                   b)))
+        (.catch (fn [e] (js/console.error "[adblock] refresh failed:" e) nil)))))
 
 (defn set-enabled! [on?]
   (let [{:keys [blocker sess]} @state]

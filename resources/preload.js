@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('vv', {
   httpShow: (url, bounds) => ipcRenderer.send('vv:http-show', { url, bounds }),
   httpHide: () => ipcRenderer.send('vv:http-hide'),
   httpBounds: (bounds) => ipcRenderer.send('vv:http-bounds', { bounds }),
+  httpSnapshot: () => ipcRenderer.invoke('vv:http-snapshot'),
   httpTocGoto: (id) => ipcRenderer.send('vv:http-toc-goto', id),
   openDialog: () => ipcRenderer.send('vv:open-dialog'),
   copyText: (text) => ipcRenderer.send('vv:clipboard-write', text),

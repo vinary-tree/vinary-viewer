@@ -189,9 +189,18 @@ function installIpc(state) {
   ipcMain.on('vv:pdf-hide', () => {
     state.pdfHidden = true;
   });
+  ipcMain.on('vv:http-show', (_event, payload) => {
+    state.httpShow = payload;
+    state.httpVisible = true;
+  });
+  ipcMain.on('vv:http-bounds', (_event, payload) => {
+    state.httpBounds = payload;
+  });
   ipcMain.on('vv:http-hide', () => {
     state.httpHidden = true;
+    state.httpVisible = false;
   });
+  ipcMain.handle('vv:http-snapshot', () => state.snapshotDataUrl);
   ipcMain.on('vv:watch-assets', () => {});
   ipcMain.handle('vv:complete-path', (_event, input) => ({
     input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
@@ -210,6 +219,11 @@ async function main() {
     pdfBounds: null,
     pdfHidden: false,
     httpHidden: false,
+    httpVisible: false,
+    httpShow: null,
+    httpBounds: null,
+    // a minimal valid 1x1 PNG, returned by the mocked vv:http-snapshot so web-host can freeze the page
+    snapshotDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
     lastCopiedText: null,
     openedPaths: [],
     contentByPath: new Map()
@@ -750,6 +764,132 @@ async function main() {
   );
   console.log('[ok] tab context menu arrow navigation works');
 
+  // ---- Web view: edge-to-edge bounds (bug 1) + menu-over-page snapshot freeze vs. modal hide (bug 2) ----
+  // The native WebContentsView is mocked here (installIpc), so web-host is driven purely by the http tab URI
+  // and the stubbed vv:http-* channels. First clear the context menu left open by the previous test.
+  await evalIn(win, `(() => {
+    const m = document.querySelector('.vv-ctx-menu');
+    if (m) m.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['context-menu'] == null`), 'context menu cleared');
+
+  // bug 4 — the extensions install input must accept keystrokes. Open Settings ▸ Extensions…, focus the
+  // field: focus must set :in-input? (so the keymap resolver, which consumes bare keys in vim
+  // normal/visual, lets text through), typing must update the controlled value, and blur must clear it.
+  await dispatchWindowKey(win, 's', { altKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'Settings'`), 'Settings menu for Extensions…');
+  await waitFor(
+    () => evalIn(win, `Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item')).some((n) => n.textContent.includes('Extensions'))`),
+    'Extensions… menu item present'
+  );
+  await evalIn(win, `(() => {
+    const item = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item')).find((n) => n.textContent.includes('Extensions'));
+    item.click();
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-ext-input'))`), 'extensions dialog open');
+  await evalIn(win, `(() => { document.querySelector('.vv-ext-input').focus(); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.input['in-input?'] === true`), 'extensions input sets in-input on focus');
+  await evalIn(win, `(() => {
+    const i = document.querySelector('.vv-ext-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'abcdefghijklmnopabcdefghijklmnop');
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-ext-input').value === 'abcdefghijklmnopabcdefghijklmnop'`),
+    'extensions input accepts typed text');
+  await evalIn(win, `(() => { document.querySelector('.vv-ext-input').blur(); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.input['in-input?'] === false`), 'extensions input clears in-input on blur');
+  await evalIn(win, `(() => {
+    const btn = Array.from(document.querySelectorAll('.vv-modal .vv-btn')).find((b) => b.textContent.trim() === 'Close');
+    if (btn) { btn.click(); }
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['extensions-open?']`), 'extensions dialog closed');
+  console.log('[ok] extensions install input accepts keyboard input');
+
+  await sendChord(win, 'T', ['control']);
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-empty')?.textContent.trim() === 'New Tab'`),
+    'fresh tab for the web view');
+  state.httpShow = null;
+  state.httpVisible = false;
+  // type an http URL into the URI bar and press Enter (→ :uri/navigate → :tab/navigate). It need not load —
+  // the native view is mocked; web-host renders from the http(s) scheme alone.
+  await evalIn(win, `(() => {
+    const i = document.querySelector('.vv-uri-input');
+    i.focus();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'http://127.0.0.1:9/smoke');
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+    return i.value;
+  })()`);
+  await delay(60);
+  await evalIn(win, `(() => {
+    document.querySelector('.vv-uri-input')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-web-host'))`), 'web host renders for an http URI');
+  await waitFor(() => state.httpShow && state.httpShow.bounds && state.httpShow.bounds.width > 100,
+    'web view show + bounds sent');
+  await waitFor(() => state.httpVisible === true, 'web view initially shown');
+
+  // bug 1 — edge-to-edge: the content pane drops its document reading gutter and the host fills it exactly,
+  // so the bounds handed to the native view carry no 45/32px inset.
+  const webEdge = await evalIn(win, `(() => {
+    const content = document.querySelector('.vv-content');
+    const host = document.querySelector('.vv-web-host');
+    const cs = getComputedStyle(content);
+    const cr = content.getBoundingClientRect();
+    const hr = host.getBoundingClientRect();
+    return {
+      hasWebClass: content.classList.contains('vv-content-web'),
+      paddingLeft: cs.paddingLeft, paddingTop: cs.paddingTop,
+      flush: Math.abs(hr.left - cr.left) < 1 && Math.abs(hr.top - cr.top) < 1 &&
+             Math.abs(hr.width - cr.width) < 1 && Math.abs(hr.height - cr.height) < 1,
+      contentWidth: Math.round(cr.width)
+    };
+  })()`);
+  assert.strictEqual(webEdge.hasWebClass, true, 'http content pane must use the edge-to-edge .vv-content-web class');
+  assert.strictEqual(webEdge.paddingLeft, '0px', 'edge-to-edge web pane must drop the L/R reading gutter');
+  assert.strictEqual(webEdge.paddingTop, '0px', 'edge-to-edge web pane must drop the T/B reading gutter');
+  assert.strictEqual(webEdge.flush, true, 'web host must fill the content pane exactly (no margin around the native view)');
+  assert.ok(Math.abs(Math.round(state.httpShow.bounds.width) - webEdge.contentWidth) < 2,
+    'native view width must equal the full pane (not inset by the 90px gutter)');
+  console.log('[ok] web view is edge-to-edge (no margin)');
+
+  // bug 2a — opening a MENU over the page freezes a snapshot and hides the native view (page does not vanish)
+  await dispatchWindowKey(win, 's', { altKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'Settings'`), 'Settings menu open over the web view');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`), 'page snapshot frozen under the menu');
+  const frozen = await evalIn(win, `(() => {
+    const img = document.querySelector('img.vv-web-snap');
+    return { src: (img && img.getAttribute('src')) || '', insideHost: Boolean(img && img.closest('.vv-web-host')) };
+  })()`);
+  assert.ok(frozen.src.startsWith('data:image/png'), 'snapshot img must show the captured page raster');
+  assert.strictEqual(frozen.insideHost, true, 'snapshot img must render inside the web host');
+  assert.strictEqual(state.httpVisible, false, 'native view must hide while the frozen snapshot is shown');
+  console.log('[ok] opening a menu freezes a page snapshot (the page does not disappear)');
+
+  // bug 2b — closing the menu drops the snapshot and restores the live view
+  await dispatchWindowKey(win, 'Escape');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'Settings menu closed');
+  await waitFor(() => evalIn(win, `!document.querySelector('img.vv-web-snap')`), 'snapshot dropped on menu close');
+  await waitFor(() => state.httpVisible === true, 'live web view restored on menu close');
+  console.log('[ok] closing the menu restores the live web view');
+
+  // bug 2c — a full-window MODAL (command palette) hides the view outright, with NO snapshot
+  await sendChord(win, 'P', ['control', 'shift']);
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.palette && window.__vvdb().ui.palette['open?'])`),
+    'command palette (modal) open');
+  await waitFor(() => state.httpVisible === false, 'native view hidden under a modal');
+  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`), false,
+    'a modal must hide the view outright (no page snapshot)');
+  await dispatchWindowKey(win, 'Escape');
+  console.log('[ok] a modal dialog hides the web view outright (no snapshot)');
+
   win.close();
 }
 
@@ -757,7 +897,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 35000);
+}, 45000);
 
 main()
   .then(() => {

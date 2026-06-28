@@ -37,6 +37,10 @@
          [:div.vv-ext-install
           [:input.vv-ext-input {:placeholder "Chrome Web Store URL or extension ID"
                                 :value @draft :on-change #(reset! draft (.. % -target -value))
+                                ;; mark the field focused so the global keymap resolver lets keystrokes
+                                ;; through (else vim :normal/:visual consumes bare printable keys)
+                                :on-focus #(dispatch [:input/set-in-input true])
+                                :on-blur  #(dispatch [:input/set-in-input false])
                                 :on-key-down (fn [^js e] (when (= "Enter" (.-key e))
                                                            (when (seq @draft) (dispatch [:extensions/install @draft]) (reset! draft ""))))}]
           [:button.vv-btn {:on-click (fn [] (when (seq @draft) (dispatch [:extensions/install @draft]) (reset! draft "")))} "Install"]]
