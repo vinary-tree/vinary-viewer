@@ -1,13 +1,19 @@
 'use strict';
-// chrome.* polyfill for the scoped extension runtime (ADR-0015). Electron 42 implements
-// action/tabs/runtime/storage/i18n/scripting natively but NOT windows/webNavigation/cookies/notifications/
-// contextMenus/privacy — so real extensions (e.g. LastPass, whose background service worker reads
-// `chrome.windows.onFocusChanged` at startup) crash and fail to register. This defines correctly-SHAPED but
-// inert stubs for the missing surfaces so the SW registers and runs; the native APIs are never overwritten.
+// Self-contained chrome.* polyfill PRELOAD for the scoped extension runtime (ADR-0015). Registered on
+// persist:vinary-web for BOTH the 'service-worker' and 'frame' preload types (vinary.main.extensions), so it
+// reaches an extension's background service worker AND its popup/options pages.
 //
-// `installPolyfill` is run in the extension's MAIN world (where `chrome` lives) via
-// contextBridge.executeInMainWorld from the SW + frame preloads, so it MUST be self-contained — it may
-// reference only globals (no closures over preload scope).
+// Electron 42 implements action/tabs/runtime/storage/i18n/scripting natively but NOT windows/webNavigation/
+// cookies/notifications/contextMenus/privacy — so real extensions (e.g. LastPass, whose background service
+// worker reads `chrome.windows.onFocusChanged` at startup) crash and fail to register. This defines
+// correctly-SHAPED but inert stubs for the missing surfaces so the SW registers and runs; the native APIs
+// are never overwritten.
+//
+// MUST be fully self-contained: a sandboxed preload realm (a service worker especially) has NO `fs` and
+// CANNOT `require` a relative file — so this requires only 'electron' and INLINES installPolyfill (an earlier
+// `require('./ext-chrome-polyfill.js')` threw "module not found" in the SW realm and the preload died before
+// injecting). installPolyfill is injected into the extension's MAIN world via contextBridge.executeInMainWorld,
+// so it is serialized and must reference only globals (no closures over preload scope).
 
 function installPolyfill() {
   var c = globalThis.chrome;
@@ -66,4 +72,21 @@ function installPolyfill() {
   });
 }
 
-module.exports = { installPolyfill };
+// ---- self-install -------------------------------------------------------------------------------------
+// Inject into the extension's MAIN world. The SW + the contextIsolation:true popup run context-isolated, so
+// the preload-realm `chrome` is NOT the extension's — executeInMainWorld compiles installPolyfill in the
+// extension's own world (before its script runs). Guard on the extension context so ordinary web pages and
+// Ghostery's own frame preload (this session serves them too) are left untouched.
+try {
+  var isExtensionContext =
+    (typeof process !== 'undefined' && process.type === 'service-worker') ||
+    (typeof location !== 'undefined' && location.protocol === 'chrome-extension:');
+  if (isExtensionContext) {
+    var electron = require('electron');
+    if (electron.contextBridge && electron.contextBridge.executeInMainWorld) {
+      electron.contextBridge.executeInMainWorld({ func: installPolyfill });
+    }
+    // non-context-isolated fallback; a no-op in the (sandboxed) preload realm, where globalThis.chrome is undefined
+    try { installPolyfill(); } catch (e) { /* ignore */ }
+  }
+} catch (e) { /* ignore */ }

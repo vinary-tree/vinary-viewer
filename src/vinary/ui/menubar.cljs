@@ -6,6 +6,7 @@
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
             [vinary.app.uri :as uri]
+            [vinary.app.zoom :as zoom]
             [vinary.input.keymaps-registry :as registry]
             [vinary.ui.access-keys :as access]
             [vinary.ui.icons :as icons]
@@ -34,11 +35,11 @@
             {:label "Zoom Out"       :access-key "o" :accel "Ctrl+-" :event [:view/zoom -1]}
             {:label "Reset Zoom"     :access-key "r" :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
-            {:submenu "Fit" :access-key "f" :radio :sub/fit}
-            {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle]}
+            {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-only true}
+            {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle] :pdf-only true}
             :sep
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
-            {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x]}]}
+            {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x] :dev-only true}]}
    {:label "Settings" :access-key "s"
     :items [{:submenu "Theme"        :access-key "t" :radio :sub/theme}
             {:submenu "Key Bindings" :access-key "k" :radio :sub/keymaps}
@@ -91,6 +92,33 @@
   [src]
   (radio-rows-from-db @rfdb/app-db src))
 
+;; ---- PDF-only / dev-only View-menu items -------------------------------------------------------
+;; The Fit submenu + Invert PDF apply only to a PDF; re-frame-10x exists only in dev builds (its runtime
+;; is stripped from :release, so the item was a silent no-op there). Both are filtered from the View menu
+;; — for rendering AND keyboard nav/access-keys — so the two paths stay consistent. The render passes the
+;; :view/pdf-active? sub value; the event/keyboard path reads app-db directly (no reactivity needed there).
+(defn- pdf-active-now? [] (= :pdf (zoom/context @rfdb/app-db)))
+
+(defn- item-visible? [pdf? item]
+  (cond
+    (not (map? item)) true                     ; :sep — kept here, tidied by clean-seps
+    (:pdf-only item)  pdf?
+    (:dev-only item)  ^boolean js/goog.DEBUG    ; false in :release → re-frame-10x hidden there
+    :else             true))
+
+(defn- clean-seps
+  "Drop separators left leading, trailing, or consecutive by item filtering."
+  [items]
+  (let [kept (reduce (fn [acc it]
+                       (if (and (= it :sep) (or (empty? acc) (= :sep (peek acc)))) acc (conj acc it)))
+                     [] items)]
+    (if (= :sep (peek kept)) (pop kept) kept)))
+
+(defn- filter-items [pdf? menu]
+  (update menu :items (fn [items] (clean-seps (filterv #(item-visible? pdf? %) items)))))
+
+(defn- effective-menus [pdf?] (mapv #(filter-items pdf? %) menus))
+
 (defn- menu-index [label]
   (first (keep-indexed (fn [idx m] (when (= (:label m) label) idx)) menus)))
 
@@ -102,7 +130,7 @@
   (some (fn [m] (when (access/match? (:access-key m) k) m)) menus))
 
 (defn- open-menu-spec [label]
-  (some (fn [m] (when (= (:label m) label) m)) menus))
+  (some (fn [m] (when (= (:label m) label) (filter-items (pdf-active-now?) m))) menus))
 
 (defn- submenu-spec [menu submenu]
   (some (fn [item] (when (and (map? item) (= (:submenu item) submenu)) item)) (:items menu)))
@@ -357,8 +385,9 @@
         focus @(rf/subscribe [:ui/menu-focus])
         sub-focus @(rf/subscribe [:ui/menu-submenu-focus])
         access-active? @(rf/subscribe [:ui/access-keys-active?])
+        pdf? @(rf/subscribe [:view/pdf-active?])
         root (cond-> [:div.vv-menubar {:role "menubar"}]
                open (conj [:div.vv-menu-overlay {:on-click #(rf/dispatch [:menu/close])}]))]
     (into root
           (map (fn [menu] (top-menu open sub-open focus sub-focus access-active? menu)))
-          menus)))
+          (effective-menus pdf?))))

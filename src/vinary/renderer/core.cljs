@@ -30,6 +30,21 @@
         "forward" (rf/dispatch [:history/forward])
         nil))))
 
+(defn- replay-web-key!
+  "Replay a chord forwarded from the (separate-context) web view as a synthetic window keydown, so the app
+   keymap resolver runs the same command it would for an app-focused chord (e.g. Ctrl+O → Open dialog).
+   The resolver listens on window keydown and doesn't require a trusted event."
+  [^js p]
+  (let [ev (js/KeyboardEvent. "keydown"
+                              #js {:key        (.-key p)
+                                   :ctrlKey    (boolean (.-ctrl p))
+                                   :shiftKey   (boolean (.-shift p))
+                                   :altKey     (boolean (.-alt p))
+                                   :metaKey    (boolean (.-meta p))
+                                   :bubbles    true
+                                   :cancelable true})]
+    (.dispatchEvent js/window ev)))
+
 (defn bridge!
   "Wire the preload's contextBridge API (window.vv) to re-frame. Content streams in here on every file
    change (live-refresh)."
@@ -54,6 +69,8 @@
       (.onWebActiveHeading vv (fn [id] (rf/dispatch [:web/active-heading id]))))
     (when (.-onHistoryNav vv)
       (.onHistoryNav vv dispatch-history-nav!))
+    (when (.-onWebKey vv)   ; app-global Ctrl/Cmd chords forwarded from the web view → replay via the resolver
+      (.onWebKey vv replay-web-key!))
     ;; menu shell: files chosen in the Open dialog, persisted settings (EDN text), app-info for About
     (when (.-onOpenFiles vv)
       (.onOpenFiles vv (fn [payload] (rf/dispatch [:files/opened (js->clj payload :keywordize-keys true)]))))

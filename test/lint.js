@@ -19,7 +19,7 @@ const jsFiles = [
   'test/electron-smoke.js', 'test/extensions-smoke.js',
   'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
   'scripts/sync-pdfjs.mjs', 'scripts/check-pdfjs.mjs',
-  'resources/ext-chrome-polyfill.js', 'resources/ext-sw-preload.js', 'resources/ext-frame-preload.js',
+  'resources/ext-chrome-polyfill.js',
 ];
 for (const f of jsFiles) {
   try { execFileSync(process.execPath, ['--check', path.join(root, f)]); log(true, `parses: ${f}`); }

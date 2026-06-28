@@ -18,6 +18,9 @@ the document lives in the app's own DOM, a PDF behaves like every other document
   Page / Actual Size) drive the pdf.js scale; see [feature 22](22-zoom-and-fit.md). **Bookmarks** are in
   the Contents tab.
 - **Themes** — the page letterbox follows the active palette.
+- **Progress + error feedback** — a heavy page (lots of vector/shading content) rasterizes on the main
+  thread and can take a while; it shows a **"rendering…"** chip instead of looking frozen, and a page that
+  fails to render shows a **click-to-retry** chip (and logs to the console) rather than a silent blank.
 
 **Layout.** Unlike the Markdown reading gutter, a PDF renders **edge-to-edge** — the `.vv-content-pdf-flush`
 class drops the L/R/bottom padding so pages fill the pane (no overflow off the right/bottom). A fit-mode
@@ -52,6 +55,8 @@ Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on d
 | Edge-to-edge layout (`.vv-content-pdf-flush` drops the `.vv-content` gutter, keeping the scroller) | `vinary.ui.views/content-view` + `resources/public/css/app.css` |
 | Window-resize re-fit (`ResizeObserver` on the scroller → debounced `refit!`; fit-mode PDFs only) | `vinary.renderer.pdf/observe-resize!` |
 | Per-mount byte clone (no blank PDF after switching tabs away and back) | `vinary.renderer.pdf/mount!` (`(.slice bytes 0)`) |
+| Per-page status chip ("rendering…" while a `RenderTask` is in flight; click-to-retry on a real render error, distinguished from a cancellation) | `vinary.renderer.pdf/render-page!` (`show-status!`/`clear-status!`) + `.vv-pdf-status*` in `app.css` |
+| pdf.js `isEvalSupported true` — JIT-compile a PDF's PostScript/Type-4 shading functions (large speedup on shaded/mesh figures) | `vinary.renderer.pdf/get-document` |
 | Vendored worker + cmaps/fonts/wasm/iccs | `scripts/sync-pdfjs.mjs` → `resources/public/pdf/` |
 
 The pdf.js module + worker are **vendored** (the legacy ES5 build) and loaded at runtime via a blob-URL
@@ -66,3 +71,13 @@ worker on first load, which empties the renderer's copy. So re-mounting the same
 switching to another tab and back — handed the engine an empty buffer and rendered nothing (a blank
 page). `mount!` now passes a fresh copy each time (`(.slice bytes 0)`), keeping the path-keyed cached
 original pristine for every re-mount; the byte cache itself is untouched.
+
+**Performance — heavy pages.** pdf.js parses on a worker but **rasterizes the page on the main thread**, so a
+figure-dense page (mesh/Coons shadings, transparency groups, tens of thousands of path fills — common in
+technical papers) can block for a while. `isEvalSupported true` lets pdf.js JIT-compile the PDF's
+shading-color functions (a large constant-factor speedup over interpreting them — the renderer already
+permits `unsafe-eval` and is sandboxed, see [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md) and the
+[threat model](../security/threat-model.md)). While a page rasterizes it shows a **"rendering…"** chip
+(deferred ~400 ms so a fast page never flashes it); a render that genuinely errors (as opposed to being
+cancelled by a scroll-away or a re-fit) shows a **click-to-retry** chip and a `console.error`, so a slow or
+failed page is never a silent blank.

@@ -62,8 +62,8 @@ runtime boots with the user's saved prefs, not defaults.
 - **Apache-2.0 stays clean** — no GPL dependency in the shipped binary.
 - The implementation is **far simpler** than planned (no GPL bus / no SW message-routing): five small main
   namespaces (`ext-util`, `ext-config`, `adblock`, `extensions`, `ext-popup`) + two UI namespaces — plus a
-  small **frame** chrome.* polyfill preload added post-ship for the page/popup APIs Electron lacks (see
-  Documented limitations).
+  **self-contained chrome.* polyfill preload** (one file, registered for both the frame and service-worker
+  types) for the page/popup **and** background-worker APIs Electron lacks (see Documented limitations).
 - Verified end-to-end by `test/extensions-smoke.js`: loadExtension → content-script injection → popup
   with native `chrome.runtime/storage/action`, plus the ad-blocker dropping a known ad host.
 - **The `vvext:*` channels and shim files in the design plan were never built** — superseded by the spike.
@@ -74,17 +74,26 @@ runtime boots with the user's saved prefs, not defaults.
   in Electron. Cloud-login managers' **autofill** (content script) + **vault popup** work.
 - **Dynamic action badge/icon** (`chrome.action.setBadgeText/setIcon` at runtime) is a no-op for display
   — Electron has no toolbar to render it; our toolbar shows the **static manifest icon**.
-- **Missing chrome.* surfaces (post-ship finding).** Electron does not implement `chrome.windows`,
-  `webNavigation`, `cookies`, `notifications`, `contextMenus`, `privacy` (nor `offscreen`/`nativeMessaging`/
-  `sidePanel`). We inject an inert chrome.* polyfill (`resources/ext-chrome-polyfill.js`) into extension
-  PAGE/popup main worlds via a **frame** session preload (`ext-frame-preload.js`, `contextBridge.execute­
-  InMainWorld`) so popups/options pages that touch them don't crash — verified by `test/extensions-smoke.js`.
-  **But Electron 42 does not run session preloads inside extension BACKGROUND service workers** (verified via
-  a filesystem-marker spike), so an extension whose SW touches those APIs at startup — e.g. **LastPass** →
-  `chrome.windows.onFocusChanged` — still fails SW registration, and its popup (which talks to that worker)
-  stays unfilled. `ext-sw-preload.js` is registered as a **forward-compatible no-op** (a future Electron that
-  runs SW preloads in extension workers fixes it automatically). Patching the extension's SW file on disk was
-  **rejected** (modifying a third-party password manager's code — security/integrity/auto-update fragility).
+- **Missing chrome.* surfaces — polyfilled for BOTH pages AND the background worker.** Electron does not
+  implement `chrome.windows`, `webNavigation`, `cookies`, `notifications`, `contextMenus`, `privacy` (nor
+  `offscreen`/`nativeMessaging`/`sidePanel`). We inject an inert chrome.* polyfill into the extension's MAIN
+  world via `contextBridge.executeInMainWorld`, registered on `persist:vinary-web` for **both** the
+  `service-worker` and `frame` preload types (`vinary.main.extensions`) — so popups/options pages **and** an
+  extension's background service worker get the missing APIs and don't crash. Verified end-to-end by
+  `test/extensions-smoke.js`, which asserts the background worker reaches `chrome.windows.onFocusChanged` (the
+  exact call LastPass makes at startup).
+
+  > **Correction (2026-06-28, round 3).** A round-2 note here claimed Electron 42 *cannot* run session
+  > preloads inside extension background workers, so LastPass-class extensions were "not fully supported."
+  > That was wrong on two counts: (a) the verifying spike ran with `--no-sandbox`, which **disables SW
+  > preloads entirely** (they require the sandbox); and (b) the SW preload realm is **sandboxed** — it has no
+  > `fs` and cannot `require` a relative file, so the old `ext-sw-preload.js`'s `require('./ext-chrome-polyfill.js')`
+  > threw "module not found" and the preload died before injecting. The fix consolidates the three preload
+  > files into one **self-contained** `resources/ext-chrome-polyfill.js` that inlines its polyfill (no
+  > relative require; only `require('electron')`, which is sandbox-safe) and self-installs via
+  > `executeInMainWorld`. **LastPass now works** without modifying its source. Patching the extension's SW file
+  > on disk remains **rejected** (modifying a third-party password manager's code — security/integrity/
+  > auto-update fragility); the fix lives entirely in *our* preload.
 - Auto-update polls Google's **unofficial** update endpoint (via `electron-chrome-web-store`, startup +
   ~5h) with CRX3 verification — see the threat model.
 

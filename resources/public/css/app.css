@@ -5,9 +5,11 @@
 :root { --vv-font-variable: "Noto Sans", system-ui, sans-serif;
   --vv-font-fixed: "Fira Code", "JetBrains Mono", monospace;
   --vv-font-size: 15px; --vv-code-font-size: 13px; }
-html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv-fg);
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1); color: var(--vv-fg);
   font-family: var(--vv-font-variable); }
-#app { height: 100%; }
+/* clip the app to the viewport so only the inner .vv-content scroller shows a scrollbar — a tall PDF/page
+   must not push the column past 100vh and add a second, window-level scrollbar beside the content one */
+#app { height: 100%; overflow: hidden; }
 ::selection { background: var(--vv-highlight); color: var(--vv-fg-strong); }
 
 /* ----- App shell ----- */
@@ -43,6 +45,19 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-pdf-anno a.vv-pdf-link { position: absolute; }
 /* optional dark-invert: invert the CANVAS only, so text/selection/find highlights stay normal */
 .vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
+/* per-page status chip: a "rendering…" hint while a slow (heavy) page rasterizes on the main thread, or a
+   click-to-retry note if a page fails to render — so a slow page never looks frozen/blank or silently
+   broken (anchored to .vv-pdf-page, which is position:relative) */
+.vv-pdf-status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3;
+  display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 14px;
+  background: var(--vv-bg2); color: var(--vv-fg-dim); border: 1px solid var(--vv-border);
+  font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); pointer-events: none; white-space: nowrap; }
+.vv-pdf-status-rendering::before { content: ""; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--vv-border); border-top-color: var(--vv-head1);
+  animation: vv-spin 0.8s linear infinite; }
+.vv-pdf-status-error { color: var(--vv-error); border-color: var(--vv-error); cursor: pointer;
+  pointer-events: auto; }
+@keyframes vv-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 .vv-error { color: var(--vv-error); }
 .vv-empty { color: var(--vv-fg-dim); }
 /* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
@@ -179,19 +194,24 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vv-palette-cat { color: var(--vv-fg-dim); font-size: 11px; flex: 0 0 auto; }
 
-/* link-hover status bar (bottom-left of the pane, browser-style) */
+/* link-hover status bar (bottom-left of the content area, browser-style). It lives inside .vv-content-wrap,
+   so bottom:0 anchors to the bottom of the content (above the zoom bar) rather than over the bar. */
 .vv-statusbar { position: absolute; bottom: 0; left: 0; z-index: 9; max-width: 72%;
   padding: 2px 10px; font-size: 11px; color: var(--vv-fg-dim);
   background: var(--vv-bg2); border-top: 1px solid var(--vv-border); border-right: 1px solid var(--vv-border);
   border-top-right-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-family: "Fira Code", monospace; pointer-events: none; }
 
-/* mode-line (vim/emacs modal indicator + pending key-sequence) */
+/* mode-line styling — DISABLED per user 2026-06-28: the `mode-line` component (views.cljs) is commented
+   out (the NORMAL/VISUAL badge floated over the zoom bar, no purpose here). Rules kept below, wrapped in a
+   comment, so restoring the component restores its style. */
+/*
 .vv-modeline { position: absolute; bottom: 0; right: 0; z-index: 9; display: flex; gap: 8px;
   padding: 2px 10px; font-size: 12px; background: var(--vv-bg2); border-top: 1px solid var(--vv-border);
   border-left: 1px solid var(--vv-border); border-top-left-radius: 4px; }
 .vv-modeline-mode { color: var(--vv-head1); font-weight: 700; }
 .vv-modeline-seq { color: var(--vv-head2); font-family: "Fira Code", monospace; }
+*/
 
 /* ----- bottom bar: the always-visible zoom control (right-aligned) ----- */
 .vv-bottombar { flex: 0 0 auto; display: flex; justify-content: flex-end; align-items: center;

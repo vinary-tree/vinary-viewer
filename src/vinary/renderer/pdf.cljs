@@ -59,7 +59,11 @@
                                         :standardFontDataUrl  (pdf-asset "standard_fonts/")
                                         :wasmUrl              (pdf-asset "wasm/")
                                         :iccUrl               (pdf-asset "iccs/")
-                                        :isEvalSupported      false})
+                                        ;; true (pdf.js default) JIT-compiles Type-4 (PostScript) shading
+                                        ;; functions instead of interpreting them — a large speedup on
+                                        ;; shaded/mesh figures. The renderer already permits unsafe-eval
+                                        ;; (ADR-0013) and is sandboxed, so this is low marginal risk.
+                                        :isEvalSupported      true})
                    (.-promise))))))
 
 (defn- page-sizes
@@ -106,6 +110,19 @@
     (apply-layout! state)))
 
 ;; ---- per-page render: canvas + text + link layers ----------------------------------------------
+(defn- clear-status! [^js div]
+  (when-let [^js s (.querySelector div ".vv-pdf-status")] (.remove s)))
+
+(defn- show-status!
+  "Overlay a status note (rendering… / failed+retry) centered on a page placeholder."
+  [^js div cls text on-click]
+  (clear-status! div)
+  (let [s (js/document.createElement "div")]
+    (set! (.-className s) (str "vv-pdf-status " cls))
+    (set! (.-textContent s) text)
+    (when on-click (.addEventListener s "click" on-click))
+    (.appendChild div s)))
+
 (defn- render-page! [state idx]
   (let [{:keys [doc page-divs rendered destroyed?]} @state]
     (when (and (not destroyed?) doc (< idx (count page-divs)) (not (contains? rendered idx)))
@@ -119,6 +136,9 @@
                            dpr     (or (.-devicePixelRatio js/window) 1)
                            canvas  (js/document.createElement "canvas")
                            ctx     (.getContext canvas "2d")]
+                       ;; clear any canvas/status left by a prior failed attempt → idempotent re-render
+                       (when-let [^js old (.querySelector div "canvas.vv-pdf-canvas")] (.remove old))
+                       (clear-status! div)
                        (set! (.-className canvas) "vv-pdf-canvas")
                        (set! (.-width canvas) (js/Math.round (* (.-width vp) dpr)))
                        (set! (.-height canvas) (js/Math.round (* (.-height vp) dpr)))
@@ -126,15 +146,38 @@
                        (set! (.. canvas -style -height) (str (.-height vp) "px"))
                        (.appendChild div canvas)
                        (let [task (.render pg #js {:canvasContext ctx :viewport vp
-                                                   :transform #js [dpr 0 0 dpr 0 0]})]
+                                                   :transform #js [dpr 0 0 dpr 0 0]})
+                             ;; a heavy page rasterizes on the main thread for a long time and would look
+                             ;; frozen/blank — show a "rendering…" hint, but only once it's slow enough to
+                             ;; matter (a fast page settles before this fires, so it never flashes).
+                             slow (js/setTimeout
+                                   #(when (get-in @state [:tasks idx])
+                                      (show-status! div "vv-pdf-status-rendering" "rendering…" nil))
+                                   400)]
                          (swap! state update :tasks assoc idx task)
                          (-> (.-promise task)
                              (.then (fn []
+                                      (js/clearTimeout slow)
+                                      (clear-status! div)
                                       (swap! state update :tasks dissoc idx)
                                       (build-text-layer! state idx pg vp)
                                       (build-link-layer! state idx pg vp)))
-                             (.catch (fn [_] nil))))))))   ; render cancelled (scrolled away / rescaled)
-          (.catch (fn [_] (swap! state update :rendered disj idx)))))))
+                             (.catch (fn [^js err]
+                                       (js/clearTimeout slow)
+                                       (swap! state update :tasks dissoc idx)
+                                       (if (= "RenderingCancelledException" (.-name err))
+                                         (clear-status! div)   ; expected — scrolled away / rescaled
+                                         (do (js/console.error "[pdf] page" (inc idx) "render failed:" err)
+                                             (swap! state update :rendered disj idx)   ; allow a retry
+                                             (show-status! div "vv-pdf-status-error"
+                                                           "⚠ failed to render — click to retry"
+                                                           (fn [] (clear-status! div) (render-page! state idx)))))))))))))
+          (.catch (fn [^js err]
+                    (swap! state update :rendered disj idx)
+                    (js/console.error "[pdf] page" (inc idx) "load failed:" err)
+                    (when-let [^js div (nth (:page-divs @state) idx nil)]
+                      (show-status! div "vv-pdf-status-error" "⚠ failed to load — click to retry"
+                                    (fn [] (clear-status! div) (render-page! state idx))))))))))
 
 (defn- release-canvas!
   "Drop a page's canvas when it scrolls out of the overscan band (bounds memory on large PDFs). The text

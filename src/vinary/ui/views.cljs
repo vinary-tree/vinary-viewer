@@ -333,15 +333,24 @@
         show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node)))))
         hide!    (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
         bounds!  (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
+        ;; defer the native-view hide until the snapshot <img> has painted (double rAF) — otherwise the
+        ;; view hides a frame before the DOM shows the frozen raster, a one-frame blank "blink". The native
+        ;; view paints above the img, so the img is invisible until the hide reveals it → seamless. Guarded
+        ;; by @overlay? so a rapid open→close can't hide a view the close path just re-showed.
+        hide-after-paint! (fn [] (js/requestAnimationFrame
+                                  (fn [] (js/requestAnimationFrame
+                                          (fn [] (when @overlay? (hide!)))))))
         freeze!  (fn []
-                   ;; instant path: a pushed snapshot is already cached → swap it in + hide the native view.
+                   ;; instant path: a pushed snapshot is already cached → paint it, then hide the view.
                    (if-let [data @pre-snap]
-                     (do (reset! snap data) (hide!))
+                     (do (reset! snap data) (hide-after-paint!))
                      ;; cold start (no push yet): pull main's cache via invoke, then hide (only if still open).
                      (if-let [^js v (vv)]
                        (if (.-httpSnapshot v)
                          (-> (.httpSnapshot v)
-                             (.then (fn [data] (when @overlay? (when data (reset! snap data)) (hide!)))))
+                             (.then (fn [data]
+                                      (when @overlay?
+                                        (if data (do (reset! snap data) (hide-after-paint!)) (hide!))))))
                          (hide!))
                        (hide!))))
         sync!    (fn [this]
@@ -785,6 +794,11 @@
        [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} (icons/icon :find-next)]
        [:button.vv-find-btn {:title "Close (Esc)" :on-click #(rf/dispatch [:find/close])} (icons/icon :close)]])))
 
+;; mode-line — REMOVED per user (2026-06-28): the Vim NORMAL/VISUAL + pending-keys badge floated over the
+;; zoom bar and has no functional purpose in this interface. Kept (commented, not deleted) per the
+;; comment-don't-delete rule; the resolver's modal state is unaffected — only the visual badge is gone. To
+;; restore, un-discard this and re-add [mode-line] inside .vv-pane in `root`.
+#_
 (defn mode-line
   "Shows the modal state + any pending key-sequence (hidden in non-modal insert with no pending)."
   []
@@ -827,9 +841,12 @@
      ;; so the find bar floats over the document (not over the tab strip / address bar)
      [:div.vv-content-wrap
       [content-view]
-      [find-bar]]
-     [status-bar]
-     [mode-line]
+      [find-bar]
+      ;; the hover-URL status bar lives INSIDE this wrap, so its bottom:0 floats above the zoom bar (the
+      ;; wrap ends above the bar) instead of overlapping it
+      [status-bar]]
+     ;; [mode-line] removed per user — the Vim NORMAL/VISUAL badge floated over the zoom bar and serves no
+     ;; functional purpose here (the resolver's modal state is unaffected; only the visual badge is gone)
      [zoombar/zoombar]]]
    [palette/command-palette]
    [ctx-menu/context-menu]

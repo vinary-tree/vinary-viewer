@@ -16,12 +16,14 @@ small first-party **toolbar + popup** surface (Electron renders none of its own)
 Each installed extension's action icon appears in a toolbar at the end of the address bar (for `http(s)`
 tabs); clicking it opens the extension's popup just below.
 
-**chrome.* polyfill for popups & pages.** Electron 42 ships many extension APIs but not all — it lacks
-`chrome.windows`, `webNavigation`, `cookies`, `notifications`, `contextMenus`, and `privacy`. So a small
-**frame** session preload (`resources/ext-frame-preload.js` + `ext-chrome-polyfill.js`) injects inert,
-correctly-shaped **stubs** for those into each extension's **popup** and **options/page** main world —
-just enough that a popup or options page which touches them doesn't throw and crash. This covers the
-*page/popup* worlds only, not background service workers (see **Honest limitations** below).
+**chrome.* polyfill for popups, pages, and background workers.** Electron 42 ships many extension APIs but
+not all — it lacks `chrome.windows`, `webNavigation`, `cookies`, `notifications`, `contextMenus`, and
+`privacy`. So one **self-contained** session preload (`resources/ext-chrome-polyfill.js`), registered for
+**both** the `frame` and `service-worker` types, injects inert, correctly-shaped **stubs** for those into
+each extension's **main world** — its popup/options pages **and** its background **service worker**. That is
+just enough that an extension which reads them (e.g. **LastPass**, whose background worker calls
+`chrome.windows.onFocusChanged` at startup) registers and its login popup loads — **without modifying the
+extension's source**.
 
 ## 2 · How you use it
 
@@ -44,29 +46,28 @@ Electron is not Chrome. Documented in [ADR-0015](../design-decisions/0015-scoped
   Cloud-login managers' **autofill** (content script) and **vault popup** do work.
 - **Dynamic action badges/icons** are not displayed (Electron has no toolbar to render them; the toolbar
   shows the static manifest icon).
-- **Background service workers don't get the polyfill (the LastPass-class gap).** The chrome.* polyfill
-  above reaches popup/options **pages**, but **Electron 42 does not run session preloads inside extension
-  _background_ service workers**. So an extension whose background worker touches one of those missing APIs
-  **at startup** — e.g. **LastPass**, which calls `chrome.windows.onFocusChanged` — still fails to
-  register its worker, and its login popup (which talks to that worker) **may stay unfilled**. The SW
-  preload (`resources/ext-sw-preload.js`) is registered anyway as a **forward-compatible no-op**: a future
-  Electron that runs preloads in extension workers would fix this automatically. Patching the extension's
-  files on disk was **rejected** (modifying a third-party password manager's code is a security/integrity
-  and auto-update hazard).
-- A few other MV3 background surfaces (`offscreen`, `nativeMessaging`, `sidePanel`) are also absent.
+- **Cloud password managers (LastPass-class) work** as of round 3 — the chrome.* polyfill now reaches the
+  **background service worker** too (see §1), so an extension whose worker reads `chrome.windows`/etc. at
+  startup registers cleanly and its popup loads. (Service-worker preloads require Electron's sandbox to be
+  enabled, which it is.) Patching the extension's files on disk was still **rejected** (modifying a
+  third-party password manager's code is a security/integrity and auto-update hazard) — the fix lives in
+  *our* preload.
+- A few MV3 background surfaces are still absent (`offscreen`, `nativeMessaging`, `sidePanel`); the polyfill
+  stubs are **inert** (correct shape, no real behavior) — enough to prevent startup crashes, but they do not
+  *implement* those APIs.
 
 ## 4 · Internals
 
 | Piece | Where |
 |---|---|
 | Web-Store install/load/reconcile + manifest→toolbar model + state push | `vinary.main.extensions` |
-| chrome.* polyfill preloads (frame = popup/page worlds; service-worker = no-op) | `resources/ext-frame-preload.js` + `ext-chrome-polyfill.js`, `ext-sw-preload.js`; registered via `session.registerPreloadScript` in `vinary.main.extensions` |
+| chrome.* polyfill preload (one self-contained file, registered for frame **and** service-worker) | `resources/ext-chrome-polyfill.js` — inlines its polyfill (no relative require) so it loads in the sandboxed SW realm, and self-installs via `contextBridge.executeInMainWorld`; registered via `session.registerPreloadScript` in `vinary.main.extensions` |
 | Popup `WebContentsView` host (origin-locked, content-sized) | `vinary.main.ext-popup` |
 | Pure helpers (id parse, reconcile, action model, popup geometry) | `vinary.main.ext-util` (unit-tested) |
 | Persisted prefs | `vinary.main.ext-config` ↔ `extensions.edn` |
 | Toolbar (manifest icons as data-URLs) | `vinary.ui.ext-toolbar` |
 | Management dialog | `vinary.ui.extensions` |
-| Runtime smoke (loadExtension + content-script + popup) | `test/extensions-smoke.js` |
+| Runtime smoke (loadExtension + content-script + popup + frame **and** background-worker `chrome.windows`) | `test/extensions-smoke.js` — run sandbox-on via `npm run test:extensions:sandbox` to exercise the SW path |
 
 Security: extensions execute on the isolated `persist:vinary-web` session and **cannot reach `window.vv`
 or Node** — see [the threat model §6.5](../security/threat-model.md).

@@ -13,7 +13,7 @@
 (defonce ^:private last-history-nav (atom {:dir nil :time 0}))
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
-(defn- app-wc    []   (some-> ^js (:win @state) .-webContents))
+(defn- app-wc    ^js []   (some-> ^js (:win @state) .-webContents))   ; ^js return: extern-safe interop under advanced (parity with shell/wc)
 
 ;; ---- pre-cached page snapshot ------------------------------------------------------------------
 ;; The native view always paints above the DOM, so an overlay is shown by hiding the view and painting this
@@ -68,12 +68,36 @@
       ("forward" 4) "forward"
       nil)))
 
+(def ^:private web-edit-keys
+  ;; Ctrl/Cmd chords the web PAGE keeps (copy/paste/cut/select-all/undo) — never forwarded to the app keymap
+  #{"c" "v" "x" "a" "z"})
+
+(defn- web-app-chord
+  "An input the web view should NOT swallow but forward to the app keymap resolver: a Ctrl/Cmd chord that is
+   not a page editing/clipboard shortcut. Lets Ctrl+O / Ctrl+Shift+O / Ctrl+L / Ctrl+F … work from the web
+   view (it is a separate native context, so its keys never reach the app's window keydown listener).
+   Returns {:key :ctrl :shift :alt :meta} or nil."
+  [^js input]
+  (when (and (= "keyDown" (.-type input))
+             (or (.-control input) (.-meta input))
+             (not (.-isComposing input)))
+    (let [key (.-key input)]
+      (when (and key (not (contains? web-edit-keys (.toLowerCase key))))
+        {:key   key
+         :ctrl  (boolean (.-control input))
+         :shift (boolean (.-shift input))
+         :alt   (boolean (.-alt input))
+         :meta  (boolean (.-meta input))}))))
+
 (defn- attach-web-input! [^js wc]
   (.on wc "before-input-event"
        (fn [event input]
-         (when-let [dir (input-history-dir input)]
-           (.preventDefault event)
-           (send-history-nav! dir))))
+         (if-let [dir (input-history-dir input)]
+           (do (.preventDefault event) (send-history-nav! dir))
+           ;; forward app-global Ctrl/Cmd chords (the web view can't reach the app's keymap resolver itself)
+           (when-let [chord (web-app-chord input)]
+             (.preventDefault event)
+             (when-let [^js awc (app-wc)] (.send awc "vv:web-key" (clj->js chord)))))))
   (.on wc "before-mouse-event"
        (fn [event mouse]
          (when-let [dir (mouse-history-dir mouse)]

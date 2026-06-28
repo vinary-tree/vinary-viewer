@@ -76,19 +76,22 @@ theme, and whether the SVGs are local files or remote images.
 
 ---
 
-## 5. PDF view is misplaced or blank
+## 5. PDF is blank, stuck "rendering…", or slow
 
-PDFs are shown by a main-owned `WebContentsView`, not by HTML inside the
-renderer. The renderer sends bounds to main whenever the host element mounts or
-resizes.
+PDFs render **in the renderer DOM via pdf.js** (ADR-0013), not in a native view. A page draws to a
+`<canvas>` inside `.vv-content` once it scrolls into view.
 
 Checks:
 
 | Symptom | Check |
 |---------|-------|
-| Blank area | Confirm the file is classified as `pdf` and readable. |
-| Offset or wrong size | Resize the window once; if that fixes it, inspect `vv:pdf-bounds` flow. |
+| Blank area | Confirm the file is classified as `pdf` and readable; check the DevTools console for a `[pdf]` error. |
+| A **"rendering…"** chip lingers on a page | The page is heavy (mesh shadings / transparency / dense vector art) and rasterizes on the **main thread** — give it a moment; it is working, not frozen. |
+| A **"⚠ failed to render — click to retry"** chip | The page errored; click it to retry, and read the logged `[pdf] page N render failed` reason in the console. |
 | PDF does not refresh after save | Confirm the path is retained and watched. |
+
+pdf.js parses on a worker but paints on the main thread, so a figure-dense page can block briefly;
+`isEvalSupported true` speeds up shaded figures (see [feature 11](../features/11-native-pdf.md)).
 
 ---
 
@@ -137,6 +140,16 @@ __vvkeymap("vim")
 
 Use `__vvdb()` for tabs, history, active theme, settings, keybinding UI state,
 and sidebar state. Use `__vvds()` for cached document content metadata.
+
+---
+
+## 9. "A JavaScript error occurred in the main process" dialog
+
+If the **main** process hits an unexpected error, vinary shows an error dialog
+with a **Copy details** button — click it to put the full stack on your
+clipboard (the full trace is also printed to the terminal / logs via
+`console.error`). Paste that into a bug report. The app keeps running after the
+dialog is dismissed.
 
 ---
 

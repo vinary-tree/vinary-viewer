@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0013**.
+The next free number is **0017**.
 
 ---
 
@@ -73,6 +73,7 @@ The next free number is **0013**.
 | [0013](0013-in-renderer-pdfjs.md) | Render PDFs in the renderer with pdf.js, retiring the native PDF view | Accepted |
 | [0014](0014-native-ad-blocking-ghostery.md) | Native ad/tracker blocking with @ghostery/adblocker-electron | Accepted |
 | [0015](0015-scoped-extension-runtime-gpl-free.md) | A GPL-free, scoped Chrome-extension runtime (password managers + ad-blocker-class) | Accepted |
+| [0016](0016-main-process-simple-optimization.md) | Compile the Electron main process with `:simple`, not `:advanced` | Accepted |
 
 ---
 

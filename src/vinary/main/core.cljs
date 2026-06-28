@@ -68,7 +68,38 @@
     (reset! main-window win)
     win))
 
+(defn- report-crash!
+  "Log the full stack (terminal/logs) and show a COPYABLE error dialog. Electron's default
+   uncaught-exception dialog has only an OK button and its text can't be selected/copied, so the
+   user had to retype crash traces by hand; this offers a 'Copy details' button instead."
+  [^js err]
+  (let [text (or (some-> err .-stack) (str err))]
+    (js/console.error "[vinary] uncaught main-process exception:\n" text)
+    (try
+      (let [^js dialog    (.-dialog electron)
+            ^js clipboard (.-clipboard electron)
+            choice (.showMessageBoxSync dialog
+                     (clj->js {:type      "error"
+                               :title     "vinary-viewer — unexpected error"
+                               :message   "An unexpected error occurred in the main process."
+                               :detail    text
+                               :buttons   ["Copy details" "Dismiss"]
+                               :defaultId 0
+                               :cancelId  1
+                               :noLink    true}))]
+        (when (zero? choice) (.writeText clipboard text)))
+      (catch :default _ nil))))   ; pre-ready / headless → the console still has the full stack
+
+(defn- install-crash-reporting! []
+  (.on js/process "uncaughtException"  (fn [err]      (report-crash! err)))
+  ;; benign promise rejections are common (extensions/network) — log them, but don't pop a modal for each
+  (.on js/process "unhandledRejection"
+       (fn [reason _] (js/console.error "[vinary] unhandled promise rejection:"
+                                        (or (some-> ^js reason .-stack) reason)))))
+
 (defn ^:export main []
+  ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
+  (install-crash-reporting!)
   ;; Linux GPU resilience: many systems sandbox the GPU process so it cannot open the system DRI/GBM
   ;; driver ("MESA-LOADER: failed to open dri … Permission denied"). Loosen only the GPU sandbox (the
   ;; renderer stays sandboxed). VV_SOFTWARE_GL=1 forces software rendering where even that fails.

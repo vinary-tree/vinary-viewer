@@ -13,6 +13,9 @@ When you follow an `http(s)` link, the page opens in Vinary's in-app web view (a
   (page), `g g` / `G` (top/bottom), arrows, Page keys, `Home`/`End`.
 - **`f` link hints** — press `f` to label every visible link and jump by typing its label (Vimium-style).
 - **History** — `Alt+←` / `Alt+→` (and the toolbar buttons / mouse back-forward) move through history.
+- **App shortcuts work here too** — global `Ctrl`/`Cmd` chords (`Ctrl+O`, `Ctrl+Shift+O`, `Ctrl+L`,
+  `Ctrl+F`, zoom, …) are forwarded from the web view to the app's keymap, so they do exactly what they do
+  over a document. Page editing/clipboard chords (`Ctrl+C` / `V` / `X` / `A` / `Z`) stay with the page.
 - **Right-click → Copy** — a native context menu offering **Copy**, **Copy Link Address** (on a link),
   and **Select All**.
 - **Text selection** works natively.
@@ -32,7 +35,9 @@ When you follow an `http(s)` link, the page opens in Vinary's in-app web view (a
   over it, and restores the live, scrollable view on close. The snapshot is **pre-captured and pushed**
   from main (`vv:http-snapshot-ready`, after load + on scroll-settle), so opening an overlay is a
   synchronous DOM swap — **instant**, with no behind-then-front flash and never blank. Dialogs now freeze
-  the **dimmed** page too, instead of going blank.
+  the **dimmed** page too, instead of going blank. The native view's hide is **deferred one paint** (a double
+  `requestAnimationFrame`) until the snapshot is on-screen, so even the one-frame blink at the swap is gone —
+  the handoff is seamless.
 
 **Security.** A local `.html` runs its own scripts — so it carries the trust posture of *remote* content,
 not that of a first-party document. It is loaded in the **same** isolated web session as remote pages
@@ -53,6 +58,7 @@ bar or `Ctrl` `+` / `-` / `0` ([feature 22](22-zoom-and-fit.md)). The same web s
 |---|---|
 | Scroll keys + `f` hints (self-contained, in the page context) | `resources/web-preload.js` |
 | `Alt`-arrow history forwarding | `vinary.main.web` (`before-input-event`) |
+| App `Ctrl`/`Cmd` chord forwarding (`vv:web-key` → synthetic `window` keydown → resolver) | `vinary.main.web` (`before-input-event` → `web-app-chord`) → `resources/preload.js` (`onWebKey`) → `vinary.renderer.core` (`replay-web-key!`) |
 | Right-click Copy menu (native) | `vinary.main.web` (`context-menu` handler) |
 | Persistent session | `vinary.main.web` (`webPreferences {:partition "persist:vinary-web"}`) |
 | Edge-to-edge layout (web + local HTML) | `.vv-content-web` (drops the gutter) in `resources/public/css/app.css` |

@@ -15,6 +15,7 @@
 (rf/reg-sub :ui/find           (fn [db _] (get-in db [:ui :find])))
 (rf/reg-sub :pdf/view-state    (fn [db _] (get-in db [:ui :pdf])))
 (rf/reg-sub :view/zoom-percent (fn [db _] (zoom/percent db)))   ; live zoom % for the active surface (zoom bar)
+(rf/reg-sub :view/pdf-active?  (fn [db _] (= :pdf (zoom/context db))))  ; gates the PDF-only View-menu items
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))

@@ -49,16 +49,20 @@ async function main() {
   await app.whenReady();
   const ses = session.fromPartition('persist:vv-ext-smoke');
 
-  // register the chrome.* polyfill preloads (ADR-0015) BEFORE loading the extension. The FRAME preload
-  // polyfills extension pages/popups (works); the service-worker preload is a forward-compatible no-op on
-  // Electron 42 (it does not run inside extension background workers — verified).
-  ses.registerPreloadScript({ type: 'service-worker', filePath: path.join(ROOT, 'resources', 'ext-sw-preload.js') });
-  ses.registerPreloadScript({ type: 'frame', filePath: path.join(ROOT, 'resources', 'ext-frame-preload.js') });
+  // register the ONE self-contained chrome.* polyfill preload (ADR-0015) for BOTH types BEFORE loading the
+  // extension — it inlines its polyfill (no relative require) so it also works in the sandboxed service-worker
+  // realm, and injects via contextBridge.executeInMainWorld into extension pages/popups AND the background SW.
+  const polyfill = path.join(ROOT, 'resources', 'ext-chrome-polyfill.js');
+  ses.registerPreloadScript({ type: 'service-worker', filePath: polyfill });
+  ses.registerPreloadScript({ type: 'frame', filePath: polyfill });
 
   // (1) load the unpacked MV3 extension
   const ext = await ses.extensions.loadExtension(EXT_DIR);
   assert.ok(ext && ext.id, 'session.extensions.loadExtension must return an extension');
   console.log('[ok] loadExtension →', ext.id);
+
+  // start the MV3 background SW so its startup chrome.* probe runs (it stores the result for the popup/smoke)
+  try { await ses.serviceWorkers.startWorkerForScope(`chrome-extension://${ext.id}/`); } catch (e) {}
 
   const win = new BrowserWindow({ width: 600, height: 500, show: true, paintWhenInitiallyHidden: true });
   const view = new WebContentsView({ webPreferences: { partition: 'persist:vv-ext-smoke', contextIsolation: true, nodeIntegration: false } });
@@ -84,6 +88,22 @@ async function main() {
   // extension-page main worlds, so extension popups/options pages that touch them don't crash (ADR-0015)
   assert.strictEqual(popup.frameWindows, true, 'the frame polyfill must define chrome.windows in extension pages');
   console.log('[ok] frame polyfill defines chrome.windows in extension pages');
+
+  // (3c) the SERVICE-WORKER preload's chrome.* polyfill (ADR-0015) reaches the BACKGROUND worker too: the SW
+  // reads chrome.windows.onFocusChanged at startup (the exact call LastPass crashes on) — now polyfilled. SW
+  // preloads require the sandbox, so this is skipped under --no-sandbox (the frame path still proves load).
+  const noSandbox = process.argv.includes('--no-sandbox') || app.commandLine.hasSwitch('no-sandbox');
+  await waitFor(async () => (await wc.executeJavaScript('Boolean(window.__vvPopup && window.__vvPopup.bg)', true)) === true,
+    'background SW stored its chrome.* probe', 8000).catch(() => {});
+  const bg = await wc.executeJavaScript('(window.__vvPopup && window.__vvPopup.bg) || null', true);
+  if (noSandbox) {
+    console.log('[skip] SW chrome.windows polyfill — service-worker preloads require the sandbox (run without --no-sandbox)');
+  } else {
+    assert.ok(bg && bg.ran, 'the background service worker must run + store its probe');
+    assert.strictEqual(bg.windows, true, 'the SW preload must define chrome.windows in the background worker');
+    assert.strictEqual(bg.windowsOk, true, 'the SW must reach chrome.windows.onFocusChanged.addListener (LastPass startup)');
+    console.log('[ok] SW chrome.windows polyfill: background worker reaches onFocusChanged (LastPass fix)');
+  }
 
   // (4) ad-blocker blocks a known ad host (network-gated: building the engine fetches filter lists)
   if (await networkUp()) {

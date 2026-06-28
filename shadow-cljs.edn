@@ -6,7 +6,11 @@
  ;; and node built-ins stay runtime requires (resolved by the Electron runtime) — no bundling.
  {:main {:target    :node-script
          :main      vinary.main.core/main
-         :output-to "dist/main/main.js"}
+         :output-to "dist/main/main.js"
+         ;; :simple (not the :node-script default :advanced) for release — advanced property-renaming
+         ;; silently renames un-^js-hinted Electron interop (e.g. .toggleDevTools → .Xc) and crashes the
+         ;; main process; the :renderer build disables advanced for the same reason. :simple still minifies.
+         :release   {:compiler-options {:optimizations :simple}}}
   ;; Electron RENDERER (Chromium). Browser target; Node fs/path/url are stubbed — the renderer talks
   ;; to the main process over the contextBridge IPC seam (added in P1), never the filesystem directly.
   :renderer {:target     :browser

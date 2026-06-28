@@ -11,8 +11,9 @@ same **percentage** reflects it. There are two surfaces:
 
 - A **zoom bar** — a slim, always-visible strip at the bottom of the content pane:
   `[ − ] [ 100% ▾ ] [ + ]`.
-- A **View ▸ Fit** submenu — radio items **Fit Width**, **Fit Page**, **Actual Size** (PDF only; see
-  [feature 11](11-native-pdf.md)).
+- A **View ▸ Fit** submenu — radio items **Fit Width**, **Fit Page**, **Actual Size**. It (and **Invert
+  PDF**) appear in the View menu **only while a PDF is the active view** (gated on the `:view/pdf-active?`
+  sub); see [feature 11](11-native-pdf.md).
 
 > **Defined terms.**
 > **Zoom factor** — the multiplier applied to the active surface; `1.0` = 100% (the default in every
@@ -98,7 +99,7 @@ Any explicit zoom (bar, keys, or menu) clears the fit mode for that PDF.
 | Web-page zoom (the native view's `webContents`) | `vinary.main.web` (`vv:http-zoom` / `vv:http-zoom-set` → `setZoomFactor`) |
 | App-window zoom (renderer DOM) | `vinary.main.shell` (`vv:zoom` / `vv:zoom-set`) |
 | The bar component (`.vv-bottombar`) | `vinary.ui.zoombar` |
-| View ▸ Fit / Zoom items | `vinary.ui.menubar` (`:sub/fit`) |
+| View ▸ Fit / Zoom items (Fit + Invert PDF shown only when a PDF is active) | `vinary.ui.menubar` (`:sub/fit`; the PDF-only items are filtered out of the View menu unless `:view/pdf-active?`) |
 
 **Why a single `context` function.** The `−`/`+` buttons, the keybindings, and the View menu all emit the
 *same* `[:view/zoom …]` event; `:view/zoom-set` is the *only* extra event (for the field and presets). The

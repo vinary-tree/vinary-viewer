@@ -70,6 +70,7 @@ fields derived from `getBoundingClientRect()`.
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc ...]` | Deliver heading outline from the HTTP web view. |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading ...]` | Deliver active HTTP heading. |
 | `vv:history-nav` | `onHistoryNav(cb)` | `"back"` or `"forward"` | history dispatch | Forward browser-like navigation from native/web surfaces. |
+| `vv:web-key` | `onWebKey(cb)` | `{key, ctrl, shift, alt, meta}` | replayed as a synthetic `window` keydown → keymap resolver | Forward an app-global Ctrl/Cmd chord from the (separate-context) web view so the keymap runs the same command (Ctrl+O, Ctrl+Shift+O, Ctrl+L, Ctrl+F, zoom …). Page editing/clipboard chords (Ctrl+C/V/X/A/Z) stay with the page. |
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened ...]` | Deliver file selections from the native Open dialog. |
 | `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received ...]` | Deliver persisted settings. |
 | `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received ...]` | Deliver persisted recent-navigation state (`{:trail {…} :recent-files [...] :web-history [...]}`); initial push plus on external edit. |

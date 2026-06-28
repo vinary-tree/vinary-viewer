@@ -35,7 +35,9 @@
     "grammars:check": "node scripts/check-grammars.mjs",
     "test": "shadow-cljs compile test && node dist/test/test.js",
     "test:electron": "electron --no-sandbox test/electron-smoke.js",
-    "test:extensions": "electron --no-sandbox test/extensions-smoke.js"
+    "test:electron:release": "npm run release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js",
+    "test:extensions": "electron --no-sandbox test/extensions-smoke.js",
+    "test:extensions:sandbox": "electron test/extensions-smoke.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",

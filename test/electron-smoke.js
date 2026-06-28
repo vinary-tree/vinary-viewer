@@ -340,14 +340,32 @@ async function main() {
   assert.ok(/^\d+$/.test(zoomBar.value || ''), 'the zoom field must show a numeric percentage');
   await dispatchWindowKey(win, 'v', { altKey: true });
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu open');
-  await waitFor(() => evalIn(win, `document.querySelector('.vv-menu-dropdown')?.textContent.includes('Fit')`), 'View dropdown rendered');
-  assert.strictEqual(await hoverMenuItem(win, 'Fit'), true, 'View menu must have a Fit submenu');
-  await waitFor(() => evalIn(win, `(() => { const d = document.querySelector('.vv-menu-subdropdown');
-    return Boolean(d) && d.textContent.includes('Fit Width') && d.textContent.includes('Fit Page'); })()`),
-    'Fit submenu lists Fit Width / Fit Page');
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-menu-dropdown')?.textContent.includes('Zoom In')`), 'View dropdown rendered');
+  // B6 — the PDF-only items (Fit submenu, Invert PDF) appear ONLY when a PDF is the active view; none is yet.
+  // A4 — the re-frame-10x item exists only in a dev build (its runtime is stripped from :release); the gate
+  // runs this smoke against a release build with VV_RELEASE=1 to assert it is then absent.
+  const releaseBuild = process.env.VV_RELEASE === '1';
+  const viewNoPdf = await evalIn(win, `(() => { const t = document.querySelector('.vv-menu-dropdown')?.textContent || '';
+    return { fit: t.includes('Fit'), invert: t.includes('Invert PDF'), tenx: t.includes('re-frame-10x') }; })()`);
+  assert.strictEqual(viewNoPdf.fit, false, 'View ▸ Fit must be hidden when no PDF is active');
+  assert.strictEqual(viewNoPdf.invert, false, 'View ▸ Invert PDF must be hidden when no PDF is active');
+  assert.strictEqual(viewNoPdf.tenx, !releaseBuild,
+    releaseBuild ? 'View ▸ re-frame-10x must be absent in a release build' : 'View ▸ re-frame-10x present in a dev build');
   await dispatchWindowKey(win, 'Escape');
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed');
-  console.log('[ok] zoom bar present + View ▸ Fit submenu works');
+  console.log('[ok] zoom bar present + View PDF-only items hidden without a PDF');
+
+  // B4 / B5 — the mode-line indicator is removed, and #app clips overflow so a tall view adds no second
+  // window-level scrollbar beside the content scroller
+  const layout = await evalIn(win, `(() => ({
+    noModeline: !document.querySelector('.vv-modeline'),
+    appClip: getComputedStyle(document.getElementById('app')).overflowY,
+    statusInWrap: !document.querySelector('.vv-statusbar') || Boolean(document.querySelector('.vv-content-wrap > .vv-statusbar'))
+  }))()`);
+  assert.strictEqual(layout.noModeline, true, 'the mode-line indicator must be removed');
+  assert.strictEqual(layout.appClip, 'hidden', '#app must clip overflow so a tall view adds no window scrollbar');
+  assert.strictEqual(layout.statusInWrap, true, 'the hover-URL status bar must live inside .vv-content-wrap (above the zoom bar)');
+  console.log('[ok] mode-line removed + app root clipped + status bar repositioned');
 
   // PDF — rendered IN-DOM via pdf.js (parity with markdown: canvas + selectable text layer + find +
   // copy), NOT the retired native WebContentsView. Bytes are streamed on vv:content.
@@ -387,6 +405,19 @@ async function main() {
   assert.ok(pdfLayout.canvasW > 0, 'PDF canvas must have a visible width');
   assert.strictEqual(pdfLayout.textOverlapsCanvas, true, 'PDF text layer must align over the canvas');
   console.log('[ok] PDF renders in-DOM: canvas + aligned text layer (no native view)');
+
+  // B6 — now a PDF IS the active view → its Fit submenu + Invert PDF appear, and the Fit submenu works
+  await dispatchWindowKey(win, 'v', { altKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu open (pdf active)');
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-menu-dropdown')?.textContent.includes('Fit')`), 'View ▸ Fit present with a PDF active');
+  assert.strictEqual(await evalIn(win, `(document.querySelector('.vv-menu-dropdown')?.textContent || '').includes('Invert PDF')`), true, 'View ▸ Invert PDF present with a PDF active');
+  assert.strictEqual(await hoverMenuItem(win, 'Fit'), true, 'View menu must have a Fit submenu with a PDF active');
+  await waitFor(() => evalIn(win, `(() => { const d = document.querySelector('.vv-menu-subdropdown');
+    return Boolean(d) && d.textContent.includes('Fit Width') && d.textContent.includes('Fit Page'); })()`),
+    'Fit submenu lists Fit Width / Fit Page');
+  await dispatchWindowKey(win, 'Escape');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed (pdf)');
+  console.log('[ok] View ▸ Fit + Invert PDF appear only with a PDF active');
 
   // selection → Ctrl+C copies the PDF text (copy parity with markdown/source)
   state.lastCopiedText = null;
@@ -443,6 +474,14 @@ async function main() {
   const openMode = await evalIn(win, `String(window.__vvdb().ui['open-dialog-mode'])`);
   assert.strictEqual(openMode, 'new-tab', 'Ctrl+Shift+O must request the new-tab open mode');
   console.log('[ok] Ctrl+Shift+O works from preview content');
+
+  // B3 — app-global Ctrl/Cmd chords forwarded from the (separate-context) web view are replayed through the
+  // resolver. Simulate the forward by delivering vv:web-key to the renderer and assert the same command runs.
+  const dialogsBeforeWeb = state.openDialogs;
+  win.webContents.send('vv:web-key', { key: 'O', ctrl: true, shift: true, alt: false, meta: false });
+  await waitFor(() => state.openDialogs > dialogsBeforeWeb, 'web-view Ctrl+Shift+O forwarded → new-tab dialog request');
+  assert.strictEqual(await evalIn(win, `String(window.__vvdb().ui['open-dialog-mode'])`), 'new-tab', 'forwarded Ctrl+Shift+O requests the new-tab open mode');
+  console.log('[ok] web-view Ctrl/Cmd shortcuts forwarded to the app keymap');
 
   await sendChord(win, 'L', ['control']);
   await waitFor(

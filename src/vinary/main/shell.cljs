@@ -10,7 +10,10 @@
 (defonce ^:private win*   (atom nil))
 (defonce ^:private inited (atom false))
 
-(defn- wc [] (some-> ^js @win* .-webContents))
+;; ^js return tag → the un-hinted interop callers (e.g. (.toggleDevTools (wc))) get an inferred extern, so
+;; advanced compilation can't rename the method to a non-existent one. (Belt-and-suspenders with the :main
+;; build's :simple optimization; see shadow-cljs.edn.)
+(defn- wc ^js [] (some-> ^js @win* .-webContents))
 
 (defn- app-info []
   (let [pkg (try (js/JSON.parse (.readFileSync fs (path/join js/__dirname ".." ".." "package.json") "utf8"))

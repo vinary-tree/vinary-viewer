@@ -104,6 +104,12 @@ contextBridge.exposeInMainWorld('vv', {
     ipcRenderer.on('vv:history-nav', h);
     return () => ipcRenderer.removeListener('vv:history-nav', h);
   },
+  // app-global Ctrl/Cmd chords forwarded from the (separate-context) web view → replayed through the resolver
+  onWebKey: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:web-key', h);
+    return () => ipcRenderer.removeListener('vv:web-key', h);
+  },
   onOpenFiles: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:open-files', h);

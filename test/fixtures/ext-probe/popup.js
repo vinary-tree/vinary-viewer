@@ -9,5 +9,15 @@ window.__vvPopup = {
   // in extension-page main worlds, so extension popups/pages that touch them don't crash:
   frameWindows: typeof chrome !== 'undefined' &&
     !!(chrome.windows && chrome.windows.onFocusChanged && chrome.windows.onFocusChanged.addListener),
+  // the background SW stores its own chrome.windows probe (ADR-0015 SW path) in chrome.storage; poll until
+  // it lands so the smoke can read whether the SW preload reached the background worker
+  bg: null,
 };
+(function pollBg() {
+  if (typeof chrome === 'undefined' || !(chrome.storage && chrome.storage.local)) { return; }
+  chrome.storage.local.get('vvBg', function (r) {
+    if (r && r.vvBg) { window.__vvPopup.bg = r.vvBg; }
+    else { setTimeout(pollBg, 100); }
+  });
+})();
 document.getElementById('p').textContent = 'popup-ready';

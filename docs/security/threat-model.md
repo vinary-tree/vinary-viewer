@@ -306,9 +306,14 @@ them**, shrinking the remote-content attack surface for the web view.
 
 ### Documented non-support (honest limits)
 
-Native-messaging password managers (1Password, KeePassXC) and several MV3 background APIs (`offscreen`,
-`nativeMessaging`, `sidePanel`, `webNavigation`) are **not** provided by Electron and are out of scope; the
-runtime fails closed (those calls no-op) rather than degrading isolation.
+Native-messaging password managers (1Password, KeePassXC) are **not** provided by Electron and are out of
+scope. For the APIs Electron lacks (`chrome.windows`/`webNavigation`/`cookies`/`notifications`/`contextMenus`/
+`privacy`), a **self-contained chrome.\* polyfill preload** (registered for both the frame and service-worker
+types) injects **inert, correctly-shaped stubs** into the extension's main world — its pages **and** its
+background worker — so an extension that reads them at startup (e.g. LastPass → `chrome.windows.onFocusChanged`)
+registers and its popup loads. The stubs **add no capability** (they fail closed: events never fire, getters
+resolve empty), so they do **not** expand the extension's reach beyond the network access it already had on
+`persist:vinary-web`. `offscreen`/`nativeMessaging`/`sidePanel` remain absent entirely.
 
 ---
 
@@ -321,7 +326,7 @@ runtime fails closed (those calls no-op) rather than degrading isolation.
 | Filesystem reads                           | Any path the user can read (CLI-viewer trust); `git` via `execFileSync` (no shell).               |
 | Markdown XSS via raw HTML                   | **Not passed through** — `rehype-raw` is not enabled; plain-text/source fallback kinds are HTML-escaped. |
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
-| CSP                                        | **None yet** — Forthcoming.                                                                       |
+| CSP                                        | **None yet** — Forthcoming. A future renderer CSP must allow `'unsafe-eval'`: pdf.js JIT-compiles a PDF's PostScript/Type-4 shading functions via `eval` (`isEvalSupported true`), and the pdf.js ESM module loads through `new Function` (ADR-0013). PDFs follow the local-document trust model. |
 | Navigation lock-down                       | **None yet** — Forthcoming.                                                                       |
 
 The current design is appropriate for its intended **local, single-user, trusted-document** use, and it

@@ -248,6 +248,9 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/recent` | `app-db` | `{:trail {dir→child} :recent-files [...]}` (persisted recent-navigation state) |
 | `:ui/recent-files` | `app-db` | the recent-files MRU vector (`[:ui :recent :recent-files]`, capped at 10) — surfaced in File ▸ Open Recent |
 | `:ui/overlay-open?` | `app-db` | bool — OR of `:ui/menu`, `:ui/context-menu`, `:ui/settings-open?`, `:ui/about-open?`, `[:ui :kbedit :open?]`, `[:ui :palette :open?]`; true hides the native PDF/web views so a dropdown/modal isn't painted beneath them |
+| `:pdf/view-state` | `app-db` | `{:scale :fit :invert?}` for the active PDF (`[:ui :pdf]`; drives `pdf/update!`) |
+| `:view/zoom-percent` | `app-db` | live zoom % for the active surface (PDF scale / web-view / app-window) — shown in the zoom bar |
+| `:view/pdf-active?` | `app-db` | bool — the active view is a PDF (`= :pdf (zoom/context …)`); gates the PDF-only View-menu items (Fit, Invert PDF) |
 | `:input/mode` **[input]** | `app-db` | `:normal`/`:insert`/`:visual` |
 | `:input/pending` **[input]** | `app-db` | the pending key-sequence vector (`:ui :input :sequence`) |
 | `:input/in-input?` **[input]** | `app-db` | bool (focus is in a text input) |
