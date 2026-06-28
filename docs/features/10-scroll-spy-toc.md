@@ -13,6 +13,7 @@ the section nearest the top of the content viewport as the user scrolls.
 |--------|----------|
 | Open Markdown with headings | Contents panel shows heading text and nesting level. |
 | Scroll | Active heading updates at most once per animation frame. |
+| Hover an entry | A full-text `title` tooltip shows the entry's heading text (so long, truncated entries stay readable). |
 | Click an entry | The corresponding heading scrolls into view. |
 | Navigate to HTTP content | The web view reports its own heading outline and active heading. |
 

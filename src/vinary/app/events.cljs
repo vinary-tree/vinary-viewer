@@ -11,6 +11,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
+            [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.app.fx]
             [vinary.input.fx]))
 
@@ -34,37 +35,80 @@
         tx       (ds/retract-unretained-tx (ds/snapshot) retained)]
     (cond-> []
       (seq tx) (conj [:ds/transact tx])
-      true     (conj [:vv/sync-retained-files retained]))))
+      true     (conj [:vv/sync-retained-files retained])
+      true     (conj [:pdf/evict retained]))))   ; evict cached PDF bytes for retired docs
 
 (defn- with-retention [result db]
   (update result :fx #(into (vec (or % [])) (retention-fx db))))
 
+;; ---- recent navigation memory (persisted to recent.edn): dir→child trail + recent-files MRU ----
+(def ^:private max-recent-files 10)
+(def ^:private max-trail 200)
+
+(defn record-recent
+  "Update [:ui :recent] for a forward navigation to local path `p`: record the dir→child trail for every
+   ancestor step (root→p), and — for a FILE (not a directory) — unshift p onto the recent-files MRU."
+  [db p is-dir?]
+  (let [pairs (partition 2 1 (uri/segments p))
+        trail (reduce (fn [m [parent child]] (assoc m (:path parent) (:path child)))
+                      (get-in db [:ui :recent :trail] {})
+                      pairs)
+        trail (if (> (count trail) max-trail)
+                (into {} (take-last max-trail (sort-by key trail)))
+                trail)
+        files (when-not is-dir?
+                (->> (get-in db [:ui :recent :recent-files] [])
+                     (remove #(= % p)) (cons p) (take max-recent-files) vec))]
+    (cond-> (assoc-in db [:ui :recent :trail] trail)
+      files (assoc-in [:ui :recent :recent-files] files))))
+
+(def ^:private max-web-history 300)
+
+(defn record-web-history
+  "Unshift an http(s) `url` onto the [:ui :recent :web-history] MRU (deduped, bounded). Powers the
+   address bar's browser-history completion for web pages (analogous to recent-files for local files)."
+  [db url]
+  (if (and url (uri/http? url))
+    (let [hist (->> (get-in db [:ui :recent :web-history] [])
+                    (remove #(= % url)) (cons url) (take max-web-history) vec)]
+      (assoc-in db [:ui :recent :web-history] hist))
+    db))
+
 (rf/reg-event-fx
  :content/received
- (fn [{:keys [db]} [_ {:keys [path kind text html stamp]}]]
+ (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp]}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
          stamp   (if (some? stamp) stamp (js/Date.now))
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
-         ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered).
+         ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
+         ;; directory carries its :doc/entries listing instead.
          attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
-                   text            (assoc :doc/text text)
-                   html            (assoc :doc/html html)
-                   (= kind "text") (assoc :doc/html (plain-html text))   ; plain text
+                   text                  (assoc :doc/text text)
+                   html                  (assoc :doc/html html)
+                   (= kind "directory")  (assoc :doc/entries (vec entries))
+                   (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    (not= kind "markdown") (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
-         tx      (cond-> [base] cur-err (conj [:db/retract eid :doc/error cur-err]))]
-     ;; the CLI/initial file arrives before any tab exists → it opens the first tab
-     (let [db' (if (empty? (nav/tabs db)) (nav/add-tab db path) db)]
-       (with-retention
-         {:db db'
-          :fx (cond-> [[:ds/transact tx]]
-                (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
-                                                              :on-done [:content/rendered path stamp]}]))}
-         db')))))
+         tx      (cond-> [base] cur-err (conj [:db/retract eid :doc/error cur-err]))
+         ;; the CLI/initial file arrives before any tab exists → it opens the first tab
+         db'     (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
+         ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
+         ;; background live-refresh — so the MRU + trail track where the user actually went.
+         active? (= path (nav/active-path db'))
+         db'     (if active? (record-recent db' path (= kind "directory")) db')]
+     (with-retention
+       {:db db'
+        :fx (cond-> [[:ds/transact tx]]
+              (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
+                                                            :on-done [:content/rendered path stamp]}])
+              ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
+              (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
+              active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
+       db'))))
 
 (rf/reg-event-fx
  :content/rendered
@@ -105,7 +149,11 @@
 (defn- nav-fx [uri scroll] (cond-> (load-fx uri) (uri/file-path uri) (conj [:scroll/restore scroll])))
 
 (defn- nav-result [db uri scroll]
-  {:db db :fx (into (retention-fx db) (nav-fx uri scroll))})
+  ;; navigating to an http(s) page records it in browser history (→ address-bar history completion)
+  (let [db (record-web-history db uri)]
+    {:db db
+     :fx (cond-> (into (retention-fx db) (nav-fx uri scroll))
+           (and uri (uri/http? uri)) (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}))
 
 ;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none. The leaving
 ;; scroll is saved into history; the new entry starts at the top.
@@ -206,6 +254,10 @@
          toi (first (keep-indexed #(when (= (:id %2) to-id) %1) ts))]
      (if toi (nav/reorder db from-id (+ toi (if after? 1 0))) db))))
 
+;; tab drag insertion indicator: which tab the cursor is over + which side (before/after its midpoint)
+(rf/reg-event-db :tab/drop-set   (fn [db [_ over after?]] (assoc-in db [:ui :tab-drop] {:over over :after? (boolean after?)})))
+(rf/reg-event-db :tab/drop-clear (fn [db _] (assoc-in db [:ui :tab-drop] nil)))
+
 (rf/reg-event-fx
  :tab/close-others
  (fn [{:keys [db]} [_ id]]
@@ -235,11 +287,105 @@
      (nav-result db' uri sc)
      {})))
 
-;; URI bar: parse the typed text (http kept; file:// stripped; else a path) + navigate the active tab
+;; Alt+Up: navigate the active tab to the PARENT directory of the current file:// uri (no-op for http /
+;; at the filesystem root). The came-from child is pre-highlighted so Alt+Down returns to it.
+(rf/reg-event-fx
+ :nav/parent
+ [(rf/inject-cofx :content-scroll)]
+ (fn [{:keys [db content-scroll]} _]
+   (let [cur (nav/active-uri db)]
+     (if-let [parent (uri/dirname cur)]
+       (let [db' (-> (nav/nav-active db parent content-scroll)
+                     (assoc-in [:ui :dir-selected] (uri/file-path cur)))]
+         (nav-result db' parent 0))
+       {}))))
+
+;; Alt+Down: open the highlighted target of the active directory view (file → open; subdir → descend).
+;; Inert unless a directory listing is showing.
+(rf/reg-event-fx
+ :nav/open-target
+ (fn [{:keys [db]} _]
+   (let [dir (nav/active-path db)
+         doc (when dir (ds/active-doc (ds/snapshot) dir))]
+     (if (= "directory" (:doc/kind doc))
+       (if-let [sel (nav/effective-selected dir (:doc/entries doc)
+                                            (get-in db [:ui :dir-selected])
+                                            (get-in db [:ui :recent :trail]))]
+         {:fx [[:dispatch [:doc/open sel]]]}
+         {})
+       {}))))
+
+;; URI bar Enter: open a complete existing path (file or directory), else the most-likely prefix match,
+;; else a non-intrusive inline error (no dialog). http(s) bypasses path completion.
 (rf/reg-event-fx
  :uri/navigate
- (fn [_ [_ text]]
-   (if-let [uri (uri/normalize text)] {:fx [[:dispatch [:tab/navigate uri]]]} {})))
+ (fn [{:keys [db]} [_ text]]
+   (cond
+     (str/blank? text) {}
+     (uri/http? text)  {:fx [[:dispatch [:tab/navigate (uri/normalize text)]]]}
+     :else
+     (let [uc           (get-in db [:ui :uri-complete])
+           [dir-part _] (uri/complete-split text)
+           [last-dir _] (uri/complete-split (or (:input uc) ""))]
+       (if (and (:input uc) (= dir-part last-dir))
+         {:fx [[:dispatch [:uri-complete/decide-enter (assoc uc :input text)]]]}
+         {:fx [[:vv/complete-path {:input text :tag :enter}]]})))))
+
+;; ---- URI-bar path auto-completion ----
+(defn- prefix-matches
+  "Entries whose basename prefix-matches `base` (dotfiles hidden unless base starts with '.'), sorted
+   dirs-first then by name (the directory browser's order)."
+  [entries base]
+  (nav/sort-entries (filter #(uri/matches-prefix? (:name %) base) entries)))
+
+(def ^:private uri-complete-empty
+  {:input nil :dir nil :entries [] :target nil :exists? false :dir? false
+   :selected -1 :dismissed? false :error? false})
+
+(rf/reg-event-db :uri-complete/clear       (fn [db _] (assoc-in db [:ui :uri-complete] uri-complete-empty)))
+(rf/reg-event-db :uri-complete/set         (fn [db [_ m]] (update-in db [:ui :uri-complete] merge m)))
+(rf/reg-event-db :uri-complete/clear-error (fn [db _] (assoc-in db [:ui :uri-complete :error?] false)))
+
+;; move the dropdown selection (computed in the event, off the live :selected, so rapid ↑/↓ don't
+;; both read a stale view-closure value); -1 = "none" → first ↓ lands on 0, first ↑ wraps to last
+(rf/reg-event-db
+ :uri-complete/move
+ (fn [db [_ dir n]]
+   (if (pos? n)
+     (let [cur  (get-in db [:ui :uri-complete :selected])
+           base (if (neg? cur) (if (pos? dir) -1 0) cur)]
+       (-> db
+           (assoc-in [:ui :uri-complete :selected] (mod (+ base dir) n))
+           (assoc-in [:ui :uri-complete :dismissed?] false)))
+     db)))
+
+(rf/reg-event-fx
+ :uri-complete/typed
+ (fn [{:keys [db]} [_ text]]
+   (if (or (str/blank? text) (uri/http? text))
+     {:db (assoc-in db [:ui :uri-complete] uri-complete-empty)}
+     {:db (update-in db [:ui :uri-complete] merge {:selected -1 :dismissed? false :error? false})
+      :fx [[:vv/complete-path {:input text :tag :live}]]})))
+
+(rf/reg-event-fx
+ :uri-complete/decide-enter
+ (fn [{:keys [db]} [_ {:keys [input entries exists? target]}]]
+   (let [[_ base] (uri/complete-split (or input ""))
+         ml       (first (prefix-matches entries base))]
+     (cond
+       exists? {:fx [[:dispatch [:tab/navigate target]] [:dispatch [:uri-complete/clear]]]}
+       ml      {:fx [[:dispatch [:tab/navigate (:path ml)]] [:dispatch [:uri-complete/clear]]]}
+       :else   {:db (assoc-in db [:ui :uri-complete :error?] true)
+                :fx [[:uri-complete/error-timeout]]}))))
+
+(rf/reg-event-fx
+ :uri-complete/result
+ (fn [{:keys [db]} [_ tag payload]]
+   (if (= tag :enter)
+     {:fx [[:dispatch [:uri-complete/decide-enter payload]]]}
+     {:db (update-in db [:ui :uri-complete] merge
+                     (-> (select-keys payload [:input :dir :entries :exists? :dir? :target])
+                         (update :entries vec)))})))
 
 ;; ---- in-app HTTP web view ----
 ;; the web view navigated (a link clicked on the remote page) → sync the active tab's URI + push history
@@ -248,8 +394,9 @@
  :http/navigated
  (fn [{:keys [db]} [_ {:keys [url]}]]
    (if (and url (uri/http? url) (not= url (nav/active-uri db)))
-     (let [db' (nav/nav-active db url 0)]   ; the web view scrolls itself; nothing to save into the content pane
-       (with-retention {:db db'} db'))
+     ;; the web view scrolls itself; nothing to save into the content pane — but record browser history
+     (let [db' (record-web-history (nav/nav-active db url 0) url)]
+       (with-retention {:db db' :fx [[:vv/save-recent (pr-str (get-in db' [:ui :recent]))]]} db'))
      {:db db})))
 
 ;; the web view's heading outline (for the Contents/TOC tab — HTML sections, like Markdown)
@@ -332,12 +479,22 @@
 (rf/reg-event-db :tab/next (fn [db _] (if-let [id (nav/nth-id db 1)]  (nav/activate db id) db)))
 (rf/reg-event-db :tab/prev (fn [db _] (if-let [id (nav/nth-id db -1)] (nav/activate db id) db)))
 
-(rf/reg-event-db
+(rf/reg-event-fx
  :sidebar/toggle
- (fn [db _] (update-in db [:ui :sidebar-visible?] not)))
+ (fn [{:keys [db]} _]
+   (let [vis      (not (get-in db [:ui :sidebar-visible?]))
+         settings (assoc (get-in db [:ui :settings]) :sidebar-visible? vis)]
+     {:db (-> db (assoc-in [:ui :sidebar-visible?] vis) (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
 
 (rf/reg-event-db :sidebar/tab   (fn [db [_ tab]] (assoc-in db [:ui :sidebar-tab] tab)))
-(rf/reg-event-db :sidebar/width (fn [db [_ w]]   (assoc-in db [:ui :sidebar-width] (-> w (max 140) (min 720)))))
+(rf/reg-event-fx
+ :sidebar/width
+ (fn [{:keys [db]} [_ w]]
+   (let [w        (-> w (max 140) (min 720))
+         settings (assoc (get-in db [:ui :settings]) :sidebar-width w)]
+     {:db (-> db (assoc-in [:ui :sidebar-width] w) (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
 ;; show the Files tab (used by "Reveal in tree" + the directory context menu); the active file's ancestors
 ;; are auto-expanded by file-tree's reveal-active!
 (rf/reg-event-db :sidebar/reveal
@@ -406,8 +563,43 @@
    {:db (assoc-in db [:ui :open-dialog-mode] (open-dialog-mode mode))
     :fx [[:vv/open-dialog]]}))
 (rf/reg-event-fx :app/quit         (fn [_ _] {:fx [[:vv/quit]]}))
-(rf/reg-event-fx :view/zoom        (fn [_ [_ dir]] {:fx [[:vv/zoom dir]]}))
+(rf/reg-event-fx
+ :view/zoom
+ (fn [{:keys [db]} [_ dir]]
+   ;; context-aware: a PDF zooms its in-renderer view; everything else zooms the Chromium webview
+   (if (= "pdf" (some-> (nav/active-path db) (#(ds/doc-attr (ds/snapshot) % :doc/kind))))
+     {:fx [[:dispatch [:pdf/zoom (case dir 1 :in -1 :out :reset)]]]}
+     {:fx [[:vv/zoom dir]]})))
 (rf/reg-event-fx :view/devtools    (fn [_ _] {:fx [[:vv/devtools]]}))
+
+;; ---- in-renderer PDF view-state (zoom / fit / dark-invert); fit + invert persist in settings.edn ----
+(rf/reg-event-fx
+ :pdf/zoom
+ (fn [{:keys [db]} [_ dir]]
+   {:db (-> db
+            (assoc-in [:ui :pdf :scale] (pdf-layout/zoom-step (get-in db [:ui :pdf :scale] 1.0) dir))
+            (assoc-in [:ui :pdf :fit] nil))}))   ; an explicit zoom overrides the fit mode
+
+(rf/reg-event-fx
+ :pdf/fit
+ (fn [{:keys [db]} [_ mode]]
+   (let [settings (assoc (get-in db [:ui :settings]) :pdf-fit mode)]
+     {:db (-> db (assoc-in [:ui :pdf :fit] mode) (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
+
+(rf/reg-event-fx
+ :pdf/invert-toggle
+ (fn [{:keys [db]} _]
+   (let [inv      (not (get-in db [:ui :pdf :invert?]))
+         settings (assoc (get-in db [:ui :settings]) :pdf-invert? inv)]
+     {:db (-> db (assoc-in [:ui :pdf :invert?] inv) (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
+
+(rf/reg-event-fx
+ :pdf/outline
+ (fn [_ [_ path toc]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/toc (vec toc)]]]]})))
 (rf/reg-event-fx
  :view/re-frame-10x
  (fn [{:keys [db]} _]
@@ -442,7 +634,11 @@
                     (try (reader/read-string text) (catch :default _ nil)))
          settings (merge (get-in db [:ui :settings]) s)]
      {:db (cond-> (assoc-in db [:ui :settings] settings)
-            (:theme s) (assoc-in [:ui :theme] (:theme s)))
+            (:theme s)                      (assoc-in [:ui :theme] (:theme s))
+            (contains? s :sidebar-visible?) (assoc-in [:ui :sidebar-visible?] (:sidebar-visible? s))
+            (:sidebar-width s)              (assoc-in [:ui :sidebar-width] (:sidebar-width s))
+            (:pdf-fit s)                    (assoc-in [:ui :pdf :fit] (:pdf-fit s))
+            (contains? s :pdf-invert?)      (assoc-in [:ui :pdf :invert?] (:pdf-invert? s)))
       :fx (cond-> [[:fonts/apply settings]]
             (:theme s) (conj [:theme/apply (:theme s)]))})))
 
@@ -454,6 +650,88 @@
      {:db (assoc-in db [:ui :settings] settings)
       :fx [[:fonts/apply settings] [:vv/save-settings (pr-str settings)]]})))
 
+;; ---- recent navigation memory (recent.edn): dir→child trail + recent-files MRU ----
+(rf/reg-event-db
+ :recent/received
+ (fn [db [_ text]]
+   (let [r (when (and (string? text) (seq (str/trim text)))
+             (try (reader/read-string text) (catch :default _ nil)))]
+     (cond-> db
+       (map? r) (assoc-in [:ui :recent] (merge {:trail {} :recent-files [] :web-history []} r))))))
+
+;; File ▸ Open Recent ▸ Clear Recent
+(rf/reg-event-fx
+ :recent/clear
+ (fn [{:keys [db]} _]
+   (let [recent (assoc (get-in db [:ui :recent]) :recent-files [])]
+     {:db (assoc-in db [:ui :recent] recent)
+      :fx [[:vv/save-recent (pr-str recent)]]})))
+
+;; ---- extensions + ad-blocking ----
+(defn- ext-config-edn
+  "Serialize the persisted extension/ad-block prefs (extensions.edn) from app-db."
+  [db]
+  (pr-str {:adblock    (get-in db [:ui :adblock])
+           :extensions {:enabled?     (get-in db [:ui :extensions :enabled?])
+                        :disabled-ids (->> (get-in db [:ui :extensions :installed])
+                                           (remove :enabled?) (map :id) set)}}))
+
+(rf/reg-event-db :extensions/open  (fn [db _] (assoc-in db [:ui :extensions-open?] true)))
+(rf/reg-event-db :extensions/close (fn [db _] (assoc-in db [:ui :extensions-open?] false)))
+
+(rf/reg-event-db
+ :ext-config/received
+ (fn [db [_ text]]
+   (let [r (when (and (string? text) (seq (str/trim text)))
+             (try (reader/read-string text) (catch :default _ nil)))]
+     (cond-> db
+       (map? (:adblock r))    (update-in [:ui :adblock] merge (:adblock r))
+       (contains? (:extensions r) :enabled?) (assoc-in [:ui :extensions :enabled?] (get-in r [:extensions :enabled?]))))))
+
+(rf/reg-event-db
+ :ext/state-received
+ (fn [db [_ text]]
+   (let [r (when (and (string? text) (seq (str/trim text)))
+             (try (reader/read-string text) (catch :default _ nil)))]
+     (cond-> db
+       (map? r) (update-in [:ui :extensions] merge (select-keys r [:enabled? :installed]))))))
+
+(rf/reg-event-db :ext/install-result (fn [db [_ p]] (assoc-in db [:ui :extensions :install-status] (js->clj p :keywordize-keys true))))
+(rf/reg-event-db :ext/update-result  (fn [db [_ p]] (assoc-in db [:ui :extensions :update-status]  (js->clj p :keywordize-keys true))))
+
+(rf/reg-event-fx :extensions/install        (fn [_ [_ s]]  {:fx [[:vv/ext-install s]]}))
+(rf/reg-event-fx :extensions/remove         (fn [_ [_ id]] {:fx [[:vv/ext-remove id]]}))
+(rf/reg-event-fx :extensions/check-updates  (fn [_ _]      {:fx [[:vv/ext-check-updates]]}))
+(rf/reg-event-fx :extensions/action-clicked (fn [_ [_ id popup bounds]] {:fx [[:vv/ext-action-clicked {:id id :popup popup :bounds bounds}]]}))
+(rf/reg-event-fx :extensions/popup-close    (fn [_ _]      {:fx [[:vv/ext-popup-close]]}))
+(rf/reg-event-fx :adblock/refresh           (fn [_ _]      {:fx [[:vv/adblock-refresh]]}))
+
+(rf/reg-event-fx
+ :extensions/set-enabled
+ (fn [{:keys [db]} [_ id on?]]
+   (let [db' (update-in db [:ui :extensions :installed]
+                        (fn [xs] (mapv (fn [x] (if (= (:id x) id) (assoc x :enabled? on?) x)) xs)))]
+     {:db db' :fx [[:vv/ext-set-enabled {:id id :on on?}] [:vv/save-ext-config (ext-config-edn db')]]})))
+
+(rf/reg-event-fx
+ :extensions/toggle
+ (fn [{:keys [db]} _]
+   (let [db' (update-in db [:ui :extensions :enabled?] not)]
+     {:db db' :fx [[:vv/save-ext-config (ext-config-edn db')]]})))
+
+(rf/reg-event-fx
+ :adblock/toggle
+ (fn [{:keys [db]} _]
+   (let [on (not (get-in db [:ui :adblock :enabled?]))
+         db' (assoc-in db [:ui :adblock :enabled?] on)]
+     {:db db' :fx [[:vv/adblock-set-enabled on] [:vv/save-ext-config (ext-config-edn db')]]})))
+
+(rf/reg-event-fx
+ :adblock/set-lists
+ (fn [{:keys [db]} [_ kw]]
+   (let [db' (assoc-in db [:ui :adblock :lists] kw)]
+     {:db db' :fx [[:vv/adblock-set-lists kw] [:vv/save-ext-config (ext-config-edn db')]]})))
+
 ;; ---- About dialog ----
 (rf/reg-event-db :about/open       (fn [db _] (assoc-in db [:ui :about-open?] true)))
 (rf/reg-event-db :about/close      (fn [db _] (assoc-in db [:ui :about-open?] false)))
@@ -463,6 +741,7 @@
 (rf/reg-event-db :context-menu/show  (fn [db [_ m]] (assoc-in db [:ui :context-menu] m)))
 (rf/reg-event-db :context-menu/close (fn [db _]     (assoc-in db [:ui :context-menu] nil)))
 (rf/reg-event-db :ui/hover-link      (fn [db [_ uri]] (assoc-in db [:ui :hover-link] uri)))
+(rf/reg-event-db :ui/set-ctrl-held   (fn [db [_ held?]] (assoc-in db [:ui :ctrl-held?] (boolean held?))))
 (rf/reg-event-fx :clipboard/copy     (fn [_ [_ text]] {:fx [[:vv/copy text]]}))
 (rf/reg-event-fx :shell/open-path     (fn [_ [_ path]] {:fx [[:vv/open-path path]]}))
 (rf/reg-event-fx :shell/open-external (fn [_ [_ url]]  {:fx [[:vv/open-external url]]}))
@@ -505,6 +784,10 @@
  :tree/activate
  (fn [{:keys [db]} _]
    (when-let [sel (get-in db [:ui :tree-selected])] {:fx [[:dispatch [:doc/open sel]]]})))
+
+;; ---- in-pane directory browser ----
+;; highlight an entry (click); Alt+Down / Enter (:nav/open-target) opens whatever is highlighted
+(rf/reg-event-db :dir/select (fn [db [_ path]] (assoc-in db [:ui :dir-selected] path)))
 
 ;; ---- Vimium-style link hints (f) ----
 (rf/reg-event-fx :hint/start (fn [_ _] {:fx [[:hints/collect]]}))

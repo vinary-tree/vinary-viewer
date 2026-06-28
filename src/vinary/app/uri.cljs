@@ -38,3 +38,79 @@
                        (or (not-empty seg) (.-hostname u)))
                      (catch :default _ uri))
     :else       (last (str/split uri #"/"))))
+
+(defn- strip-trailing-slash
+  "Drop a single trailing '/' from a path (but keep the root '/')."
+  [p]
+  (if (and (> (count p) 1) (str/ends-with? p "/")) (subs p 0 (dec (count p))) p))
+
+(defn dirname
+  "Parent directory path of a local-file uri (file:// stripped). nil for http(s) or when there is no
+   parent (the filesystem root). A trailing slash is ignored, so a directory uri yields its parent."
+  [uri]
+  (when-let [p (some-> (file-path uri) strip-trailing-slash)]
+    (let [i (str/last-index-of p "/")]
+      (cond
+        (nil? i)  nil                          ; no slash → no parent
+        (zero? i) (when (> (count p) 1) "/")   ; \"/foo\" → \"/\"; \"/\" → nil
+        :else     (subs p 0 i)))))
+
+(defn segments
+  "Ordered breadcrumb segments of a local-file uri, root → leaf: each {:name :path}, where :path is the
+   cumulative absolute path navigable to that point. The filesystem root is included as {:name \"/\"
+   :path \"/\"}. nil for http(s)."
+  [uri]
+  (when-let [p (some-> (file-path uri) strip-trailing-slash)]
+    (let [named (rest (str/split p #"/"))]      ; \"/a/b\" → (\"a\" \"b\"); \"/\" → ()
+      (into [{:name "/" :path "/"}]
+            (map-indexed (fn [i name]
+                           {:name name
+                            :path (str "/" (str/join "/" (take (inc i) named)))})
+                         named)))))
+
+(defn ancestor-paths
+  "The navigable ancestor paths of a local-file uri, root → leaf — i.e. (map :path (segments uri))."
+  [uri]
+  (mapv :path (segments uri)))
+
+(defn complete-split
+  "Split a path-ish input at its last separator (either '/' or '\\\\'): [dir-part base]. `dir-part`
+   includes the trailing separator (so it names the directory to list); a trailing-separator input
+   yields base \"\". For path auto-completion in the URI bar."
+  [text]
+  (let [text (str text)
+        i    (max (.lastIndexOf text "/") (.lastIndexOf text "\\"))]
+    (if (neg? i) ["" text] [(subs text 0 (inc i)) (subs text (inc i))])))
+
+(defn matches-prefix?
+  "Case-insensitive basename prefix match for completion, hiding dotfiles unless `base` starts with '.'."
+  [name base]
+  (and (or (str/starts-with? base ".") (not (str/starts-with? name ".")))
+       (str/starts-with? (str/lower-case name) (str/lower-case base))))
+
+(defn common-prefix
+  "Longest common string prefix of a sequence of strings (\"\" for an empty sequence or no shared prefix).
+   Drives Tab-completion: Tab fills the input up to the matches' common prefix (Fish/readline semantics)."
+  [strs]
+  (if (empty? strs)
+    ""
+    (reduce (fn [acc s]
+              (let [n (min (count acc) (count s))]
+                (loop [i 0]
+                  (if (and (< i n) (= (.charAt acc i) (.charAt s i))) (recur (inc i)) (subs acc 0 i)))))
+            (first strs) (rest strs))))
+
+(defn web-matches
+  "Visited URLs from browser history that complete `text` — case-insensitive, prefix matches first (these
+   drive the ghost suggestion), then substring matches; order within each group is preserved (history is
+   most-recent-first). Returns at most `cap` URLs. Powers the address bar's history completion for web
+   pages (the filesystem path completion is for local files)."
+  [history text cap]
+  (let [q (str/lower-case (str text))]
+    (if (str/blank? q)
+      []
+      (->> history
+           (filter #(str/includes? (str/lower-case %) q))
+           (sort-by (fn [u] (if (str/starts-with? (str/lower-case u) q) 0 1)))
+           (take cap)
+           vec))))

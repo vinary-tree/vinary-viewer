@@ -32,11 +32,12 @@ are scalar cardinality-one fields.
 | Attribute | Type | Meaning |
 |-----------|------|---------|
 | `:doc/path` | string | Absolute local file path; identity attribute. |
-| `:doc/kind` | string | `markdown`, `image`, `pdf`, `source`, or `text`. |
-| `:doc/text` | string | Raw text for Markdown/source/text. Omitted for binary image/PDF. |
+| `:doc/kind` | string | `markdown`, `image`, `pdf`, `source`, `text`, or `directory`. |
+| `:doc/text` | string | Raw text for Markdown/source/text. Omitted for binary image/PDF and directories. |
 | `:doc/html` | string | Rendered Markdown HTML or escaped text HTML. |
 | `:doc/toc` | vector | Render-time Markdown heading metadata. |
 | `:doc/assets` | vector | Embedded local asset paths referenced by Markdown. |
+| `:doc/entries` | vector | Immediate children of a directory document; each is `{:name :path :dir? :size :mtime :symlink}`. Present only when `:doc/kind = "directory"`. Pulled by `active-doc` and rendered in-pane by the directory browser. |
 | `:doc/error` | string | Read/render error message. |
 | `:doc/stamp` | number | Content timestamp used to ignore stale async render results. |
 
@@ -57,12 +58,16 @@ Current default shape:
       :sidebar-width 280
       :sidebar-tab :files
       :tree-selected nil
+      :dir-selected nil             ; highlighted directory-entry path (Enter / Alt+Down opens it)
       :tabs []
       :active-tab nil
       :next-tab-id 0
+      :tab-drop nil                 ; {:over <tab-id> :after? bool} tab-drag drop indicator, or nil
       :projects []
       :menu nil
       :settings {}
+      :recent {:trail {} :recent-files []}  ; persisted (recent.edn): dir→last-child trail + MRU
+      :ctrl-held? false             ; Control currently held (drives the breadcrumb URI bar)
       :settings-open? false
       :keymaps {:active "default" :order [] :sets {}}
       :kbedit {:open? false :sel nil :editing nil :capture nil
@@ -82,6 +87,15 @@ Important slices:
 | `:ds/rev` | DataScript transaction revision signal. |
 | `[:ui :tabs]` | Ordered browser-like tab views. |
 | `[:ui :active-tab]` | Active tab id. |
+| `[:ui :tab-drop]` | Tab-drag drop-line indicator `{:over <tab-id> :after? bool}` (or nil). |
+| `[:ui :dir-selected]` | Explicitly highlighted directory-entry path (the rendered highlight also consults the trail). |
+| `[:ui :ctrl-held?]` | Whether Control is held; gates the Ctrl-hover breadcrumb URI bar. |
+| `[:ui :recent]` | Persisted recent-navigation state `{:trail {dir→child} :recent-files [...] :web-history [...]}` from `recent.edn`. |
+| `[:ui :uri-complete]` | Address-bar completion state (`{:input :entries :dismissed? :selected :error? …}`). |
+| `[:ui :pdf]` | In-renderer PDF view-state `{:scale :fit :invert?}` (fit + invert persisted in `settings.edn`). |
+| `[:ui :extensions]` | Extension runtime state pushed from main: `{:enabled? :installed [...] :install-status :update-status}`. |
+| `[:ui :adblock]` | Ad-block prefs `{:enabled? :lists :last-updated}` (persisted in `extensions.edn`). |
+| `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Git-rooted file trees. |
 | `[:ui :settings]` | Persisted settings loaded from `settings.edn`. |
 | `[:ui :keymaps]` | Persisted keymap registry loaded from `keybindings.edn`. |

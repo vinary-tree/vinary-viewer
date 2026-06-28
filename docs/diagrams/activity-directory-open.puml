@@ -1,0 +1,54 @@
+@startuml activity-directory-open
+'' PlantUML over Mermaid: swimlanes show WHICH layer owns each step of opening a directory; the
+'' directory? branch and the "same vv:content spine — no new IPC" note are activity-diagram features a
+'' flowchart cannot lane. Colours are the shared per-concept palette (_vv-theme.iuml).
+!include _vv-theme.iuml
+
+title Open a directory → in-pane browser (piggybacks the vv:open / vv:content spine)
+
+|#2D9574|Renderer|
+start
+:folder click / URI bar / Alt+Down →\n[:doc/open dir] or [:tab/navigate dir];
+:nav/nav-active pushes a history entry;
+:fx [:vv/open dir];
+
+|#B1951D|IPC seam|
+:window.vv.open(dir) → vv:open;
+
+|#3A5BA0|Main (Node)|
+:vinary.main.service/open!;
+if (directory? path) then (yes)
+  :list-dir → [{:name :path :dir? :size :mtime :symlink} …];
+  :send **vv:content** {:kind "directory" :entries …};
+  :watch path {ignoreInitial true, **depth 0**}\nadd / unlink / addDir / unlinkDir → re-list (live-refresh);
+  note right: bounded depth-0 watch\n(an ADR-0006 amendment)
+else (file)
+  :read + send file content (unchanged);
+endif
+
+|#B1951D|IPC seam|
+:onContent → [:content/received];
+
+|#2D9574|Renderer (re-frame)|
+:event (PURE): attrs gain :doc/entries (vec entries);
+:record-recent → [:ui :recent]\ntrail (dir→child) + (file only) recent-files MRU;
+:fx [:vv/save-recent] (debounced 300ms → recent.edn);
+
+|#A45BAD|Stores|
+:**:ds/transact** {:doc/path :doc/kind "directory" :doc/entries};
+:bridge → [:ds/changed] → :ds/rev inc (:doc/active recomputes);
+
+|#7590DB|DOM / app-db|
+:content-view branch (= "directory" (:doc/kind doc));
+:**dir-view** (pure Reagent): detailed list,\nsort dirs-first; highlight = nav/effective-selected;
+stop
+
+legend right
+  |= Colour |= Swimlane |
+  |<#2D9574>| Renderer (re-frame events + fx) |
+  |<#B1951D>| IPC seam (preload / window.vv) |
+  |<#3A5BA0>| Main process (Node IO) |
+  |<#A45BAD>| Stores (DataScript) |
+  |<#7590DB>| DOM / app-db (dir-view) |
+endlegend
+@enduml

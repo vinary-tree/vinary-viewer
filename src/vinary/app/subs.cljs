@@ -12,12 +12,14 @@
 (rf/reg-sub :ui/theme       (fn [db _] (get-in db [:ui :theme])))
 (rf/reg-sub :ui/tree-filter (fn [db _] (get-in db [:ui :tree-filter])))
 (rf/reg-sub :ui/find           (fn [db _] (get-in db [:ui :find])))
+(rf/reg-sub :pdf/view-state    (fn [db _] (get-in db [:ui :pdf])))
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
 (rf/reg-sub :ui/sidebar-tab    (fn [db _] (get-in db [:ui :sidebar-tab])))
 (rf/reg-sub :ui/projects       (fn [db _] (get-in db [:ui :projects])))
 (rf/reg-sub :ui/tree-selected  (fn [db _] (get-in db [:ui :tree-selected])))
+(rf/reg-sub :ui/dir-selected   (fn [db _] (get-in db [:ui :dir-selected])))
 (rf/reg-sub :ui/menu           (fn [db _] (get-in db [:ui :menu])))
 (rf/reg-sub :ui/menu-submenu   (fn [db _] (get-in db [:ui :menu-submenu])))
 (rf/reg-sub :ui/menu-focus     (fn [db _] (get-in db [:ui :menu-focus])))
@@ -29,6 +31,23 @@
 (rf/reg-sub :ui/app-info       (fn [db _] (get-in db [:ui :app-info])))
 (rf/reg-sub :ui/context-menu   (fn [db _] (get-in db [:ui :context-menu])))
 (rf/reg-sub :ui/hover-link     (fn [db _] (get-in db [:ui :hover-link])))
+(rf/reg-sub :ui/ctrl-held?     (fn [db _] (get-in db [:ui :ctrl-held?])))
+(rf/reg-sub :ui/tab-drop       (fn [db _] (get-in db [:ui :tab-drop])))
+(rf/reg-sub :ui/recent         (fn [db _] (get-in db [:ui :recent])))
+(rf/reg-sub :ui/recent-files   (fn [db _] (get-in db [:ui :recent :recent-files])))
+(rf/reg-sub :ui/web-history    (fn [db _] (get-in db [:ui :recent :web-history])))
+(rf/reg-sub :ui/overlay-open?
+            ;; any blocking DOM overlay (menu / context menu / palette / modal dialog) is open — the
+            ;; native web view hides while this is true so the overlay isn't painted beneath it.
+            ;; (PDFs now render in-renderer via pdf.js — ADR 0013 — so only the web view is native.)
+            (fn [db _]
+              (boolean (or (get-in db [:ui :menu])
+                           (get-in db [:ui :context-menu])
+                           (get-in db [:ui :settings-open?])
+                           (get-in db [:ui :about-open?])
+                           (get-in db [:ui :kbedit :open?])
+                           (get-in db [:ui :extensions-open?])
+                           (get-in db [:ui :palette :open?])))))
 (rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
 
@@ -70,6 +89,10 @@
 (rf/reg-sub :input/pending     (fn [db _] (get-in db [:ui :input :sequence])))
 (rf/reg-sub :input/in-input?   (fn [db _] (get-in db [:ui :input :in-input?])))
 (rf/reg-sub :palette/state     (fn [db _] (get-in db [:ui :palette])))
+(rf/reg-sub :ui/uri-complete     (fn [db _] (get-in db [:ui :uri-complete])))
+(rf/reg-sub :ui/extensions-open? (fn [db _] (get-in db [:ui :extensions-open?])))
+(rf/reg-sub :ui/extensions       (fn [db _] (get-in db [:ui :extensions])))
+(rf/reg-sub :ui/adblock          (fn [db _] (get-in db [:ui :adblock])))
 
 ;; ---- the browser-tab model (app-db) ----
 (rf/reg-sub :ui/tabs          (fn [db _] (nav/tabs db)))

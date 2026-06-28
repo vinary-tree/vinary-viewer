@@ -42,6 +42,8 @@ The renderer never receives `ipcRenderer` or `fs`.
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars` | Push grammar registry. |
 | `vv:settings-request` | `requestSettings()` | none | `vinary.main.settings` | Push current `settings.edn`. |
 | `vv:settings-save` | `saveSettings(edn)` | EDN string | `vinary.main.settings` | Persist settings. |
+| `vv:recent-request` | `requestRecent()` | none | `vinary.main.recent` | Push current `recent.edn`. |
+| `vv:recent-save` | `saveRecent(edn)` | EDN string | `vinary.main.recent` | Persist recent-navigation state (trail + MRU). |
 | `vv:pdf-show` | `pdfShow(path, bounds)` | `{path, bounds}` | `vinary.main.pdf` | Show native PDF view. |
 | `vv:pdf-hide` | `pdfHide()` | none | `vinary.main.pdf` | Hide PDF view. |
 | `vv:pdf-bounds` | `pdfBounds(bounds)` | `{bounds}` | `vinary.main.pdf` | Reposition PDF view. |
@@ -77,6 +79,7 @@ Every `on*` API returns an unsubscribe function.
 | `vv:history-nav` | `onHistoryNav(cb)` | direction | history event |
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened payload]` |
 | `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received text]` |
+| `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received text]` |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata | `[:app-info/received info]` |
 
 ---
@@ -94,6 +97,22 @@ Main-to-renderer content payloads:
  :text "# Title"
  :stamp 1780000000000}
 ```
+
+**Directories reuse `vv:content`** — no dedicated channel. When the opened path is a
+directory, `vinary.main.service/send-content!` sends a listing instead of file text:
+
+```clojure
+{:path "/abs/path/dir"
+ :kind "directory"
+ :entries [{:name "report.md" :path "/abs/path/dir/report.md"
+            :dir? false :size 8421 :mtime 1780000000000 :symlink false}
+           …]
+ :stamp 1780000000000}
+```
+
+The renderer stores `:entries` on the document entity as `:doc/entries` and renders
+the in-pane directory browser. A depth-0 watcher re-sends the listing as children
+change, exactly like a file's live refresh.
 
 Markdown render output is not sent by main; it is produced in the renderer and
 committed as:

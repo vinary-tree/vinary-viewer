@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('vv', {
   watchAssets: (docPath, paths) => ipcRenderer.send('vv:watch-assets', { docPath, paths }),
   requestKeymap: () => ipcRenderer.send('vv:keymap-request'),
   requestGrammars: () => ipcRenderer.send('vv:grammars-request'),
+  // RETIRED native-PDF seam (no main listener after ADR 0013 — PDFs now render in-renderer via pdf.js);
+  // kept recoverable. These are harmless no-ops while the native view is retired.
   pdfShow: (path, bounds) => ipcRenderer.send('vv:pdf-show', { path, bounds }),
   pdfHide: () => ipcRenderer.send('vv:pdf-hide'),
   pdfBounds: (bounds) => ipcRenderer.send('vv:pdf-bounds', { bounds }),
@@ -26,6 +28,22 @@ contextBridge.exposeInMainWorld('vv', {
   requestSettings: () => ipcRenderer.send('vv:settings-request'),
   saveSettings: (edn) => ipcRenderer.send('vv:settings-save', edn),
   saveKeymap: (edn) => ipcRenderer.send('vv:keymap-save', edn),
+  requestRecent: () => ipcRenderer.send('vv:recent-request'),
+  saveRecent: (edn) => ipcRenderer.send('vv:recent-save', edn),
+  completePath: (input) => ipcRenderer.invoke('vv:complete-path', input),
+  // extensions + ad-blocking (renderer → main)
+  requestExtConfig: () => ipcRenderer.send('vv:ext-config-request'),
+  saveExtConfig: (edn) => ipcRenderer.send('vv:ext-config-save', edn),
+  extState: () => ipcRenderer.send('vv:ext-state-request'),
+  extInstall: (idOrUrl) => ipcRenderer.send('vv:ext-install', idOrUrl),
+  extRemove: (id) => ipcRenderer.send('vv:ext-remove', id),
+  extSetEnabled: (id, on) => ipcRenderer.send('vv:ext-set-enabled', { id, on }),
+  extCheckUpdates: () => ipcRenderer.send('vv:ext-check-updates'),
+  extActionClicked: (id, popup, bounds) => ipcRenderer.send('vv:ext-action-clicked', { id, popup, bounds }),
+  extPopupClose: () => ipcRenderer.send('vv:ext-popup-close'),
+  adblockSetEnabled: (on) => ipcRenderer.send('vv:adblock-set-enabled', on),
+  adblockSetLists: (kw) => ipcRenderer.send('vv:adblock-set-lists', kw),
+  adblockRefresh: () => ipcRenderer.send('vv:adblock-refresh'),
   requestAppInfo: () => ipcRenderer.send('vv:app-info-request'),
   quit: () => ipcRenderer.send('vv:quit'),
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),
@@ -87,6 +105,15 @@ contextBridge.exposeInMainWorld('vv', {
     ipcRenderer.on('vv:settings', h);
     return () => ipcRenderer.removeListener('vv:settings', h);
   },
+  onRecent: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:recent', h);
+    return () => ipcRenderer.removeListener('vv:recent', h);
+  },
+  onExtConfig: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-config', h); return () => ipcRenderer.removeListener('vv:ext-config', h); },
+  onExtState: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-state', h); return () => ipcRenderer.removeListener('vv:ext-state', h); },
+  onExtInstallResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-install-result', h); return () => ipcRenderer.removeListener('vv:ext-install-result', h); },
+  onExtUpdateResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-update-result', h); return () => ipcRenderer.removeListener('vv:ext-update-result', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:app-info', h);

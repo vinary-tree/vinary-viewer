@@ -7,7 +7,8 @@
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
             [clojure.string :as str]
-            [vinary.ui.icons :as icons]))
+            [vinary.ui.icons :as icons]
+            [vinary.ui.platform :as platform]))
 
 (defn- build-tree
   "Flat repo-relative paths → nested map. A folder node has :children; a file node has :file."
@@ -35,12 +36,16 @@
                [:summary.vv-dir-name {:on-context-menu (ctx! :dir dpath)} (icons/folder-icon) k]
                (nodes->hiccup (:children v) root active open? dpath)])
             (let [full (str root "/" (:file v))]
-              ;; left-click navigates the active tab; Ctrl+click opens a new tab; right-click → context menu
+              ;; open (single click on Linux, double on Windows/macOS); Ctrl+click → new tab; right-click → menu
               [:a.vv-file {:class            (when (= full active) "vv-file-active")
                            :data-path        full
                            :title            full
                            :on-click         (fn [^js e]
-                                               (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full]))
+                                               (when (or (.-ctrlKey e) (platform/single-click-open?))
+                                                 (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
+                           :on-double-click  (fn [^js e]
+                                               (when-not (platform/single-click-open?)
+                                                 (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
                            :on-context-menu  (ctx! :file full)}
                (icons/file-icon k) k])))))
 

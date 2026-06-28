@@ -35,6 +35,8 @@
   --vv-var:     #7590db;        /* variables, types (var — blue-purple) */
   --vv-comment: #2aa1ae;        /* comments (comment — teal) */
   --vv-error:   #e0211d;        /* errors / diff deletion (err — red) */
+  --vv-pdf-gutter: #1c1d21;     /* letterbox behind PDF pages (in-renderer pdf.js view) */
+  --vv-pdf-page-shadow: rgba(0,0,0,0.55);  /* PDF page drop-shadow */
   --vv-code:    #cbc1d5;        /* default code-block text (cblk) */
 
   /* in-page find highlights */

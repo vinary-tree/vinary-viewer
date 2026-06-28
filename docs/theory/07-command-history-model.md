@@ -3,6 +3,13 @@
 Navigation history is a Command/Memento-style model over per-tab history entries.
 Each tab owns its own timeline.
 
+**Unified-history principle.** *All* navigation funnels through this one model
+(`vinary.app.nav` — `step` for Back/Forward, `nav-active` to push). Filesystem
+navigation is included: directories open *in-tab*, so going up to a parent folder
+(`Alt+Up`), opening a directory entry (`Alt+Down`), clicking a breadcrumb segment,
+and following a link all push or step the *same* stack. This is what lets a single
+back-stack carry you fluidly across documents and folders alike.
+
 ---
 
 ## 1. Entry shape
@@ -63,7 +70,67 @@ The abandoned forward entry `C` is dropped.
 
 ---
 
-## 5. References
+## 5. Filesystem navigation: `Alt+Up` / `Alt+Down`
+
+Two commands extend the model to folders, both bound in the `:all` block of every
+keymap (so they are keymap- and mode-independent):
+
+| Command | Key | Operation |
+|---------|-----|-----------|
+| `:nav/parent` | `Alt+Up` | Navigate the active tab to `uri/dirname` of the current path (a normal `nav-active` push), and pre-highlight the came-from child in `[:ui :dir-selected]`. No-op for `http(s)` or at the filesystem root. |
+| `:nav/open-target` | `Alt+Down` | Open the highlighted entry of the active directory listing. Inert unless `:doc/kind = "directory"`. |
+
+Because `Alt+Up` is a normal push, **Back** still returns to wherever you ascended
+from — folders are first-class history entries.
+
+---
+
+## 6. Trail memory (a `dir → child` map)
+
+> **Definition.** The **trail** is a persistent map from each directory to the last
+> child opened from it: `dir → child`. It lives at `[:ui :recent :trail]` and is
+> saved to `recent.edn`.
+
+On every forward navigation to a local path, the pure helper `record-recent` writes
+a `dir → child` entry for **every ancestor step** of the path. The highlighted entry
+of a directory listing is then *derived* by `nav/effective-selected` in this order:
+
+```text
+explicit :dir-selected   →   trail[dir]   →   first sorted entry
+```
+
+This makes the signature round-trip hold: **`Alt+Up` then `Alt+Down` returns to the
+most-recently-opened full path.** Worked example — open `/home/me/docs/report.md`:
+
+```text
+record-recent writes:
+   /              → /home
+   /home          → /home/me
+   /home/me       → /home/me/docs
+   /home/me/docs  → /home/me/docs/report.md
+
+Alt+Up    → navigate to /home/me/docs
+            (report.md is pre-highlighted via :dir-selected)
+Alt+Down  → effective-selected → /home/me/docs/report.md → open it
+            (back to exactly where you were)
+```
+
+Two cooperating mechanisms give this both **immediacy** and **durability**:
+
+- the explicit `:dir-selected` set by `:nav/parent` handles the *immediate*
+  round-trip;
+- the persisted `trail` handles the *durable* case — ascend to `/home/me/docs` from
+  anywhere, even in a new session, and `Alt+Down` still re-opens `report.md` because
+  `trail["/home/me/docs"]` remembers it.
+
+The trail is bounded (the 200 most-recent directories); a sibling `:recent-files`
+MRU (capped at 10) records opened **files** for File ▸ Open Recent. Both persist via
+the debounced `:vv/save-recent` effect. See
+[features/17-breadcrumb-and-up-down-navigation.md](../features/17-breadcrumb-and-up-down-navigation.md).
+
+---
+
+## 7. References
 
 - Gamma, E., Helm, R., Johnson, R., & Vlissides, J. (1994). *Design Patterns:
   Elements of Reusable Object-Oriented Software.* Addison-Wesley. ISBN

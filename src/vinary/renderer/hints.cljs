@@ -19,23 +19,37 @@
       (<= n base)   (mapv str (take n a))
       :else         (vec (take n (for [x a y a] (str x y)))))))
 
+(defn- target-for-el
+  "Classify one candidate element into a hint target map (no DOM element), or nil. A [data-path] element
+   (a directory-browser row or git-tree file) becomes a :file/:dir target; an a[href] is classified via
+   vinary.app.link."
+  [^js el]
+  (if (.hasAttribute el "data-path")
+    (let [path (.getAttribute el "data-path")]
+      (when (seq path)
+        {:kind (if (= "true" (.getAttribute el "data-dir")) :dir :file)
+         :path path
+         :text (str (.-textContent el))}))
+    (link/classify (link/target-for-anchor el) (.-textContent el))))
+
 (defn collect
-  "All a[href] inside `content-el` that intersect the viewport, classified (vinary.app.link/classify) and
-   stamped with their top-left viewport position. Returns a vector of {:kind :path :text :x :y} (no DOM
-   element — these flow through app-db)."
-  [^js content-el]
-  (if-not content-el
-    []
-    (let [vh (.-innerHeight js/window) vw (.-innerWidth js/window)]
-      (->> (array-seq (.querySelectorAll content-el "a[href]"))
-           (keep (fn [^js a]
-                   (let [r (.getBoundingClientRect a)
-                         t (link/classify (link/target-for-anchor a) (.-textContent a))]
-                     (when (and t (> (.-width r) 0) (> (.-height r) 0)
-                                (< (.-top r) vh) (> (.-bottom r) 0)
-                                (< (.-left r) vw) (> (.-right r) 0))
-                       (assoc t :x (js/Math.round (.-left r)) :y (js/Math.round (.-top r)))))))
-           (vec)))))
+  "Hint candidates inside the given root elements that intersect the viewport: preview links (a[href])
+   and file/dir rows ([data-path], from the in-pane directory browser + git tree). Each becomes
+   {:kind :path :text :x :y} (no DOM element — these flow through app-db). `roots` is a collection of
+   elements; nils are skipped (e.g. the tree is absent when the sidebar is hidden)."
+  [roots]
+  (let [vh (.-innerHeight js/window) vw (.-innerWidth js/window)]
+    (->> roots
+         (remove nil?)
+         (mapcat (fn [^js root] (array-seq (.querySelectorAll root "a[href], [data-path]"))))
+         (keep (fn [^js el]
+                 (let [r (.getBoundingClientRect el)]
+                   (when (and (> (.-width r) 0) (> (.-height r) 0)
+                              (< (.-top r) vh) (> (.-bottom r) 0)
+                              (< (.-left r) vw) (> (.-right r) 0))
+                     (when-let [t (target-for-el el)]
+                       (assoc t :x (js/Math.round (.-left r)) :y (js/Math.round (.-top r))))))))
+         (vec))))
 
 (defn with-labels
   "Assign uniform-length labels to the collected targets."

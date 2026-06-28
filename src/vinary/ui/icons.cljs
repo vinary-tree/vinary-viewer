@@ -32,6 +32,7 @@
    :redo             "fa-solid fa-rotate-right"
    :folder           "fa-solid fa-folder"
    :folder-open      "fa-solid fa-folder-open"
+   :globe            "fa-solid fa-globe"
    :file             "fa-solid fa-file"})
 
 (def ^:private code  "fa-solid fa-file-code")

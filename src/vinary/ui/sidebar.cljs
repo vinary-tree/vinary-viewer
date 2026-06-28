@@ -19,6 +19,7 @@
        (for [{:keys [level text id]} headings]
          ^{:key id}
          [:a.vv-toc-item {:class    (str "vv-toc-l" level (when (= id active) " vv-toc-active"))
+                          :title    text
                           :on-click #(rf/dispatch [:toc/goto id])}
           text])]
       [:div.vv-sidebar-empty "No sections"])))

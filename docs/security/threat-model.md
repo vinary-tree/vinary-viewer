@@ -8,9 +8,12 @@ applied. Every claim is grounded in the source; recommended-but-unimplemented it
 
 > **Scope and trust assumptions.** vinary-viewer is a **local, single-user document previewer**: you run
 > it and you point it at files you can already read. It is *not* a sandbox for opening untrusted
-> documents from the internet, and it does not load remote web content. The analysis below is framed
-> against that intended use, and explicitly flags where the current posture would be insufficient for a
-> stricter "open untrusted input" use case.
+> documents from the internet. It **does** load remote web content — but only in a **separate, isolated
+> native web view** (a main-owned `WebContentsView` on the `persist:vinary-web` session, never the
+> sandboxed app renderer), which hosts the in-app browser, the optional native ad-blocker (ADR-0014), and
+> the optional scoped Chrome-extension runtime (ADR-0015). That distinct trust boundary is analyzed in
+> **§6.5**. The analysis below is otherwise framed against the intended use, and explicitly flags where
+> the current posture would be insufficient for a stricter "open untrusted input" use case.
 
 ---
 
@@ -242,6 +245,57 @@ Additional, lower-priority items consistent with the checklist (also Forthcoming
 > is gated on rewriting `resources/preload.js` so it does not call CommonJS `require('electron')` at
 > module top level in a way the sandbox forbids. This is why it is sequenced as a deliberate, planned
 > change rather than a one-line flag flip.
+
+---
+
+## 6.5 The web view, ad-blocking, and extensions trust boundary
+
+The in-app web view (`vinary.main.web`), the native ad-blocker (`vinary.main.adblock`, ADR-0014), and the
+scoped Chrome-extension runtime (`vinary.main.extensions`, ADR-0015) introduce a **second, distinct trust
+boundary** — separate from the sandboxed app renderer analyzed above. This section makes its surface
+explicit.
+
+### Isolation
+
+- **A separate session.** The web view, its popup host, the ad-blocker, and any extensions all live on the
+  **`persist:vinary-web`** partition — a persistent, dedicated `Session` (cookies/logins for documentation
+  sites survive restarts) that is **isolated from the app renderer's session** and from Node. The web view
+  and popup views use `contextIsolation: true`, `nodeIntegration: false`. **Extensions cannot reach
+  `window.vv`** (the app-renderer seam of ADR-0009 is unchanged and is not exposed to this session) or any
+  Node/OS API.
+- **Remote content stays in the native view.** Remote pages are *never* loaded into the first-party app
+  renderer; the analysis of §1–§5 (which assumes the renderer loads only the local bundle) is unaffected.
+
+### New attack surface (extensions) — and its mitigations
+
+Extensions, once installed, **execute code within the web view** (content scripts read page content; the
+background service worker + popups can make network requests on `persist:vinary-web`). This is a genuine
+expansion of attack surface, mitigated by:
+
+- **Web-Store-only provenance.** `installChromeWebStore` is configured with `allowUnpackedExtensions:
+  false`; `beforeInstall` **denies** in-page "Add to Chrome", so the *only* install path is the user's
+  explicit **Settings ▸ Extensions** action, where the pasted input is parsed to a strict 32-char
+  (`[a-p]{32}`) Web Store id (`ext-util/parse-store-id`).
+- **Unofficial update endpoint, called out.** Auto-update (`electron-chrome-web-store`, startup + ~5h)
+  polls Google's update server — an **unofficial** channel for a non-Chrome client — and verifies CRX3
+  signatures. Users who do not want background updates can disable the extension runtime.
+- **Popup lock-down.** The popup `WebContentsView` runs with `nodeIntegration: false`; `will-navigate` is
+  constrained to the extension's own `chrome-extension://<id>/` origin, and `setWindowOpenHandler` denies
+  new windows (external `http(s)` links open in the OS browser).
+- **Untrusted manifest data is validated.** A hostile/malformed manifest cannot inject via the toolbar:
+  action icons are **magic-byte-sniffed** (PNG/JPEG/WebP) and **size-capped (< 2 MB)** before being
+  rendered strictly as `<img src="data:<sniffed-mime>;base64,…">` in the renderer (`extensions/icon-data-url`).
+
+### How the native ad-blocker *reduces* risk
+
+The MPL ad-blocker (ADR-0014) drops malvertising/tracker requests at `webRequest` **before the page sees
+them**, shrinking the remote-content attack surface for the web view.
+
+### Documented non-support (honest limits)
+
+Native-messaging password managers (1Password, KeePassXC) and several MV3 background APIs (`offscreen`,
+`nativeMessaging`, `sidePanel`, `webNavigation`) are **not** provided by Electron and are out of scope; the
+runtime fails closed (those calls no-op) rather than degrading isolation.
 
 ---
 

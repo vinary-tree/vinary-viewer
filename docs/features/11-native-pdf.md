@@ -1,75 +1,52 @@
-# Native PDF
+# PDF preview (in-renderer)
 
-**Status: Available now.**
+**Status: Available now.** *(Supersedes the original native-PDF view — see [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md).)*
 
 ---
 
 ## 1 · What it is
 
-vinary-viewer previews **Portable Document Format (PDF)** files with Chromium's
-built-in PDF viewer. The PDF surface is an Electron **`WebContentsView`** owned
-by the main process and positioned over a renderer-owned placeholder element.
+PDFs render **in the renderer DOM via [pdf.js](https://mozilla.github.io/pdf.js/)**, exactly like the
+Markdown and source previews — not in a separate native viewer. Each page is drawn to a `<canvas>` with a
+transparent **text layer** and a **link layer** overlaid, all inside the `.vv-content` scroller. Because
+the document lives in the app's own DOM, a PDF behaves like every other document:
 
-This is intentionally different from Markdown, image, and source previews:
-those render inside the renderer's Document Object Model (DOM), while a PDF is a
-native sibling surface. The renderer therefore measures where the PDF should sit
-and sends those bounds to main over the `window.vv` mediator.
+- **App keymap + smooth scrolling** — bare arrows, `j`/`k`, Space/PageDown, `g g`/`G`, etc.
+- **In-page find** (`Ctrl+F`) across the whole document (text is materialized on demand).
+- **Text selection + Copy** — select with the mouse, `Ctrl+C`, or right-click → **Copy** (the themed menu).
+- **Zoom / fit / dark-invert** and **bookmarks** in the Contents tab.
+- **Themes** — the page letterbox follows the active palette.
 
-## 2 · How to use it
+## 2 · How you use it
 
-1. Open a `.pdf` file with `vv report.pdf`, `File > Open`, or the git file tree.
-2. The PDF appears in the content area using Chromium's native viewer.
-3. Edit or replace the PDF on disk; live-refresh reloads the native PDF view.
+Open a `.pdf` file (CLI `vv report.pdf`, the file tree, or a link). Then:
 
-The PDF viewer is hidden when the active document is no longer a PDF.
+| Action | Keys / UI |
+|---|---|
+| Scroll | arrows, `j`/`k`, Space / `Shift`+Space, Page keys, `Home`/`End` |
+| Zoom in / out / reset | `Ctrl` `+` / `-` / `0` (context-aware: zooms the PDF) |
+| Fit width / page / actual size | **View** menu |
+| Invert (dark PDF) | **View ▸ Invert PDF** (canvas only; text/selection stay normal) |
+| Find | `Ctrl+F` |
+| Copy selection | `Ctrl+C` or right-click ▸ Copy |
+| Jump to a bookmark | **Contents** sidebar tab |
 
-## 3 · How it works internally
+Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on disk live-refreshes it.
 
-The file classifier maps `.pdf` to `:doc/kind = "pdf"` in
-`vinary.main.file-kind/kind-of`. Main sends a `vv:content` message with the path,
-kind, and stamp without reading the binary file as text.
+## 3 · Internals
 
-```clojure
-{:path "/abs/report.pdf"
- :kind "pdf"
- :stamp 1710000000000}
-```
+| Piece | Where |
+|---|---|
+| Bytes → renderer (over `vv:content`, `:kind "pdf" :bytes …`) | `vinary.main.service/send-content!` |
+| Byte cache (keyed by `:doc/path`, **not** DataScript) + find hook | `vinary.renderer.pdf-cache` |
+| Render engine (worker bootstrap, canvas/text/link layers, virtualization, zoom, outline) | `vinary.renderer.pdf` |
+| Pure geometry/zoom/outline helpers (DOM-free, unit-tested) | `vinary.renderer.pdf-layout` |
+| `pdf-view` Reagent component (mounts inside `.vv-content`) | `vinary.ui.views/pdf-view` |
+| Vendored worker + cmaps/fonts/wasm/iccs | `scripts/sync-pdfjs.mjs` → `resources/public/pdf/` |
 
-The renderer's Strategy branch in `vinary.ui.views/content-view` renders
-`pdf-host`, a placeholder `div`. On mount and resize, `pdf-host` computes
-`getBoundingClientRect()` and calls:
-
-```text
-window.vv.pdfShow(path, bounds)
-window.vv.pdfBounds(bounds)
-window.vv.pdfHide()
-```
-
-The preload mediator forwards those calls to main. `vinary.main.pdf` creates one
-`WebContentsView`, attaches it to the window's `contentView`, loads
-`file://<path>`, and keeps the native view bounds synchronized with the
-placeholder.
-
-Live refresh reuses the retained-file watcher model from
-[live refresh](01-live-refresh.md). When main receives a file watcher event for
-the PDF path, `vinary.main.pdf/reload!` reloads the view if that PDF is the one
-currently shown.
-
-## 4 · Design notes / trade-offs
-
-- **Native quality.** Chromium's built-in PDF viewer handles rendering, zoom,
-  selection, and PDF-specific behavior without a JavaScript PDF renderer.
-- **Main owns the native view.** Keeping the native surface in the main process
-  preserves the renderer's no-filesystem-access boundary.
-- **Bounds synchronization is required.** Because `WebContentsView` is not a DOM
-  node, the renderer must report placeholder bounds on mount and resize.
-- **Retained-file lifetime.** The PDF path stays watched while it is reachable
-  from any open tab history, and its watcher is released when it is no longer
-  retained.
-
-## 5 · Diagram
-
-Source:
-[`../diagrams/component-native-pdf.puml`](../diagrams/component-native-pdf.puml).
-
-![Native PDF component view](../diagrams/component-native-pdf.svg)
+The pdf.js module + worker are **vendored** (the legacy ES5 build) and loaded at runtime via a blob-URL
+ESM `import()` — Closure `:simple` cannot bundle pdf.js's internal dynamic `import()`. Pages are
+**preallocated** to exact heights (no scroll jank), rendered lazily by an `IntersectionObserver`, and
+offscreen canvases are released to bound memory. See [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md)
+for the full rationale, and the smoke coverage in `test/electron-smoke.js` (canvas + aligned text layer +
+copy + find).

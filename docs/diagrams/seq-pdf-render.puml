@@ -1,0 +1,37 @@
+@startuml seq-pdf-render
+'' Sequence: opening a PDF — main streams bytes over vv:content; the renderer caches them (NOT DataScript)
+'' and renders pages to canvas + a real text layer via pdf.js, inside the .vv-content scroller, so a PDF
+'' inherits find / selection / copy / smooth-scroll like every other document (ADR-0013).
+'' (PlantUML over Mermaid: participant colouring + activation lanes for the byte→render handoff.)
+!include _vv-theme.iuml
+
+title PDF render pipeline (in-renderer pdf.js — ADR-0013)
+
+actor User
+participant "main\nservice" as SVC #3A5BA0
+participant "preload\nvv:content" as IPC #B1951D
+participant ":content/received\n+ byte cache" as EV #4F97D7
+participant "pdf-view\n(.vv-pdf-doc)" as VIEW #2D9574
+participant "pdf.js engine\n+ worker" as PDF #67B11D
+
+User -> SVC : open report.pdf
+activate SVC
+SVC -> SVC : readFileSync → bytes (Uint8Array)
+SVC -> IPC : vv:content { :kind "pdf" :bytes }
+deactivate SVC
+IPC -> EV : [:content/received]
+activate EV
+EV -> EV : pdf-cache/put-bytes! (by :doc/path)\n— NOT DataScript (ADR-0010)
+EV -> VIEW : transact { :doc/kind "pdf" } → mount
+deactivate EV
+activate VIEW
+VIEW -> PDF : mount! bytes
+activate PDF
+PDF -> PDF : load doc (blob-URL ESM import,\noff the Closure path) + measure page sizes
+PDF -> VIEW : preallocate page placeholders\n(exact heights → no scroll jank)
+PDF -> PDF : IntersectionObserver → render\ncanvas + text layer + link layer
+PDF -> VIEW : pages paint inside .vv-content
+deactivate PDF
+note over VIEW : find / selection / Ctrl+C / smooth-scroll\nwork — the text layer is real DOM
+deactivate VIEW
+@enduml

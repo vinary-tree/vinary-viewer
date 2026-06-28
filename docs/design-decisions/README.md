@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0012**.
+The next free number is **0013**.
 
 ---
 
@@ -69,12 +69,16 @@ The next free number is **0012**.
 | [0009](0009-mediator-ipc-over-point-to-point.md) | A single `window.vv` mediator seam over point-to-point IPC          | Accepted   |
 | [0010](0010-bounded-content-retention-and-render-metadata.md) | Bound content retention to tab histories and emit Markdown render metadata | Accepted |
 | [0011](0011-font-awesome-icons-self-hosted-fonts.md) | Font Awesome icons + self-hosted fonts, vendored at build time; no CSS framework | Accepted |
+| [0012](0012-unified-history-and-in-pane-directory-browser.md) | One history spine, an in-pane directory browser, and persisted Up/Down trail memory | Accepted |
+| [0013](0013-in-renderer-pdfjs.md) | Render PDFs in the renderer with pdf.js, retiring the native PDF view | Accepted |
+| [0014](0014-native-ad-blocking-ghostery.md) | Native ad/tracker blocking with @ghostery/adblocker-electron | Accepted |
+| [0015](0015-scoped-extension-runtime-gpl-free.md) | A GPL-free, scoped Chrome-extension runtime (password managers + ad-blocker-class) | Accepted |
 
 ---
 
 ## How the ADRs relate
 
-These eleven decisions reinforce one another into a coherent reactive architecture:
+These twelve decisions reinforce one another into a coherent reactive architecture:
 
 - **0001** sets the platform (modern Electron), which **enables** the contextBridge seam in **0009** and
   the in-renderer rendering in **0002**.
@@ -92,6 +96,11 @@ These eleven decisions reinforce one another into a coherent reactive architectu
   fonts, both vendored at build time by the same mechanism as the tree-sitter grammars (**0001**'s modern
   Electron makes the `file://` self-host viable), and themed through the same `--vv-*` token system used
   everywhere else — the bespoke CSS kept over any framework.
+- **0012** makes every navigation affordance a thin interface over **0010**'s per-tab history spine:
+  filesystem navigation joins that history (directories render in-pane, piggybacking **0002**'s renderer
+  Strategy registry and the `vv:content` spine), `Alt+Up`/`Alt+Down` retrace a persisted directory
+  trail, and the native PDF/web overlays yield to DOM menus/dialogs. It reuses the **0009** mediator seam
+  for the new `recent.edn` and adds no content IPC.
 
 For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md) and the
 theory pillar under [`docs/theory/`](../theory/).

@@ -60,6 +60,19 @@
     (when (.-onSettings vv)
       (.onSettings vv (fn [text] (rf/dispatch [:settings/received text])))
       (when (.-requestSettings vv) (.requestSettings vv)))
+    (when (.-onRecent vv)
+      (.onRecent vv (fn [text] (rf/dispatch [:recent/received text])))
+      (when (.-requestRecent vv) (.requestRecent vv)))
+    (when (.-onExtConfig vv)
+      (.onExtConfig vv (fn [text] (rf/dispatch [:ext-config/received text])))
+      (when (.-requestExtConfig vv) (.requestExtConfig vv)))
+    (when (.-onExtState vv)
+      (.onExtState vv (fn [text] (rf/dispatch [:ext/state-received text])))
+      (when (.-extState vv) (.extState vv)))
+    (when (.-onExtInstallResult vv)
+      (.onExtInstallResult vv (fn [p] (rf/dispatch [:ext/install-result p]))))
+    (when (.-onExtUpdateResult vv)
+      (.onExtUpdateResult vv (fn [p] (rf/dispatch [:ext/update-result p]))))
     (when (.-onAppInfo vv)
       (.onAppInfo vv (fn [payload] (rf/dispatch [:app-info/received (js->clj payload :keywordize-keys true)])))
       (when (.-requestAppInfo vv) (.requestAppInfo vv)))))
@@ -78,7 +91,7 @@
 
 (defn- selectable-root [^js node]
   (some-> (element-for-node node)
-          (.closest ".markdown-body, .vv-source")))
+          (.closest ".markdown-body, .vv-source, .vv-pdf-doc")))
 
 (defn- focused-source-selection []
   (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]
@@ -147,6 +160,52 @@
                              :else nil))))
                      true))
 
+(defonce ^:private ctrl-held-state (atom false))
+(defn ctrl-tracker!
+  "Track whether Control is held (capture-phase; reads each event's ctrlKey so a missed keyup self-heals)
+   so the URI bar can switch to a clickable breadcrumb. Resets on window blur."
+  []
+  (let [commit (fn [held?]
+                 (when (not= held? @ctrl-held-state)
+                   (reset! ctrl-held-state held?)
+                   (rf/dispatch [:ui/set-ctrl-held held?])))]
+    (.addEventListener js/window "keydown" (fn [^js e] (commit (.-ctrlKey e))) true)
+    (.addEventListener js/window "keyup"   (fn [^js e] (commit (.-ctrlKey e))) true)
+    (.addEventListener js/window "blur"    (fn [_] (commit false)))))
+
+(defn- editable-target? [^js el]
+  (boolean (and el (.-closest el) (.closest el "input, textarea, select, [contenteditable], .cm-editor"))))
+
+(defn- overlay-open-now? []
+  (let [ui (:ui @rfdb/app-db)]
+    (boolean (or (:menu ui) (:context-menu ui) (:settings-open? ui) (:about-open? ui)
+                 (get-in ui [:kbedit :open?]) (get-in ui [:palette :open?])
+                 (get-in ui [:hints :active?])))))
+
+(def ^:private arrow->scroll
+  {"ArrowDown"  [:nav/scroll {:dy 80}]
+   "ArrowUp"    [:nav/scroll {:dy -80}]
+   "ArrowRight" [:nav/scroll {:dx :right}]
+   "ArrowLeft"  [:nav/scroll {:dx :left}]})
+
+(defn arrow-scroll!
+  "Bare arrow keys smoothly scroll the focused pane (the focused element's scrollable ancestor, else the
+   content pane). Skipped inside editable elements (inputs / textareas / CodeMirror), which keep their
+   native cursor movement, and while a menu/overlay is open. Held keys auto-repeat into the smooth scroll
+   animator (vinary.input.fx) for continuous motion. Capture-phase so it preempts the keymap resolver."
+  []
+  (.addEventListener js/window "keydown"
+                     (fn [^js e]
+                       (when-let [ev (and (not (.-altKey e)) (not (.-ctrlKey e)) (not (.-metaKey e))
+                                          (not (.-shiftKey e))
+                                          (not (editable-target? (.-target e)))
+                                          (not (overlay-open-now?))
+                                          (get arrow->scroll (.-key e)))]
+                         (.preventDefault e)
+                         (.stopPropagation e)
+                         (rf/dispatch ev)))
+                     true))
+
 (defn mount! []
   (when (nil? @root)
     (reset! root (rdomc/create-root (.getElementById js/document "app"))))
@@ -164,6 +223,8 @@
   (menubar/install-access-keys!)
   (mouse-nav!)
   (hints!)
+  (ctrl-tracker!)
+  (arrow-scroll!)
   (mount!)
   (rf/dispatch [:view/re-frame-10x-hide]))
 

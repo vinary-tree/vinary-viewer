@@ -18,6 +18,15 @@ sources are edited). It has a simple, functional, and clean design (minimalist
 aesthetics), a responsive feel, and will never become laden with extraneous or
 heavy features.
 
+Ad blocking is supported by default (this is a documentation previewer, not a
+revenue generator), and there is experimental support for Chrome extensions but
+that is intended for integration with password managers and related. Vinary
+Viewer is not and never will be intended to be used as a full-featured web
+browser but it must support web browsing to cover the most common forms
+documentation.
+
+Vinary Viewer has been built, from the ground up, by an engineer for engineers!
+
 > Status: `0.2.0-dev`. This is the v0.2 rewrite: a standalone ClojureScript /
 > re-frame / Electron application. The old v0.1.0 vmd-patching tool is preserved
 > at git tag **`v0.1.0`**.

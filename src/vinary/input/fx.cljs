@@ -35,22 +35,73 @@
 
 (defn- content-el [] (.querySelector js/document ".vv-content"))
 
+;; ---- smooth scrolling ----
+;; A single requestAnimationFrame loop eases the focused pane toward an ACCUMULATING target. Each scroll
+;; command advances the target; the loop chases it at a fixed fraction per frame. So a held arrow (OS key
+;; auto-repeat) keeps advancing the target and produces continuous, smooth motion instead of the choppy
+;; per-press `behavior:"smooth"` jumps (which interrupt each other on repeat). The target also accumulates
+;; across the in-flight animation, so a single tap eases smoothly too.
+(defonce ^:private scroll-anim (atom nil))   ; {:el :top :left :raf} | nil
+
+(defn- scrollable? [^js el]
+  (and el (instance? js/Element el)
+       (> (.-scrollHeight el) (+ (.-clientHeight el) 2))
+       (let [oy (.-overflowY (.getComputedStyle js/window el))]
+         (or (= oy "auto") (= oy "scroll") (= oy "overlay")))))
+
+(defn- focused-scroll-el
+  "The scroll container to move: the focused element's nearest scrollable ancestor, else the content pane."
+  []
+  (or (loop [n (.-activeElement js/document)]
+        (cond (nil? n) nil (scrollable? n) n :else (recur (.-parentElement n))))
+      (content-el)))
+
+(defn- anim-step! []
+  (let [{:keys [^js el top left]} @scroll-anim]
+    (if (or (nil? el) (not (.-isConnected el)))
+      (reset! scroll-anim nil)
+      (let [ct (.-scrollTop el) cl (.-scrollLeft el) dt (- top ct) dl (- left cl)]
+        (if (and (< (js/Math.abs dt) 0.5) (< (js/Math.abs dl) 0.5))
+          (do (set! (.-scrollTop el) top) (set! (.-scrollLeft el) left) (reset! scroll-anim nil))
+          (do (set! (.-scrollTop el) (+ ct (* dt 0.25)))
+              (set! (.-scrollLeft el) (+ cl (* dl 0.25)))
+              (swap! scroll-anim assoc :raf (js/requestAnimationFrame anim-step!))))))))
+
+(defn- ease-scroll!
+  "Set the eased scroll target via `f-top`/`f-left` (each (fn [base-coord ^js el] → new-coord)), clamped
+   to the element's scroll range. Reuses the in-flight target as the base so repeats accumulate."
+  [^js el f-top f-left]
+  (let [s         @scroll-anim
+        same?     (and s (identical? (:el s) el))
+        max-top   (max 0 (- (.-scrollHeight el) (.-clientHeight el)))
+        max-left  (max 0 (- (.-scrollWidth el) (.-clientWidth el)))
+        base-top  (if same? (:top s) (.-scrollTop el))
+        base-left (if same? (:left s) (.-scrollLeft el))]
+    (reset! scroll-anim {:el   el
+                         :top  (-> (f-top base-top el)   (max 0) (min max-top))
+                         :left (-> (f-left base-left el) (max 0) (min max-left))
+                         :raf  (when same? (:raf s))})
+    (when-not (and same? (:raf s))
+      (swap! scroll-anim assoc :raf (js/requestAnimationFrame anim-step!)))))
+
 (rf/reg-fx
  :dom/scroll
  (fn [{:keys [dy dx to]}]
-   (when-let [^js el (content-el)]
-     (cond
-       (= to :top)    (.scrollTo el #js {:top 0 :behavior "smooth"})
-       (= to :bottom) (.scrollTo el #js {:top (.-scrollHeight el) :behavior "smooth"})
-       (= dy :page)   (.scrollBy el #js {:top (* 0.9 (.-clientHeight el)) :behavior "smooth"})
-       (= dy :-page)  (.scrollBy el #js {:top (* -0.9 (.-clientHeight el)) :behavior "smooth"})
-       (= dy :half)   (.scrollBy el #js {:top (* 0.5 (.-clientHeight el)) :behavior "smooth"})
-       (= dy :-half)  (.scrollBy el #js {:top (* -0.5 (.-clientHeight el)) :behavior "smooth"})
-       (= dx :right)  (.scrollBy el #js {:left (* 0.18 (.-clientWidth el)) :behavior "smooth"})
-       (= dx :left)   (.scrollBy el #js {:left (* -0.18 (.-clientWidth el)) :behavior "smooth"})
-       (number? dy)   (.scrollBy el #js {:top dy :behavior "smooth"})
-       (number? dx)   (.scrollBy el #js {:left dx :behavior "smooth"})
-       :else          nil))))
+   (when-let [^js el (focused-scroll-el)]
+     (let [keep-top  (fn [t _] t)
+           keep-left (fn [l _] l)]
+       (cond
+         (= to :top)    (ease-scroll! el (fn [_ _]     0)                                 keep-left)
+         (= to :bottom) (ease-scroll! el (fn [_ ^js e] (.-scrollHeight e))                keep-left)
+         (= dy :page)   (ease-scroll! el (fn [t ^js e] (+ t (* 0.9 (.-clientHeight e))))  keep-left)
+         (= dy :-page)  (ease-scroll! el (fn [t ^js e] (- t (* 0.9 (.-clientHeight e))))  keep-left)
+         (= dy :half)   (ease-scroll! el (fn [t ^js e] (+ t (* 0.5 (.-clientHeight e))))  keep-left)
+         (= dy :-half)  (ease-scroll! el (fn [t ^js e] (- t (* 0.5 (.-clientHeight e))))  keep-left)
+         (= dx :right)  (ease-scroll! el keep-top (fn [l ^js e] (+ l (* 0.18 (.-clientWidth e)))))
+         (= dx :left)   (ease-scroll! el keep-top (fn [l ^js e] (- l (* 0.18 (.-clientWidth e)))))
+         (number? dy)   (ease-scroll! el (fn [t _] (+ t dy)) keep-left)
+         (number? dx)   (ease-scroll! el keep-top (fn [l _] (+ l dx)))
+         :else          nil)))))
 
 (rf/reg-fx
  :dom/focus

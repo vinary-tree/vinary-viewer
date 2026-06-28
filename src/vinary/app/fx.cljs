@@ -7,6 +7,7 @@
             [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
+            [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.find :as finder]))
 
 ;; content-pane scroll: a cofx reads the current scrollTop (so nav events save the leaving position into
@@ -17,16 +18,17 @@
 ;; Vimium link hints: collect visible links + assign labels (→ :hints/activate); follow a chosen target
 (rf/reg-fx :hints/collect
            (fn [_]
-             (let [el (.querySelector js/document ".vv-content")]
-               (rf/dispatch [:hints/activate (hints/with-labels (hints/collect el))]))))
+             ;; the in-pane directory browser lives inside .vv-content; include the git tree when shown
+             (let [content (.querySelector js/document ".vv-content")
+                   tree    (.querySelector js/document ".vv-tree")]
+               (rf/dispatch [:hints/activate (hints/with-labels (hints/collect [content tree]))]))))
 
 (rf/reg-fx :hints/follow
            (fn [target]
              (case (:kind target)
                :anchor       (when-let [^js el (.getElementById js/document (:path target))]
                                (.scrollIntoView el #js {:behavior "smooth" :block "start"}))
-               (:http :file) (rf/dispatch [:doc/open (:path target)])
-               :dir          (rf/dispatch [:shell/open-path (:path target)])
+               (:http :file :dir) (rf/dispatch [:doc/open (:path target)])
                nil)))
 
 ;; DataScript writes go through this fx (keeps event handlers pure).
@@ -47,8 +49,16 @@
    (when-let [^js link (.getElementById js/document "vv-theme-link")]
      (set! (.-href link) (str "css/themes/" theme ".css")))))
 
-;; in-page find (imperative DOM highlight, dispatches counts/index back into the loop)
-(rf/reg-fx :find/run   (fn [q]   (rf/dispatch [:find/count (finder/search! q)])))
+;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
+(rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
+(rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
+
+;; in-page find (imperative DOM highlight, dispatches counts/index back into the loop). For a PDF, first
+;; materialize ALL text layers so find covers the whole document (canvases are windowed; text is not).
+(rf/reg-fx :find/run
+           (fn [q]
+             (-> (pdf-cache/ensure-active!)
+                 (.then (fn [_] (rf/dispatch [:find/count (finder/search! q)]))))))
 (rf/reg-fx :find/cycle (fn [dir] (rf/dispatch [:find/idx (finder/cycle! dir)])))
 (rf/reg-fx :find/clear (fn [_]   (finder/clear!)))
 
@@ -89,8 +99,55 @@
 (rf/reg-fx :vv/zoom          (fn [dir]  (when-let [^js v (vv)] (when (.-zoom v)         (.zoom v dir)))))
 (rf/reg-fx :vv/devtools      (fn [_]    (when-let [^js v (vv)] (when (.-toggleDevtools v) (.toggleDevtools v)))))
 (rf/reg-fx :vv/copy          (fn [text] (when-let [^js v (vv)] (when (.-copyText v)     (.copyText v (str text))))))
-(rf/reg-fx :vv/save-settings (fn [edn]  (when-let [^js v (vv)] (when (.-saveSettings v) (.saveSettings v edn)))))
+(defonce ^:private settings-save-timer (atom nil))
+(rf/reg-fx :vv/save-settings
+           ;; debounced — the sidebar resize splitter writes :sidebar-width on every mousemove
+           (fn [edn]
+             (when-let [t @settings-save-timer] (js/clearTimeout t))
+             (reset! settings-save-timer
+                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveSettings v) (.saveSettings v edn)))) 300))))
 (rf/reg-fx :vv/save-keymap   (fn [edn]  (when-let [^js v (vv)] (when (.-saveKeymap v) (.saveKeymap v edn)))))
+(defonce ^:private recent-save-timer (atom nil))
+(rf/reg-fx :vv/save-recent
+           ;; debounced (Alt+Up/Down and breadcrumb clicks can rewrite the trail rapidly)
+           (fn [edn]
+             (when-let [t @recent-save-timer] (js/clearTimeout t))
+             (reset! recent-save-timer
+                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveRecent v) (.saveRecent v edn)))) 300))))
+
+;; URI-bar path completion: invoke main (request/response); debounced for live typing, immediate for Enter.
+(defonce ^:private complete-timer (atom nil))
+(rf/reg-fx :vv/complete-path
+           (fn [{:keys [input tag]}]
+             (let [go (fn [] (when-let [^js v (vv)]
+                               (when (.-completePath v)
+                                 (-> (.completePath v input)
+                                     (.then (fn [res] (rf/dispatch [:uri-complete/result tag (js->clj res :keywordize-keys true)])))
+                                     (.catch (fn [_] nil))))))]
+               (if (= tag :enter)
+                 (go)
+                 (do (when-let [t @complete-timer] (js/clearTimeout t))
+                     (reset! complete-timer (js/setTimeout go 90)))))))
+(rf/reg-fx :uri-complete/error-timeout
+           (fn [_] (js/setTimeout #(rf/dispatch [:uri-complete/clear-error]) 2500)))
+
+;; ---- extensions + ad-blocking effects (renderer → main over the seam) ----
+(rf/reg-fx :vv/ext-install        (fn [s]   (when-let [^js v (vv)] (when (.-extInstall v) (.extInstall v s)))))
+(rf/reg-fx :vv/ext-remove         (fn [id]  (when-let [^js v (vv)] (when (.-extRemove v) (.extRemove v id)))))
+(rf/reg-fx :vv/ext-set-enabled    (fn [{:keys [id on]}] (when-let [^js v (vv)] (when (.-extSetEnabled v) (.extSetEnabled v id on)))))
+(rf/reg-fx :vv/ext-check-updates  (fn [_]   (when-let [^js v (vv)] (when (.-extCheckUpdates v) (.extCheckUpdates v)))))
+(rf/reg-fx :vv/ext-action-clicked (fn [{:keys [id popup bounds]}]
+                                    (when-let [^js v (vv)] (when (.-extActionClicked v) (.extActionClicked v id popup (clj->js bounds))))))
+(rf/reg-fx :vv/ext-popup-close    (fn [_]   (when-let [^js v (vv)] (when (.-extPopupClose v) (.extPopupClose v)))))
+(rf/reg-fx :vv/adblock-set-enabled (fn [on] (when-let [^js v (vv)] (when (.-adblockSetEnabled v) (.adblockSetEnabled v on)))))
+(rf/reg-fx :vv/adblock-set-lists  (fn [kw]  (when-let [^js v (vv)] (when (.-adblockSetLists v) (.adblockSetLists v (name kw))))))
+(rf/reg-fx :vv/adblock-refresh    (fn [_]   (when-let [^js v (vv)] (when (.-adblockRefresh v) (.adblockRefresh v)))))
+(defonce ^:private ext-config-save-timer (atom nil))
+(rf/reg-fx :vv/save-ext-config    ; debounced — toggles can fire rapidly
+           (fn [edn]
+             (when-let [t @ext-config-save-timer] (js/clearTimeout t))
+             (reset! ext-config-save-timer
+                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveExtConfig v) (.saveExtConfig v edn)))) 300))))
 (rf/reg-fx :vv/open-path     (fn [p]    (when-let [^js v (vv)] (when (.-openPath v)     (.openPath v p)))))
 (rf/reg-fx :vv/open-external (fn [url]  (when-let [^js v (vv)] (when (.-openExternal v) (.openExternal v url)))))
 (rf/reg-fx :devtools/re-frame-10x (fn [visible?] (set-re-frame-10x! visible?)))

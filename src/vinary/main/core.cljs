@@ -8,9 +8,15 @@
             [vinary.main.service :as service]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
+            [vinary.main.recent :as recent]
+            [vinary.main.window :as window]
             [vinary.main.shell :as shell]
-            [vinary.main.pdf :as pdf]
+            ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.web :as web]
+            [vinary.main.adblock :as adblock]
+            [vinary.main.extensions :as extensions]
+            [vinary.main.ext-config :as ext-config]
+            [vinary.main.ext-popup :as ext-popup]
             [vinary.main.grammars :as grammars]))
 
 (def ^js app (.-app electron))
@@ -33,22 +39,30 @@
 
 (defn create-window! []
   (let [win (BrowserWindow.
-              (clj->js {:width 1280
-                        :height 860
-                        :backgroundColor "#292b2e"
-                        :autoHideMenuBar true
-                        :webPreferences {:contextIsolation true
-                                         :nodeIntegration false
-                                         :preload (preload-path)}}))]
+              (clj->js (merge {:backgroundColor "#292b2e"
+                               :autoHideMenuBar true
+                               :webPreferences {:contextIsolation true
+                                                :nodeIntegration false
+                                                :preload (preload-path)}}
+                              ;; restore last position/size (clamped on-screen); defaults to 1280×860
+                              (window/options))))]
     (.loadFile win (renderer-index))
+    (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
     (.once (.-webContents win) "did-finish-load"
            (fn []
              (config/init! (.-webContents win))
              (settings/init! (.-webContents win))
+             (recent/init! (.-webContents win))
+             (ext-config/init! (.-webContents win))
              (grammars/init! (.-webContents win))
              (when-let [f (initial-file)] (service/open! (.-webContents win) f))))
     (.on win "closed" (fn [] (reset! main-window nil)))
-    (pdf/init! win)
+    ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
+    ;; extension runtime + ad-blocking on the web session (before the lazy web view's first load)
+    (let [prefs (ext-config/load-config)]
+      (ext-popup/init! win)
+      (extensions/init! win prefs)
+      (adblock/init! (:adblock prefs)))
     (web/init! win)
     (shell/init! win)
     (reset! main-window win)

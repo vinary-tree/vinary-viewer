@@ -1,0 +1,36 @@
+@startuml seq-overlay-hide
+'' Sequence: a DOM overlay (menu / dialog) opening drives the native PDF/web WebContentsView to hide so
+'' it is not painted over the overlay; closing restores it. Reuses the existing show/hide IPC — no new
+'' channel. (PlantUML over Mermaid: participant colouring + the activation lanes.)
+!include _vv-theme.iuml
+
+title Native PDF / web view yields to a DOM overlay
+
+actor User
+participant "menubar /\nmodal dialog" as UI #7590DB
+participant "app-db [:ui]" as DB #7590DB
+participant ":ui/overlay-open?\nsubscription" as SUB #4F97D7
+participant "pdf-host /\nweb-host" as HOST #2D9574
+participant "preload\nwindow.vv" as IPC #B1951D
+participant "main pdf / web\nWebContentsView" as MAIN #3A5BA0
+
+== a DOM overlay opens ==
+User -> UI : open a menu / Preferences
+UI -> DB : assoc [:ui :menu] / [:ui :settings-open?]
+DB -> SUB : recompute (OR of overlay flags) = **true**
+SUB -> HOST : reagent-render derefs → component re-renders
+HOST -> HOST : component-did-update\n(if overlay? → hide!)
+HOST -> IPC : pdfHide() / httpHide()
+IPC -> MAIN : vv:pdf-hide / vv:http-hide
+MAIN -> MAIN : view.setVisible(false)
+note over MAIN: the DOM dropdown / dialog is now visible\n(no opaque native view on top of it)
+
+== the overlay closes ==
+User -> UI : dismiss (click-away / Esc)
+UI -> DB : assoc nil / false
+DB -> SUB : recompute = **false**
+SUB -> HOST : re-render
+HOST -> IPC : pdfShow(path, bounds) / httpShow(url, bounds)
+IPC -> MAIN : vv:pdf-show / vv:http-show
+MAIN -> MAIN : setBounds + setVisible(true)
+@enduml

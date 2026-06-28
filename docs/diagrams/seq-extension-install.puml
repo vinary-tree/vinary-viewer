@@ -1,0 +1,37 @@
+@startuml seq-extension-install
+'' Sequence: installing a Chrome extension from Settings ▸ Extensions through the GPL-free runtime
+'' (Electron's built-in loader + electron-chrome-web-store, MIT). The spike proved Electron 42 provides
+'' chrome.* natively, so there is NO shim/preload — main just reads the manifest to drive the toolbar.
+'' (PlantUML over Mermaid: participant colouring + activation lanes across the seam.)
+!include _vv-theme.iuml
+
+title Extension install (GPL-free runtime — ADR-0015)
+
+actor User
+participant "Extensions\ndialog" as UI #4F97D7
+participant "preload\nwindow.vv" as IPC #B1951D
+participant "main\nextensions" as EXT #3A5BA0
+participant "electron-chrome\n-web-store (MIT)" as WS #9F8766
+participant "session.extensions\n(built-in, MIT)" as SES #BC6EC5
+participant "ext-toolbar\n(renderer)" as TB #2D9574
+
+User -> UI : paste Web Store URL/ID → Install
+activate UI
+UI -> IPC : vv:ext-install (idOrUrl)
+deactivate UI
+IPC -> EXT : install!
+activate EXT
+EXT -> EXT : ext-util/parse-store-id → [a-p]{32}
+EXT -> WS : installExtension(id, { session, extensionsPath })
+activate WS
+WS -> SES : download + unpack + loadExtension
+SES --> EXT : "extension-loaded" (manifest, path)
+deactivate WS
+EXT -> EXT : manifest → action model;\nicon bytes → data-URL (magic-sniffed, capped)
+EXT -> TB : vv:ext-state { :installed [...] }
+deactivate EXT
+activate TB
+TB -> TB : render action icon in the address-bar row
+note over TB : click → vv:ext-action-clicked → main opens\nthe popup (its chrome.* work natively — no shim)
+deactivate TB
+@enduml

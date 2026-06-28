@@ -63,4 +63,4 @@
    the lookup-ref form does not resolve under :advanced."
   [db path]
   (when-let [eid (eid-for-path db path)]
-    (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/error :doc/stamp] eid)))
+    (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/entries :doc/error :doc/stamp] eid)))

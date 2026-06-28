@@ -6,12 +6,13 @@
   (:require ["electron" :refer [ipcMain]]
             ["fs" :as fs]
             ["path" :as path]
+            ["os" :as os]
             ["child_process" :as cp]
             ["chokidar" :refer [watch]]
             [clojure.set :as set]
             [clojure.string :as str]
             [vinary.main.file-kind :as file-kind]
-            [vinary.main.pdf :as pdf]
+            ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.grammars :as grammars]))
 
 (defonce ^:private watchers (atom {}))   ; path -> chokidar watcher
@@ -50,14 +51,54 @@
 (defn- kind-of [^String path]
   (file-kind/kind-of grammars/source? path))
 
+(def ^:private dir-watch-options
+  ;; immediate children only (depth 0) — not the recursive whole-tree watch ADR-0006 rejects.
+  (clj->js {:ignoreInitial true :depth 0}))
+
+(defn- directory? [path]
+  (try (.isDirectory (.statSync fs path)) (catch :default _ false)))
+
+(defn- entry->map
+  "One directory child as plain data for the renderer's directory view. Symlinks are flagged and
+   resolved through to report the target's dir?/size/mtime."
+  [dir ^js dirent]
+  (let [name    (.-name dirent)
+        abs     (path/join dir name)
+        ^js st  (try (.lstatSync fs abs) (catch :default _ nil))
+        link?   (boolean (and st (.isSymbolicLink st)))
+        ^js st* (if link? (try (.statSync fs abs) (catch :default _ st)) st)]
+    {:name    name
+     :path    abs
+     :dir?    (boolean (and st* (.isDirectory st*)))
+     :size    (when st* (.-size st*))
+     :mtime   (when st* (.-mtimeMs st*))
+     :symlink link?}))
+
+(defn- list-dir
+  "Immediate children of `dir` as a vector of entry maps (unsorted; the renderer sorts)."
+  [dir]
+  (try (mapv #(entry->map dir %) (.readdirSync fs dir #js {:withFileTypes true}))
+       (catch :default _ [])))
+
 (defn- send-content! [^js wc path]
   (let [kind  (kind-of path)
         stamp (js/Date.now)]
     (cond
-      ;; binary — don't read as text; images render by file:// path, PDFs in a main-owned native view.
-      (#{"image" "pdf"} kind)
-      (do (.send wc "vv:content" (clj->js {:path path :kind kind :stamp stamp}))
-          (when (= kind "pdf") (pdf/reload! path)))   ; live-refresh the native PDF view on change
+      ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
+      (directory? path)
+      (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
+
+      ;; image — render by file:// path (binary, not read as text)
+      (= "image" kind)
+      (.send wc "vv:content" (clj->js {:path path :kind "image" :stamp stamp}))
+
+      ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
+      ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
+      ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)
+      (= "pdf" kind)
+      (try (let [bytes (.readFileSync fs path)]
+             (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp})))
+           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
       :else
       (try (let [text (.readFileSync fs path "utf8")]
@@ -147,18 +188,52 @@
   (send-content! wc path)
   (send-tree! wc path)
   (when-not (get @watchers path)
-    (let [w (watch path watch-options)]
-      (.on w "change" (fn [_] (send-open-content! path)))
-      (.on w "add"    (fn [_] (send-open-content! path)))
+    (let [dir? (directory? path)
+          w    (watch path (if dir? dir-watch-options watch-options))]
+      (if dir?
+        ;; a directory tab: re-list as immediate children appear / vanish / change
+        (doseq [ev ["add" "unlink" "addDir" "unlinkDir" "change"]]
+          (.on w ev (fn [_] (send-open-content! path))))
+        (do
+          (.on w "change" (fn [_] (send-open-content! path)))
+          (.on w "add"    (fn [_] (send-open-content! path)))))
       (swap! watchers assoc path w))))
 
 (defn close! [path]
   (swap! retained-paths disj path)
   (unwatch-file! path))
 
+;; ---- URI-bar path auto-completion ----
+(defn- expand-home [p]
+  (cond
+    (= p "~")                 (os/homedir)
+    (str/starts-with? p "~/") (path/join (os/homedir) (subs p 2))
+    :else                     p))
+
+(defn- complete
+  "Path-completion data for a raw URI-bar input: the children of the directory it points into, plus
+   whether the exact input is an existing file/dir and its resolved absolute path. The renderer filters
+   `entries` by the typed basename. A leading file:// and ~ are resolved here (the renderer is sandboxed)."
+  [raw]
+  (let [s        (let [s (str raw)] (if (str/starts-with? s "file://") (subs s 7) s))
+        s        (expand-home s)
+        sep-i    (max (.lastIndexOf s "/") (.lastIndexOf s "\\"))
+        dir-part (if (neg? sep-i) "." (subs s 0 (inc sep-i)))
+        parent   (try (.resolve path dir-part) (catch :default _ dir-part))
+        entries  (if (directory? parent) (list-dir parent) [])
+        target   (try (.resolve path s) (catch :default _ s))
+        ^js st   (try (.statSync fs target) (catch :default _ nil))]
+    {:input   (str raw)
+     :dir     parent
+     :target  target
+     :entries entries
+     :exists? (boolean st)
+     :dir?    (boolean (and st (.isDirectory st)))}))
+
 (defn init! []
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [_e path] (close! path)))
+  (.handle ipcMain "vv:complete-path" (fn [_e raw] (clj->js (complete raw))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]

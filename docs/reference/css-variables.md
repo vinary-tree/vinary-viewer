@@ -78,7 +78,9 @@ resources/public/index.html
 | `--vv-em` | emphasis / `<em>` (bright green) | `#86dc2f` | `#ba2f59` | `.markdown-body em` |
 | `--vv-var` | variables, types (blue-purple) | `#7590db` | `#715ab1` | `hljs-variable/-template-variable/-type/-params` |
 | `--vv-comment` | comments (teal) | `#2aa1ae` | `#2aa1ae` | `hljs-comment/-quote` |
-| `--vv-error` | errors / diff deletion (red) | `#e0211d` | `#e0211d` | `.vv-error`, `.vv-tab-close:hover`, `hljs-deletion` |
+| `--vv-error` | errors / diff deletion (red) | `#e0211d` | `#e0211d` | `.vv-error`, `.vv-tab-close:hover`, `hljs-deletion`, `.vv-uri-error`, `.vv-ext-item-rm:hover` |
+| `--vv-pdf-gutter` | letterbox behind in-renderer PDF pages | `#1c1d21` | `#d8d4cc` | `.vv-pdf-doc` background |
+| `--vv-pdf-page-shadow` | PDF page drop-shadow | `rgba(0,0,0,.55)` | `rgba(0,0,0,.18)` | `.vv-pdf-page` box-shadow |
 | `--vv-code` | default code-block text | `#cbc1d5` | `#655370` | `.markdown-body pre code`, `.hljs` |
 
 ### 2.6 In-page find highlights
@@ -98,6 +100,30 @@ tokens above, while the `--vv-find-*` tokens are the theme-authored palette inte
 > `--vv-find-hit-*` / `--vv-find-active-bg` tokens are defined in the themes for find-specific tuning;
 > wiring the `::highlight()` rules to them is a small, isolated change. Both are documented so the
 > intent is clear.
+
+### 2.7 Directory browser, breadcrumb & tab-drop classes
+
+These structural classes are pure layout (in `app.css`) and reference the palette tokens above; like
+`.vv-shield` (§3) they are listed class-first so the directory browser, the Ctrl-hover breadcrumb, and
+the tab-drag drop-line are easy to find. No new tokens were added — every color reuses an existing one.
+
+| Class | Surface | Tokens consumed |
+| --- | --- | --- |
+| `.vv-fb` | Directory browser container (a detailed list). | layout only (no color) |
+| `.vv-fb-head`, `.vv-fb-path` | Sticky header (folder name + item count). | `--vv-border` (underline), `--vv-bg1` (sticky bg), `--vv-fg` (path) |
+| `.vv-fb-head-row`, `.vv-fb-col-icon` | Column header row (icon · Name · Size · Modified); `-col-icon` is the icon-column placeholder. | `--vv-fg-dim` (header text), `--vv-border` (underline); `-col-icon` layout only |
+| `.vv-fb-row`, `.vv-fb-sel` | One file/folder row; `-sel` = the selected / highlighted row. | `--vv-fg` (text); `.vv-fb-sel` → `--vv-highlight` (bg); `:hover` → `--vv-bg-code`; icon `--vv-fg-dim`, selected/hover → `--vv-head1` |
+| `.vv-fb-name` | Entry label cell. | layout only (inherits `--vv-fg` from the row) |
+| `.vv-fb-size`, `.vv-fb-mtime` | Size / modified cells. | `--vv-fg-dim` (monospace via `--vv-font-fixed`) |
+| `.vv-fb-empty` | "Empty directory" placeholder. | `--vv-fg-dim` |
+| `.vv-breadcrumb` | The Ctrl-hover breadcrumb container in the URI bar. | layout only (monospace via `--vv-font-fixed`) |
+| `.vv-crumb`, `.vv-crumb-sep` | A clickable path segment / the `›` separator. | `--vv-head1` (segment); `:last-child` → `--vv-fg`; `:hover` → `--vv-bg-code`; separator → `--vv-fg-dim` |
+| `.vv-tab-drop-before`, `.vv-tab-drop-after` | The 2 px tab-drag insertion line (`::before` / `::after`); vertical on `.vv-tab`, horizontal on `.vv-vtab`. | `--vv-head1` (the accent line) |
+
+> **Naming note.** The directory browser uses the `.vv-fb-*` (file-browser) prefix, deliberately
+> distinct from the **git file-tree's** `details.vv-dir` / `summary.vv-dir-name` (which keep `--vv-meta`,
+> §2.4) so the two never collide. The selected row is always `--vv-highlight` and the row/icon accent is
+> always `--vv-head1`.
 
 ---
 

@@ -17,6 +17,7 @@ renderer displays the document.
 | `:doc/kind = "mermaid"` | Renderer-side Mermaid SVG preview. |
 | `:doc/kind = "source"` | Read-only CodeMirror source view. |
 | Markdown tab with View Source enabled | Source view over cached Markdown text. |
+| `:doc/kind = "directory"` | In-pane directory browser (`dir-view`). |
 | `:doc/html` present | Markdown/text HTML body. |
 | Otherwise | Rendering placeholder. |
 
@@ -70,6 +71,21 @@ part of the Markdown strategy instead of as separate document kinds.
 PDF and HTTP/HTTPS rendering use main-owned native views. The renderer mounts a
 host element and sends bounds across IPC. Main owns the actual `WebContentsView`
 and reports navigation/TOC information back where appropriate.
+
+---
+
+## 6. Directory strategy
+
+A `:doc/kind = "directory"` document selects `vinary.ui.views/dir-view`, the in-pane
+directory browser. Unlike Markdown (HTML written into a host node) or the native
+strategies (a `WebContentsView`), the directory strategy is **pure Reagent over
+data**: it reads the document's `:doc/entries` vector (sent by main, see
+[features/16-directory-browser.md](../features/16-directory-browser.md)), sorts them
+dirs-first/case-insensitive with `nav/sort-entries`, and renders an interactive
+**detailed list** (name · size · modified). The highlighted entry is *derived*, not
+stored, by `nav/effective-selected` (explicit selection → persisted trail child →
+first entry), so directories take part in the same navigation history and
+trail-memory model as every other document kind.
 
 ---
 

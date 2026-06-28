@@ -1,0 +1,32 @@
+@startuml state-dir-trail-memory
+'' PlantUML state diagram: Alt+Up / Alt+Down walk the directory hierarchy while a persisted dir→child
+'' trail makes the walk reversible — Alt+Up then Alt+Down returns to the most-recently-opened full path.
+'' (PlantUML over Mermaid: explicit state machine with guard-style transition notes.)
+!include _vv-theme.iuml
+
+title Alt+Up / Alt+Down over the persisted directory→child trail
+
+state "Viewing  /a/b/c.md\n(a file)" as FILE
+state "Browsing  /a/b\nhighlight = c.md" as DIRB
+state "Browsing  /a\nhighlight = b" as DIRA
+
+[*] --> FILE : open /a/b/c.md\nrecord-recent writes\n/→a, /a→b, /a/b→c.md
+
+FILE --> DIRB : **Alt+Up**  (:nav/parent → /a/b)
+DIRB --> DIRA : **Alt+Up**  (:nav/parent → /a)
+DIRA --> DIRB : **Alt+Down**  (:nav/open-target opens b → /a/b,\nhighlight = trail[/a/b] = c.md)
+DIRB --> FILE : **Alt+Down**  (opens c.md)
+
+note right of DIRB
+  highlight = nav/effective-selected:
+   • explicit dir-selected (if a current child)
+   • else trail[dir]
+   • else the first listed entry
+end note
+
+note bottom
+  The trail lives in recent.edn ([:ui :recent :trail]) and persists across
+  sessions, so revisiting /a/b in a later run still highlights c.md. Each
+  Alt+Up / Alt+Down also pushes the per-tab history (Alt+Left undoes it).
+end note
+@enduml

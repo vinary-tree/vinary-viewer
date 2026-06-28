@@ -53,6 +53,8 @@
 | --- | --- | --- | --- | --- | --- |
 | `:history/back` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
 | `:history/forward` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
+| `:nav/parent` **[input]** | fx | — | active tab uri, content scroll | active tab/history (→ parent dir via `uri/dirname`), `[:ui :dir-selected]` ← came-from path | navigate active tab to parent, scroll restore, sync retained; **no-op** for `http(s)` / at filesystem root |
+| `:nav/open-target` **[input]** | fx | — | active path, DataScript `active-doc`, `[:ui :dir-selected]`, `[:ui :recent :trail]` | — | when `:doc/kind` = `"directory"`: `[:dispatch [:doc/open <effective-selected>]]`; else inert |
 
 ### 1.5 Theme
 
@@ -94,7 +96,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `:sidebar/toggle` | db | — | `:ui :sidebar-visible?` | `:ui :sidebar-visible?` ← not | — |
 | `:nav/focus` | fx | `target` (`:tree`/`:content`/`:toggle`) | — | — | `[:dom/focus target]` |
-| `:nav/scroll` | fx | `opts` (`{:dy …}` / `{:to …}`) | — | — | `[:dom/scroll opts]` |
+| `:nav/scroll` | fx | `opts` (`{:dy …}` / `{:dx …}` / `{:to …}`) | — | — | `[:dom/scroll opts]` |
 
 ### 1.10 Modal input state **[input]**
 
@@ -136,6 +138,46 @@
 > `:prompt` (e.g. `:file/open`, `:theme/pick`) dispatch `[:palette/open …]`, which opens the overlay
 > with the `:command`, `:file`, or `:theme` source; typing fuzzy-filters, `Enter` runs the selection.
 
+### 1.13 In-pane directory browser
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:dir/select` | db | `path` | — | `:ui :dir-selected` ← path (the highlighted `Enter` / `Alt+Down` target) | — |
+
+> The directory browser is a **detailed list** (name · size · modified) — there is no grid layout, no
+> layout toggle, and no `:dir-view-mode` state. Its only key handler is `Enter` → `[:nav/open-target]`;
+> bare arrow keys are *not* consumed — they fall through to the global smooth pane-scroll (see
+> `:dom/scroll`). A click dispatches `[:dir/select path]` to highlight, then opens **OS-dependently** — a
+> single click on Linux, a double click on Windows/macOS (`vinary.ui.platform/single-click-open?`) — and
+> `Ctrl+click` opens in a new tab. See
+> [features/16-directory-browser.md](../features/16-directory-browser.md).
+
+### 1.14 Recent navigation memory (`recent.edn`)
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:recent/received` | db | EDN text | — | `:ui :recent` ← parsed `{:trail {…} :recent-files [...]}` merged over `{:trail {} :recent-files []}` | — |
+| `:recent/clear` | fx | — | `:ui :recent` | `:ui :recent :recent-files` ← `[]` (the dir→child `:trail` is kept) | `[:vv/save-recent edn]` |
+
+> The trail + MRU are **also** updated as a side effect of `:content/received`: a pure `record-recent`
+> helper records a `dir → child` entry for every ancestor of the active path (and, for a **file**,
+> unshifts it onto `:recent-files`, capped at 10), then `:content/received` emits `[:vv/save-recent …]`.
+> This only runs for the **active** tab's path (a real forward navigation), never a background
+> live-refresh. See [features/17-breadcrumb-and-up-down-navigation.md](../features/17-breadcrumb-and-up-down-navigation.md).
+
+### 1.15 Tab drag-drop indicator & breadcrumb modifier
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:tab/drop-set` | db | `over` (tab id), `after?` | — | `:ui :tab-drop` ← `{:over over :after? (boolean after?)}` | — |
+| `:tab/drop-clear` | db | — | — | `:ui :tab-drop` ← nil | — |
+| `:ui/set-ctrl-held` | db | `held?` | — | `:ui :ctrl-held?` ← `(boolean held?)` (drives the Ctrl-hover breadcrumb) | — |
+
+> `:ui/set-ctrl-held` is dispatched by capture-phase `keydown`/`keyup` listeners in
+> `vinary.renderer.core` (each reads its own `ctrlKey`, so a missed `keyup` self-heals). `:tab/drop-set`/
+> `:tab/drop-clear` drive the CSS insertion line (`.vv-tab-drop-before` / `.vv-tab-drop-after`) shown
+> while dragging a tab.
+
 ---
 
 ## 2. Effects
@@ -159,6 +201,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
+| `:vv/save-recent` | `edn` (EDN string) | **debounced 300 ms**, then `window.vv.saveRecent(edn)` → `vv:recent-save` IPC (persists the dir→child trail + recent-files MRU to `recent.edn`) | — |
 | `:vv/http-toc-goto` | `id` | `window.vv.httpTocGoto(id)` → `vv:http-toc-goto` IPC | — |
 
 ### 2.2 `vinary.input.fx` **[input]**
@@ -169,7 +212,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:input/cancel-timeout` | `id` | `clearTimeout id` (when id) | — |
 | `:keymap/install-active` | `_` | install the active app-db keymap registry entry into the live keymap atom and dispatch its initial mode | `[:input/set-mode mode]` |
 | `:keymap/persist` | EDN string | debounce and save keymap registry through `window.vv.saveKeymap` | — |
-| `:dom/scroll` | `{:dy :to}` | scroll `.vv-content`: `:to :top`/`:bottom` → `scrollTo`; `:dy :page`/`:-page` (±0.9·clientH), `:half`/`:-half` (±0.5·clientH), or a number → `scrollBy` | — |
+| `:dom/scroll` | `{:dy :dx :to}` | smoothly scroll the **focused pane** (the focused element's scrollable ancestor, else `.vv-content`) by easing toward an **accumulating target** through a single `requestAnimationFrame` animator — so a held key scrolls continuously and smoothly (this replaced the old per-press `behavior:"smooth"` jumps and also smooths Vim `j`/`k`, page/half scroll). Supports `:to :top`/`:bottom`; vertical `:dy` (`:page`/`:-page` ±0.9·clientH, `:half`/`:-half` ±0.5·clientH, or a number); and horizontal `:dx` (`:left`/`:right` or a number). | — |
 | `:dom/focus` | `target` | `:tree` → focus `.vv-tree-filter`; `:content` → focus `.vv-content`; `:toggle` → swap focus between them | — |
 
 > **Two timeout mechanisms exist.** The **resolver** holds an authoritative synchronous chord timer
@@ -199,6 +242,12 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/active-heading` | `app-db` | active heading id \| nil |
 | `:ui/sidebar-visible?` **[input]** | `app-db` | bool |
 | `:ui/tree-selected` **[input]** | `app-db` | selected tree path \| nil |
+| `:ui/dir-selected` | `app-db` | highlighted directory-entry path \| nil (the *explicit* selection; the rendered highlight also consults the trail — see `nav/effective-selected`) |
+| `:ui/ctrl-held?` | `app-db` | bool — Control currently held (drives the Ctrl-hover breadcrumb URI bar) |
+| `:ui/tab-drop` | `app-db` | `{:over <tab-id> :after? bool}` \| nil — the tab-drag drop-line indicator |
+| `:ui/recent` | `app-db` | `{:trail {dir→child} :recent-files [...]}` (persisted recent-navigation state) |
+| `:ui/recent-files` | `app-db` | the recent-files MRU vector (`[:ui :recent :recent-files]`, capped at 10) — surfaced in File ▸ Open Recent |
+| `:ui/overlay-open?` | `app-db` | bool — OR of `:ui/menu`, `:ui/context-menu`, `:ui/settings-open?`, `:ui/about-open?`, `[:ui :kbedit :open?]`, `[:ui :palette :open?]`; true hides the native PDF/web views so a dropdown/modal isn't painted beneath them |
 | `:input/mode` **[input]** | `app-db` | `:normal`/`:insert`/`:visual` |
 | `:input/pending` **[input]** | `app-db` | the pending key-sequence vector (`:ui :input :sequence`) |
 | `:input/in-input?` **[input]** | `app-db` | bool (focus is in a text input) |
@@ -247,7 +296,7 @@ command palette. Predicates: `:always`, `:has-tabs`, `:can-back?`, `:can-forward
 | --- | --- |
 | Tabs | `:tab/next`, `:tab/prev`, `:tab/close` |
 | File | `:file/open`, `:file/open-in-new-tab`, `:file/reveal-in-tree` |
-| Navigation | `:history/back`, `:history/forward`, `:nav/scroll-down`, `:nav/scroll-up`, `:nav/page-down`, `:nav/page-up`, `:nav/half-page-down`, `:nav/half-page-up`, `:nav/scroll-top`, `:nav/scroll-bottom`, `:focus/sidebar`, `:focus/content`, `:focus/toggle`, `:tree/down`, `:tree/up`, `:tree/open` |
+| Navigation | `:history/back`, `:history/forward`, `:nav/parent`, `:nav/open-target`, `:nav/scroll-down`, `:nav/scroll-up`, `:nav/page-down`, `:nav/page-up`, `:nav/half-page-down`, `:nav/half-page-up`, `:nav/scroll-top`, `:nav/scroll-bottom`, `:focus/sidebar`, `:focus/content`, `:focus/toggle`, `:tree/down`, `:tree/up`, `:tree/open` |
 | Search | `:search/start`, `:search/next`, `:search/prev`, `:search/close`, `:palette/open`, `:palette/files` |
 | View | `:sidebar/toggle`, `:theme/cycle`, `:theme/pick` |
 | Mode (vim) | `:mode/normal`, `:mode/insert`, `:mode/visual`, `:mode/ex`, `:input/escape` |

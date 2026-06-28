@@ -5,6 +5,7 @@
    closes on click-away; hovering another top-level label switches menus."
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [vinary.app.uri :as uri]
             [vinary.input.keymaps-registry :as registry]
             [vinary.ui.access-keys :as access]
             [vinary.ui.icons :as icons]
@@ -18,15 +19,13 @@
   [{:label "File" :access-key "f"
     :items [{:label "Open…"     :access-key "o" :accel "Ctrl+O" :event [:file/open-dialog]}
             {:label "Open in New Tab…" :access-key "n" :accel "Ctrl+Shift+O" :event [:file/open-dialog :new-tab]}
+            {:submenu "Open Recent" :access-key "r" :radio :sub/recent}
             {:label "Close Tab" :access-key "c" :accel "Ctrl+W" :event [:tab/close-active]}
             :sep
             {:label "Reload"    :access-key "r" :accel "Ctrl+R" :event [:tab/reload]}
             {:label "Quit"      :access-key "q" :accel "Ctrl+Q" :event [:app/quit]}]}
    {:label "View" :access-key "v"
     :items [{:label "Toggle Sidebar" :access-key "s" :accel "Ctrl+B" :event [:sidebar/toggle]}
-            {:label "Files"          :access-key "f" :event [:sidebar/show :files]}
-            {:label "Contents"       :access-key "c" :event [:sidebar/show :contents]}
-            {:label "Tabs"           :access-key "t" :event [:sidebar/show :tabs]}
             :sep
             {:label "View Source"    :access-key "v" :event [:tab/toggle-source]}
             {:label "Find…"          :access-key "n" :accel "Ctrl+F" :event [:find/toggle]}
@@ -35,13 +34,19 @@
             {:label "Zoom Out"       :access-key "o" :accel "Ctrl+-" :event [:view/zoom -1]}
             {:label "Reset Zoom"     :access-key "r" :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
+            {:label "Fit Width (PDF)"   :access-key "w" :event [:pdf/fit :width]}
+            {:label "Fit Page (PDF)"    :access-key "p" :event [:pdf/fit :page]}
+            {:label "Actual Size (PDF)" :access-key "a" :event [:pdf/fit :actual]}
+            {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle]}
+            :sep
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
             {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x]}]}
    {:label "Settings" :access-key "s"
     :items [{:submenu "Theme"        :access-key "t" :radio :sub/theme}
             {:submenu "Key Bindings" :access-key "k" :radio :sub/keymaps}
             :sep
-            {:label "Preferences…"   :access-key "p" :event [:settings/open]}]}
+            {:label "Preferences…"   :access-key "p" :event [:settings/open]}
+            {:label "Extensions…"    :access-key "x" :event [:extensions/open]}]}
    {:label "Help" :access-key "h"
     :items [{:label "Command Palette" :access-key "c" :accel "Ctrl+Shift+P" :event [:palette/open {:source :command}]}
             :sep
@@ -70,6 +75,12 @@
                                          (registry/set-ids db))
                                    :sep
                                    {:label "Customize…" :access-key "c" :event [:kbedit/open]})
+               :sub/recent  (let [files (get-in db [:ui :recent :recent-files])]
+                              (if (seq files)
+                                (conj (mapv (fn [p] {:label (uri/basename p) :event [:doc/open p]}) files)
+                                      :sep
+                                      {:label "Clear Recent" :event [:recent/clear]})
+                                [{:label "No recent files" :event [:menu/close]}]))
                nil)]
     (access/annotate-rows (or rows []) submenu-preferred-keys)))
 

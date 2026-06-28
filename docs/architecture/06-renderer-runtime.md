@@ -89,6 +89,16 @@ On mount/update, the component writes `innerHTML`, then runs post-layout work:
 The renderer guards async post-render work with a render token so stale work from
 an older document/render cannot apply to the current view.
 
+`markdown-body` is one branch of the `vinary.ui.views/content-view` **Strategy**
+selector, which picks the renderer for the active tab by URI scheme and `:doc/kind`
+(empty → watermark, error, web view, PDF host, image, mermaid, source, View-Source,
+and so on — see [theory/05-strategy-renderer-registry.md](../theory/05-strategy-renderer-registry.md)).
+A `:doc/kind = "directory"` document selects `vinary.ui.views/dir-view`, the in-pane
+**directory browser**: a pure-Reagent detailed list (name · size · modified) over the
+document's `:doc/entries` that, like the image view, restores per-history scroll on
+mount/update. `Enter` opens the highlighted entry (as do `Alt+Down` / Vim `J`), while
+bare arrow keys fall through to the global smooth pane-scroll.
+
 ---
 
 ## 5. Subscription graph

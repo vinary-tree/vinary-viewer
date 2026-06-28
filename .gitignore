@@ -23,6 +23,10 @@ resources/public/assets/fa/
 resources/public/assets/fonts/noto-sans/
 resources/public/assets/fonts/fira-code/
 
+# Vendored PDF.js worker + data assets (cmaps/standard_fonts/wasm/iccs), copied from node_modules.
+# Regenerate with `npm run pdfjs:sync`.
+resources/public/pdf/
+
 # --- legacy v0.1.0 (patch-overlay tool) native addon artifacts ---
 src/mouse-forward-back/build/
 src/mouse-forward-back/node_modules/

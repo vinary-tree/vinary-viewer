@@ -114,3 +114,37 @@ Keybindings:
 
 The content view gives `:doc/error` precedence over stale HTML until a successful
 content path clears it.
+
+---
+
+## 8. Open a directory and update the trail
+
+Directories are navigation targets that open *in-tab* and reuse the file-open
+plumbing (no new IPC). The flow also maintains the persisted **trail** that powers
+`Alt+Up` → `Alt+Down`.
+
+1. User opens a directory: a CLI arg, a folder in the Files tree, a breadcrumb
+   segment, a directory link, or `Alt+Up` to a parent. Navigation updates app-db
+   tabs/history (a folder is an ordinary history entry) and emits `[:vv/open path]`.
+2. Main `service/send-content!` detects a directory with `directory?`, lists the
+   immediate children with `list-dir` (each `Dirent` mapped through `entry->map`,
+   which flags symlinks and resolves their target), and sends `vv:content` with
+   `:kind "directory"` and an `:entries` vector. A **depth-0** chokidar watcher is
+   established for live refresh.
+3. Renderer `:content/received` stores the listing as `:doc/entries` on the
+   document entity. For the **active** tab's path it also runs the pure
+   `record-recent`: it writes a `dir → child` entry into `[:ui :recent :trail]` for
+   every ancestor step of the path and — for a file, not a directory — unshifts the
+   path onto `[:ui :recent :recent-files]` (capped at 10). It then emits
+   `[:vv/save-recent edn]`, debounced 300 ms, which persists `recent.edn`.
+4. The `:doc/active` subscription delivers `:doc/entries`; `vinary.ui.views/dir-view`
+   renders the detailed list. The highlighted entry is computed by
+   `nav/effective-selected`: explicit `:dir-selected` → trail child for this folder
+   → first sorted entry.
+5. `Alt+Up` (`:nav/parent`) navigates to `uri/dirname` of the current path and
+   pre-highlights the came-from child in `[:ui :dir-selected]`; `Alt+Down`
+   (`:nav/open-target`) opens the highlighted entry. Because the trail persists,
+   `Alt+Up` then `Alt+Down` returns to the last-opened path even across sessions.
+6. When a child is added, removed, renamed, or changed, the depth-0 watcher re-lists
+   the folder (`add`/`unlink`/`addDir`/`unlinkDir`/`change`) and the pane refreshes
+   in place, preserving scroll.

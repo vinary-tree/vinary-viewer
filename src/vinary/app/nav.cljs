@@ -3,7 +3,8 @@
    in [:ui :tabs] (ordered) + [:ui :active-tab] (id); DataScript caches document content by :doc/path.
    These pure helpers read + transform that state — events thread the transforms; subs / resolver / palette
    read via the reads + base-ctx. One source of truth for navigation."
-  (:require [vinary.app.uri :as uri]))
+  (:require [clojure.string :as str]
+            [vinary.app.uri :as uri]))
 
 ;; ---- reads ----
 (defn tabs       [db] (get-in db [:ui :tabs]))
@@ -148,3 +149,20 @@
     (when (pos? n)
       (let [i (or (first (keep-indexed #(when (= (:id %2) (active-id db)) %1) ts)) -1)]
         (:id (nth ts (mod (+ i dir) n)))))))
+
+;; ---- directory browser selection (shared by the renderer view, keyboard nav, and Alt+Down) ----
+(defn sort-entries
+  "Directory entries (from main) sorted dirs-first, then case-insensitive by name. The directory view
+   and keyboard selection share this order so the highlight and the rendered list always agree."
+  [entries]
+  (sort-by (juxt #(if (:dir? %) 0 1) #(str/lower-case (or (:name %) ""))) entries))
+
+(defn effective-selected
+  "The highlighted entry path for a directory listing: the explicit `dir-selected` if it is a current
+   child, else the remembered `trail` child for `dir` if it is a current child, else the first entry
+   (or nil when empty)."
+  [dir entries dir-selected trail]
+  (let [child-paths (into #{} (map :path) entries)]
+    (or (when (contains? child-paths dir-selected) dir-selected)
+        (let [t (get trail dir)] (when (contains? child-paths t) t))
+        (:path (first (sort-entries entries))))))

@@ -11,8 +11,10 @@ these files; the renderer receives plain EDN text or plain data over the
 
 | Path | Status | Purpose |
 |------|--------|---------|
-| `settings.edn` | Available | Theme and font preferences. |
+| `settings.edn` | Available | Theme, fonts, and sidebar width/visibility. |
 | `keybindings.edn` | Available | Active keymap set and custom keymap definitions. |
+| `recent.edn` | Available | Recent-navigation memory: the dir→child `:trail` and the `:recent-files` MRU. |
+| `window.edn` | Available | Main-window geometry: position, size, and maximized state. |
 | `filetypes.edn` | Available | Filename and pattern mappings to source grammar ids. |
 | `grammars/<lang>/grammar.wasm` | Available | Optional tree-sitter grammar for a source language. |
 | `grammars/<lang>/highlights.scm` | Available | Optional highlight query for that grammar. |
@@ -34,11 +36,15 @@ Settings persist as EDN:
  :variable-font-family "Inter"
  :variable-font-size 16
  :fixed-font-family "JetBrains Mono"
- :fixed-font-size 14}
+ :fixed-font-size 14
+ :sidebar-width 280            ; sidebar width in px
+ :sidebar-visible? true}       ; sidebar open / closed
 ```
 
 The exact keys are the settings currently written by the UI. Unknown keys are
 merged into the settings map but only known UI settings have visible effects.
+Beyond fonts and theme, `settings.edn` also remembers the **sidebar** width and
+open/closed state, so the shell reopens the way you left it.
 
 ---
 
@@ -120,7 +126,38 @@ id, language alias, or extension. Unresolved mappings are ignored.
 
 ---
 
-## 6. Security boundary
+## 6. Recent navigation and window geometry
+
+**`recent.edn`** holds two pieces of navigation memory, managed by
+`vinary.main.recent` (it mirrors `settings.edn`: raw EDN text over IPC, watched for
+external edits, written back debounced):
+
+```clojure
+{:trail        {"/home/me/docs" "/home/me/docs/report.md"
+                "/home/me"      "/home/me/docs"
+                "/"             "/home"}
+ :recent-files ["/home/me/docs/report.md" "/home/me/notes.md"]}
+```
+
+| Key | Meaning |
+|-----|---------|
+| `:trail` | A `directory → last-opened-child` map. It is what makes `Alt+Up` then `Alt+Down` return to the most-recently-opened file. Bounded to the 200 most-recent directories. |
+| `:recent-files` | The most-recently-used opened **files** (not directories or URLs), capped at 10, surfaced under File ▸ Open Recent. **Clear Recent** empties this list. |
+
+**`window.edn`** records the main window's geometry so it reopens where you left it,
+handled entirely in the main process (`vinary.main.window`):
+
+```clojure
+{:x 120 :y 80 :width 1280 :height 860 :maximized? false}
+```
+
+A saved position that is no longer on any connected display is dropped, so the
+window can never reopen off-screen; the normal (non-maximized) bounds are stored so
+un-maximizing restores the previous size.
+
+---
+
+## 7. Security boundary
 
 Configuration files are local input. Keep these rules:
 

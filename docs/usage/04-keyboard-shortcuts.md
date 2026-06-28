@@ -59,15 +59,31 @@ stable actions available across the current UI include:
 | Action | Typical binding |
 |--------|-----------------|
 | Find | `Ctrl+F` in Standard; `/` in Vim normal mode. |
-| History back/forward | `Alt+Left` / `Alt+Right`, toolbar buttons, and mouse thumb buttons. |
+| History back/forward | `Alt+Left` / `Alt+Right`, toolbar buttons, and mouse thumb buttons. **Keymap-independent** — bound in the `:all` block of every keymap (Standard, Vim, Emacs), so they work in any mode. |
+| Parent directory | `Alt+Up` (`:nav/parent`); Vim `K`. Navigate the active tab to the current path's parent folder. Alt key is keymap-independent. |
+| Open highlighted entry | `Alt+Down` (`:nav/open-target`); Vim `J`. Open the highlighted child of the active directory listing. Alt key is keymap-independent. |
 | Switch tabs | Keymap commands backed by `:tab/next` and `:tab/prev`. |
-| Scroll | Keymap commands backed by `:nav/scroll`. |
+| Scroll the pane | **Bare arrow keys** (`↑`/`↓`/`←`/`→`), plus keymap commands backed by `:nav/scroll` (Vim `j`/`k`, page/half). All are smooth — see below. |
 | Toggle sidebar | Command backed by `:sidebar/toggle`. |
 | Open command palette | Command backed by palette state and command registry. |
 | Link hints | `f` in Vim normal mode. |
 
 Use the visual editor for the authoritative active binding list; it reads the
 same registry the resolver uses.
+
+**Smooth scrolling.** Bare arrow keys scroll the **focused pane** — the focused
+element's nearest scrollable ancestor, else the content pane. They are skipped inside
+editable elements (inputs, textareas, CodeMirror) so cursor movement still works, and
+while a menu or modal overlay is open. A single `requestAnimationFrame` animator eases
+toward an *accumulating* target, so a held key scrolls continuously and smoothly
+(replacing the old per-press jumps); the same animator smooths Vim `j`/`k` and the
+page/half-page commands. Implemented in `vinary.input.fx` (`:dom/scroll`); the
+bare-arrow capture handler is `vinary.renderer.core/arrow-scroll!`.
+
+**Opening files/folders is OS-dependent.** In both the **directory browser** and the
+**git file tree**, a **single click opens on Linux** and a **double click opens on
+Windows/macOS** (the host file-manager convention, via
+`vinary.ui.platform/single-click-open?`). `Ctrl`+click always opens in a new tab.
 
 ---
 

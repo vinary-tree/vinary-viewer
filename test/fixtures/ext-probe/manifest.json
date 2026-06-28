@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "VV Ext Probe",
+  "version": "1.0.0",
+  "description": "Spike/probe fixture for Vinary's extension runtime (MV3 SW + content script + action popup).",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["http://127.0.0.1/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "VV Probe", "default_icon": { "16": "icon16.png" } },
+  "permissions": ["storage", "scripting"]
+}

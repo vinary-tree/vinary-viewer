@@ -12,7 +12,7 @@
   (or (:link-kind target) (:kind target)))
 
 (defn new-tab? [target]
-  (contains? #{:http :file} (link-kind target)))
+  (contains? #{:http :file :dir} (link-kind target)))
 
 (defn open-event
   "Return the re-frame event for opening a preview target."
@@ -22,6 +22,6 @@
     (when-not (str/blank? path)
       (case kind
         :anchor [:toc/goto path]
-        :dir    [:shell/open-path path]
-        (:http :file) [(if new-tab? :tab/open :tab/navigate) path]
+        ;; a directory now opens in-pane (the directory browser) just like a file, pushing history
+        (:http :file :dir) [(if new-tab? :tab/open :tab/navigate) path]
         nil))))

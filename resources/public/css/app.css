@@ -19,7 +19,26 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
   min-height: 0; min-width: 0; }
 .vv-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
   padding: 32px 45px; box-sizing: border-box; }
-.vv-content-pdf { padding: 0; overflow: hidden; }
+.vv-content-pdf { padding: 0; overflow: hidden; }   /* RETIRED with the native PDF view (ADR 0013) — now unused */
+
+/* in-renderer PDF view (pdf.js): pages render to <canvas> inside the scrolling .vv-content, with a
+   transparent text layer (real selection/find/copy) + a link layer overlaid — parity with markdown. */
+.vv-pdf-doc { background: var(--vv-pdf-gutter); padding: 16px 0; min-height: 100%; }
+.vv-pdf-page { position: relative; margin: 0 auto 16px; background: #fff;
+  box-shadow: 0 1px 6px var(--vv-pdf-page-shadow); }
+.vv-pdf-canvas { display: block; }
+/* pdf.js text layer — canonical rules (from pdf_viewer.css), scoped: transparent, selectable spans */
+.vv-pdf-text { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1;
+  text-align: initial; text-size-adjust: none; forced-color-adjust: none;
+  transform-origin: 0 0; caret-color: CanvasText; z-index: 1; }
+.vv-pdf-text :is(span, br) { color: transparent; position: absolute; white-space: pre;
+  cursor: text; transform-origin: 0 0; }
+.vv-pdf-text span.markedContent { top: 0; height: 0; }
+/* link layer (external + intra-doc destinations) over the text */
+.vv-pdf-anno { position: absolute; inset: 0; z-index: 2; }
+.vv-pdf-anno a.vv-pdf-link { position: absolute; }
+/* optional dark-invert: invert the CANVAS only, so text/selection/find highlights stay normal */
+.vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
 .vv-error { color: var(--vv-error); }
 .vv-empty { color: var(--vv-fg-dim); }
 /* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
@@ -183,11 +202,67 @@ html, body { margin: 0; height: 100%; background: var(--vv-bg1); color: var(--vv
 .vv-uribar { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding: 4px 8px;
   background: var(--vv-bg1); border-bottom: 1px solid var(--vv-border); }
 .vv-uribar .vv-nav-btn { margin-right: 0; }
+/* address field: a relative wrapper so the ghost autosuggestion layer + completion dropdown anchor to it */
+.vv-uri-field { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
 .vv-uri-input { flex: 1 1 auto; min-width: 0; background: var(--vv-bg2); color: var(--vv-fg);
   border: 1px solid var(--vv-border); border-radius: 4px; padding: 3px 9px; font-size: 12px;
-  font-family: "Fira Code", "JetBrains Mono", monospace; outline: none; }
-.vv-uri-input:focus { background: var(--vv-bg-code); border-color: var(--vv-head1); }
+  font-family: "Fira Code", "JetBrains Mono", monospace; outline: none; position: relative; z-index: 1; }
+.vv-uri-input:focus { background: transparent; border-color: var(--vv-head1); }
 .vv-uri-input::placeholder { color: var(--vv-fg-dim); }
+/* Fish-style ghost: a transparent copy of the typed text spaces the dimmed suggestion suffix so it
+   begins exactly at the cursor; sits behind the (transparent-on-focus) input, sharing its metrics */
+.vv-uri-ghost { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  display: flex; align-items: center; white-space: pre; padding: 3px 9px; border: 1px solid transparent;
+  border-radius: 4px; font-size: 12px; font-family: "Fira Code", "JetBrains Mono", monospace;
+  background: var(--vv-bg-code); }
+.vv-uri-ghost-typed  { color: transparent; white-space: pre; }
+.vv-uri-ghost-suffix { color: var(--vv-fg-dim); white-space: pre; }
+/* completion dropdown — shown only when the completion is ambiguous (more than one match) */
+.vv-uri-complete { position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 30; margin: 0;
+  padding: 4px 0; list-style: none; max-height: 280px; overflow-y: auto; background: var(--vv-bg2);
+  border: 1px solid var(--vv-border); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.vv-uri-opt { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer;
+  font-size: 12px; font-family: "Fira Code", "JetBrains Mono", monospace; color: var(--vv-fg);
+  white-space: nowrap; }
+.vv-uri-opt-sel { background: var(--vv-bg-code); color: var(--vv-fg-strong); }
+.vv-uri-opt-icon { flex: 0 0 auto; width: 16px; text-align: center; color: var(--vv-fg-dim); }
+.vv-uri-opt-dir .vv-uri-opt-icon { color: var(--vv-head1); }
+.vv-uri-opt-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+/* inline, non-intrusive no-match error (never a dialog) */
+.vv-uri-field.vv-uri-error .vv-uri-input { border-color: var(--vv-error); }
+.vv-uri-errmsg { position: absolute; top: calc(100% + 2px); left: 0; z-index: 30; padding: 2px 8px;
+  font-size: 11px; color: var(--vv-error); background: var(--vv-bg2); border: 1px solid var(--vv-border);
+  border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+
+/* extension browser-action toolbar (in the address-bar row) */
+.vv-ext-toolbar { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: 4px; }
+.vv-ext-action { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px;
+  background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; color: var(--vv-fg); padding: 0; }
+.vv-ext-action:hover { background: var(--vv-bg2); border-color: var(--vv-border); }
+.vv-ext-action-icon { width: 16px; height: 16px; display: block; }
+
+/* extensions & ad-blocking dialog */
+.vv-ext-sect { margin-bottom: 16px; }
+.vv-ext-sect-title { font-weight: 600; font-size: 13px; color: var(--vv-head1); margin-bottom: 8px;
+  border-bottom: 1px solid var(--vv-border); padding-bottom: 4px; }
+.vv-ext-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+.vv-ext-label { color: var(--vv-fg-dim); }
+.vv-ext-radio { display: inline-flex; align-items: center; gap: 3px; }
+.vv-ext-install { display: flex; gap: 6px; margin: 8px 0; }
+.vv-ext-input { flex: 1 1 auto; background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 4px; padding: 4px 8px; font-size: 12px; outline: none; }
+.vv-ext-input:focus { border-color: var(--vv-head1); }
+.vv-ext-status { font-size: 12px; color: var(--vv-fg-dim); margin: 4px 0; }
+.vv-ext-list { margin: 8px 0; border: 1px solid var(--vv-border); border-radius: 6px; overflow: hidden; }
+.vv-ext-empty { padding: 12px; color: var(--vv-fg-dim); font-size: 12px; text-align: center; }
+.vv-ext-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--vv-border); }
+.vv-ext-item:last-child { border-bottom: none; }
+.vv-ext-item-icon { width: 16px; height: 16px; flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--vv-fg-dim); }
+.vv-ext-item-name { flex: 1 1 auto; font-size: 13px; }
+.vv-ext-item-ver { color: var(--vv-fg-dim); font-size: 11px; }
+.vv-ext-item-rm { background: transparent; border: none; color: var(--vv-fg-dim); cursor: pointer; padding: 2px 6px; border-radius: 3px; }
+.vv-ext-item-rm:hover { color: var(--vv-error); background: var(--vv-bg2); }
+.vv-ext-note { font-size: 11px; color: var(--vv-fg-dim); margin-top: 10px; line-height: 1.4; }
 
 /* in-page find (floats over the content; matches painted via the CSS Custom Highlight API) */
 .vv-find { position: absolute; top: 8px; right: 22px; z-index: 10; display: flex; align-items: center;
@@ -494,3 +569,45 @@ details[open] > .vv-dir-name > .vv-folder-closed,
 details[open] > .vv-project-name > .vv-folder-closed { display: none; }
 details[open] > .vv-dir-name > .vv-folder-open,
 details[open] > .vv-project-name > .vv-folder-open { display: inline-block; }
+
+/* ===== In-pane directory browser (detailed list) ===== */
+.vv-fb { display: flex; flex-direction: column; min-height: 100%; outline: none; }
+.vv-fb-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-bottom: 1px solid var(--vv-border); position: sticky; top: 0; z-index: 1; background: var(--vv-bg1); }
+.vv-fb-path { font-weight: 600; color: var(--vv-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vv-fb-empty { padding: 28px 16px; color: var(--vv-fg-dim); text-align: center; }
+.vv-fb-head-row, .vv-fb-row {
+  display: grid; grid-template-columns: 1.6em minmax(0, 1fr) 92px 172px; gap: 10px;
+  align-items: center; padding: 5px 14px; }
+.vv-fb-head-row { color: var(--vv-fg-dim); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em; border-bottom: 1px solid var(--vv-border); }
+.vv-fb-row { cursor: pointer; color: var(--vv-fg); border-radius: 3px; }
+.vv-fb-row.vv-fb-sel { background: var(--vv-highlight); }
+.vv-fb-row:hover { background: var(--vv-bg-code); }
+.vv-fb-row i { font-size: 14px; color: var(--vv-fg-dim); }
+.vv-fb-row.vv-fb-sel i, .vv-fb-row:hover i { color: var(--vv-head1); }
+.vv-fb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vv-fb-size, .vv-fb-mtime { color: var(--vv-fg-dim); font-size: 12px;
+  font-family: var(--vv-font-fixed); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== Breadcrumb URI bar (Ctrl-hover) ===== */
+.vv-breadcrumb { flex: 1 1 auto; display: flex; align-items: center; gap: 1px; min-width: 0;
+  overflow: hidden; height: 24px; padding: 0 6px; font-family: var(--vv-font-fixed); font-size: 13px; }
+.vv-crumb { color: var(--vv-head1); text-decoration: none; padding: 1px 5px; border-radius: 3px;
+  white-space: nowrap; cursor: pointer; }
+.vv-crumb:last-child { color: var(--vv-fg); }
+.vv-crumb:hover { background: var(--vv-bg-code); text-decoration: underline; }
+.vv-crumb-sep { color: var(--vv-fg-dim); user-select: none; }
+
+/* ===== Tab drag insertion indicator ===== */
+.vv-tab, .vv-vtab { position: relative; }
+.vv-tab.vv-tab-drop-before::before, .vv-tab.vv-tab-drop-after::after {
+  content: ""; position: absolute; top: 4px; bottom: 4px; width: 2px; background: var(--vv-head1);
+  border-radius: 1px; pointer-events: none; }
+.vv-tab.vv-tab-drop-before::before { left: -1px; }
+.vv-tab.vv-tab-drop-after::after  { right: -1px; }
+.vv-vtab.vv-tab-drop-before::before, .vv-vtab.vv-tab-drop-after::after {
+  content: ""; position: absolute; left: 4px; right: 4px; height: 2px; background: var(--vv-head1);
+  border-radius: 1px; pointer-events: none; }
+.vv-vtab.vv-tab-drop-before::before { top: -1px; }
+.vv-vtab.vv-tab-drop-after::after  { bottom: -1px; }

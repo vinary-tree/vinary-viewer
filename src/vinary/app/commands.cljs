@@ -50,6 +50,8 @@
    :tree/down {:id :tree/down :title "Tree down" :category "Navigation" :dispatch [:tree/move 1]}
    :tree/up   {:id :tree/up :title "Tree up" :category "Navigation" :dispatch [:tree/move -1]}
    :tree/open {:id :tree/open :title "Open tree selection" :category "Navigation" :dispatch [:tree/activate]}
+   :nav/parent      {:id :nav/parent :title "Parent directory" :category "Navigation" :dispatch [:nav/parent]}
+   :nav/open-target {:id :nav/open-target :title "Open highlighted target" :category "Navigation" :dispatch [:nav/open-target]}
    ;; ---- Search ----
    :search/start {:id :search/start :title "Find" :category "Search" :dispatch [:find/toggle]}
    :search/next  {:id :search/next :title "Find next" :category "Search" :dispatch [:find/cycle 1] :when :find-visible?}

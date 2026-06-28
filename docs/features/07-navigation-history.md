@@ -6,6 +6,17 @@ Each tab owns its own browser-like history stack. Back/Forward act on the active
 tab, restore the target URI, and restore the saved scroll position for that
 history entry.
 
+> **Unified-history principle.** *All* navigation funnels through this one per-tab
+> mechanism in `vinary.app.nav` — `step` for Back/Forward, `nav-active` to push a
+> new entry. Crucially, **filesystem navigation is part of history**: directories
+> open *in-tab* (via `:tab/navigate` / `:doc/open`, see
+> [16-directory-browser.md](16-directory-browser.md)), so ascending to a parent
+> folder (`Alt+Up`), opening a directory entry (`Alt+Down`), and clicking a
+> breadcrumb segment all push or step the same stack as following a link. The
+> embedded web view participates too: a `vv:history-nav` message routes into
+> `:history/back` / `:history/forward` through the renderer's
+> `dispatch-history-nav!`.
+
 ---
 
 ## 1. History entry shape
@@ -36,10 +47,22 @@ truncates entries after `idx`, just like a web browser.
 |--------|-------|
 | Back | Toolbar Back, `Alt+Left`, or mouse back button. |
 | Forward | Toolbar Forward, `Alt+Right`, or mouse forward button. |
+| Up to parent folder | `Alt+Up` (or Vim `K`) — navigate the active tab to the current path's parent directory. |
+| Open highlighted directory entry | `Alt+Down` (or Vim `J`) — open the highlighted child of the active directory listing. |
+| Jump to a folder in the path | Hold `Ctrl` over the URI bar and click a breadcrumb segment. |
 | Open link in same tab | Left-click. |
 | Open link in new tab | `Ctrl+click` or middle-click. |
 
-Back/Forward are disabled when the active tab has no earlier/later entry.
+Back/Forward are disabled when the active tab has no earlier/later entry. `Alt+Up`
+is a no-op for `http(s)` pages and at the filesystem root; `Alt+Down` is inert
+unless a directory listing is showing.
+
+> **`Alt+Left` / `Alt+Right` are now keymap-independent.** All four Alt navigation
+> keys (`Alt+Left`/`Right`/`Up`/`Down`) are bound in the `:all` block of every
+> keymap (`default`, `vim`, `emacs`), so they work under any keymap and in any mode.
+> Previously only the default keymap bound `Alt+Left`/`Right`, so Vim/Emacs users
+> lost them (and Vim's `:normal` even consumed them). See
+> [17-breadcrumb-and-up-down-navigation.md §6](17-breadcrumb-and-up-down-navigation.md).
 
 ---
 
@@ -72,6 +95,8 @@ This keeps back/forward useful in long Markdown files with many embedded SVGs.
 | `:doc/open-new` | Focus an existing tab for the URI when possible, otherwise open a new tab. |
 | `:history/back` | Step active tab history by `-1` and restore target scroll. |
 | `:history/forward` | Step active tab history by `+1` and restore target scroll. |
+| `:nav/parent` | `Alt+Up`. Navigate the active tab to the parent directory of the current `file://` URI (via `uri/dirname`), pre-highlighting the came-from child in `[:ui :dir-selected]`. No-op for `http(s)` / at root. |
+| `:nav/open-target` | `Alt+Down` (and `Enter` inside a listing). Open the highlighted entry of the active directory view (`nav/effective-selected`). Inert unless `:doc/kind` is `"directory"`. |
 | `:http/navigated` | Sync in-app HTTP view navigation into active tab history. |
 
 Local-file destinations request `[:vv/open path]` and `[:scroll/restore n]`.

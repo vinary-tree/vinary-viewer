@@ -10,6 +10,8 @@
   {"C-f"     :search/start
    "M-left"  :history/back
    "M-right" :history/forward
+   "M-up"    :nav/parent
+   "M-down"  :nav/open-target
    "C-tab"   :tab/next
    "C-S-tab" :tab/prev
    "C-w"     :tab/close

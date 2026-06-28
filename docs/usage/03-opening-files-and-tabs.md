@@ -14,6 +14,8 @@ watching model, and per-tab history behavior.
 | `File > Open` | Native multi-file dialog. One selected file navigates the active tab; multiple selected files open one tab each. |
 | Sidebar file tree | Clicking a file dispatches `[:doc/open path]`. |
 | Markdown links | Left-click navigates the active tab; `Ctrl+click` opens a new tab. |
+| Directory path | Opening a folder (CLI arg, a folder link, a breadcrumb segment, or `Alt+Up`) lists it **in the pane** — see §6. |
+| File ▸ Open Recent | Re-open one of the last 10 opened files (the MRU), or **Clear Recent** — see §6. |
 | URI bar | Normalizes typed file paths, `file://` URIs, and HTTP/HTTPS URLs, then dispatches `[:tab/navigate uri]`. |
 
 The renderer never reads the filesystem directly. Local opens dispatch the
@@ -34,9 +36,12 @@ The main process classifies each local path through `vinary.main.file-kind/kind-
 | `mermaid` | `.mmd`, `.mermaid` | Renderer-side Mermaid SVG preview. |
 | `source` | Source files with bundled/user grammars, configured filetype mappings, plus `.d2`, `.puml`, `.dot`, and related non-Mermaid diagram-source extensions | Read-only CodeMirror 6 source view with tree-sitter highlighting when possible. |
 | `text` | Fallback | Escaped `<pre class="vv-plain">`. |
+| `directory` | any path that is a folder (detected by `vinary.main.service/directory?` *before* `kind-of`) | In-pane directory browser listing the immediate children. |
 
 Mermaid source files render as diagrams. Other diagram source files open as
-source text unless you embed generated SVG output in Markdown.
+source text unless you embed generated SVG output in Markdown. Directories are
+detected before the extension classifier and list their children rather than being
+read as text.
 
 ---
 
@@ -101,7 +106,33 @@ for the design rationale.
 
 ---
 
-## 6. Summary
+## 6. Browsing directories and Open Recent
+
+**Directories open in the pane.** Opening a folder lists its immediate children
+right in the preview area, instead of popping the OS file manager. A folder is a
+normal navigation target: it pushes a history entry, appears in the breadcrumb, and
+participates in `Alt+Up` / `Alt+Down`.
+
+The listing is a detailed list (name · size · modified).
+
+| Gesture | Result |
+|---------|--------|
+| Open an entry | Single-click on Linux, double-click on Windows/macOS, or highlight + `Enter` / `Alt+Down` (a folder descends; a file shows its preview). |
+| `Ctrl+click` | Open the entry in a new tab. |
+| `↑` `↓` `←` `→` | Smoothly scroll the listing (they do not move the highlight). |
+| Right-click a folder ▸ Open in file manager | The one explicit way to hand a folder to the OS. |
+
+See [../features/16-directory-browser.md](../features/16-directory-browser.md) and
+[../features/17-breadcrumb-and-up-down-navigation.md](../features/17-breadcrumb-and-up-down-navigation.md).
+
+**File ▸ Open Recent.** Every opened **file** (not a directory or a URL) is added to
+a most-recently-used list, capped at 10, surfaced under **File ▸ Open Recent**.
+Pick an entry to re-open it, or choose **Clear Recent** to empty the list. The MRU
+persists to `recent.edn` (see [05-configuration.md](05-configuration.md)).
+
+---
+
+## 7. Summary
 
 | Goal | Use |
 |------|-----|

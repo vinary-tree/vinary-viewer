@@ -193,6 +193,9 @@ function installIpc(state) {
     state.httpHidden = true;
   });
   ipcMain.on('vv:watch-assets', () => {});
+  ipcMain.handle('vv:complete-path', (_event, input) => ({
+    input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
+  }));
   ipcMain.on('vv:context-open-link', () => {});
   ipcMain.on('vv:context-open-link-new-tab', () => {});
   ipcMain.on('vv:clipboard-write', (_event, text) => {
@@ -312,42 +315,73 @@ async function main() {
   );
   console.log('[ok] Settings pointer submenus open');
 
+  // PDF — rendered IN-DOM via pdf.js (parity with markdown: canvas + selectable text layer + find +
+  // copy), NOT the retired native WebContentsView. Bytes are streamed on vv:content.
+  const pdfFixture = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
   win.webContents.send('vv:content', {
-    path: path.join(ROOT, 'test', 'fixtures', 'smoke.pdf'),
+    path: pdfFixture,
     kind: 'pdf',
+    bytes: new Uint8Array(fs.readFileSync(pdfFixture)),
     stamp: Date.now()
   });
   await waitFor(
-    () => evalIn(win, `Boolean(document.querySelector('.vv-pdf-host'))`),
-    'PDF host'
+    () => evalIn(win, `(() => {
+      const c = document.querySelector('.vv-pdf-doc .vv-pdf-page canvas.vv-pdf-canvas');
+      return Boolean(c) && c.getBoundingClientRect().width > 0 && c.getBoundingClientRect().height > 0;
+    })()`),
+    'PDF canvas rendered in the DOM', 15000
   );
-  await waitFor(() => state.pdfShow && state.pdfShow.bounds, 'PDF show payload');
+  await waitFor(
+    () => evalIn(win, `document.querySelectorAll('.vv-pdf-text span').length > 0`),
+    'PDF text layer spans', 15000
+  );
   const pdfLayout = await evalIn(win, `(() => {
-    const content = document.querySelector('.vv-content');
-    const host = document.querySelector('.vv-pdf-host');
-    const contentStyle = getComputedStyle(content);
-    const hostRect = host.getBoundingClientRect();
+    const canvas = document.querySelector('.vv-pdf-canvas');
+    const span = Array.from(document.querySelectorAll('.vv-pdf-text span')).find(s => /Smoke|Vinary/.test(s.textContent))
+                 || document.querySelector('.vv-pdf-text span');
+    const cr = canvas.getBoundingClientRect();
+    const sr = span.getBoundingClientRect();
     return {
-      hasPdfClass: content.classList.contains('vv-content-pdf'),
-      paddingTop: contentStyle.paddingTop,
-      paddingRight: contentStyle.paddingRight,
-      paddingBottom: contentStyle.paddingBottom,
-      paddingLeft: contentStyle.paddingLeft,
-      hostWidth: hostRect.width,
-      hostHeight: hostRect.height
+      inRenderer: Boolean(document.querySelector('.vv-pdf-doc')),
+      noNativeHost: !document.querySelector('.vv-pdf-host'),
+      canvasW: Math.round(cr.width),
+      textOverlapsCanvas: sr.left < cr.right && sr.right > cr.left && sr.top < cr.bottom && sr.bottom > cr.top
     };
   })()`);
-  assert.strictEqual(pdfLayout.hasPdfClass, true, 'PDF content must use the PDF layout class');
-  assert.strictEqual(pdfLayout.paddingTop, '0px', 'PDF content top padding must be zero');
-  assert.strictEqual(pdfLayout.paddingRight, '0px', 'PDF content right padding must be zero');
-  assert.strictEqual(pdfLayout.paddingBottom, '0px', 'PDF content bottom padding must be zero');
-  assert.strictEqual(pdfLayout.paddingLeft, '0px', 'PDF content left padding must be zero');
-  assert.ok(pdfLayout.hostWidth > 0 && pdfLayout.hostHeight > 0, 'PDF host must have visible bounds');
-  assert.ok(
-    state.pdfShow.bounds.width > 0 && state.pdfShow.bounds.height > 0,
-    'PDF IPC bounds must be positive'
-  );
-  console.log('[ok] PDF preview has zero margins and visible bounds');
+  assert.strictEqual(pdfLayout.inRenderer, true, 'PDF must render in the in-renderer pdf-view (.vv-pdf-doc)');
+  assert.strictEqual(pdfLayout.noNativeHost, true, 'the native PDF host (.vv-pdf-host) must be retired');
+  assert.ok(pdfLayout.canvasW > 0, 'PDF canvas must have a visible width');
+  assert.strictEqual(pdfLayout.textOverlapsCanvas, true, 'PDF text layer must align over the canvas');
+  console.log('[ok] PDF renders in-DOM: canvas + aligned text layer (no native view)');
+
+  // selection → Ctrl+C copies the PDF text (copy parity with markdown/source)
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => {
+    const layer = document.querySelector('.vv-pdf-text');
+    const range = document.createRange();
+    range.selectNodeContents(layer);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+    return sel.toString();
+  })()`);
+  assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C must be handled for a PDF selection');
+  await waitFor(() => state.lastCopiedText && state.lastCopiedText.includes('Vinary'), 'PDF selection Ctrl+C clipboard write');
+  console.log('[ok] PDF text selection copies via Ctrl+C');
+
+  // in-page find covers the PDF text layer (materialized on find)
+  await evalIn(win, `window.getSelection().removeAllRanges()`);
+  await dispatchWindowKey(win, 'f', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find bar opens over PDF');
+  await evalIn(win, `(() => {
+    const i = document.querySelector('.vv-find-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'Smoke'); i.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.find.count > 0`), 'PDF find matches', 8000);
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+    i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+  console.log('[ok] in-page find matches PDF text');
 
   const dialogsBefore = state.openDialogs;
   await sendChord(win, 'O', ['control', 'shift']);

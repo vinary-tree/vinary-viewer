@@ -17,7 +17,9 @@
             [vinary.app.uri :as uri]
             [vinary.grammar-catalog :as grammar-catalog]
             [vinary.main.file-kind :as file-kind]
+            [vinary.main.ext-util :as eu]
             [vinary.renderer.hints :as hints]
+            [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
             [vinary.renderer.math :as math]
@@ -504,10 +506,178 @@
   (testing "non-document preview targets keep their existing destinations"
     (is (= [:toc/goto "section"]
            (preview-nav/open-event {:kind :anchor :path "section"} false)))
-    (is (= [:shell/open-path "/tmp"]
-           (preview-nav/open-event {:kind :dir :path "/tmp"} false)))
+    (is (= [:tab/navigate "/tmp"]
+           (preview-nav/open-event {:kind :dir :path "/tmp"} false)))   ; directories open in-pane now
+    (is (= [:tab/open "/tmp"]
+           (preview-nav/open-event {:kind :dir :path "/tmp"} true)))
     (is (true? (preview-nav/new-tab? {:kind :preview-link :link-kind :file :path "/x"})))
+    (is (true? (preview-nav/new-tab? {:kind :dir :path "/x"})))
     (is (false? (preview-nav/new-tab? {:kind :preview-link :link-kind :anchor :path "x"})))))
+
+(deftest uri-path-helpers
+  (testing "dirname: parent directory, http/root → nil, trailing slash ignored"
+    (is (= "/a/b" (uri/dirname "/a/b/c.md")))
+    (is (= "/a/b" (uri/dirname "file:///a/b/c.md")))
+    (is (= "/a"   (uri/dirname "/a/b")))
+    (is (= "/a"   (uri/dirname "/a/b/")))
+    (is (= "/"    (uri/dirname "/a")))
+    (is (nil?     (uri/dirname "/")))
+    (is (nil?     (uri/dirname "https://example.com/x"))))
+  (testing "segments: root→leaf {:name :path} with cumulative paths"
+    (is (= [{:name "/" :path "/"} {:name "a" :path "/a"}
+            {:name "b" :path "/a/b"} {:name "c.md" :path "/a/b/c.md"}]
+           (uri/segments "/a/b/c.md")))
+    (is (= [{:name "/" :path "/"}] (uri/segments "/")))
+    (is (nil? (uri/segments "https://example.com"))))
+  (testing "ancestor-paths"
+    (is (= ["/" "/a" "/a/b" "/a/b/c.md"] (uri/ancestor-paths "/a/b/c.md")))))
+
+(deftest uri-completion-helpers
+  (testing "complete-split: [dir-part base] at the last separator; dir-part keeps its trailing slash"
+    (is (= ["/home/u/" "Do"] (uri/complete-split "/home/u/Do")))
+    (is (= ["/home/u/" ""]   (uri/complete-split "/home/u/")))
+    (is (= ["file:///a/" "b"] (uri/complete-split "file:///a/b")))
+    (is (= ["" "rel"]        (uri/complete-split "rel")))
+    (is (= ["C:\\d\\" "f"]   (uri/complete-split "C:\\d\\f"))))   ; Windows backslash delimits too
+  (testing "matches-prefix?: case-insensitive; dotfiles hidden unless the base starts with '.'"
+    (is (uri/matches-prefix? "Documents" "do"))
+    (is (uri/matches-prefix? "Documents" ""))
+    (is (not (uri/matches-prefix? "Downloads" "do x")))
+    (is (not (uri/matches-prefix? ".config" "c")))
+    (is (uri/matches-prefix? ".config" ".c")))
+  (testing "common-prefix: longest shared prefix (Tab fills to here)"
+    (is (= "Do"  (uri/common-prefix ["Documents" "Downloads"])))
+    (is (= "abc" (uri/common-prefix ["abc"])))
+    (is (= ""    (uri/common-prefix ["abc" "xyz"])))
+    (is (= ""    (uri/common-prefix []))))
+  (testing "web-matches: prefix matches rank before substring; recency preserved; capped; case-insensitive"
+    (is (= ["abcdef" "xabcy"] (uri/web-matches ["xabcy" "abcdef"] "abc" 10)))   ; prefix outranks substring
+    (let [hist ["https://example.com/docs" "https://example.com/api" "https://elixir-lang.org"]]
+      (is (= ["https://example.com/docs" "https://example.com/api"] (uri/web-matches hist "https://example.com" 10)))
+      (is (= ["https://example.com/docs" "https://example.com/api"] (uri/web-matches hist "HTTPS://EXAMPLE.COM" 10)))
+      (is (= 1 (count (uri/web-matches hist "https://e" 1))))
+      (is (= [] (uri/web-matches hist "" 10))))))
+
+(deftest directory-selection
+  (let [entries [{:name "z.txt" :path "/d/z.txt" :dir? false}
+                 {:name "sub"   :path "/d/sub"   :dir? true}
+                 {:name "A.txt" :path "/d/A.txt" :dir? false}]]
+    (testing "sort-entries: directories first, then case-insensitive name"
+      (is (= ["/d/sub" "/d/A.txt" "/d/z.txt"] (mapv :path (nav/sort-entries entries)))))
+    (testing "effective-selected: explicit selection in the listing wins"
+      (is (= "/d/A.txt" (nav/effective-selected "/d" entries "/d/A.txt" {}))))
+    (testing "effective-selected: else the remembered trail child"
+      (is (= "/d/z.txt" (nav/effective-selected "/d" entries "/gone" {"/d" "/d/z.txt"}))))
+    (testing "effective-selected: else the first sorted entry"
+      (is (= "/d/sub" (nav/effective-selected "/d" entries nil {}))))
+    (testing "effective-selected: nil for an empty listing"
+      (is (nil? (nav/effective-selected "/d" [] nil {}))))))
+
+(deftest recent-trail-and-mru
+  (let [db0 {:ui {:recent {:trail {} :recent-files []}}}
+        db1 (events/record-recent db0 "/a/b/c.md" false)]
+    (testing "trail records each ancestor→child step (root→file)"
+      (is (= "/a"        (get-in db1 [:ui :recent :trail "/"])))
+      (is (= "/a/b"      (get-in db1 [:ui :recent :trail "/a"])))
+      (is (= "/a/b/c.md" (get-in db1 [:ui :recent :trail "/a/b"]))))
+    (testing "a file is unshifted onto the MRU; a directory is not"
+      (is (= ["/a/b/c.md"] (get-in db1 [:ui :recent :recent-files])))
+      (is (= ["/a/b/c.md"] (get-in (events/record-recent db1 "/a/b" true)
+                                   [:ui :recent :recent-files]))))
+    (testing "MRU dedups + moves to front (newest first)"
+      (let [db (-> db1
+                   (events/record-recent "/a/b/d.md" false)
+                   (events/record-recent "/a/b/c.md" false))]
+        (is (= ["/a/b/c.md" "/a/b/d.md"] (get-in db [:ui :recent :recent-files])))))
+    (testing "MRU is capped at 10 (newest retained)"
+      (let [db (reduce (fn [d i] (events/record-recent d (str "/f/" i ".md") false)) db0 (range 12))]
+        (is (= 10 (count (get-in db [:ui :recent :recent-files]))))
+        (is (= "/f/11.md" (first (get-in db [:ui :recent :recent-files]))))))))
+
+(deftest web-history-mru
+  (let [db  {:ui {:recent {:trail {} :recent-files [] :web-history []}}}
+        db' (-> db
+                (events/record-web-history "https://a.com")
+                (events/record-web-history "https://b.com")
+                (events/record-web-history "https://a.com"))]   ; revisit → dedup + move to front
+    (testing "http(s) URLs are unshifted onto the web-history MRU, deduped, newest first"
+      (is (= ["https://a.com" "https://b.com"] (get-in db' [:ui :recent :web-history]))))
+    (testing "non-http inputs (local paths, blank) are ignored"
+      (is (= ["https://a.com" "https://b.com"]
+             (get-in (events/record-web-history db' "/local/file.md") [:ui :recent :web-history])))
+      (is (= ["https://a.com" "https://b.com"]
+             (get-in (events/record-web-history db' nil) [:ui :recent :web-history]))))))
+
+(deftest pdf-layout-helpers
+  (testing "clamp-zoom bounds [0.25, 8.0]"
+    (is (= 0.25 (pdf-layout/clamp-zoom 0.1)))
+    (is (= 8.0  (pdf-layout/clamp-zoom 20)))
+    (is (= 1.5  (pdf-layout/clamp-zoom 1.5))))
+  (testing "zoom-step: in ×1.2, out ÷1.2, reset → 1.0, clamped at max"
+    (is (= 1.2 (pdf-layout/zoom-step 1.0 :in)))
+    (is (< (js/Math.abs (- (/ 1.0 1.2) (pdf-layout/zoom-step 1.0 :out))) 1e-9))
+    (is (= 1.0 (pdf-layout/zoom-step 3.3 :reset)))
+    (is (= 8.0 (pdf-layout/zoom-step 7.5 :in))))
+  (testing "fit-scale: width / page / actual + zero guard"
+    (is (= 2.0 (pdf-layout/fit-scale 200 999 100 50 :width)))
+    (is (= 1.0 (pdf-layout/fit-scale 200 50 100 50 :page)))      ; min(2.0, 1.0)
+    (is (= 1.0 (pdf-layout/fit-scale 200 999 100 50 :actual)))
+    (is (= 1.0 (pdf-layout/fit-scale 200 200 0 0 :width))))      ; zero guard
+  (testing "page-rects: cumulative offsets with gaps + total-height"
+    (let [rects (pdf-layout/page-rects [[100 200] [100 100]] 1.0 10)]
+      (is (= [{:top 0 :height 200 :width 100} {:top 210 :height 100 :width 100}] rects))
+      (is (= 310 (pdf-layout/total-height rects))))
+    (is (= [{:top 0 :height 100 :width 50}] (pdf-layout/page-rects [[100 200]] 0.5 10))))
+  (testing "visible-range: window + overscan; [-1 -1] when none"
+    (let [rects (pdf-layout/page-rects [[10 100] [10 100] [10 100]] 1.0 0)]   ; tops 0,100,200
+      (is (= [0 0]   (pdf-layout/visible-range rects 0 50 0)))
+      (is (= [0 1]   (pdf-layout/visible-range rects 50 100 0)))
+      (is (= [0 2]   (pdf-layout/visible-range rects 100 100 50)))            ; overscan pulls in 0 & 2
+      (is (= [-1 -1] (pdf-layout/visible-range rects 1000 50 0)))))
+  (testing "outline->toc: nesting → levels, dest → vv-pdf-page-N, unresolved skipped"
+    (let [outline [{:title "A" :dest "da" :items [{:title "A1" :dest "da1" :items []}]}
+                   {:title "B" :dest "gone" :items []}]
+          d->p    {"da" 1 "da1" 2 "gone" nil}]
+      (is (= [{:level 1 :text "A"  :id "vv-pdf-page-1"}
+              {:level 2 :text "A1" :id "vv-pdf-page-2"}]
+             (pdf-layout/outline->toc outline d->p))))))
+
+(deftest ext-util-helpers
+  (testing "parse-store-id: 32-char id from a URL or bare id, else nil"
+    (is (= "abcdefghijklmnopabcdefghijklmnop" (eu/parse-store-id "abcdefghijklmnopabcdefghijklmnop")))
+    (is (= "cjpalhdlnbpafiamejdnhcphjbkeiagm"
+           (eu/parse-store-id "https://chromewebstore.google.com/detail/ublock/cjpalhdlnbpafiamejdnhcphjbkeiagm")))
+    (is (nil? (eu/parse-store-id "not an id")))
+    (is (nil? (eu/parse-store-id nil))))
+  (testing "merge-config: defaults filled in; disabled-ids coerced to a set"
+    (let [c (eu/merge-config {:adblock {:enabled? false} :extensions {:disabled-ids ["a" "b"]}})]
+      (is (false? (get-in c [:adblock :enabled?])))
+      (is (= :ads-and-tracking (get-in c [:adblock :lists])))
+      (is (= #{"a" "b"} (get-in c [:extensions :disabled-ids]))))
+    (is (= eu/default-config (eu/merge-config nil))))
+  (testing "reconcile-enabled: ids to unload = installed ∩ disabled"
+    (is (= {:to-unload ["b"]} (eu/reconcile-enabled ["a" "b" "c"] #{"b" "z"}))))
+  (testing "action-model: title/popup/icon from a manifest (string keys); prefers 32px icon"
+    (let [a (eu/action-model {"name" "uBlock"
+                              "action" {"default_title" "uBO" "default_popup" "popup.html"
+                                        "default_icon" {"16" "i16.png" "32" "i32.png"}}})]
+      (is (= "uBO" (:title a))) (is (= "popup.html" (:popup a)))
+      (is (= "i32.png" (:icon-rel a))) (is (true? (:has-popup? a))))
+    (let [a (eu/action-model {"name" "X" "action" {"default_icon" "icon.png"}})]
+      (is (= "X" (:title a))) (is (= "icon.png" (:icon-rel a))) (is (false? (:has-popup? a)))))
+  (testing "clamp-popup-size: ≤ 800×600, ≥ mins, default when nil"
+    (is (= [800 600] (eu/clamp-popup-size 9999 9999)))
+    (is (= [120 80]  (eu/clamp-popup-size 10 10)))
+    (is (= [360 480] (eu/clamp-popup-size nil nil))))
+  (testing "anchor->bounds: just below the icon, clamped on-screen"
+    (is (= {:x 100 :y 26 :width 200 :height 300}
+           (eu/anchor->bounds {:x 100 :y 0 :width 26 :height 24} 1000 800 [200 300])))
+    (is (= 800 (:x (eu/anchor->bounds {:x 950 :y 0 :width 26 :height 24} 1000 800 [200 300])))))
+  (testing "cache-stale?: nil/zero, or older than every-hours"
+    (is (eu/cache-stale? 0 24 1000))
+    (is (eu/cache-stale? nil 24 1000))
+    (is (eu/cache-stale? 1 24 (+ 1 (* 25 3600000))))
+    (is (not (eu/cache-stale? 1000 24 (+ 1000 (* 1 3600000)))))))
 
 (deftest history-input-coalescing
   (let [[s1 ok1?] (history-input/accept {:dir nil :time 0} "back" 1000)

@@ -22,6 +22,8 @@
    "C-i" :history/forward
    "H"   :history/back
    "L"   :history/forward
+   "K"   :nav/parent          ; like Alt+Up — up to the parent directory
+   "J"   :nav/open-target     ; like Alt+Down — open the highlighted file/folder
    "/"   :search/start
    "n"   :search/next
    "N"   :search/prev
@@ -46,6 +48,12 @@
   {"escape" :input/escape}
   :all
   {"escape" :input/escape
+   ;; Alt+arrow navigation is keymap-independent (here in :all, not :normal, so vim's normal
+   ;; mode does not consume them): ←/→ history, ↑ parent dir, ↓ open highlighted target.
+   "M-left"  :history/back
+   "M-right" :history/forward
+   "M-up"    :nav/parent
+   "M-down"  :nav/open-target
    "C-o" :file/open-dialog
    "C-S-o" :file/open-dialog-new-tab
    "C-l" :focus/uri

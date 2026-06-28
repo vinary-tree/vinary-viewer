@@ -150,6 +150,28 @@ ipcRenderer.on('vv:web-scroll-to', function (_e, id) {
     else if (matches.length === 0) clear();
     else refresh();
   }
+  // vim/standard scroll keys — reading parity with the markdown preview (the web page is a separate
+  // scroll context, so these scroll it directly rather than round-tripping to the app).
+  let lastG = 0;
+  function sby(dy, smooth) { window.scrollBy({ top: dy, behavior: smooth ? 'smooth' : 'auto' }); }
+  function sto(y) { window.scrollTo({ top: y, behavior: 'smooth' }); }
+  function scrollKey(e) {
+    const vh = window.innerHeight, k = e.key;
+    if (k === 'j' && !e.ctrlKey) sby(48, false);
+    else if (k === 'k' && !e.ctrlKey) sby(-48, false);
+    else if (k === 'ArrowDown') sby(48, false);
+    else if (k === 'ArrowUp') sby(-48, false);
+    else if (k === 'd' && e.ctrlKey) sby(vh / 2, true);
+    else if (k === 'u' && e.ctrlKey) sby(-vh / 2, true);
+    else if (k === ' ' && !e.shiftKey) sby(vh * 0.9, true);
+    else if ((k === ' ' && e.shiftKey) || k === 'PageUp') sby(-vh * 0.9, true);
+    else if (k === 'PageDown') sby(vh * 0.9, true);
+    else if (k === 'G' || k === 'End') sto(document.documentElement.scrollHeight);
+    else if (k === 'Home') sto(0);
+    else if (k === 'g' && !e.ctrlKey) { const n = Date.now(); if (n - lastG < 400) { sto(0); lastG = 0; } else lastG = n; }
+    else return false;
+    return true;
+  }
   window.addEventListener('keydown', function (e) {
     if (active) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); clear(); }
@@ -157,8 +179,8 @@ ipcRenderer.on('vv:web-scroll-to', function (_e, id) {
       else if (/^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); type(e.key); }
       return;
     }
-    if (e.key === 'f' && !e.ctrlKey && !e.altKey && !e.metaKey && !inInput()) {
-      e.preventDefault(); e.stopPropagation(); start();
-    }
+    if (inInput() || e.altKey || e.metaKey) return;   // Alt = history (handled in main); inputs type normally
+    if (e.key === 'f' && !e.ctrlKey) { e.preventDefault(); e.stopPropagation(); start(); return; }
+    if (scrollKey(e)) { e.preventDefault(); e.stopPropagation(); }
   }, true);
 })();

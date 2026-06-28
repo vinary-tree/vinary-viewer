@@ -25,9 +25,17 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars/push!` | Request user grammar registry and filetype mappings. |
 | `vv:settings-request` | `requestSettings()` | none | `vinary.main.settings/push!` | Request persisted `settings.edn`. |
 | `vv:settings-save` | `saveSettings(edn)` | EDN string | `vinary.main.settings/save!` | Persist settings EDN. |
-| `vv:pdf-show` | `pdfShow(path, bounds)` | `{path, bounds}` | `vinary.main.pdf/show!` | Show/load the native PDF `WebContentsView`. |
-| `vv:pdf-hide` | `pdfHide()` | none | `vinary.main.pdf/hide!` | Hide the native PDF view. |
-| `vv:pdf-bounds` | `pdfBounds(bounds)` | `{bounds}` | `vinary.main.pdf/set-bounds!` | Reposition the native PDF view. |
+| `vv:recent-request` | `requestRecent()` | none | `vinary.main.recent/push!` | Request persisted `recent.edn` (dir→child trail + recent-files MRU). |
+| `vv:recent-save` | `saveRecent(edn)` | EDN string | `vinary.main.recent/save!` | Persist recent-navigation EDN (debounced 300 ms in the renderer). |
+| `vv:complete-path` | `completePath(input)` ⮐ | string | `vinary.main.service` | *(invoke)* Path-completion data for the URI bar: directory children + exact-match info. |
+| `vv:ext-config-request` / `vv:ext-config-save` | `requestExtConfig()` / `saveExtConfig(edn)` | none / EDN | `vinary.main.ext-config` | Request / persist `extensions.edn` (ad-block + extension prefs). |
+| `vv:ext-state-request` | `extState()` | none | `vinary.main.extensions` | Request the installed-extensions state push. |
+| `vv:ext-install` / `vv:ext-remove` | `extInstall(idOrUrl)` / `extRemove(id)` | string | `vinary.main.extensions` | Install (Web-Store id/URL) / uninstall an extension. |
+| `vv:ext-set-enabled` | `extSetEnabled(id, on)` | `{id, on}` | `vinary.main.extensions` | Enable/disable a loaded extension. |
+| `vv:ext-check-updates` | `extCheckUpdates()` | none | `vinary.main.extensions` | Trigger a Web-Store update check. |
+| `vv:ext-action-clicked` / `vv:ext-popup-close` | `extActionClicked(id, popup, bounds)` / `extPopupClose()` | `{id, popup, bounds}` / none | `vinary.main.ext-popup` | Open / close a browser-action popup. |
+| `vv:adblock-set-enabled` / `vv:adblock-set-lists` / `vv:adblock-refresh` | `adblockSetEnabled(on)` / `adblockSetLists(kw)` / `adblockRefresh()` | bool / string / none | `vinary.main.adblock` | Toggle / set list-set / refresh the ad-blocker. |
+| `vv:pdf-show` / `vv:pdf-hide` / `vv:pdf-bounds` | `pdfShow` / `pdfHide` / `pdfBounds` | — | *RETIRED* | Native PDF view seam — retired for in-renderer pdf.js (ADR-0013); no main listener (harmless no-ops). |
 | `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. |
 | `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
 | `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web/set-bounds!` | Reposition the in-app HTTP view. |
@@ -50,7 +58,7 @@ fields derived from `getBoundingClientRect()`.
 
 | Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
 |---------|----------------------|---------|-----------------------|---------|
-| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?}` | `[:content/received ...]` | Deliver initial and live-refreshed document content. |
+| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, bytes?}` | `[:content/received ...]` | Deliver initial and live-refreshed document content (PDFs carry `:bytes`, cached in the renderer). |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error ...]` | Deliver read/render errors. |
 | `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received ...]` | Deliver git file-tree data. |
 | `vv:keymap` | `onKeymap(cb)` | keymap registry map/string | `[:keymap/config-received ...]` | Deliver persisted keybinding config. |
@@ -61,16 +69,23 @@ fields derived from `getBoundingClientRect()`.
 | `vv:history-nav` | `onHistoryNav(cb)` | `"back"` or `"forward"` | history dispatch | Forward browser-like navigation from native/web surfaces. |
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened ...]` | Deliver file selections from the native Open dialog. |
 | `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received ...]` | Deliver persisted settings. |
+| `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received ...]` | Deliver persisted recent-navigation state (`{:trail {…} :recent-files [...] :web-history [...]}`); initial push plus on external edit. |
+| `vv:ext-config` | `onExtConfig(cb)` | EDN string | `[:ext-config/received ...]` | Deliver persisted ad-block + extension prefs (`extensions.edn`). |
+| `vv:ext-state` | `onExtState(cb)` | EDN string | `[:ext/state-received ...]` | Deliver the installed-extensions list + master toggle. |
+| `vv:ext-install-result` / `vv:ext-update-result` | `onExtInstallResult` / `onExtUpdateResult` | object | `[:ext/install-result ...]` / `[:ext/update-result ...]` | Install / update outcome. |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata map | `[:app-info/received ...]` | Deliver app metadata. |
 
 ---
 
 ## 3. Content Kinds
 
-`vv:content` uses the file classifier in `vinary.main.file-kind/kind-of`:
+`vv:content` uses the file classifier in `vinary.main.file-kind/kind-of`, except
+for directories, which `vinary.main.service/send-content!` detects first (via
+`directory?`) and lists rather than reading as text:
 
 | Extension(s) | `kind` | Payload detail |
 |---------------|--------|----------------|
+| any path that is a directory | `"directory"` | not read as text; payload is `{:path :kind "directory" :entries [...] :stamp}`, where each entry is `{:name :path :dir? :size :mtime :symlink}`. Stored on the document entity as `:doc/entries` and rendered in-pane by the directory browser. |
 | `.md`, `.markdown`, `.mdx` | `"markdown"` | text is read and rendered in the renderer. |
 | image extensions such as `.png`, `.jpg`, `.svg`, `.webp`, `.avif` | `"image"` | binary is not read as text; renderer uses `file://` URL. |
 | `.pdf` | `"pdf"` | binary is not read as text; main-owned PDF view loads `file://` URL. |

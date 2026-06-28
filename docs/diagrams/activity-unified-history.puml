@@ -1,0 +1,47 @@
+@startuml activity-unified-history
+'' PlantUML over Mermaid: this view emphasises that MANY input affordances converge on ONE history
+'' mechanism (a fan-in to nav/step + nav-active) with a kind-of-navigation branch — an activity diagram
+'' with swimlane ownership + a decision expresses that better than a flowchart. Colours: blue-violet
+'' APPDB = app-db per-tab history; teal RENDERER = re-frame events.
+!include _vv-theme.iuml
+
+title Unified history spine — every navigation affordance is one interface over one mechanism
+
+|#7590DB|Affordance (input)|
+start
+:Any navigation affordance —
+toolbar Back/Forward, **Alt+Left / Alt+Right** (all keymaps),
+mouse thumb buttons, web-view back/forward (vv:history-nav),
+**Alt+Up** / **Alt+Down**, breadcrumb-segment click,
+file / link / tree click, URI bar Enter, File ▸ Open Recent;
+
+|#2D9574|Renderer (re-frame events)|
+:resolver / command registry / UI dispatches a navigation event;
+if (kind of navigation?) then (back / forward)
+  :[:history/back] / [:history/forward];
+  |#7590DB|app-db history (vinary.app.nav)|
+  :**nav/step ±1**\nmove [:hist :idx]; restore that entry's scroll;
+else (open / push)
+  |#2D9574|Renderer (re-frame events)|
+  :[:tab/navigate] / [:doc/open] /\n[:nav/parent] / [:nav/open-target];
+  note right
+    A directory opens the same way as a file
+    (:tab/navigate / :doc/open), so **filesystem
+    navigation is part of history** — Alt+Left
+    undoes an Alt+Up.
+  end note
+  |#7590DB|app-db history (vinary.app.nav)|
+  :**nav/nav-active**\npush {:uri :scroll}; truncate forward entries;
+endif
+
+:active tab :uri := current history entry;
+:retained-file-paths → main watcher / DataScript cache ownership;
+:load local content [:vv/open] + [:scroll/restore];
+stop
+
+legend right
+  |= Colour |= Concept |
+  |<#7590DB>| app-db — per-tab history (vinary.app.nav) |
+  |<#2D9574>| Renderer — re-frame events |
+endlegend
+@enduml

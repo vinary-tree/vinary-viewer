@@ -28,6 +28,11 @@
    "C-l" :focus/uri
    "C-t" :tab/new-blank
    "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
+   ;; Alt+arrow navigation, keymap-independent: ←/→ history, ↑ parent dir, ↓ open highlighted target.
+   "M-left"  :history/back
+   "M-right" :history/forward
+   "M-up"    :nav/parent
+   "M-down"  :nav/open-target
    "C-g" :input/escape
    "escape" :input/escape
    ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift

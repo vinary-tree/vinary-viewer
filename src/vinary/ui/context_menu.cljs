@@ -34,7 +34,9 @@
            :sep
            {:label "Copy file path"       :event [:clipboard/copy path]}
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
-    :dir  [{:label "Open in file manager" :event [:shell/open-path path]}
+    :dir  [{:label "Open"                 :event [:doc/open path]}
+           {:label "Open in new tab"      :event [:doc/open-new path]}
+           {:label "Open in file manager" :event [:shell/open-path path]}
            :sep
            {:label "Copy directory path"  :event [:clipboard/copy path]}
            {:label "Copy directory name"  :event [:clipboard/copy (basename path)]}]
