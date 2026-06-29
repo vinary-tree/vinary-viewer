@@ -64,6 +64,63 @@ function createLocalSvgScrollFixture() {
   return { docPath, text };
 }
 
+// standard PNG CRC-32 (poly 0xEDB88320), for building valid chunks below
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) {
+    c ^= buf[i];
+    for (let k = 0; k < 8; k++) c = ((c >>> 1) ^ (0xEDB88320 & -(c & 1))) >>> 0;
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// a VALID (transparent RGBA) PNG of the given pixel dimensions — large enough for the renderer to load it AND
+// for figures.cljs's IHDR header-parse to read its intrinsic width/height (used by the raster scroll test).
+function makePng(width, height) {
+  const zlib = require('zlib');
+  const sig = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;   // bit depth
+  ihdr[9] = 6;   // color type: RGBA
+  const raw = Buffer.alloc(height * (1 + width * 4)); // per-scanline filter byte (0) + transparent RGBA pixels
+  const idat = zlib.deflateSync(raw);
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0);
+    const typed = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(typed), 0);
+    return Buffer.concat([len, typed, crc]);
+  };
+  return Buffer.concat([sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', Buffer.alloc(0))]);
+}
+
+function createLocalRasterScrollFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-raster-scroll-'));
+  const imagesDir = path.join(dir, 'images');
+  tempDirs.push(dir);
+  fs.mkdirSync(imagesDir);
+
+  const images = [
+    { file: 'wide.png', width: 800, height: 200 },   // 4.00
+    { file: 'tall.png', width: 200, height: 600 },   // 0.33
+    { file: 'box.png',  width: 400, height: 400 }    // 1.00
+  ];
+  for (const im of images) {
+    fs.writeFileSync(path.join(imagesDir, im.file), makePng(im.width, im.height));
+  }
+  const filler = Array.from({ length: 16 }, (_value, index) =>
+    `Paragraph ${index + 1}. This gives the raster image scroll test enough height.`
+  ).join('\n\n');
+  const text = `# Local Raster Scroll\n\n${filler}\n\n` +
+    `![Wide](images/wide.png)\n\n## Middle\n\n${filler}\n\n` +
+    `![Tall](images/tall.png)\n\n## More\n\n${filler}\n\n` +
+    `![Box](images/box.png)\n\n## End\n\n${filler}`;
+  const docPath = path.join(dir, 'local-raster-scroll.md');
+  fs.writeFileSync(docPath, text);
+  return { docPath, text };
+}
+
 async function waitFor(predicate, label, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -415,6 +472,23 @@ async function main() {
   assert.ok(pdfNonWhite > 0, 'PDF canvas must contain rendered pixels (not a blank/white canvas)');
   console.log('[ok] PDF renders in-DOM: canvas + aligned text layer + real pixels (no native view)');
 
+  // Bug C (round 5): pdf.js 5.x sizes/positions every text span via calc(var(--total-scale-factor) * …).
+  // build-text-layer! must set --total-scale-factor (it formerly set only the renamed --scale-factor), else
+  // the span geometry is invalid-at-computed-value and Ctrl+F highlights mis-position. Assert the var is set
+  // AND a span's font-size resolves to a positive px (not the inherited body size that an undefined var gives).
+  const pdfScale = await evalIn(win, `(() => {
+    const layer = document.querySelector('.vv-pdf-text');
+    const span = document.querySelector('.vv-pdf-text span');
+    return {
+      totalScaleVar: layer ? layer.style.getPropertyValue('--total-scale-factor').trim() : '',
+      fontPx: span ? parseFloat(getComputedStyle(span).fontSize) : 0
+    };
+  })()`);
+  assert.ok(pdfScale.totalScaleVar && parseFloat(pdfScale.totalScaleVar) > 0,
+    'the PDF text layer must set --total-scale-factor (pdf.js 5.x reads it) so span geometry / find highlights resolve');
+  assert.ok(pdfScale.fontPx > 0, 'PDF text-layer spans must have a resolved (non-zero) font-size from the scale var');
+  console.log('[ok] PDF text layer sets --total-scale-factor → find highlights align (Bug C)');
+
   // B6 — now a PDF IS the active view → its Fit submenu + Invert PDF appear, and the Fit submenu works
   await dispatchWindowKey(win, 'v', { altKey: true });
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu open (pdf active)');
@@ -485,6 +559,69 @@ async function main() {
   await sendChord(win, '0', ['control']);   // reset zoom for the following tests
   await delay(120);
   console.log('[ok] PDF page stays rendered through a zoom rescale');
+
+  // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
+  // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
+  // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.
+  win.webContents.send('vv:keymap', '{:active "vim" :order [] :sets {}}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'vim'`), 'persisted Vim set becomes active at config-received');
+  assert.strictEqual(await evalIn(win, `window.__vvdb().ui.input.mode`), 'normal',
+    'Bug A: Vim is modal → input mode is :normal immediately (set synchronously in :db — no manual switch needed)');
+  console.log('[ok] persisted Vim keymap is live immediately — active set + :normal mode (Bug A)');
+
+  // inject a content link (PDF-intra-doc style: href="#", destination only in a click listener) + a sidebar
+  // tree file row (the leak candidate), with focus in the content pane.
+  await evalIn(win, `(() => {
+    const content = document.querySelector('.vv-content');
+    const a = document.createElement('a');
+    a.className = 'vv-pdf-link'; a.href = '#'; a.textContent = 'HINTLINK';
+    a.setAttribute('style', 'position:fixed;left:6px;top:6px;width:48px;height:16px;z-index:99999;background:#fff');
+    a.addEventListener('click', (e) => { e.preventDefault(); window.__vvHintClicked = true; });
+    content.appendChild(a);
+    let tree = document.querySelector('.vv-tree');
+    if (!tree) { tree = document.createElement('div'); tree.className = 'vv-tree'; tree.setAttribute('data-vv-test-tree','1'); document.body.appendChild(tree); }
+    const t = document.createElement('a'); t.className = 'vv-file'; t.setAttribute('data-path', '/leak/should-not-hint.txt');
+    t.textContent = 'leakrow'; t.setAttribute('style', 'position:fixed;left:6px;top:60px;width:48px;height:16px;z-index:99999');
+    tree.appendChild(t);
+    window.__vvHintClicked = false;
+    // the hidden find bar auto-focuses at boot (sets :in-input? true). Cycle a REAL input (the URI bar) through
+    // focus→blur so its on-blur dispatches :input/set-in-input false, then move focus into the content pane.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const uri = document.querySelector('.vv-uri-input'); if (uri) { uri.focus(); uri.blur(); }
+    const c = document.querySelector('.vv-content'); if (c) { c.setAttribute('tabindex', '-1'); c.focus(); }
+  })()`);
+  // a bare 'f' only resolves to :hint/start when NOT typing into an input; wait for :in-input? to clear first.
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.input['in-input?']`), ':in-input? cleared before f');
+
+  // Bug B1: 'f' (Vim) collects link hints scoped to the focused CONTENT pane — the sidebar tree must NOT leak in.
+  await dispatchWindowKey(win, 'f');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.hints && window.__vvdb().ui.hints['active?'])`), 'link hints activate on f');
+  const hintInfo = await evalIn(win, `(() => {
+    const ts = (window.__vvdb().ui.hints && window.__vvdb().ui.hints.targets) || [];
+    return { leak: ts.some(t => t.path === '/leak/should-not-hint.txt'),
+             label: (ts.find(t => (t.text || '').indexOf('HINTLINK') >= 0) || {}).label,
+             count: ts.length };
+  })()`);
+  assert.strictEqual(hintInfo.leak, false, 'Bug B1: the sidebar tree file row must NOT be hinted while the content pane is focused');
+  assert.ok(hintInfo.label, 'the injected content link must be hinted (collected from .vv-content)');
+  console.log('[ok] f-hints scoped to the content pane — sidebar tree not hinted (Bug B1)');
+
+  // Bug B2: typing the label fires the element's REAL click. A PDF intra-doc link carries its destination only
+  // in a click listener (href="#"), so deriving nav from href was a no-op; the follow now re-finds the element
+  // at its stamped position and .click()s it.
+  for (const ch of hintInfo.label) { await dispatchWindowKey(win, ch); await delay(20); }
+  await waitFor(() => evalIn(win, `window.__vvHintClicked === true`), 'typing the hint label fires the link real click');
+  console.log('[ok] activating an f-hint fires the link real click listener (Bug B2)');
+
+  // restore the default keymap + clean up the injected nodes so the following tests run unchanged
+  await evalIn(win, `(() => {
+    document.querySelectorAll('.vv-content .vv-pdf-link').forEach(e => { if (/HINTLINK/.test(e.textContent)) e.remove(); });
+    document.querySelectorAll('.vv-file').forEach(e => { if (e.getAttribute('data-path') === '/leak/should-not-hint.txt') e.remove(); });
+    const tn = document.querySelector('.vv-tree[data-vv-test-tree]'); if (tn) tn.remove();
+  })()`);
+  win.webContents.send('vv:keymap', null);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'default'`), 'default keymap restored after the hint tests');
+  await delay(60);
 
   const dialogsBefore = state.openDialogs;
   await sendChord(win, 'O', ['control', 'shift']);
@@ -822,6 +959,124 @@ async function main() {
   assert.deepStrictEqual(localSvgResult.dims, localSvgStart.dims, 'local SVG dimensions must stay stable while scrolling over images');
   console.log('[ok] local SVG markdown images scroll without layout churn');
 
+  // RASTER images "jumpy when scrolling" fix: PNG/JPG/etc. now reserve their layout box from intrinsic dims
+  // (width/height attributes, header-parsed) so they don't reflow (pop from ~0 → full height) as they decode
+  // while scrolling. Previously raster images were left dimensionless (clear-size!) → the jump.
+  const rasterFixture = createLocalRasterScrollFixture();
+  state.contentByPath.set(rasterFixture.docPath, {
+    path: rasterFixture.docPath,
+    kind: 'markdown',
+    text: rasterFixture.text,
+    stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [rasterFixture.docPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Local Raster Scroll'`),
+    'local raster scroll markdown document'
+  );
+  // the box must be reserved from intrinsic dims (width/height ATTRIBUTES), independent of byte decode
+  await waitFor(
+    () => evalIn(win, `Array.from(document.querySelectorAll('.markdown-body img'))
+      .every((img) => img.hasAttribute('width') && img.hasAttribute('height')
+                      && Number(img.getAttribute('width')) > 0 && Number(img.getAttribute('height')) > 0)`),
+    'raster images get intrinsic width/height attributes (layout box reserved)'
+  );
+  const rasterAttrs = await evalIn(win, `Array.from(document.querySelectorAll('.markdown-body img'))
+    .map((img) => img.getAttribute('width') + 'x' + img.getAttribute('height'))`);
+  assert.deepStrictEqual(rasterAttrs, ['800x200', '200x600', '400x400'],
+    'raster images must carry their intrinsic dimensions (header-parsed PNG IHDR) as width/height attributes');
+  await waitFor(
+    () => evalIn(win, `(() => {
+      const imgs = Array.from(document.querySelectorAll('.markdown-body img'));
+      return imgs.length === 3 && imgs.every((img) => img.complete && img.naturalWidth > 0);
+    })()`),
+    'local raster images load'
+  );
+  const rasterStart = await evalIn(win, `(() => {
+    const body = document.querySelector('.markdown-body');
+    const imgs = Array.from(body.querySelectorAll('img'));
+    window.__vvRasterImages = imgs;
+    window.__vvRasterMutations = 0;
+    window.__vvRasterObserver?.disconnect?.();
+    window.__vvRasterObserver = new MutationObserver((records) => {
+      window.__vvRasterMutations += records.filter((record) => record.type === 'childList').length;
+    });
+    window.__vvRasterObserver.observe(body, { childList: true });
+    return {
+      imageCount: imgs.length,
+      dims: imgs.map((img) => {
+        const rect = img.getBoundingClientRect();
+        return { width: Math.round(rect.width), height: Math.round(rect.height),
+                 ratio: Math.round((rect.width / rect.height) * 100) };
+      })
+    };
+  })()`);
+  assert.strictEqual(rasterStart.imageCount, 3, 'local raster fixture must render three images');
+  // reserved boxes must match the intrinsic aspect ratios (800/200=4.00, 200/600=0.33, 400/400=1.00),
+  // responsively (width clamped to the column, height from the ratio) — this is what stops the jump
+  assert.deepStrictEqual(rasterStart.dims.map((d) => d.ratio), [400, 33, 100],
+    'reserved raster boxes must match their intrinsic aspect ratios');
+  win.show();
+  await delay(100);
+  win.focus();
+  win.webContents.focus();
+  for (let i = 0; i < rasterStart.imageCount; i++) {
+    const wheelTarget = await evalIn(win, `(() => {
+      const content = document.querySelector('.vv-content');
+      const img = document.querySelectorAll('.markdown-body img')[${i}];
+      const maxTop = Math.max(0, content.scrollHeight - content.clientHeight);
+      const targetTop = Math.max(0, Math.min(maxTop - 1, img.offsetTop - (content.clientHeight / 2) + (img.offsetHeight / 2)));
+      content.scrollTop = targetTop;
+      const rect = img.getBoundingClientRect();
+      return {
+        before: content.scrollTop,
+        x: Math.round(rect.left + Math.max(1, Math.min(rect.width - 1, rect.width / 2))),
+        y: Math.round(rect.top + Math.max(1, Math.min(rect.height - 1, rect.height / 2)))
+      };
+    })()`);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: wheelTarget.x, y: wheelTarget.y });
+    win.webContents.sendInputEvent({
+      type: 'mouseWheel',
+      x: wheelTarget.x,
+      y: wheelTarget.y,
+      deltaY: -480,
+      wheelTicksY: -4,
+      hasPreciseScrollingDeltas: true,
+      canScroll: true
+    });
+    await waitFor(
+      () => evalIn(win, `document.querySelector('.vv-content').scrollTop > ${wheelTarget.before + 8}`),
+      `wheel scroll over local raster ${i + 1}`,
+      2000
+    );
+  }
+  const rasterResult = await evalIn(win, `(() => {
+    const body = document.querySelector('.markdown-body');
+    const imgs = Array.from(body.querySelectorAll('img'));
+    const dims = imgs.map((img) => {
+      const rect = img.getBoundingClientRect();
+      return { width: Math.round(rect.width), height: Math.round(rect.height),
+               ratio: Math.round((rect.width / rect.height) * 100) };
+    });
+    const result = {
+      childListMutations: window.__vvRasterMutations,
+      sameImages: Array.isArray(window.__vvRasterImages) &&
+        window.__vvRasterImages.length === imgs.length &&
+        imgs.every((img, index) => img === window.__vvRasterImages[index]),
+      dims,
+      docStillOpen: document.querySelector('.markdown-body h1')?.textContent.trim() === 'Local Raster Scroll'
+    };
+    window.__vvRasterObserver?.disconnect?.();
+    window.__vvRasterObserver = null;
+    window.__vvRasterImages = null;
+    return result;
+  })()`);
+  assert.strictEqual(rasterResult.childListMutations, 0, 'wheel scrolling raster images must not rebuild markdown body children');
+  assert.strictEqual(rasterResult.sameImages, true, 'wheel scrolling raster images must not recreate image nodes');
+  assert.strictEqual(rasterResult.docStillOpen, true, 'wheel scrolling raster images must keep the markdown document open');
+  assert.deepStrictEqual(rasterResult.dims, rasterStart.dims, 'raster image dimensions must stay stable while scrolling over them (no layout jump)');
+  console.log('[ok] local raster markdown images reserve a box + scroll without layout jump');
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();
@@ -966,12 +1221,16 @@ async function main() {
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`), 'page snapshot frozen under the menu');
   const frozen = await evalIn(win, `(() => {
     const img = document.querySelector('img.vv-web-snap');
-    return { src: (img && img.getAttribute('src')) || '', insideHost: Boolean(img && img.closest('.vv-web-host')) };
+    return { src: (img && img.getAttribute('src')) || '', insideHost: Boolean(img && img.closest('.vv-web-host')),
+             complete: Boolean(img && img.complete && img.naturalWidth > 0) };
   })()`);
   assert.ok(frozen.src.startsWith('data:image'), 'snapshot img must show the captured page raster');
   assert.strictEqual(frozen.insideHost, true, 'snapshot img must render inside the web host');
   assert.strictEqual(state.httpVisible, false, 'native view must hide while the frozen snapshot is shown');
-  console.log('[ok] opening a menu freezes a page snapshot (the page does not disappear)');
+  // Bug D (round 5): the native view is hidden only AFTER the snapshot <img> has decoded (img.decode() before
+  // hide!), so the frozen raster is on-screen the instant the view goes away — no one-frame blank "blink".
+  assert.strictEqual(frozen.complete, true, 'Bug D: the frozen snapshot img must be DECODED (complete) once the native view is hidden');
+  console.log('[ok] opening a menu freezes a DECODED page snapshot before hiding the view (Bug D: no blink)');
 
   // bug 2b — closing the menu drops the snapshot and restores the live view
   await dispatchWindowKey(win, 'Escape');
