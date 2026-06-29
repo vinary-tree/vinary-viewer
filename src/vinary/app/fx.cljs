@@ -18,18 +18,32 @@
 ;; Vimium link hints: collect visible links + assign labels (→ :hints/activate); follow a chosen target
 (rf/reg-fx :hints/collect
            (fn [_]
-             ;; the in-pane directory browser lives inside .vv-content; include the git tree when shown
+             ;; the in-pane directory browser lives inside .vv-content (always hinted). The sidebar git tree is a
+             ;; SIBLING of .vv-content, so hinting it leaked file-row labels over a PDF/preview; include it ONLY
+             ;; when it actually holds focus (same activeElement discrimination input/fx uses for :dom/focus).
              (let [content (.querySelector js/document ".vv-content")
-                   tree    (.querySelector js/document ".vv-tree")]
-               (rf/dispatch [:hints/activate (hints/with-labels (hints/collect [content tree]))]))))
+                   tree    (.querySelector js/document ".vv-tree")
+                   tree?   (and tree (.contains tree (.-activeElement js/document)))]
+               (rf/dispatch [:hints/activate
+                             (hints/with-labels (hints/collect (if tree? [content tree] [content])))]))))
 
 (rf/reg-fx :hints/follow
-           (fn [target]
-             (case (:kind target)
-               :anchor       (when-let [^js el (.getElementById js/document (:path target))]
-                               (.scrollIntoView el #js {:behavior "smooth" :block "start"}))
-               (:http :file :dir) (rf/dispatch [:doc/open (:path target)])
-               nil)))
+           (fn [{:keys [kind path x y]}]
+             ;; Targets are serialized (no DOM node), so for a real link we RE-FIND the live element at its
+             ;; stamped viewport position and fire its OWN click — a PDF intra-doc link carries its destination
+             ;; only in a click listener (href="#"), so deriving nav from href is a no-op; .click() runs the
+             ;; listener exactly like a user click (intra-doc → scroll-to-page, external → open). The hint overlay
+             ;; is pointer-events:none, so elementFromPoint passes through to the link.
+             (let [^js el (some-> (.elementFromPoint js/document (inc x) (inc y)) (.closest "a[href]"))]
+               (cond
+                 el                         (.click el)
+                 ;; file/dir rows ([data-path], no href): keep :doc/open — their on-click is platform single/
+                 ;; double-click gated, so a synthetic .click() would only open on single-click platforms.
+                 (#{:http :file :dir} kind) (rf/dispatch [:doc/open path])
+                 ;; fallback for a non-PDF in-page #anchor not found by elementFromPoint
+                 (= kind :anchor)           (when-let [^js a (.getElementById js/document path)]
+                                              (.scrollIntoView a #js {:behavior "smooth" :block "start"}))
+                 :else nil))))
 
 ;; DataScript writes go through this fx (keeps event handlers pure).
 (rf/reg-fx :ds/transact (fn [tx] (d/transact! ds/conn tx)))

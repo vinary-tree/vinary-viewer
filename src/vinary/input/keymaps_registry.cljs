@@ -46,6 +46,14 @@
 
 (defn default-mode [db id] (if (modal? db id) :normal :insert))
 
+(defn initial-mode-for
+  "The EXACT initial input mode for set `id` (:normal for a modal/vim set, :insert for non-modal) — PURE,
+   no install. Reads the same :initial-mode keymap/initial-mode does, but computed from app-db so the
+   :keymap/config-received and :keymap/select events can set [:ui :input :mode] SYNCHRONOUSLY (in :db)
+   instead of via a late dispatch that re-reads the live atom."
+  [db id]
+  (:initial-mode (keymap/merge-user (entry db id)) :insert))
+
 ;; ---- naming ----
 (defn- taken? [db nm]
   (or (builtin? nm) (contains? (sets db) nm) (some #(= nm (:name %)) builtins)))
@@ -166,8 +174,13 @@
 (defn ->edn [db] (pr-str (registry db)))
 
 ;; ---- side-effecting bridge to the live keymap atom ----
+(defn install-for!
+  "Install a SPECIFIC set `id` into the live keymap (the resolver reads it). Taking the id explicitly lets
+   the install effect avoid re-reading the active-id from a possibly-mid-transaction global db."
+  [db id]
+  (if (builtin? id) (keymap/install! (keyword id)) (keymap/install-user! (entry db id))))
+
 (defn install-active!
   "Install the active set into the live keymap (the resolver reads it)."
   [db]
-  (let [id (active-id db)]
-    (if (builtin? id) (keymap/install! (keyword id)) (keymap/install-user! (entry db id)))))
+  (install-for! db (active-id db)))

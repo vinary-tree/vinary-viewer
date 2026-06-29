@@ -94,6 +94,21 @@
       (is (= :focus/uri (get-in (keymap/modes) [:all "C-l"]))
           (str preset " C-l")))))
 
+(deftest keymap-init-applies-persisted-set
+  ;; Regression for the init bug (a persisted Vim set was not live until a manual Standard→Vim switch). The
+  ;; fix: :keymap/config-received sets [:ui :input :mode] in :db SYNCHRONOUSLY via initial-mode-for, and
+  ;; installs the live keymap by id via install-for! — these are the pure pieces that make it correct.
+  (testing "initial-mode-for returns each set's modal initial mode (so the mode is set in :db, no async lag)"
+    (is (= :normal (registry/initial-mode-for empty-keymaps "vim")))
+    (is (= :insert (registry/initial-mode-for empty-keymaps "default")))
+    (is (= :insert (registry/initial-mode-for empty-keymaps "emacs"))))
+  (testing "install-for! installs the named set live into the keymap atom (the resolver reads it)"
+    (registry/install-for! empty-keymaps "vim")
+    (is (= :normal (keymap/initial-mode)) "vim is modal → initial mode :normal")
+    (is (= :hint/start (get-in (keymap/modes) [:normal "f"])) "vim's normal-mode bindings are live after install-for!")
+    (registry/install-for! empty-keymaps "default")
+    (is (= :insert (keymap/initial-mode)) "default is non-modal → initial mode :insert")))
+
 (deftest resolver-step
   (let [modes {:normal {"j" :nav/scroll-down "g" {"g" :nav/scroll-top}} :all {"escape" :input/escape}}]
     (testing "leaf → dispatch"

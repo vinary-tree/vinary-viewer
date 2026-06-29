@@ -89,20 +89,25 @@ async function main() {
   assert.strictEqual(popup.frameWindows, true, 'the frame polyfill must define chrome.windows in extension pages');
   console.log('[ok] frame polyfill defines chrome.windows in extension pages');
 
-  // (3c) the SERVICE-WORKER preload's chrome.* polyfill (ADR-0015) reaches the BACKGROUND worker too: the SW
-  // reads chrome.windows.onFocusChanged at startup (the exact call LastPass crashes on) — now polyfilled. SW
-  // preloads require the sandbox, so this is skipped under --no-sandbox (the frame path still proves load).
+  // (3c) the SERVICE-WORKER preload's chrome.* polyfill (ADR-0015) reaching a TRIVIAL probe SW: its FIRST
+  // statement reads chrome.windows.onFocusChanged un-guarded (the call LastPass crashes on). For this small
+  // SW the executeInMainWorld realm COINCIDES with the SW script realm, so the polyfill lands and the worker
+  // survives + stores its sentinel. IMPORTANT HONEST CAVEAT (ADR-0015 §"Service-worker limitation"): a GREEN
+  // here does NOT prove a real/heavy extension SW works — for those, executeInMainWorld runs in a SEPARATE
+  // realm from the SW script (empirically, Electron 42), so e.g. LastPass's background SW still crashes. This
+  // asserts only the trivial-SW + frame path. SW preloads REQUIRE the sandbox, so under --no-sandbox this is
+  // NOT validated (explicitly skipped, not silently passed — run `npm run test:extensions:sandbox`).
   const noSandbox = process.argv.includes('--no-sandbox') || app.commandLine.hasSwitch('no-sandbox');
   await waitFor(async () => (await wc.executeJavaScript('Boolean(window.__vvPopup && window.__vvPopup.bg)', true)) === true,
     'background SW stored its chrome.* probe', 8000).catch(() => {});
   const bg = await wc.executeJavaScript('(window.__vvPopup && window.__vvPopup.bg) || null', true);
   if (noSandbox) {
-    console.log('[skip] SW chrome.windows polyfill — service-worker preloads require the sandbox (run without --no-sandbox)');
+    console.log('[skip] SW chrome.windows polyfill NOT validated under --no-sandbox (SW preloads need the sandbox) — run `npm run test:extensions:sandbox`');
   } else {
-    assert.ok(bg && bg.ran, 'the background service worker must run + store its probe');
-    assert.strictEqual(bg.windows, true, 'the SW preload must define chrome.windows in the background worker');
-    assert.strictEqual(bg.windowsOk, true, 'the SW must reach chrome.windows.onFocusChanged.addListener (LastPass startup)');
-    console.log('[ok] SW chrome.windows polyfill: background worker reaches onFocusChanged (LastPass fix)');
+    assert.ok(bg && bg.ran, 'the (trivial) probe SW must SURVIVE its un-guarded chrome.windows.onFocusChanged read + store its sentinel');
+    assert.strictEqual(bg.windows, true, 'the SW preload must define chrome.windows in the trivial probe worker');
+    assert.strictEqual(bg.windowsOk, true, 'the trivial probe SW must reach chrome.windows.onFocusChanged.addListener');
+    console.log('[ok] SW chrome.windows polyfill reaches a TRIVIAL probe SW (does NOT generalize to heavy real-extension SWs — ADR-0015 §SW-limitation)');
   }
 
   // (4) ad-blocker blocks a known ad host (network-gated: building the engine fetches filter lists)

@@ -334,13 +334,21 @@
         show!    (fn [url] (when-let [^js v (vv)] (when (and (.-httpShow v) @node) (.httpShow v url (pdf-rect @node) @owner-id))))
         hide!    (fn [] (when-let [^js v (vv)] (when (.-httpHide v) (.httpHide v))))
         bounds!  (fn [] (when-let [^js v (vv)] (when (and (.-httpBounds v) @node) (.httpBounds v (pdf-rect @node)))))
-        ;; defer the native-view hide until the snapshot <img> has painted (double rAF) — otherwise the
-        ;; view hides a frame before the DOM shows the frozen raster, a one-frame blank "blink". The native
-        ;; view paints above the img, so the img is invisible until the hide reveals it → seamless. Guarded
-        ;; by @overlay? so a rapid open→close can't hide a view the close path just re-showed.
-        hide-after-paint! (fn [] (js/requestAnimationFrame
-                                  (fn [] (js/requestAnimationFrame
-                                          (fn [] (when @overlay? (hide!)))))))
+        ;; Hold the native view up until the snapshot <img> is actually DECODED, then hide it — otherwise the
+        ;; view hides a frame before the DOM raster is ready to paint (the <img> decode is async), the exact
+        ;; one-frame blank "blink" reported. One rAF lets reagent render the <img>; img.decode() resolves when
+        ;; it can paint (instant when pre-decoded below); a final rAF lands the paint; then hide. The native
+        ;; view paints above the img, so the img is invisible until the hide reveals it → seamless. Guarded by
+        ;; @overlay? so a rapid open→close can't hide a view the close path just re-showed.
+        hide-after-paint! (fn []
+                            (js/requestAnimationFrame
+                             (fn []
+                               (let [^js img (some-> @node (.querySelector "img.vv-web-snap"))]
+                                 (if (and img (.-decode img))
+                                   (-> (.decode img)
+                                       (.then  (fn [] (js/requestAnimationFrame (fn [] (when @overlay? (hide!))))))
+                                       (.catch (fn [] (when @overlay? (hide!)))))
+                                   (when @overlay? (hide!)))))))
         freeze!  (fn []
                    ;; instant path: a pushed snapshot is already cached → paint it, then hide the view.
                    (if-let [data @pre-snap]
@@ -367,7 +375,14 @@
       (fn [this]
         (when-let [^js v (vv)]
           (when (.-onHttpSnapshotReady v)
-            (reset! unsub (.onHttpSnapshotReady v (fn [data] (reset! pre-snap data))))))
+            (reset! unsub (.onHttpSnapshotReady
+                           v (fn [data]
+                               (reset! pre-snap data)
+                               ;; pre-decode the pushed raster off-DOM so the frozen <img> (same data-URL)
+                               ;; paints from the image cache instantly → decode-before-hide resolves at once.
+                               (let [^js im (js/Image.)]
+                                 (set! (.-src im) data)
+                                 (some-> (.decode im) (.catch (fn [_] nil)))))))))
         (sync! this)
         (when (exists? js/ResizeObserver)
           (let [o (js/ResizeObserver. (fn [_] (bounds!)))] (.observe o @node) (reset! obs o)))

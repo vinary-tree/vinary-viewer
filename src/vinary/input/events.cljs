@@ -56,16 +56,23 @@
                (map? payload)                                   payload
                (and (string? payload) (not (str/blank? payload)))
                (try (reader/read-string payload) (catch :default _ nil))
-               :else                                            nil)]
-     {:db (assoc-in db [:ui :keymaps] (registry/normalize-config cfg))
-      :fx [[:keymap/install-active]]})))
+               :else                                            nil)
+         db' (assoc-in db [:ui :keymaps] (registry/normalize-config cfg))
+         id  (registry/active-id db')]
+     ;; set the input mode in the SAME :db (re-frame applies :db before :fx) so the persisted set is fully
+     ;; live at boot — keymap AND mode — with no one-tick :insert window; pass the id so the install effect
+     ;; needn't re-read the active-id. This is the init bug: a modal (vim) set needs its :normal mode set now.
+     {:db (assoc-in db' [:ui :input :mode] (registry/initial-mode-for db' id))
+      :fx [[:keymap/install-active id]]})))
 
 ;; switch the active keymap set (Settings ▸ Key Bindings radio) → install it live + persist the registry
 (rf/reg-event-fx
  :keymap/select
  (fn [{:keys [db]} [_ id]]
    (let [db' (registry/select db id)]
-     {:db db' :fx [[:keymap/install-active] [:vv/save-keymap (registry/->edn db')]]})))
+     ;; mirror config-received: set the new set's initial mode synchronously + install by id
+     {:db (assoc-in db' [:ui :input :mode] (registry/initial-mode-for db' id))
+      :fx [[:keymap/install-active id] [:vv/save-keymap (registry/->edn db')]]})))
 
 ;; ---- command palette / fuzzy finder ----
 (rf/reg-event-db
@@ -90,7 +97,7 @@
 ;; ================= key-binding editor (vinary.ui.keybindings-editor) =================
 ;; every edit goes through :kbedit/do (a vinary.input.kbedit-history command) so it is undoable; after
 ;; each commit the active set is re-installed live + the registry is persisted (debounced).
-(defn- kb-commit-fx [db'] [[:keymap/install-active] [:keymap/persist (registry/->edn db')]])
+(defn- kb-commit-fx [db'] [[:keymap/install-active (registry/active-id db')] [:keymap/persist (registry/->edn db')]])
 
 (defn- kb-push [db cmd]
   (let [db' (hist/apply-cmd db cmd)]

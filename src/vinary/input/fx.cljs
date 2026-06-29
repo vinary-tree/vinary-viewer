@@ -3,15 +3,16 @@
    focus between the sidebar filter and the content pane. Pure-ish (touch the DOM only here)."
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
-            [vinary.input.keymap :as keymap]
             [vinary.input.keymaps-registry :as registry]))
 
-;; install the active keymap set (from the registry in app-db) into the live keymap atom + set the mode
+;; install the keymap set with the given id into the live keymap atom. The MODE is now set synchronously in
+;; the dispatching event's :db (events.cljs), so this no longer dispatches :input/set-mode — removing the
+;; one-tick window where the atom was the new set but the mode was still :insert. @rfdb/app-db is read only
+;; for a CUSTOM set's entry (the :sets map), already committed by re-frame's :db-before-:fx ordering.
 (rf/reg-fx
  :keymap/install-active
- (fn [_]
-   (registry/install-active! @rfdb/app-db)
-   (rf/dispatch [:input/set-mode (keymap/initial-mode)])))
+ (fn [id]
+   (registry/install-for! @rfdb/app-db id)))
 
 ;; persist the keymap registry EDN to disk, debounced (editor edits stream fast; coalesce the writes)
 (defonce ^:private save-timer (atom nil))

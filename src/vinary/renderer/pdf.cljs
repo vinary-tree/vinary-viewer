@@ -209,7 +209,13 @@
       (set! (.-className tdiv) "vv-pdf-text")
       (set! (.. tdiv -style -width) (str (.-width vp) "px"))
       (set! (.. tdiv -style -height) (str (.-height vp) "px"))
-      (.setProperty (.-style tdiv) "--scale-factor" (str (:scale @state)))
+      ;; pdf.js 5.x sizes/positions every text span with calc(var(--total-scale-factor) * …); if that custom
+      ;; property is undefined the declarations are invalid-at-computed-value (font-size→inherited, marked-content
+      ;; left/top→auto), so the transparent spans land at the wrong boxes and ::highlight(vv-find) paints over
+      ;; them in the wrong place. Set the name pdf.js 5.x actually reads; keep the old --scale-factor for back-compat.
+      (doto (.-style tdiv)
+        (.setProperty "--total-scale-factor" (str (:scale @state)))
+        (.setProperty "--scale-factor"       (str (:scale @state))))
       (.appendChild div tdiv)
       (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
                                          #js [#js {:textContentSource (.streamTextContent pg)
