@@ -109,16 +109,18 @@
   ;; switches (disable-partial-raster, ui-disable-partial-swap). NOTE: those two do NOT fix the NVIDIA +
   ;; Wayland scroll-band; the actual band fix is disable-hardware-acceleration? below (remove the GPU process).
   (doseq [sw startup/chromium-switches] (.appendSwitch (.-commandLine app) sw))
-  ;; Remove the GPU process where its Wayland presentation path renders the duplicated scroll-band
-  ;; (confirmed on NVIDIA + Wayland: removing the GPU process eliminates it; it persists with the GPU
-  ;; process even with Vulkan/partial-swap off). Software compositing is already in force, so the GPU
-  ;; process adds no benefit here. Default ON for Wayland sessions; VV_GPU=1 forces it back on,
-  ;; VV_SOFTWARE_GL=1 forces it off anywhere. See vinary.main.startup/disable-hardware-acceleration?.
-  (when (startup/disable-hardware-acceleration?
-          {:VV_GPU           (.. js/process -env -VV_GPU)
-           :VV_SOFTWARE_GL   (.. js/process -env -VV_SOFTWARE_GL)
+  ;; NVIDIA + Wayland scroll-band fix that KEEPS the GPU process (best performance): GPU-rasterized tiles
+  ;; go through the broken Vulkan-on-Wayland presentation that paints a duplicated scroll-band; disabling
+  ;; GPU rasterization (already software-blocklisted here, so no loss) makes tiles software-rasterized and
+  ;; presented via a path that avoids it, while keeping the GPU for compositing/presentation/WebGL/video.
+  ;; Verified by screen-captured A/B (this flag alone flips banded<->clean). VV_GPU_RASTER=1 opts out.
+  (when (startup/disable-gpu-rasterization?
+          {:VV_GPU_RASTER    (.. js/process -env -VV_GPU_RASTER)
            :XDG_SESSION_TYPE (.. js/process -env -XDG_SESSION_TYPE)
            :WAYLAND_DISPLAY  (.. js/process -env -WAYLAND_DISPLAY)})
+    (.appendSwitch (.-commandLine app) "disable-gpu-rasterization"))
+  ;; VV_SOFTWARE_GL=1 forces FULL software rendering (no GPU process) anywhere — last-resort escape hatch.
+  (when (startup/disable-hardware-acceleration? {:VV_SOFTWARE_GL (.. js/process -env -VV_SOFTWARE_GL)})
     (.disableHardwareAcceleration app))
   (service/init!)
   ;; remove Electron's default application menu — vinary-viewer draws its own themed menu bar, and its

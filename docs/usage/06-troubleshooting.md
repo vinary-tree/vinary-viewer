@@ -115,32 +115,34 @@ replaced by the top's). **Multiple** such bands can appear, they shift as you ke
 appearing to flicker — disappear and reappear.
 
 This is the **GPU process's Wayland window-surface presentation path** mis-presenting a stale region of
-the window — **not** a problem with the document. Diagnosed by screen-captured A/B testing: with the GPU
-process active the band appears regardless of presentation backend (default, `--use-angle=gl`,
-`--use-angle=vulkan` all band); **removing the GPU process eliminates it.** The SVG figures are only an
-**amplifier** (Chromium evicts and re-decodes their bitmaps as they scroll off/on screen — the flicker —
-producing large repaint regions); they do not create the copy.
+the window — **not** a problem with the document. Screen-captured A/B testing isolated a single lever:
+with the GPU process active, **GPU-rasterized tiles** go through the broken Vulkan-on-Wayland presentation
+and paint the band, and adding/removing **`--disable-gpu-rasterization`** flips it clean↔banded with every
+other flag held constant (default, `--use-angle=gl`/`gl-egl`/`vulkan`, SkiaRenderer, vsync, sRGB all band
+*without* it; all clean *with* it). The SVG figures are only an **amplifier** (Chromium evicts/re-decodes
+their bitmaps as they scroll — the flicker — producing large repaint regions); they do not create the copy.
 
-**The fix:** the app disables the GPU process on Wayland sessions — `app.disableHardwareAcceleration()`,
-gated by `vinary.main.startup/disable-hardware-acceleration?` in `vinary.main.core/main`. Low cost here
-because GPU **compositing** is already blocklisted to software on this NVIDIA + Wayland combo
-(`app.getGPUFeatureStatus().gpu_compositing = disabled_software`), so the GPU process was doing no
-compositing/raster — only the broken presentation. Overrides:
+**The fix:** the app appends **`--disable-gpu-rasterization`** on Wayland sessions, gated by
+`vinary.main.startup/disable-gpu-rasterization?` in `vinary.main.core/main`. This **keeps the GPU process
+on** (best performance — hardware presentation, WebGL, video) and only moves rasterization to software,
+which costs nothing here because GPU compositing/rasterization are already blocklisted to software on this
+NVIDIA + Wayland combo (`app.getGPUFeatureStatus().gpu_compositing = disabled_software`). Overrides:
 
 | Env | Effect |
 |-----|--------|
-| *(default on Wayland)* | GPU process disabled — no band |
-| `VV_GPU=1` | force the GPU process back **on** (band returns on this host); for systems where Wayland GPU works |
-| `VV_SOFTWARE_GL=1` | force the GPU process **off** anywhere (X11 too) |
+| *(default on Wayland)* | GPU rasterization off, GPU process **on** — no band |
+| `VV_GPU_RASTER=1` | force full GPU rasterization (band returns on this host); for systems where Wayland GPU rasterization works |
+| `VV_SOFTWARE_GL=1` | full software — remove the GPU process entirely (last resort, anywhere incl. X11) |
 
 > What does **not** fix it (verified — don't retry): `--disable-partial-raster`, `--ui-disable-partial-swap`,
-> `--disable-features=Vulkan`, and forcing the ANGLE/GL backend (`--use-angle=gl`) — the band persists with
-> any of them while the GPU process is active. The first two switches are still appended
-> (`vinary.main.startup/chromium-switches`) as harmless defensive measures, but they are not this fix.
+> `--disable-features=Vulkan`, `--disable-gpu-vsync`, `--force-color-profile=srgb`, and any ANGLE backend
+> (`--use-angle=gl`/`gl-egl`/`vulkan`) — the band persists with all of them unless `--disable-gpu-rasterization`
+> is also present. Forcing Vulkan (`--use-vulkan`) makes it worse (blank window). The partial-raster/swap
+> switches are still appended (`vinary.main.startup/chromium-switches`) as harmless defensive measures.
 
 To debug a recurrence: capture it with an **external** screenshot tool while scrolling (`spectacle`/`grim`
-— Electron's `capturePage` cannot see present-layer artifacts), and compare `VV_GPU=1` vs default to
-confirm the GPU process is the cause.
+— Electron's `capturePage` cannot see present-layer artifacts), and compare `VV_GPU_RASTER=1` vs default to
+confirm GPU rasterization is the cause.
 
 ---
 

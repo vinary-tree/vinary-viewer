@@ -64,17 +64,19 @@
     (is (contains? (set startup/chromium-switches) "disable-gpu-sandbox")
         "core/main must always append --disable-gpu-sandbox (Linux GPU driver access)")))
 
-(deftest disable-hw-accel
-  (testing "Wayland session removes the GPU process (the scroll-band fix); X11/other keep it"
-    (is (true?  (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "wayland"})))
-    (is (true?  (startup/disable-hardware-acceleration? {:WAYLAND_DISPLAY "wayland-0"})))
-    (is (false? (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "x11"})))
-    (is (false? (startup/disable-hardware-acceleration? {})))
-    (is (false? (startup/disable-hardware-acceleration? {:WAYLAND_DISPLAY ""}))))
-  (testing "VV_GPU forces the GPU process on (overrides Wayland); VV_SOFTWARE_GL forces it off anywhere"
-    (is (false? (startup/disable-hardware-acceleration? {:VV_GPU "1" :XDG_SESSION_TYPE "wayland"})))
-    (is (true?  (startup/disable-hardware-acceleration? {:VV_SOFTWARE_GL "1" :XDG_SESSION_TYPE "x11"})))
-    (is (false? (startup/disable-hardware-acceleration? {:VV_GPU "1" :VV_SOFTWARE_GL "1"})))))
+(deftest gpu-mode
+  (testing "Wayland disables GPU rasterization (the band fix; keeps the GPU process on)"
+    (is (true?  (startup/disable-gpu-rasterization? {:XDG_SESSION_TYPE "wayland"})))
+    (is (true?  (startup/disable-gpu-rasterization? {:WAYLAND_DISPLAY "wayland-0"})))
+    (is (false? (startup/disable-gpu-rasterization? {:XDG_SESSION_TYPE "x11"})))
+    (is (false? (startup/disable-gpu-rasterization? {})))
+    (is (false? (startup/disable-gpu-rasterization? {:WAYLAND_DISPLAY ""})))
+    (is (false? (startup/disable-gpu-rasterization? {:VV_GPU_RASTER "1" :XDG_SESSION_TYPE "wayland"}))
+        "VV_GPU_RASTER=1 opts out (force full GPU rasterization)"))
+  (testing "full-software (remove the GPU process) only when VV_SOFTWARE_GL is set"
+    (is (true?  (startup/disable-hardware-acceleration? {:VV_SOFTWARE_GL "1"})))
+    (is (false? (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "wayland"})))
+    (is (false? (startup/disable-hardware-acceleration? {})))))
 
 (deftest key-normalization
   (testing "modifier folding + named keys"

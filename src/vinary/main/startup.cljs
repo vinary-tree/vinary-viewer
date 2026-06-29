@@ -1,6 +1,6 @@
 (ns vinary.main.startup
   "Pure, electron-free startup configuration for the main process, so the node :test build can assert
-   the app's invariant Chromium command-line switches without loading electron.")
+   the app's invariant Chromium switches and the GPU-mode predicates without loading electron.")
 
 (def chromium-switches
   "Chromium command-line switches the app appends unconditionally at launch (applied by the doseq in
@@ -10,42 +10,51 @@
                                       DRI/GBM driver (\"MESA-LOADER: failed to open dri … Permission
                                       denied\"); loosen only the GPU sandbox (the renderer stays sandboxed).
 
-     - \"disable-partial-raster\"   — RASTERIZATION stage (cc::LayerTreeSettings::use_partial_raster): stop
-                                      reusing previously-rastered TILE CONTENT for sub-regions a layer
-                                      believes unchanged. Defensive only.
+     - \"disable-partial-raster\"   — RASTERIZATION stage (cc::LayerTreeSettings::use_partial_raster):
+                                      stop reusing previously-rastered TILE CONTENT. Defensive only.
 
      - \"ui-disable-partial-swap\"  — PRESENTATION stage (viz::RendererSettings::partial_swap_enabled):
-                                      present the FULL viewport every frame instead of only the per-frame
-                                      damage rect. Defensive only.
+                                      present the FULL viewport every frame. Defensive only.
 
    NOTE — neither partial-raster nor partial-swap fixes the NVIDIA + Wayland scroll-band (a copy of the
    window's top ~1/5 painted into the bottom ~1/5 while scrolling). Screen-captured A/B testing this
-   session showed the band PERSISTS with the GPU process active even with both switches set and with any
-   ANGLE/GL or Vulkan backend forced; it vanishes ONLY when the GPU process is removed. The actual fix is
-   `disable-hardware-acceleration?` below. These two switches are kept (low cost; may help other
-   software-compositor modes) but are NOT the band fix — don't let their names mislead the next reader."
+   session isolated the actual lever to `disable-gpu-rasterization?` below. These two switches are kept
+   (low cost; may help other software-compositor modes) but are NOT the band fix."
   ["disable-gpu-sandbox" "disable-partial-raster" "ui-disable-partial-swap"])
 
-(defn disable-hardware-acceleration?
-  "Whether to remove Chromium's GPU process at startup (app.disableHardwareAcceleration) — the ACTUAL fix
-   for the NVIDIA + Wayland scroll-band.
+(defn- wayland-session?
+  [{:keys [XDG_SESSION_TYPE WAYLAND_DISPLAY]}]
+  (boolean (or (= "wayland" XDG_SESSION_TYPE)
+               (and WAYLAND_DISPLAY (not= "" WAYLAND_DISPLAY)))))
 
-   The band (a copy of the window's top ~1/5 painted into the bottom ~1/5 while scrolling; multiple bands
-   accumulate; cursor motion worsens it) comes from the GPU process's Wayland window-surface PRESENTATION
-   path. Screen-captured + visually-verified A/B this session: with the GPU process ON the band is present
-   regardless of presentation backend (default, --use-angle=gl, --use-angle=vulkan all band); removing the
-   GPU process ELIMINATES it. Software compositing is already in force here (gpu_compositing =
-   disabled_software — Chromium blocklists GPU compositing for this NVIDIA + Wayland combo), so the GPU
-   process provides no compositing/raster benefit — only the broken presentation — making removal a
-   low-cost default on Wayland. Kept overridable.
+(defn disable-gpu-rasterization?
+  "Whether to append Chromium's --disable-gpu-rasterization at startup — the NVIDIA + Wayland scroll-band
+   fix that KEEPS the GPU process (the higher-performance fix).
 
-   `env` is a map of the relevant environment-variable values (strings or nil):
-     :VV_GPU           — set to force the GPU process back ON (opt out of this workaround) anywhere.
-     :VV_SOFTWARE_GL   — set to force the GPU process OFF (full software) anywhere.
+   The band (a copy of the window's top ~1/5 painted into the bottom ~1/5 while scrolling; multiple bands;
+   worsened by cursor motion) is produced when GPU-rasterized tiles go through the GPU process's broken
+   Vulkan-on-Wayland window-surface PRESENTATION. Screen-captured + visually-verified A/B this session
+   isolated the lever: with the GPU process on, adding/removing --disable-gpu-rasterization flips the band
+   CLEAN<->BANDED with every other flag held constant (default, --use-angle=gl/gl-egl/vulkan, SkiaRenderer,
+   vsync, srgb all band without it; all clean with it). Disabling GPU rasterization makes tiles
+   software-rasterized (already software-blocklisted on this host — gpu_compositing/rasterization =
+   disabled_software — so NO performance loss) while KEEPING the GPU process for compositing/presentation/
+   WebGL/video; this is faster than removing the GPU process entirely (disable-hardware-acceleration?).
+
+   Default ON for Wayland sessions; VV_GPU_RASTER=1 opts out (force full GPU rasterization; band returns).
+
+   `env` is a map of env-var values (strings or nil):
+     :VV_GPU_RASTER     — set to opt out (keep GPU rasterization on).
      :XDG_SESSION_TYPE / :WAYLAND_DISPLAY — detect a Wayland session (the affected presentation path)."
-  [{:keys [VV_GPU VV_SOFTWARE_GL XDG_SESSION_TYPE WAYLAND_DISPLAY]}]
-  (cond
-    VV_GPU         false
-    VV_SOFTWARE_GL true
-    :else          (boolean (or (= "wayland" XDG_SESSION_TYPE)
-                                (and WAYLAND_DISPLAY (not= "" WAYLAND_DISPLAY))))))
+  [{:keys [VV_GPU_RASTER] :as env}]
+  (and (not VV_GPU_RASTER) (wayland-session? env)))
+
+(defn disable-hardware-acceleration?
+  "Whether to remove Chromium's GPU process entirely (app.disableHardwareAcceleration) — the last-resort
+   FULL-software escape hatch, only when VV_SOFTWARE_GL is set. The default band fix keeps the GPU process
+   (see disable-gpu-rasterization?); this is for ruling the GPU out entirely or for hosts where even the
+   GPU-raster-off path misbehaves.
+
+   `env`: {:VV_SOFTWARE_GL <string|nil>}."
+  [{:keys [VV_SOFTWARE_GL]}]
+  (boolean VV_SOFTWARE_GL))
