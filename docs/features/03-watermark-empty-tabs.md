@@ -7,16 +7,14 @@
 ## 1 · What it is
 
 When no document is open — at launch with no file argument, or after you close the last tab —
-the content area is not blank. It shows a **faint, theme-tinted silhouette of the Vinary Tree
-shield**: a heraldic shield enclosing a tree-of-life and the wordmark *VINARY TREE*. The
-watermark is deliberately low-contrast (7% opacity) so it reads as a quiet brand mark, not a
-call to action, and it **re-tints automatically with the active theme** because it is drawn from
-a single `--vv-*` color token rather than baked-in colors.
+the content area is not blank. It shows a **faint, grayscale Vinary Tree logo**: the full crest
+(a heraldic shield enclosing a tree-of-life and the wordmark *VINARY TREE*), desaturated and
+faded to a quiet background mark. The watermark is deliberately low-contrast (8% opacity) so it
+reads as a quiet brand mark, not a call to action.
 
-The clever part is *how* it is colored: the SVG asset is monochrome (`currentColor`), and the CSS
-uses it only as a **mask** — a stencil — over a box filled with the theme's foreground color. The
-SVG is never recolored; the box is, and the SVG just clips it to the shield shape. Switch theme
-and the same emblem changes color with no asset change.
+Unlike the rest of the chrome, the watermark is **theme-independent**: it is the logo's own
+artwork run through a CSS `grayscale(1)` filter at low opacity, so it reads the same soft gray on
+every theme rather than being re-tinted per theme.
 
 ---
 
@@ -25,14 +23,14 @@ and the same emblem changes color with no asset change.
 There is nothing to configure. The watermark appears whenever there are no open tabs:
 
 1. Launch `vv` with no file argument, **or** close every open tab (each tab's `×`).
-2. The content area centers the Vinary Tree shield watermark.
-3. Switch theme from the toolbar ([feature 06](06-themes-and-live-switching.md)); the watermark
-   re-tints to match (darker on light themes, lighter on dark themes), always at 7% opacity.
+2. The content area centers the Vinary Tree logo watermark.
+3. It looks the same across themes ([feature 06](06-themes-and-live-switching.md)) — a faint
+   grayscale logo at 8% opacity.
 
-**Replacing the emblem.** The watermark asset is
-`resources/public/assets/shield.svg`. It is a faithful *placeholder* for the full Vinary Tree
-crest; drop a precise, monochrome (`currentColor`) SVG at that path to replace it — no code
-change is needed, since the CSS references the file by name.
+**Replacing the emblem.** The watermark asset is `resources/public/assets/vinary-tree-logo.svg`.
+Drop a replacement SVG at that path to change it — no code change is needed, since the markup
+references the file by name. (A separate monochrome `shield.svg` placeholder also ships but is no
+longer referenced — see the design note below.)
 
 ---
 
@@ -51,9 +49,7 @@ From `src/vinary/ui/views.cljs`:
      (cond
        (empty? tabs)               [watermark]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
-       (= "image" (:doc/kind doc)) [:div.vv-image-view
-                                    [:img {:src (str "file://" (:doc/path doc)) :alt (:doc/path doc)}]]
-       (:doc/html doc)             [markdown-body (:doc/html doc)]
+       ;; … image / markdown / pdf / source / web branches …
        :else                       [:div.vv-empty "Rendering…"])]))
 ```
 
@@ -65,97 +61,69 @@ The watermark component itself is trivial:
 
 ```clojure
 (defn watermark []
-  [:div.vv-watermark [:div.vv-shield]])
+  [:div.vv-watermark
+   [:img.vv-watermark-logo {:src "assets/vinary-tree-logo.svg" :alt ""}]])
 ```
 
-It is two nested divs: an outer flexbox that centers, and an inner box that *is* the emblem via
-CSS mask.
+It is a centering flexbox wrapping a single `<img>` of the logo asset.
 
-### The CSS mask turns one color into a themed emblem
+### The CSS fades the logo into a watermark
 
 From `resources/public/css/app.css`:
 
 ```css
-/* watermark on empty tabs — a themed silhouette of the Vinary Tree emblem via CSS mask */
 .vv-watermark { display: flex; align-items: center; justify-content: center; height: 100%; }
-.vv-shield { width: 300px; height: 360px; background-color: var(--vv-fg); opacity: 0.07;
-  -webkit-mask: url(../assets/shield.svg) center / contain no-repeat;
-  mask: url(../assets/shield.svg) center / contain no-repeat; }
+.vv-watermark-logo { width: 40%; max-width: 360px; height: auto; opacity: 0.08;
+  filter: grayscale(1); user-select: none; pointer-events: none; }
 ```
 
 What each declaration does:
 
-- **`background-color: var(--vv-fg)`** — fills the 300 × 360 px box with the **theme foreground
-  color**. `--vv-fg` is defined per theme (e.g. `#b2b2b2` in spacemacs-dark, `#655370` in
-  spacemacs-light). This is the color you actually see.
-- **`mask: url(../assets/shield.svg) center / contain no-repeat`** — a
-  [CSS mask](https://developer.mozilla.org/en-US/docs/Web/CSS/mask). A mask uses the referenced
-  image's *alpha channel* as a stencil: the box's background shows **only where the SVG is
-  opaque**. So the shield's strokes/fills clip the colored box into the emblem shape.
-  `center` positions the mask, `contain` scales it to fit without distortion, `no-repeat`
-  prevents tiling. The `-webkit-mask` twin is the vendor-prefixed form for Chromium.
-- **`opacity: 0.07`** — fades the whole thing to 7%, making it a faint background mark.
+- **`.vv-watermark { display: flex; … height: 100% }`** — fills the empty content pane and centers
+  its child on both axes.
+- **`width: 40%; max-width: 360px; height: auto`** — sizes the logo to 40% of the pane width, capped
+  at 360 px, preserving its aspect ratio (responsive, unlike a fixed-size emblem).
+- **`filter: grayscale(1)`** — fully desaturates the logo's own colors to gray, so the watermark does
+  not clash with any theme's palette.
+- **`opacity: 0.08`** — fades the whole thing to 8%, making it a faint background mark.
+- **`user-select: none; pointer-events: none`** — the watermark is decorative: it cannot be selected
+  or intercept clicks.
 
-Because the *color* comes from `--vv-fg` and the *shape* comes from the masked SVG, the SVG file
-never needs per-theme variants: it is a pure stencil. Theme switching ([feature 06](06-themes-and-live-switching.md))
-swaps the `<link>` to a stylesheet that redefines `--vv-fg`, and the watermark re-tints instantly.
-
-### The SVG asset is a `currentColor` stencil
-
-`resources/public/assets/shield.svg` (abbreviated):
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 290" fill="none"
-     stroke="currentColor" color="currentColor" aria-label="Vinary Tree">
-  <!-- shield --><path d="M40,32 Q40,21 51,21 L189,21 …Z" stroke-width="3" />
-  <!-- sun --><circle cx="120" cy="138" r="24" stroke-width="1.5" opacity="0.5" />
-  <!-- tree-of-life: trunk + 7 fanning branches ending in leaf-pods --> …
-  <!-- wordmark -->
-  <text x="120" y="232" text-anchor="middle" fill="currentColor" stroke="none"
-        font-size="15" font-weight="700" letter-spacing="1.5">VINARY TREE</text>
-</svg>
-```
-
-- **`stroke="currentColor"` / `fill="currentColor"`** — the SVG draws in a single color. When the
-  SVG is used as a CSS *mask*, only its alpha (opaque vs. transparent) matters; the actual color
-  is irrelevant because the visible color is supplied by the masked box's `background-color`. The
-  `currentColor` choice also means the same asset can be used as an inline `<img>`/icon elsewhere
-  and inherit text color, but in the watermark it functions purely as a stencil.
-- **`viewBox 0 0 240 290`** — the intrinsic aspect ratio that `mask-size: contain` preserves
-  inside the 300 × 360 box.
-
-The emblem is a placeholder for the full crest, as noted in the SVG's own comment.
+Because the logo is desaturated and faded entirely in CSS, the same asset renders identically in
+every theme — no per-theme variant and no theme token are involved.
 
 ---
 
 ## 4 · Design notes / trade-offs
 
-- **Why a CSS mask instead of an inline SVG with `fill: var(--vv-fg)`?** Both can theme an SVG.
-  The mask approach keeps the asset a *replaceable file* (drop in a new `shield.svg`, done) and
-  keeps all theming concerns in CSS, so the component (`[:div.vv-shield]`) carries no color logic
-  at all. An inline-SVG approach would either inline the markup into the view (coupling art to
-  code) or require per-theme `fill` plumbing.
-- **Why 7% opacity?** It is a brand watermark, not UI. Low contrast keeps it from competing with
-  any content that might overlay it and reads as "empty, but ours".
-- **Trade-off — fixed 300 × 360 size.** The emblem is a fixed size rather than viewport-relative.
-  This is simple and looks correct at typical window sizes; a responsive size is a possible future
-  refinement.
+- **Why a full-color logo + `grayscale(1)` instead of a tinted mask?** The shipped watermark uses the
+  real Vinary Tree crest (`vinary-tree-logo.svg`) drawn as an `<img>` and desaturated by CSS. An
+  earlier design (ADR-0007) instead used a **monochrome `shield.svg` as a CSS mask** over a box filled
+  with the theme foreground `--vv-fg`, so the silhouette re-tinted per theme. That approach was
+  **superseded** by the full-color logo: a grayscale filter keeps the crest's artwork (not just a
+  silhouette) while staying theme-neutral, and needs no `currentColor` stencil. The `shield.svg`
+  placeholder still ships but is **orphaned** (referenced by nothing).
+- **Why 8% opacity?** It is a brand watermark, not UI. Low contrast keeps it from competing with any
+  content that might overlay it and reads as "empty, but ours".
+- **Theme-independent by design.** Because the watermark is grayscale, it neither needs nor reads a
+  `--vv-*` token; it looks the same on dark and light themes.
 
-Recorded in [ADR-0007 CSS-mask themed watermark](../design-decisions/0007-css-mask-themed-watermark.md).
-Theming mechanics are in [feature 06](06-themes-and-live-switching.md) and
+Background on the superseded mask approach is recorded in
+[ADR-0007 CSS-mask themed watermark](../design-decisions/0007-css-mask-themed-watermark.md) (see its
+*Update* note). Theming mechanics for the rest of the UI are in
+[feature 06](06-themes-and-live-switching.md) and
 [reference/css-variables.md](../reference/css-variables.md).
 
 ---
 
 ## 5 · Diagram
 
-The emblem pipeline — *monochrome SVG → CSS mask → box filled with `var(--vv-fg)` at 7% → rendered
-silhouette* — is illustrated by the object/component diagram owned by this pillar:
+The emblem pipeline — *full-color logo SVG → `<img>` → `filter: grayscale(1)` + `opacity: 0.08` →
+faint grayscale logo* — is illustrated by the object/component diagram owned by this pillar:
 [`../diagrams/object-watermark.puml`](../diagrams/object-watermark.puml).
 
-![Watermark mask object pipeline](../diagrams/object-watermark.svg)
+![Watermark logo render pipeline](../diagrams/object-watermark.svg)
 
-In the diagram, **tan** marks the filesystem SVG asset, **teal** the renderer CSS (paint-only, no
-IPC), **purple** the theme palette token `--vv-fg`, and the final green box the rendered emblem —
-the same color contract used across all vinary-viewer diagrams
-([`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml)).
+In the diagram, **tan** marks the filesystem SVG asset, **teal** the renderer markup + CSS
+(paint-only, no IPC), and the final green box the rendered emblem — the same color contract used
+across all vinary-viewer diagrams ([`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml)).

@@ -6,6 +6,7 @@
             ["path" :as path]
             [clojure.string :as str]
             [vinary.main.service :as service]
+            [vinary.main.startup :as startup]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
             [vinary.main.recent :as recent]
@@ -103,10 +104,13 @@
 (defn ^:export main []
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
-  ;; Linux GPU resilience: many systems sandbox the GPU process so it cannot open the system DRI/GBM
-  ;; driver ("MESA-LOADER: failed to open dri … Permission denied"). Loosen only the GPU sandbox (the
-  ;; renderer stays sandboxed). VV_SOFTWARE_GL=1 forces software rendering where even that fails.
-  (.appendSwitch (.-commandLine app) "disable-gpu-sandbox")
+  ;; Chromium switches the app always needs — see vinary.main.startup/chromium-switches for the full
+  ;; rationale of each: disable-gpu-sandbox (Linux GPU-process DRI/GBM driver access; renderer stays
+  ;; sandboxed), disable-partial-raster (RASTER stage: tile-content reuse), and ui-disable-partial-swap
+  ;; (PRESENT stage: forces full-viewport present so the software display compositor can't leave a stale
+  ;; top→bottom scroll-band on NVIDIA + Wayland). RASTER ≠ SWAP — distinct stages, distinct switches.
+  (doseq [sw startup/chromium-switches] (.appendSwitch (.-commandLine app) sw))
+  ;; VV_SOFTWARE_GL=1 additionally forces FULL software rendering (no GPU process) where even that fails.
   (when (.. js/process -env -VV_SOFTWARE_GL) (.disableHardwareAcceleration app))
   (service/init!)
   ;; remove Electron's default application menu — vinary-viewer draws its own themed menu bar, and its

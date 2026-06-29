@@ -1,8 +1,24 @@
 # 0007 — A CSS-mask + `currentColor` themed watermark (one asset, all themes)
 
-- **Status:** Accepted
+- **Status:** Superseded in implementation — see the **Update (2026-06-29)** below (kept as the historical record)
 - **Date:** 2026-06-24
 - **Deciders:** vinary-viewer maintainers
+
+## Update (2026-06-29)
+
+**This decision was not shipped as described.** The v0.2 watermark (`vinary.ui.views/watermark`) has,
+since the first v0.2 commit, rendered the **full-color Vinary Tree logo** (`vinary-tree-logo.svg`) as a
+plain `<img class="vv-watermark-logo">`, desaturated and faded entirely in CSS:
+
+```css
+.vv-watermark-logo { width: 40%; max-width: 360px; height: auto; opacity: 0.08; filter: grayscale(1); }
+```
+
+There is **no `.vv-shield` element and no CSS `mask`** in the shipping code, and the monochrome
+`shield.svg` placeholder this ADR describes is **orphaned** (referenced by nothing). The grayscale-logo
+approach keeps the crest's artwork (not just a one-tint silhouette) and is theme-independent without a
+`currentColor` stencil. The mask design below is retained as the historical record; current behavior is
+documented in [feature 03 — Watermark on empty tabs](../features/03-watermark-empty-tabs.md).
 
 ## Context
 

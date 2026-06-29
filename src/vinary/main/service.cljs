@@ -13,6 +13,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [vinary.main.file-kind :as file-kind]
+            [vinary.main.service-util :as service-util]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.grammars :as grammars]))
 
@@ -92,35 +93,40 @@
 (defn- send-content! [^js wc path]
   (let [kind  (kind-of path)
         stamp (js/Date.now)]
-    (cond
+    (case (service-util/route {:directory? (directory? path)
+                               :archive?   (archive-uri? path)
+                               :kind       kind})
+      ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
+      ;; Routed FIRST (in service-util/route) so a real directory lists even when its extensionless name
+      ;; classifies as "text" — otherwise the parser fs.readSyncs a directory fd → EISDIR.
+      :directory
+      (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
+
       ;; archive URI or parser-owned local kind — main streams/parses and returns a bounded preview payload.
       ;; Plain text routes through the parser so extensionless logs / delimited files can be sniffed
       ;; before falling back to escaped text.
-      (or (archive-uri? path) (#{"office" "table" "log" "archive" "text"} kind))
+      :parsed
       (send-parsed-content! wc path)
 
-      ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
-      (directory? path)
-      (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
-
       ;; image — render by file:// path (binary, not read as text)
-      (= "image" kind)
+      :image
       (.send wc "vv:content" (clj->js {:path path :kind "image" :stamp stamp}))
 
       ;; html — render live in the web view (loaded by its file:// URL), not shown as escaped source.
       ;; Live-refresh re-sends with a new stamp → content-view remounts the web host → the page reloads.
-      (= "html" kind)
+      :html
       (.send wc "vv:content" (clj->js {:path path :kind "html" :stamp stamp}))
 
       ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
       ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)
-      (= "pdf" kind)
+      :pdf
       (try (let [bytes (.readFileSync fs path)]
              (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp})))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
-      :else
+      ;; everything else (source, markdown, diagram, …) — read as UTF-8 text and send with its kind.
+      :text
       (try (let [text (.readFileSync fs path "utf8")]
              (.send wc "vv:content" (clj->js {:path path :kind kind :text text :stamp stamp})))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)})))))))

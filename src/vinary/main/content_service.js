@@ -666,7 +666,14 @@ async function openUri(uri) {
 
 async function openLocal(filePath) {
   const stamp = Date.now();
-  const stat = statPayload(filePath);
+  const fileStat = fs.statSync(filePath);
+  // A directory must never reach the file parser: fs.readSync on a directory fd throws EISDIR
+  // (readPrefix, below). The renderer already routes directories to the in-pane listing
+  // (main/service.cljs send-content!); this guards the content-service path for any direct caller.
+  if (fileStat.isDirectory()) {
+    throw new Error(`Cannot preview a directory as a file: ${filePath}`);
+  }
+  const stat = { size: fileStat.size, mtime: fileStat.mtimeMs };
   const kind = classifyName(filePath);
   if (kind === 'archive') return archiveListingPayload(filePath, [], stamp);
   if (kind === 'office') return officeBufferPayload(filePath, filePath, readFileLimited(filePath, OFFICE_PREVIEW_BYTES), stamp, stat);

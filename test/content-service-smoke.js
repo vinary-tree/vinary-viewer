@@ -185,6 +185,20 @@ async function main() {
     const nestedListing = await content.openUri(content.archiveUri(bundlePath, ['nested.tar']));
     assert.strictEqual(nestedListing.kind, 'archive');
     assert.deepStrictEqual(nestedListing.entries.map(entry => entry.name), ['data.csv']);
+
+    // A directory must never be parsed as a file. An extensionless directory name (e.g. "publication")
+    // classifies as "text", which previously routed it into the parser → fs.readSync on a dir fd → EISDIR.
+    const dirPath = path.join(tmp, 'publication');
+    fs.mkdirSync(dirPath);
+    fs.writeFileSync(path.join(dirPath, 'README'), 'hello');
+    await assert.rejects(
+      () => content.openUri(dirPath),
+      err => {
+        const msg = String((err && err.message) || err);
+        assert.ok(!/EISDIR/.test(msg), 'directory open must not surface a raw EISDIR: ' + msg);
+        assert.ok(/directory/i.test(msg), 'directory open should reject with a clear directory message: ' + msg);
+        return true;
+      });
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

@@ -1,54 +1,48 @@
 @startuml object-watermark
 '' ============================================================================
 '' PlantUML over Mermaid because: this is an OBJECT/COMPONENT pipeline showing
-'' how a single monochrome SVG asset is re-tinted by a CSS mask into a themed
-'' emblem. Mermaid has no first-class object diagram with typed compartments and
-'' per-object fill colors; PlantUML's `rectangle`+`card` with inline per-element
-'' colors lets each transformation stage carry the palette color of the concept
-'' it belongs to (filesystem asset, IPC-less renderer CSS, app token).
+'' how the Vinary Tree logo SVG is rendered as a faint, grayscale watermark.
+'' Mermaid has no first-class object diagram with typed compartments and per-object
+'' fill colors; PlantUML's `rectangle`+`card` with inline per-element colors lets
+'' each stage carry the palette color of the concept it belongs to (filesystem
+'' asset, IPC-less renderer CSS, final rendered emblem).
 '' ============================================================================
 !include _vv-theme.iuml
 
-title Watermark emblem pipeline — shield.svg → CSS mask → themed silhouette
+title Watermark emblem pipeline — vinary-tree-logo.svg → <img> + grayscale filter → faint logo
 
 '' ---- the source asset (filesystem / static resource = tan) ----
-rectangle "shield.svg\n(resources/public/assets)" as SVG FS_COLOR {
-  card "viewBox 0 0 240 290\nstroke = currentColor\nfill   = currentColor\nheraldic shield + tree-of-life\n+ 'VINARY TREE' wordmark" as SVGBODY #FBF8EF
+rectangle "vinary-tree-logo.svg\n(resources/public/assets)" as SVG FS_COLOR {
+  card "the full-color Vinary Tree crest\n(heraldic shield + tree-of-life\n+ 'VINARY TREE' wordmark)" as SVGBODY #FBF8EF
 }
 
-'' ---- the CSS rule that turns the asset into a tintable silhouette (renderer = teal) ----
-rectangle ".vv-shield  (app.css)" as SHIELD RENDERER_COLOR {
-  card "width  : 300px\nheight : 360px" as BOX #FBF8EF
-  card "mask : url(../assets/shield.svg)\n       center / contain no-repeat\n(only opaque SVG pixels survive)" as MASK #FBF8EF
-  card "background-color : var(--vv-fg)\nopacity          : 0.07" as FILL #FBF8EF
-}
-
-'' ---- the active theme palette token (DataScript-purple = a --vv-* token) ----
-rectangle "active theme\n(css/themes/<name>.css :root)" as THEME DATASCRIPT_COLOR {
-  card "--vv-fg  (base foreground)\ndark : #b2b2b2\nlight: #655370" as FGVAR #FBF8EF
+'' ---- the renderer markup + CSS that fades it to a watermark (renderer = teal) ----
+rectangle ".vv-watermark-logo  <img>  (views.cljs + app.css)" as IMG RENDERER_COLOR {
+  card "<img src=\"assets/vinary-tree-logo.svg\">\ncentered by .vv-watermark (flex)" as TAG #FBF8EF
+  card "width: 40%; max-width: 360px\nheight: auto" as SIZE #FBF8EF
+  card "filter : grayscale(1)\nopacity: 0.08" as FADE #FBF8EF
 }
 
 '' ---- the rendered result inside the empty content pane ----
-rectangle "rendered emblem\n.vv-watermark > .vv-shield" as OUT #1F6B53 {
-  card "a faint, theme-tinted\nVinary Tree silhouette,\ncentered in the empty tab" as EMBLEM #FBF8EF
+rectangle "rendered emblem\n.vv-watermark > img.vv-watermark-logo" as OUT #1F6B53 {
+  card "a faint, desaturated\nVinary Tree logo,\ncentered in the empty tab" as EMBLEM #FBF8EF
 }
 
-'' ---- wiring (each arrow is one transformation step) ----
-SVG  -[#9F8766,thickness=2]->  SHIELD : (1) referenced as a CSS\nmask image (alpha channel)
-THEME -[#A45BAD,thickness=2]-> SHIELD : (2) var(--vv-fg) supplies\nthe box fill color
-SHIELD -[#2D9574,thickness=2]-> OUT  : (3) box painted in --vv-fg,\nclipped to the shield, @ 7% opacity
+'' ---- wiring (each arrow is one rendering step) ----
+SVG -[#9F8766,thickness=2]-> IMG : (1) loaded as an <img>\n(its own colors, drawn as-is)
+IMG -[#2D9574,thickness=2]-> OUT : (2) desaturated by grayscale(1)\nand faded to 8% opacity
 
 note bottom of OUT
-  The SVG itself is **never recolored**; the box is filled with the
-  theme color and the SVG only **masks** (clips) that fill. Switching
-  theme swaps --vv-fg, so the same emblem re-tints with **no asset change**.
+  The watermark is **theme-independent**: the logo is desaturated and faded by CSS,
+  so it reads the same faint grayscale in every theme. (The earlier CSS-mask design —
+  ADR-0007 — tinted a monochrome shield.svg with --vv-fg; it was superseded by this
+  full-color logo, and shield.svg is now orphaned.)
 end note
 
 legend right
   |= color |= concept |
   | <#9F8766> | filesystem / static SVG asset |
-  | <#2D9574> | renderer (Chromium) CSS — no IPC, paint-only |
-  | <#A45BAD> | theme palette token (--vv-*) |
+  | <#2D9574> | renderer (Chromium) markup + CSS — no IPC, paint-only |
   | <#1F6B53> | final rendered emblem |
 endlegend
 @enduml

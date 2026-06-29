@@ -17,6 +17,8 @@
             [vinary.app.uri :as uri]
             [vinary.grammar-catalog :as grammar-catalog]
             [vinary.main.file-kind :as file-kind]
+            [vinary.main.service-util :as service-util]
+            [vinary.main.startup :as startup]
             [vinary.main.ext-util :as eu]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.pdf-layout :as pdf-layout]
@@ -35,6 +37,32 @@
 (def ^:private empty-keymaps {:ui {:keymaps {:active "default" :order [] :sets {}}}})
 
 (defn- ev [m] (clj->js m))
+
+(deftest content-route
+  (testing "a real directory lists even when its extensionless name classifies as text (EISDIR fix)"
+    (is (= :directory (service-util/route {:directory? true :archive? false :kind "text"})))
+    (is (= :directory (service-util/route {:directory? true :archive? false :kind "markdown"})))
+    (is (= :directory (service-util/route {:directory? true :archive? false :kind "image"}))))
+  (testing "non-directory paths route by archive/kind, unchanged"
+    (is (= :parsed (service-util/route {:directory? false :archive? true  :kind "text"})))
+    (is (= :parsed (service-util/route {:directory? false :archive? false :kind "text"})))
+    (is (= :parsed (service-util/route {:directory? false :archive? false :kind "log"})))
+    (is (= :parsed (service-util/route {:directory? false :archive? false :kind "table"})))
+    (is (= :parsed (service-util/route {:directory? false :archive? false :kind "office"})))
+    (is (= :image (service-util/route {:directory? false :archive? false :kind "image"})))
+    (is (= :html  (service-util/route {:directory? false :archive? false :kind "html"})))
+    (is (= :pdf   (service-util/route {:directory? false :archive? false :kind "pdf"})))
+    (is (= :text  (service-util/route {:directory? false :archive? false :kind "source"})))
+    (is (= :text  (service-util/route {:directory? false :archive? false :kind "markdown"})))))
+
+(deftest startup-switches
+  (testing "software-compositor present/raster artifact fixes ship as invariant startup switches"
+    (is (contains? (set startup/chromium-switches) "ui-disable-partial-swap")
+        "core/main must always append --ui-disable-partial-swap (PRESENT stage: stale top→bottom scroll-band)")
+    (is (contains? (set startup/chromium-switches) "disable-partial-raster")
+        "core/main must always append --disable-partial-raster (RASTER stage: tile-content reuse)")
+    (is (contains? (set startup/chromium-switches) "disable-gpu-sandbox")
+        "core/main must always append --disable-gpu-sandbox (Linux GPU driver access)")))
 
 (deftest key-normalization
   (testing "modifier folding + named keys"

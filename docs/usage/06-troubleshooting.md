@@ -106,7 +106,51 @@ forces software rendering if you ever need to rule the GPU out.)
 
 ---
 
-## 6. Source highlighting is missing
+## 6. Markdown preview shows a duplicated band while scrolling (software compositing)
+
+While scrolling a tall Markdown preview — especially one with several SVG figures — a horizontal band
+≈ the **top fifth of the window is duplicated into a band at the bottom fifth** (the bottom pixels are
+replaced by the top's). **Multiple** such bands can appear, they shift as you keep scrolling, and
+**moving the mouse cursor over them makes them spread**. It often correlates with the SVG figures
+appearing to flicker — disappear and reappear.
+
+This is a **software display-compositor present-stage bug**, not a problem with the document. On hosts
+where Electron runs with GPU compositing disabled — `app.getGPUFeatureStatus().gpu_compositing =
+disabled_software` (e.g. NVIDIA + Wayland) — Chromium normally presents only each frame's **damage
+rect** to the window surface (*partial swap*). Presenting only the damaged sub-rect into a
+rotated/recycled buffer can leave a **stale band** of an earlier scroll offset in the buffer's
+undamaged region — the band you see. Cursor motion generates extra frames that rotate through more
+stale buffers, so the bands multiply and shuffle. The SVG figures are an **amplifier** (Chromium
+evicts and re-decodes their bitmaps as they scroll off/on screen — the flicker — producing large
+damage regions); they do **not** create the copy.
+
+Two *different* Chromium stages can strand stale pixels under software compositing, so the app appends
+two switches in `vinary.main.core/main` (see `vinary.main.startup/chromium-switches`) — **raster ≠ swap**
+(raster produces tile bitmaps; swap/present pushes the final frame to the screen):
+
+| Switch | Stage | What it fixes |
+|--------|-------|---------------|
+| `--ui-disable-partial-swap` | **present** (`viz` display compositor) | redraws + presents the whole viewport every frame, so no stale band survives — the fix for **this** scrolling-band artifact |
+| `--disable-partial-raster` | **raster** (`cc` tiles) | re-rasterizes tiles fully (a distinct stale-content-within-a-tile mode) |
+
+Both apply in the **main** process at launch (not visible in renderer DevTools). If you still see a
+band after a rebuild, these experiments bisect the cause:
+
+| Experiment | Expected if it is partial-swap | Meaning |
+|-----------|-------------------------------|---------|
+| Rebuild (`npm run compile`) + relaunch | **band gone** | confirmed — partial-swap was the cause |
+| `VV_SOFTWARE_GL=1` **without** the swap switch | **band persists** | `disableHardwareAcceleration` removes the GPU process but does *not* disable partial swap, so a persisting band *corroborates* the swap diagnosis rather than refuting it |
+| `--ozone-platform=x11` + `VV_SOFTWARE_GL=1` | band gone only here | the defect is specific to the Wayland software present path — run under Xwayland (the prior "X11 segfaults the GPU process" caveat is moot with hardware acceleration off) |
+| Temporarily make the `figures/*.svg` 404 | banding drops sharply | confirms the SVGs are the amplifier (diagnostic only, not a fix) |
+
+If none of the above clears it, the renderer-side fallback is to render the figures as **inline SVG**
+(part of the DOM, not a decode-cache-evictable `<img>`) in `src/vinary/renderer/figures.cljs` — see the
+related SVG-scroll note in §4 above. (Related cause; the same present-stage bug underlies the SVG flicker
+there.)
+
+---
+
+## 7. Source highlighting is missing
 
 The source preview still opens without a grammar, but highlighting may be plain.
 
@@ -122,7 +166,7 @@ source language has no matching grammar, CodeMirror still shows the text.
 
 ---
 
-## 7. Keybindings do not behave as expected
+## 8. Keybindings do not behave as expected
 
 Checks:
 
@@ -139,7 +183,7 @@ resolver is using.
 
 ---
 
-## 8. DevTools inspection
+## 9. DevTools inspection
 
 Renderer console helpers:
 
@@ -154,7 +198,7 @@ and sidebar state. Use `__vvds()` for cached document content metadata.
 
 ---
 
-## 9. "A JavaScript error occurred in the main process" dialog
+## 10. "A JavaScript error occurred in the main process" dialog
 
 If the **main** process hits an unexpected error, vinary shows an error dialog
 with a **Copy details** button — click it to put the full stack on your
