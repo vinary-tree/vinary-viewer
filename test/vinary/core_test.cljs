@@ -289,6 +289,23 @@
                              ["diagram.svg" "image"]
                              ["manual.pdf" "pdf"]
                              ["index.html" "html"]
+                             ["notes.docx" "office"]
+                             ["notes.odt" "office"]
+                             ["slides.odp" "office"]
+                             ["formula.odf" "office"]
+                             ["data.csv" "table"]
+                             ["data.tsv" "table"]
+                             ["book.xlsx" "table"]
+                             ["book.ods" "table"]
+                             ["app.log" "log"]
+                             ["syslog" "log"]
+                             ["app.log.1" "log"]
+                             ["app.log.gz" "log"]
+                             ["bundle.zip" "archive"]
+                             ["bundle.tar" "archive"]
+                             ["bundle.tar.gz" "archive"]
+                             ["bundle.tgz" "archive"]
+                             ["vv-archive://open?chain=%5B%22%2Ftmp%2Fbundle.zip%22%5D" "archive"]
                              ["page.htm" "html"]
                              ["workflow.d2" "source"]
                              ["workflow.puml" "source"]
@@ -301,6 +318,14 @@
                              ["program.rho" "source"]
                              ["notes.unknown" "text"]]]
       (is (= expected (file-kind/kind-of source? path)) path))))
+
+(deftest archive-uri-helpers
+  (let [uri "vv-archive://open?chain=%5B%22%2Ftmp%2Fbundle.zip%22%2C%22logs%2Fapp.log%22%5D"]
+    (is (true? (uri/archive? uri)))
+    (is (= ["/tmp/bundle.zip" "logs/app.log"] (uri/archive-chain uri)))
+    (is (= "app.log" (uri/basename uri)))
+    (is (= "file:///tmp/bundle.zip!/logs/app.log" (uri/display uri)))
+    (is (= uri (uri/file-path uri)))))
 
 (deftest bundled-grammar-catalog
   (testing "catalog entries expose required runtime fields"

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('vv', {
   requestRecent: () => ipcRenderer.send('vv:recent-request'),
   saveRecent: (edn) => ipcRenderer.send('vv:recent-save', edn),
   completePath: (input) => ipcRenderer.invoke('vv:complete-path', input),
+  contentPage: (request) => ipcRenderer.invoke('vv:content-page', request),
   // extensions + ad-blocking (renderer → main)
   requestExtConfig: () => ipcRenderer.send('vv:ext-config-request'),
   saveExtConfig: (edn) => ipcRenderer.send('vv:ext-config-save', edn),

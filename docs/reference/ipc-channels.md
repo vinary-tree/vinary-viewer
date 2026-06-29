@@ -20,6 +20,7 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:close` | `close(path)` | `path` string | `vinary.main.service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `vinary.main.service/sync-retained!` | Replace main's retained local-file set and release unretained watchers/assets. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service/watch-assets!` | Watch local media assets referenced by a retained Markdown document. |
+| `vv:content-page` | `contentPage(request)` ⮐ | `{path, kind, stamp, page, meta?}` | `vinary.main.service` → `content_service.contentPage` | *(invoke)* Fetch one bounded page for a large log or delimited-table preview, including `hasPrev`/`hasNext` flags. |
 | `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config/push!` | Request persisted `keybindings.edn`. |
 | `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config/save!` | Persist keybinding registry EDN. |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars/push!` | Request user grammar registry and filetype mappings. |
@@ -60,7 +61,7 @@ fields derived from `getBoundingClientRect()`.
 
 | Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
 |---------|----------------------|---------|-----------------------|---------|
-| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, bytes?}` | `[:content/received ...]` | Deliver initial and live-refreshed document content (PDFs carry `:bytes`, cached in the renderer). |
+| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, paged?}` | `[:content/received ...]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first page. |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error ...]` | Deliver read/render errors. |
 | `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received ...]` | Deliver git file-tree data. |
 | `vv:keymap` | `onKeymap(cb)` | keymap registry map/string | `[:keymap/config-received ...]` | Deliver persisted keybinding config. |
@@ -96,9 +97,13 @@ for directories, which `vinary.main.service/send-content!` detects first (via
 | image extensions such as `.png`, `.jpg`, `.svg`, `.webp`, `.avif` | `"image"` | binary is not read as text; renderer uses `file://` URL. |
 | `.pdf` | `"pdf"` | bytes streamed to the renderer (`:bytes`) and rendered in-DOM by pdf.js (ADR-0013); never read as text. |
 | `.html`, `.htm`, `.xhtml` | `"html"` | not read as text; rendered as a live page in the in-app web view via its `file://` URL (edge-to-edge), with the ad-blocker + extensions applied. |
+| `.docx`, `.odt`, `.odp`, `.odf` | `"office"` | parsed in main into sanitized HTML/text preview payloads. |
+| `.csv`, `.tsv`, `.tab`, `.psv`, `.dsv`, `.xlsx`, `.xlsm`, `.ods`, `.fods` | `"table"` | delimited files render as bounded rows, large delimited files page through `vv:content-page`, and workbooks render capped sheet matrices. |
+| `.log`, `.out`, `.err`, `.trace`, compressed `.log.gz` / rotated `.log.N.gz`, standard log basenames, and sniffed log-like text | `"log"` | rendered as lines with tolerant severity highlighting; large logs page through `vv:content-page`. |
+| `.zip`, `.jar`, `.war`, `.ear`, `.epub`, `.tar`, `.tgz`, `.tar.gz` and `vv-archive://...` | `"archive"` | listed in-pane as directory-browser-compatible entries; nested archive entries are addressed by virtual archive URI chains and are not extracted to disk. |
 | `.mmd`, `.mermaid` | `"mermaid"` | text is read and rendered to SVG by the renderer-side Mermaid strategy. |
 | bundled/user source extensions, configured filetype mappings, and non-Mermaid diagram-source extensions | `"source"` | text is read into the read-only source view. |
-| everything else | `"text"` | text is escaped into plain HTML. |
+| everything else | `"text"` | plain text routes through the content service first so extensionless logs/delimited files can be sniffed; otherwise text is escaped into plain HTML. |
 
 ---
 

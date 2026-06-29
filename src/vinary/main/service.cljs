@@ -9,6 +9,7 @@
             ["os" :as os]
             ["child_process" :as cp]
             ["chokidar" :refer [watch]]
+            ["./content_service.js" :as content-service]
             [clojure.set :as set]
             [clojure.string :as str]
             [vinary.main.file-kind :as file-kind]
@@ -51,12 +52,15 @@
 (defn- kind-of [^String path]
   (file-kind/kind-of grammars/source? path))
 
+(defn- archive-uri? [uri]
+  (file-kind/archive-uri? uri))
+
 (def ^:private dir-watch-options
   ;; immediate children only (depth 0) — not the recursive whole-tree watch ADR-0006 rejects.
   (clj->js {:ignoreInitial true :depth 0}))
 
 (defn- directory? [path]
-  (try (.isDirectory (.statSync fs path)) (catch :default _ false)))
+  (try (and (not (archive-uri? path)) (.isDirectory (.statSync fs path))) (catch :default _ false)))
 
 (defn- entry->map
   "One directory child as plain data for the renderer's directory view. Symlinks are flagged and
@@ -80,10 +84,21 @@
   (try (mapv #(entry->map dir %) (.readdirSync fs dir #js {:withFileTypes true}))
        (catch :default _ [])))
 
+(defn- send-parsed-content! [^js wc path]
+  (-> (.openUri content-service path)
+      (.then (fn [payload] (.send wc "vv:content" payload)))
+      (.catch (fn [e] (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))
+
 (defn- send-content! [^js wc path]
   (let [kind  (kind-of path)
         stamp (js/Date.now)]
     (cond
+      ;; archive URI or parser-owned local kind — main streams/parses and returns a bounded preview payload.
+      ;; Plain text routes through the parser so extensionless logs / delimited files can be sniffed
+      ;; before falling back to escaped text.
+      (or (archive-uri? path) (#{"office" "table" "log" "archive" "text"} kind))
+      (send-parsed-content! wc path)
+
       ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
       (directory? path)
       (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
@@ -191,8 +206,9 @@
   [^js wc path]
   (swap! doc-webcontents assoc path wc)
   (send-content! wc path)
-  (send-tree! wc path)
-  (when-not (get @watchers path)
+  (when-not (archive-uri? path)
+    (send-tree! wc path))
+  (when-not (or (archive-uri? path) (get @watchers path))
     (let [dir? (directory? path)
           w    (watch path (if dir? dir-watch-options watch-options))]
       (if dir?
@@ -238,6 +254,7 @@
 (defn init! []
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [_e path] (close! path)))
+  (.handle ipcMain "vv:content-page" (fn [_e req] (.contentPage content-service req)))
   (.handle ipcMain "vv:complete-path" (fn [_e raw] (clj->js (complete raw))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"

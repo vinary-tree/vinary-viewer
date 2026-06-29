@@ -106,6 +106,39 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-source .cm-md-task           { color: var(--vv-meta); font-weight: 600; }
 .vv-source .cm-md-quote          { color: var(--vv-head2); }
 
+.vv-pagebar { display: flex; align-items: center; gap: 8px; padding: 8px 0 14px; }
+.vv-page-btn { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
+  border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.vv-page-btn:disabled { opacity: 0.5; cursor: default; }
+.vv-page-label { color: var(--vv-fg-dim); font-size: 12px; }
+
+.vv-table-doc { min-height: 100%; font-family: var(--vv-font-variable); }
+.vv-sheet-tabs { display: flex; align-items: center; gap: 4px; padding-bottom: 10px; }
+.vv-sheet-tab { background: var(--vv-bg2); color: var(--vv-fg-dim); border: 1px solid var(--vv-border);
+  border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+.vv-sheet-tab-active { color: var(--vv-head1); border-color: var(--vv-head1); background: var(--vv-bg-code); }
+.vv-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--vv-border); background: var(--vv-bg1); }
+.vv-table { border-collapse: collapse; min-width: 100%; font-size: 13px; font-family: var(--vv-font-fixed); }
+.vv-table th, .vv-table td { border: 1px solid var(--vv-border); padding: 4px 8px;
+  white-space: pre; vertical-align: top; }
+.vv-table td { color: var(--vv-code); }
+.vv-table-rownum { position: sticky; left: 0; z-index: 1; min-width: 44px;
+  background: var(--vv-bg2); color: var(--vv-fg-dim); text-align: right; font-weight: 400; }
+.vv-table tr:nth-child(2n) td { background: var(--vv-bg2); }
+.vv-table-note { padding: 8px 0; color: var(--vv-fg-dim); font-size: 12px; }
+
+.vv-log-doc { min-height: 100%; }
+.vv-log-lines { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--vv-font-fixed);
+  font-size: var(--vv-code-font-size); line-height: 1.45; }
+.vv-log-line { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
+.vv-log-num { color: var(--vv-fg-dim); text-align: right; user-select: none; }
+.vv-log-text { min-width: 0; }
+.vv-log-trace .vv-log-text, .vv-log-debug .vv-log-text { color: var(--vv-comment); }
+.vv-log-info .vv-log-text { color: var(--vv-code); }
+.vv-log-warn .vv-log-text { color: var(--vv-head4); font-weight: 600; }
+.vv-log-error .vv-log-text, .vv-log-fatal .vv-log-text, .vv-log-critical .vv-log-text {
+  color: var(--vv-error); font-weight: 600; }
+
 .markdown-body .cm-keyword     { color: var(--vv-head1); }
 .markdown-body .cm-operator    { color: var(--vv-head1); }
 .markdown-body .cm-variable    { color: var(--vv-var); }

@@ -15,15 +15,19 @@ const log = (ok, msg) => { console.log((ok ? '✓ ' : '✗ ') + msg); if (!ok) f
 // 1. JS parses
 const jsFiles = [
   'src/sidebar.js', 'src/patch-create-window.js', 'src/patch-renderer-main.js',
+  'src/vinary/main/content_service.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
-  'test/electron-smoke.js', 'test/extensions-smoke.js',
+  'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
   'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
   'scripts/sync-pdfjs.mjs', 'scripts/check-pdfjs.mjs',
   'resources/ext-chrome-polyfill.js',
 ];
 for (const f of jsFiles) {
   try { execFileSync(process.execPath, ['--check', path.join(root, f)]); log(true, `parses: ${f}`); }
-  catch (e) { log(false, `parse error: ${f}\n${(e.stderr || e.message).toString().trim()}`); }
+  catch (e) {
+    const stderr = e.stderr && e.stderr.toString().trim();
+    log(false, `parse error: ${f}\n${stderr || e.message}`);
+  }
 }
 
 // 2 & 3. CSS — brace balance + theme-var completeness, for BOTH surfaces. Each stylesheet uses the same

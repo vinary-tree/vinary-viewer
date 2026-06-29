@@ -4,12 +4,28 @@
   (:require [clojure.string :as str]))
 
 (defn http? [uri] (boolean (and uri (re-find #"(?i)^https?://" uri))))
+(defn archive? [uri] (str/starts-with? (str uri) "vv-archive://"))
+
+(defn archive-chain [uri]
+  (when (archive? uri)
+    (try
+      (let [u (js/URL. uri)
+            chain (.parse js/JSON (or (.get (.-searchParams u) "chain") "[]"))]
+        (vec (array-seq chain)))
+      (catch :default _ []))))
+
+(defn archive-display [uri]
+  (if-let [[root & entries] (seq (archive-chain uri))]
+    (str "file://" root "!/" (str/join "!/" entries))
+    (str uri)))
 
 (defn file-path
-  "The local filesystem path for a uri: a leading file:// stripped; http(s) → nil; else the uri as-is."
+  "The main-openable local address for a uri: a leading file:// stripped; http(s) → nil; archive virtual
+   URIs preserved; else the uri as-is."
   [uri]
   (cond (nil? uri)                        nil
         (http? uri)                       nil
+        (archive? uri)                    uri
         (str/starts-with? uri "file://")  (subs uri 7)
         :else                             uri))
 
@@ -20,13 +36,14 @@
   (let [t (str/trim (or text ""))]
     (cond (str/blank? t)                  nil
           (http? t)                       t
+          (archive? t)                    t
           (str/starts-with? t "file://")  (subs t 7)
           :else                           t)))
 
 (defn display
   "How a uri appears in the URI bar: http(s) as-is; a local path shown file://-prefixed."
   [uri]
-  (cond (nil? uri) "" (http? uri) uri :else (str "file://" uri)))
+  (cond (nil? uri) "" (http? uri) uri (archive? uri) (archive-display uri) :else (str "file://" uri)))
 
 (defn basename
   "Short tab label: a file's basename, or for http the last path segment (falling back to the host)."
@@ -37,6 +54,7 @@
                            seg (last (remove str/blank? (str/split (.-pathname u) #"/")))]
                        (or (not-empty seg) (.-hostname u)))
                      (catch :default _ uri))
+    (archive? uri) (or (some-> (last (archive-chain uri)) (str/split #"/") last) "Archive")
     :else       (last (str/split uri #"/"))))
 
 (defn- strip-trailing-slash
@@ -48,25 +66,44 @@
   "Parent directory path of a local-file uri (file:// stripped). nil for http(s) or when there is no
    parent (the filesystem root). A trailing slash is ignored, so a directory uri yields its parent."
   [uri]
-  (when-let [p (some-> (file-path uri) strip-trailing-slash)]
-    (let [i (str/last-index-of p "/")]
-      (cond
-        (nil? i)  nil                          ; no slash → no parent
-        (zero? i) (when (> (count p) 1) "/")   ; \"/foo\" → \"/\"; \"/\" → nil
-        :else     (subs p 0 i)))))
+  (if (archive? uri)
+    (let [[root & entries] (archive-chain uri)]
+      (when root
+        (if (seq entries)
+          (let [parent (vec (butlast entries))]
+            (str "vv-archive://open?chain="
+                 (js/encodeURIComponent (.stringify js/JSON (clj->js (into [root] parent))))))
+          (dirname root))))
+    (when-let [p (some-> (file-path uri) strip-trailing-slash)]
+      (let [i (str/last-index-of p "/")]
+        (cond
+          (nil? i)  nil                          ; no slash → no parent
+          (zero? i) (when (> (count p) 1) "/")   ; \"/foo\" → \"/\"; \"/\" → nil
+          :else     (subs p 0 i))))))
 
 (defn segments
   "Ordered breadcrumb segments of a local-file uri, root → leaf: each {:name :path}, where :path is the
    cumulative absolute path navigable to that point. The filesystem root is included as {:name \"/\"
    :path \"/\"}. nil for http(s)."
   [uri]
-  (when-let [p (some-> (file-path uri) strip-trailing-slash)]
-    (let [named (rest (str/split p #"/"))]      ; \"/a/b\" → (\"a\" \"b\"); \"/\" → ()
-      (into [{:name "/" :path "/"}]
-            (map-indexed (fn [i name]
-                           {:name name
-                            :path (str "/" (str/join "/" (take (inc i) named)))})
-                         named)))))
+  (if (archive? uri)
+    (let [[root & entries] (archive-chain uri)
+          root-segs (segments root)
+          entry-segs (map-indexed
+                      (fn [i name]
+                        (let [chain (into [root] (take (inc i) entries))]
+                          {:name name
+                           :path (str "vv-archive://open?chain="
+                                      (js/encodeURIComponent (.stringify js/JSON (clj->js chain))))}))
+                      entries)]
+      (vec (concat root-segs entry-segs)))
+    (when-let [p (some-> (file-path uri) strip-trailing-slash)]
+      (let [named (rest (str/split p #"/"))]      ; \"/a/b\" → (\"a\" \"b\"); \"/\" → ()
+        (into [{:name "/" :path "/"}]
+              (map-indexed (fn [i name]
+                             {:name name
+                              :path (str "/" (str/join "/" (take (inc i) named)))})
+                           named))))))
 
 (defn ancestor-paths
   "The navigable ancestor paths of a local-file uri, root → leaf — i.e. (map :path (segments uri))."

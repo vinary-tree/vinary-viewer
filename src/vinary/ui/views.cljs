@@ -460,14 +460,16 @@
 
 (defn image-view
   "A directly-opened image filling the content width; consumes any pending scroll-restore on mount."
-  [_path _stamp]
+  [_path _stamp _data-url]
   (let [node (atom nil)]
     (r/create-class
      {:display-name "vv-image-view"
       :component-did-mount  (fn [_] (scroll/apply! @node))
       :component-did-update (fn [_] (scroll/apply! @node))
-      :reagent-render       (fn [path stamp] [:div.vv-image-view {:ref (fn [el] (reset! node el))}
-                                              [:img {:src (media/cache-bust-local-media-url (media/path->file-url path) stamp)
+      :reagent-render       (fn [path stamp data-url] [:div.vv-image-view {:ref (fn [el] (reset! node el))}
+                                                       [:img {:src (or data-url
+                                                                       (media/cache-bust-local-media-url
+                                                                        (media/path->file-url path) stamp))
                                                      :alt path}]])})))
 
 (defn pdf-view
@@ -510,6 +512,134 @@
       :reagent-render         (fn [_path _stamp]
                                 (reset! vstate @(rf/subscribe [:pdf/view-state]))  ; reactive → did-update
                                 [:div.vv-pdf-doc {:ref (fn [el] (reset! node el))}])})))
+
+(defn- content-page [path kind stamp page meta]
+  (when-let [^js vv (.-vv js/window)]
+    (when (.-contentPage vv)
+      (-> (.contentPage vv (clj->js {:path path :kind kind :stamp stamp :page page :meta meta}))
+          (.then #(js->clj % :keywordize-keys true))))))
+
+(defn- bounded-cache [m k v]
+  (let [m' (assoc m k v)]
+    (if (> (count m') 9)
+      (dissoc m' (first (sort (keys m'))))
+      m')))
+
+(defn- doc-page-size [doc fallback]
+  (or (get-in doc [:doc/meta :pageSize]) fallback))
+
+(defn- page-controls [kind path stamp meta page cache* current*]
+  (let [{:keys [index hasPrev hasNext]} page
+        prefetch! (fn [idx]
+                    (when-let [p (content-page path kind stamp idx meta)]
+                      (-> p (.then #(swap! cache* bounded-cache idx %)))))
+        load! (fn [idx]
+                (if-let [cached (get @cache* idx)]
+                  (reset! current* cached)
+                  (when-let [p (content-page path kind stamp idx meta)]
+                    (-> p (.then (fn [res]
+                                   (swap! cache* bounded-cache idx res)
+                                   (reset! current* res)
+                                   ;; finite lookbehind/lookahead: keep nearby pages warm without growing
+                                   ;; unbounded renderer state.
+                                   (doseq [adj [(dec idx) (inc idx)]
+                                           :when (and (>= adj 0) (not (contains? @cache* adj)))]
+                                     (prefetch! adj))))))))]
+    [:div.vv-pagebar
+     [:button.vv-page-btn {:disabled (not hasPrev) :on-click #(load! (dec index))} "Previous"]
+     [:span.vv-page-label (str "Page " (inc (or index 0)))]
+     [:button.vv-page-btn {:disabled (not hasNext) :on-click #(load! (inc index))} "Next"]]))
+
+(defn table-view
+  "Sheet/delimited table preview. Large delimited files use paged row windows fetched from main; small
+   tables/workbooks render bounded sheet matrices from the content payload."
+  [_doc]
+  (let [node (atom nil)
+        sheet* (r/atom 0)
+        doc-key* (atom nil)
+        current* (r/atom nil)
+        cache* (r/atom {})]
+    (r/create-class
+     {:display-name "vv-table-view"
+      :component-did-mount  (fn [this]
+                              (let [[_ doc] (r/argv this)]
+                                (reset! doc-key* [(:doc/path doc) (:doc/stamp doc)])
+                                (reset! current* (:doc/page doc))
+                                (scroll/apply! @node)))
+      :component-did-update (fn [this]
+                              (let [[_ doc] (r/argv this)]
+                                (when (not= [(:doc/path doc) (:doc/stamp doc)] @doc-key*)
+                                  (reset! doc-key* [(:doc/path doc) (:doc/stamp doc)])
+                                  (reset! cache* {})
+                                  (reset! current* (:doc/page doc)))
+                                (scroll/apply! @node)))
+      :reagent-render
+      (fn [doc]
+        (let [paged? (:doc/paged? doc)
+              page (or @current* (:doc/page doc))
+              page-size (doc-page-size doc 500)
+              sheets (vec (:doc/sheets doc))
+              sheet (get sheets @sheet* (first sheets))
+              rows (if paged? (:rows page) (:rows sheet))]
+          [:div.vv-table-doc {:ref (fn [el] (reset! node el))}
+           (if paged?
+             [page-controls "table" (:doc/path doc) (:doc/stamp doc) (:doc/meta doc) page cache* current*]
+             (when (> (count sheets) 1)
+               [:div.vv-sheet-tabs
+                (for [[i sh] (map-indexed vector sheets)]
+                  ^{:key i}
+                  [:button.vv-sheet-tab {:class (when (= i @sheet*) "vv-sheet-tab-active")
+                                         :on-click #(reset! sheet* i)}
+                   (:name sh)])]))
+           [:div.vv-table-scroll
+            [:table.vv-table
+             [:tbody
+              (for [[ri row] (map-indexed vector rows)]
+                ^{:key ri}
+                [:tr
+                 [:th.vv-table-rownum (str (inc (+ ri (* (or (:index page) 0) page-size))))]
+                 (for [[ci cell] (map-indexed vector row)]
+                   ^{:key ci} [:td cell])])]]]
+           (when (:truncated sheet)
+             [:div.vv-table-note "Preview truncated"])]))})))
+
+(defn- log-level [line]
+  (some-> (re-find #"(?i)\b(trace|debug|info|warn|warning|error|fatal|critical)\b" (str line))
+          second
+          str/lower-case
+          (str/replace "warning" "warn")))
+
+(defn log-view
+  "Paged static log preview with tolerant timestamp/severity highlighting."
+  [_doc]
+  (let [node (atom nil)
+        current* (r/atom nil)
+        cache* (r/atom {})]
+    (r/create-class
+     {:display-name "vv-log-view"
+      :component-did-mount  (fn [this]
+                              (let [[_ doc] (r/argv this)]
+                                (reset! current* (:doc/page doc))
+                                (scroll/apply! @node)))
+      :component-did-update (fn [_] (scroll/apply! @node))
+      :reagent-render
+      (fn [doc]
+        (let [paged? (:doc/paged? doc)
+              page (or @current* (:doc/page doc))
+              page-size (doc-page-size doc 2000)
+              lines (if paged?
+                      (:lines page)
+                      (str/split (or (:doc/text doc) "") #"\r?\n"))]
+          [:div.vv-log-doc {:ref (fn [el] (reset! node el))}
+           (when paged?
+             [page-controls "log" (:doc/path doc) (:doc/stamp doc) (:doc/meta doc) page cache* current*])
+           [:pre.vv-log-lines
+            (for [[i line] (map-indexed vector lines)
+                  :let [level (log-level line)]]
+              ^{:key i}
+              [:div.vv-log-line {:class (when level (str "vv-log-" level))}
+               [:span.vv-log-num (str (inc (+ i (* (or (:index page) 0) page-size))))]
+               [:span.vv-log-text line]])]]))})))
 
 (defn watermark []
   [:div.vv-watermark
@@ -612,16 +742,23 @@
        (= "pdf" (:doc/kind doc))   ^{:key (str "pdf:" (:doc/path doc))}
                                    [pdf-view (:doc/path doc) (:doc/stamp doc)]
        (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [image-view (:doc/path doc) (:doc/stamp doc)]
+                                   [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
+       (and vs?
+            (:doc/text doc)
+            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source"} (:doc/kind doc))))
+       ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
+       [source-view (:doc/text doc) (:doc/path doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
        (= "mermaid" (:doc/kind doc)) ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
                                      [mermaid-view (:doc/text doc) (:doc/path doc)]
        (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
-       ;; "View Source" on a markdown doc → show its raw source in the pane (not replacing the window)
-       (and vs? (= "markdown" (:doc/kind doc)) (:doc/text doc))
-       ^{:key (str "src:" (:doc/path doc))} [source-view (:doc/text doc) (:doc/path doc)]
-       (= "directory" (:doc/kind doc)) ^{:key (str "dir:" (:doc/path doc))}
-                                       [dir-view (:doc/path doc) (:doc/entries doc)]
+       (= "office" (:doc/kind doc)) [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       (= "table" (:doc/kind doc)) ^{:key (str "table:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [table-view doc]
+       (= "log" (:doc/kind doc))   ^{:key (str "log:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [log-view doc]
+       (#{"directory" "archive"} (:doc/kind doc)) ^{:key (str "dir:" (:doc/path doc))}
+                                                   [dir-view (:doc/path doc) (:doc/entries doc)]
        (:doc/html doc)             [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
        :else                       [:div.vv-empty "Rendering…"])]))
 

@@ -6,10 +6,11 @@
 > any editor and the rendered view refreshes the instant you save — **without
 > losing your scroll position, your in-page search, or your theme**. It previews
 > **Markdown** (GitHub-flavoured, with heading anchors, syntax highlighting, and
-> embedded SVG figure sizing), **images**, **PDFs**, **source files**, **plain
-> text**, and **HTTP/HTTPS links**, across **multiple tabs**, with a **git file
-> tree**, an **in-page find**, a **table-of-contents scroll-spy**, **navigation
-> history**, live theme switching, and custom keybindings.
+> embedded SVG figure sizing), **images**, **PDFs**, **Office/OpenDocument files**,
+> **workbooks and delimited tables**, **large logs**, **archives**, **source files**,
+> **plain text**, and **HTTP/HTTPS links**, across **multiple tabs**, with a **git
+> file tree**, an **in-page find**, a **table-of-contents scroll-spy**,
+> **navigation history**, live theme switching, and custom keybindings.
 
 ---
 

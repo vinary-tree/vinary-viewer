@@ -33,7 +33,7 @@
     "pdfjs:check": "node scripts/check-pdfjs.mjs",
     "grammars:sync": "node scripts/sync-grammars.mjs",
     "grammars:check": "node scripts/check-grammars.mjs",
-    "test": "shadow-cljs compile test && node dist/test/test.js",
+    "test": "shadow-cljs compile test && node dist/test/test.js && node test/content-service-smoke.js",
     "test:electron": "electron --no-sandbox test/electron-smoke.js",
     "test:electron:release": "npm run release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js",
     "test:extensions": "electron --no-sandbox test/extensions-smoke.js",
@@ -48,8 +48,11 @@
     "@ghostery/adblocker-electron": "2.18.0",
     "chokidar": "^5.0.0",
     "electron-chrome-web-store": "0.13.0",
+    "fast-xml-parser": "^5.9.3",
+    "mammoth": "^1.12.0",
     "mathjax-full": "^3.2.1",
     "mermaid": "^11.16.0",
+    "papaparse": "^5.5.4",
     "pdfjs-dist": "5.4.149",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -61,8 +64,10 @@
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
     "rxjs": "^7.8.2",
+    "tar-stream": "^3.2.0",
     "unified": "^11.0.5",
-    "web-tree-sitter": "0.25.9"
+    "web-tree-sitter": "0.25.9",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@fontsource-variable/fira-code": "^5.2.7",

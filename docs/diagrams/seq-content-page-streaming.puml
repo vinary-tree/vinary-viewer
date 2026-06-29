@@ -1,0 +1,91 @@
+@startuml seq-content-page-streaming
+'' ============================================================================
+'' vinary-viewer - Sequence: bounded content previews for logs, tables, and archives
+''
+'' PlantUML over Mermaid because: this flow has two separate IPC phases, a
+'' reusable main-process parser service, archive recursion, and finite page
+'' lookahead/lookbehind. PlantUML sequence diagrams keep those actors explicit
+'' while preserving the same color legend used by the rest of the suite.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Bounded preview streaming - first page, adjacent page, nested archive
+
+autonumber "0:"
+
+actor User #white
+participant "reagent UI\ncontent-view" as UI RENDERER_COLOR
+participant "preload\nwindow.vv" as Vv IPC_COLOR
+participant "main.service\nipcMain" as Svc MAIN_COLOR
+participant "content_service.js\nparser/streamer" as CS MAIN_COLOR
+participant "Archive reader\nyauzl/tar-stream" as AR FS_COLOR
+participant "Filesystem\nReadable stream" as FS FS_COLOR
+participant "DataScript\ncontent cache" as DS DATASCRIPT_COLOR
+
+== first open ==
+User -> UI : open `/var/log/app.log`\nor `bundle.zip`
+UI -> Vv : `vv:open(path)`
+Vv -> Svc : **vv:open**
+activate Svc
+Svc -> CS : `openUri(path)`
+activate CS
+
+alt large log or delimited text
+  CS -> FS : create bounded read stream
+  FS --> CS : lines/rows until page 0 + lookahead
+  CS --> Svc : `{kind, paged:true, page}`
+else archive URI or archive file
+  CS -> AR : list current archive layer\nor open selected member
+  AR --> CS : immediate children\nor entry stream
+  CS --> Svc : `{kind:"archive", entries}`\nor first preview page
+else office/workbook preview
+  CS -> FS : read capped preview bytes
+  FS --> CS : bounded buffer
+  CS --> Svc : `{kind:"office"|"table", html|sheets}`
+end
+
+Svc -> Vv : **vv:content** bounded payload
+deactivate CS
+deactivate Svc
+Vv -> UI : `onContent`
+UI -> DS : `[:content/received payload]`
+UI -> UI : render table/log/archive preview
+
+== adjacent page ==
+User -> UI : Next page
+UI -> Vv : `contentPage({path, kind, page:n})`
+Vv -> Svc : **vv:content-page**
+activate Svc
+Svc -> CS : `contentPage(request)`
+activate CS
+CS -> FS : stream from source start\ncollect only requested page
+FS --> CS : page n + one lookahead row/line
+CS --> Svc : `{index, rows|lines, hasPrev, hasNext}`
+deactivate CS
+deactivate Svc
+Svc --> Vv : bounded page
+Vv --> UI : Promise resolves
+UI -> UI : cache page n and prefetch n-1/n+1
+
+== nested archive ==
+User -> UI : open `outer.zip!/inner.tar.gz!/logs/app.log`
+UI -> Vv : `vv:open(vv-archive://...?chain=...)`
+Vv -> Svc : **vv:open**
+Svc -> CS : parse virtual archive chain
+CS -> AR : open each archive layer\nup to depth limit
+AR --> CS : final member stream
+CS -> FS : stream final log/table preview
+FS --> CS : bounded first page
+CS --> Svc : preview payload
+Svc -> Vv : **vv:content**
+Vv -> UI : render final member
+
+legend right
+  |= Colour |= Concept |
+  | <#3A5BA0> | MAIN / Node IO |
+  | <#2D9574> | Renderer / UI |
+  | <#B1951D> | IPC seam |
+  | <#A45BAD> | DataScript content cache |
+  | <#9F8766> | filesystem / archive stream |
+endlegend
+@enduml

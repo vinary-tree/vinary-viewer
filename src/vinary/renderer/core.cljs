@@ -112,7 +112,7 @@
 
 (defn- selectable-root [^js node]
   (some-> (element-for-node node)
-          (.closest ".markdown-body, .vv-source, .vv-pdf-doc")))
+          (.closest ".markdown-body, .vv-source, .vv-pdf-doc, .vv-table-doc, .vv-log-doc")))
 
 (defn- focused-source-selection []
   (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]

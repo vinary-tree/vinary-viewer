@@ -27,6 +27,14 @@ main webContents.send("vv:*", payload)
 
 The renderer never receives `ipcRenderer` or `fs`.
 
+The sequence below shows the bounded-preview protocol for large logs, delimited files,
+and archive members. A *page* is a finite row or line window; a *virtual archive URI*
+is an address for an archive member that has not been extracted to disk.
+
+![Bounded preview streaming](../diagrams/seq-content-page-streaming.svg)
+
+*Figure - source: [`docs/diagrams/seq-content-page-streaming.puml`](../diagrams/seq-content-page-streaming.puml).*
+
 ---
 
 ## 2. Renderer to main
@@ -37,6 +45,7 @@ The renderer never receives `ipcRenderer` or `fs`.
 | `vv:close` | `close(path)` | string path | `vinary.main.service` | Close an individual watcher path. Kept for compatibility; retained sync is authoritative. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained local path set. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a Markdown document. |
+| `vv:content-page` | `contentPage(request)` | page request map | `vinary.main.service` | Fetch one bounded page of a large log or delimited-table preview. |
 | `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config` | Push current `keybindings.edn`. |
 | `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config` | Persist keybinding registry. |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars` | Push grammar registry. |
@@ -68,7 +77,7 @@ Every `on*` API returns an unsubscribe function.
 
 | Channel | `window.vv` API | Payload | Renderer event |
 |---------|-----------------|---------|----------------|
-| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, stamp?}` | `[:content/received payload]` |
+| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?}` | `[:content/received payload]` |
 | `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
 | `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received payload]` |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
@@ -98,6 +107,40 @@ Main-to-renderer content payloads:
  :stamp 1780000000000}
 ```
 
+Large logs and large delimited files use a two-step protocol. The initial
+`vv:content` message is a manifest plus the first page. The main process reads
+the source through a stream and stops after the requested page plus one lookahead
+line or row, so the renderer never receives an unbounded text blob for these
+formats:
+
+```clojure
+{:path "/abs/path/app.log"
+ :kind "log"
+ :paged true
+ :page {:index 0 :lines ["..."] :hasPrev false :hasNext true}
+ :meta {:size 81234567 :pageSize 2000}
+ :stamp 1780000000000}
+```
+
+The renderer asks for adjacent pages through `vv:content-page`:
+
+```clojure
+{:path "/abs/path/app.log" :kind "log" :stamp 1780000000000 :page 1}
+```
+
+and receives only that bounded page. Delimited files use the same shape with
+`:kind "table"` and `:rows` instead of `:lines`. The renderer keeps a finite
+nearby-page cache and prefetches the previous and next page when possible; main
+keeps a bounded request cache keyed by `path`, `stamp`, `kind`, `page`, and
+`sheet`.
+
+Supported tabular preview formats are `.csv`, `.tsv`, `.tab`, `.psv`, `.dsv`,
+`.xlsx`, `.xlsm`, `.ods`, and `.fods`. Delimited files are stream-paged when
+large; workbook formats are parsed from capped preview bytes because their ZIP/XML
+metadata must be read together. Supported office-style document previews are
+`.docx`, `.odt`, `.odp`, and `.odf`; they produce sanitized HTML plus extracted
+text where available.
+
 **Directories reuse `vv:content`** — no dedicated channel. When the opened path is a
 directory, `vinary.main.service/send-content!` sends a listing instead of file text:
 
@@ -113,6 +156,27 @@ directory, `vinary.main.service/send-content!` sends a listing instead of file t
 The renderer stores `:entries` on the document entity as `:doc/entries` and renders
 the in-pane directory browser. A depth-0 watcher re-sends the listing as children
 change, exactly like a file's live refresh.
+
+Archives also reuse `vv:content`: opening an archive returns `:kind "archive"` with
+directory-browser-compatible `:entries`. Entry paths are virtual archive URIs rather
+than extracted temporary files. Archive directories are represented as URI-chain
+entries ending in `/`; archive members retain their full path within the current
+archive layer:
+
+```text
+vv-archive://open?chain=%5B%22%2Fabs%2Fbundle.zip%22%2C%22logs%2Fapp.log%22%5D
+```
+
+The URI-bar display form is `file:///abs/bundle.zip!/logs/app.log`. Nested archives
+append archive entry names to the encoded chain, for example:
+
+```text
+vv-archive://open?chain=%5B%22%2Fabs%2Fouter.zip%22%2C%22inner.tar.gz%22%2C%22logs%2Fapp.log%22%5D
+```
+
+The main process resolves the chain one archive layer at a time, never writes an
+extracted entry to disk, and enforces bounded nested-archive depth and entry-size
+limits before streaming the final entry to its preview.
 
 Markdown render output is not sent by main; it is produced in the renderer and
 committed as:

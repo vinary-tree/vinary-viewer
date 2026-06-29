@@ -171,6 +171,7 @@ from a doc are always relative, e.g. `../diagrams/<name>.puml`.
 | `seq-open-file.puml`                   | sequence (full round trip)       | `usage/01-getting-started.md`, `features/02-multi-tab-previews.md`                 |
 | `seq-markdown-render.puml`             | sequence (render round trip)     | `features/09-markdown-rendering.md`, `theory/01-reactive-architecture.md`          |
 | `seq-live-refresh.puml`                | sequence (watcher → re-render)   | `features/01-live-refresh.md`, `theory/03-live-refresh-spine.md`                   |
+| `seq-content-page-streaming.puml`       | sequence (bounded content pages)   | `architecture/03-ipc-protocol.md`                                                  |
 | `seq-theme-switch.puml`                | sequence                         | `usage/05-configuration.md`, `features/06-themes-and-live-switching.md`            |
 | `seq-find.puml`                        | sequence (find highlight)        | `features/05-in-page-find.md`, `theory/06-find-css-custom-highlight.md`            |
 | `seq-history.puml`                     | sequence (back / forward)        | `features/07-navigation-history.md`                                               |

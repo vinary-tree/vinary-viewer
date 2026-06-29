@@ -77,7 +77,8 @@
 
 (rf/reg-event-fx
  :content/received
- (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp]}]]
+ (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
+                            sourceable paged] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -88,7 +89,13 @@
          attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
                    text                  (assoc :doc/text text)
                    html                  (assoc :doc/html html)
-                   (= kind "directory")  (assoc :doc/entries (vec entries))
+                   (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
+                   sheets                (assoc :doc/sheets (vec sheets))
+                   page                  (assoc :doc/page page)
+                   meta                  (assoc :doc/meta meta)
+                   dataUrl               (assoc :doc/data-url dataUrl)
+                   (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
+                   (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    (not= kind "markdown") (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
@@ -100,7 +107,7 @@
          ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
          ;; background live-refresh — so the MRU + trail track where the user actually went.
          active? (= path (nav/active-path db'))
-         db'     (if active? (record-recent db' path (= kind "directory")) db')]
+         db'     (if active? (record-recent db' path (#{"directory" "archive"} kind)) db')]
      (with-retention
        {:db db'
         :fx (cond-> [[:ds/transact tx]]

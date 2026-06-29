@@ -143,8 +143,9 @@ or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of
 ## 4. Filesystem exposure
 
 The main process reads **any path it is given** (`service/send-content!` →
-`fs.readFileSync(path, "utf8")`), and runs `git` in the **directory of the open file**
-(`service/repo-tree`). It performs no allow-listing or path confinement.
+`content_service.openUri` or the legacy text/source path), and runs `git` in the
+**directory of the open file** (`service/repo-tree`). It performs no allow-listing
+or path confinement.
 
 **Why this is acceptable in the intended model:** vinary-viewer is a **CLI-invoked, single-user
 viewer**. The paths it reads originate from (a) the command line you typed and (b) files you clicked in
@@ -162,6 +163,37 @@ preserve this property if the app grows features that touch the network.
 shell-injection vector), with `cwd` set to the open file's directory. The renderer cannot inject
 additional `git` arguments; it only influences *which directory* `git` runs in by choosing which file to
 open.
+
+### Local parser and archive exposure
+
+The expanded preview surface adds parsers for local Office, OpenDocument, workbook, delimited, log, and
+archive files. These parsers run in the **main process**, so their inputs are a trust boundary even
+though the app remains a local, single-user viewer.
+
+| Input class | Main-process behavior | Bound today |
+|-------------|-----------------------|-------------|
+| `.docx` | Mammoth extracts HTML and plain text from a local buffer. | Preview bytes are capped before parsing; HTML is stripped of script/style/embed elements, event attributes, and `javascript:` URLs before it crosses IPC. |
+| `.odt`, `.odp`, `.odf` | The OpenDocument `content.xml` member is read and converted into escaped paragraph/heading HTML. | Preview bytes are capped; generated HTML is escaped from XML text nodes. |
+| `.xlsx`, `.xlsm`, `.ods`, `.fods` | Workbook XML is parsed into bounded sheet matrices. | Preview bytes are capped; rendered sheets are row/column/cell-length bounded. |
+| `.csv`, `.tsv`, `.tab`, `.psv`, `.dsv` | Delimited text is parsed with Papa Parse. | Large files are stream-paged; each page is a bounded row window with one lookahead row to compute `hasNext`. |
+| Log files and sniffed log-like text | Standard timestamp, severity, JSON-log, and common access-log formats are detected from a prefix sample and rendered as text lines. | Large files are stream-paged; compressed logs such as `.log.gz` and rotated `.log.N.gz` are decompressed through a stream. |
+| `.zip`, `.jar`, `.war`, `.ear`, `.epub`, `.tar`, `.tgz`, `.tar.gz` | Archives are listed in-pane and entries are addressed as virtual archive URIs. | No entry is extracted to disk; nested archive depth, total listed entries, and entry bytes are bounded. |
+
+The main invariant is: **parsers may read local user-selected bytes, but renderer payloads stay bounded
+or structured.** Large logs and large delimited files cross IPC as pages, not as complete strings. Nested
+archive entries cross as `vv-archive://open?chain=...` URIs until the user opens a final previewable
+member.
+
+Archive traversal is intentionally virtual. A URI such as
+`vv-archive://open?chain=[root.zip,inner.tar.gz,logs/app.log]` means "stream `logs/app.log` out of
+`inner.tar.gz`, which is itself an entry inside `root.zip`"; it does **not** mean "extract to a temporary
+directory and open a path." This avoids path traversal writes such as `../../target`, because archive
+member names are never materialized as filesystem destinations.
+
+Residual risk is parser risk: malformed Office/workbook/archive inputs could exercise bugs in
+third-party parser libraries or in the local XML/ZIP/TAR traversal code. That risk is acceptable for the
+current **trusted local document** model. It would not be sufficient for hostile internet attachments
+without stronger sandboxing, stricter IPC path authorization, and parser isolation.
 
 ---
 
@@ -324,6 +356,8 @@ resolve empty), so they do **not** expand the extension's reach beyond the netwo
 | Renderer ↔ OS isolation                    | **Strong** — `contextIsolation:true`, `nodeIntegration:false`, Node modules stubbed in the build. |
 | Cross-process surface                      | **Mediated** — documented `window.vv` operations; no raw `ipcRenderer`, fs, arbitrary file writes, or shell. |
 | Filesystem reads                           | Any path the user can read (CLI-viewer trust); `git` via `execFileSync` (no shell).               |
+| Office/workbook/archive parsing           | Main-process parsers with capped preview bytes, bounded archive depth/entry count, and no extraction writes. |
+| Large log / delimited previews             | Stream-paged over IPC as finite row/line windows; renderer keeps only nearby pages.               |
 | Markdown XSS via raw HTML                   | **Not passed through** — `rehype-raw` is not enabled; plain-text/source fallback kinds are HTML-escaped. |
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
 | CSP                                        | **None yet** — Forthcoming. A future renderer CSP must allow `'unsafe-eval'`: pdf.js JIT-compiles a PDF's PostScript/Type-4 shading functions via `eval` (`isEvalSupported true`), and the pdf.js ESM module loads through `new Function` (ADR-0013). PDFs follow the local-document trust model. |
