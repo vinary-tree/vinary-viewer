@@ -104,14 +104,22 @@
 (defn ^:export main []
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
-  ;; Chromium switches the app always needs — see vinary.main.startup/chromium-switches for the full
-  ;; rationale of each: disable-gpu-sandbox (Linux GPU-process DRI/GBM driver access; renderer stays
-  ;; sandboxed), disable-partial-raster (RASTER stage: tile-content reuse), and ui-disable-partial-swap
-  ;; (PRESENT stage: forces full-viewport present so the software display compositor can't leave a stale
-  ;; top→bottom scroll-band on NVIDIA + Wayland). RASTER ≠ SWAP — distinct stages, distinct switches.
+  ;; Chromium switches the app always needs — see vinary.main.startup/chromium-switches: disable-gpu-sandbox
+  ;; (Linux GPU-process DRI/GBM driver access; renderer stays sandboxed) + two defensive software-compositor
+  ;; switches (disable-partial-raster, ui-disable-partial-swap). NOTE: those two do NOT fix the NVIDIA +
+  ;; Wayland scroll-band; the actual band fix is disable-hardware-acceleration? below (remove the GPU process).
   (doseq [sw startup/chromium-switches] (.appendSwitch (.-commandLine app) sw))
-  ;; VV_SOFTWARE_GL=1 additionally forces FULL software rendering (no GPU process) where even that fails.
-  (when (.. js/process -env -VV_SOFTWARE_GL) (.disableHardwareAcceleration app))
+  ;; Remove the GPU process where its Wayland presentation path renders the duplicated scroll-band
+  ;; (confirmed on NVIDIA + Wayland: removing the GPU process eliminates it; it persists with the GPU
+  ;; process even with Vulkan/partial-swap off). Software compositing is already in force, so the GPU
+  ;; process adds no benefit here. Default ON for Wayland sessions; VV_GPU=1 forces it back on,
+  ;; VV_SOFTWARE_GL=1 forces it off anywhere. See vinary.main.startup/disable-hardware-acceleration?.
+  (when (startup/disable-hardware-acceleration?
+          {:VV_GPU           (.. js/process -env -VV_GPU)
+           :VV_SOFTWARE_GL   (.. js/process -env -VV_SOFTWARE_GL)
+           :XDG_SESSION_TYPE (.. js/process -env -XDG_SESSION_TYPE)
+           :WAYLAND_DISPLAY  (.. js/process -env -WAYLAND_DISPLAY)})
+    (.disableHardwareAcceleration app))
   (service/init!)
   ;; remove Electron's default application menu — vinary-viewer draws its own themed menu bar, and its
   ;; keybindings own the accelerators (so the default menu's Ctrl+R/W/etc. don't double-fire)

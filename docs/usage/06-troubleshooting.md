@@ -106,7 +106,7 @@ forces software rendering if you ever need to rule the GPU out.)
 
 ---
 
-## 6. Markdown preview shows a duplicated band while scrolling (software compositing)
+## 6. Markdown preview shows a duplicated band while scrolling (NVIDIA + Wayland)
 
 While scrolling a tall Markdown preview — especially one with several SVG figures — a horizontal band
 ≈ the **top fifth of the window is duplicated into a band at the bottom fifth** (the bottom pixels are
@@ -114,39 +114,33 @@ replaced by the top's). **Multiple** such bands can appear, they shift as you ke
 **moving the mouse cursor over them makes them spread**. It often correlates with the SVG figures
 appearing to flicker — disappear and reappear.
 
-This is a **software display-compositor present-stage bug**, not a problem with the document. On hosts
-where Electron runs with GPU compositing disabled — `app.getGPUFeatureStatus().gpu_compositing =
-disabled_software` (e.g. NVIDIA + Wayland) — Chromium normally presents only each frame's **damage
-rect** to the window surface (*partial swap*). Presenting only the damaged sub-rect into a
-rotated/recycled buffer can leave a **stale band** of an earlier scroll offset in the buffer's
-undamaged region — the band you see. Cursor motion generates extra frames that rotate through more
-stale buffers, so the bands multiply and shuffle. The SVG figures are an **amplifier** (Chromium
-evicts and re-decodes their bitmaps as they scroll off/on screen — the flicker — producing large
-damage regions); they do **not** create the copy.
+This is the **GPU process's Wayland window-surface presentation path** mis-presenting a stale region of
+the window — **not** a problem with the document. Diagnosed by screen-captured A/B testing: with the GPU
+process active the band appears regardless of presentation backend (default, `--use-angle=gl`,
+`--use-angle=vulkan` all band); **removing the GPU process eliminates it.** The SVG figures are only an
+**amplifier** (Chromium evicts and re-decodes their bitmaps as they scroll off/on screen — the flicker —
+producing large repaint regions); they do not create the copy.
 
-Two *different* Chromium stages can strand stale pixels under software compositing, so the app appends
-two switches in `vinary.main.core/main` (see `vinary.main.startup/chromium-switches`) — **raster ≠ swap**
-(raster produces tile bitmaps; swap/present pushes the final frame to the screen):
+**The fix:** the app disables the GPU process on Wayland sessions — `app.disableHardwareAcceleration()`,
+gated by `vinary.main.startup/disable-hardware-acceleration?` in `vinary.main.core/main`. Low cost here
+because GPU **compositing** is already blocklisted to software on this NVIDIA + Wayland combo
+(`app.getGPUFeatureStatus().gpu_compositing = disabled_software`), so the GPU process was doing no
+compositing/raster — only the broken presentation. Overrides:
 
-| Switch | Stage | What it fixes |
-|--------|-------|---------------|
-| `--ui-disable-partial-swap` | **present** (`viz` display compositor) | redraws + presents the whole viewport every frame, so no stale band survives — the fix for **this** scrolling-band artifact |
-| `--disable-partial-raster` | **raster** (`cc` tiles) | re-rasterizes tiles fully (a distinct stale-content-within-a-tile mode) |
+| Env | Effect |
+|-----|--------|
+| *(default on Wayland)* | GPU process disabled — no band |
+| `VV_GPU=1` | force the GPU process back **on** (band returns on this host); for systems where Wayland GPU works |
+| `VV_SOFTWARE_GL=1` | force the GPU process **off** anywhere (X11 too) |
 
-Both apply in the **main** process at launch (not visible in renderer DevTools). If you still see a
-band after a rebuild, these experiments bisect the cause:
+> What does **not** fix it (verified — don't retry): `--disable-partial-raster`, `--ui-disable-partial-swap`,
+> `--disable-features=Vulkan`, and forcing the ANGLE/GL backend (`--use-angle=gl`) — the band persists with
+> any of them while the GPU process is active. The first two switches are still appended
+> (`vinary.main.startup/chromium-switches`) as harmless defensive measures, but they are not this fix.
 
-| Experiment | Expected if it is partial-swap | Meaning |
-|-----------|-------------------------------|---------|
-| Rebuild (`npm run compile`) + relaunch | **band gone** | confirmed — partial-swap was the cause |
-| `VV_SOFTWARE_GL=1` **without** the swap switch | **band persists** | `disableHardwareAcceleration` removes the GPU process but does *not* disable partial swap, so a persisting band *corroborates* the swap diagnosis rather than refuting it |
-| `--ozone-platform=x11` + `VV_SOFTWARE_GL=1` | band gone only here | the defect is specific to the Wayland software present path — run under Xwayland (the prior "X11 segfaults the GPU process" caveat is moot with hardware acceleration off) |
-| Temporarily make the `figures/*.svg` 404 | banding drops sharply | confirms the SVGs are the amplifier (diagnostic only, not a fix) |
-
-If none of the above clears it, the renderer-side fallback is to render the figures as **inline SVG**
-(part of the DOM, not a decode-cache-evictable `<img>`) in `src/vinary/renderer/figures.cljs` — see the
-related SVG-scroll note in §4 above. (Related cause; the same present-stage bug underlies the SVG flicker
-there.)
+To debug a recurrence: capture it with an **external** screenshot tool while scrolling (`spectacle`/`grim`
+— Electron's `capturePage` cannot see present-layer artifacts), and compare `VV_GPU=1` vs default to
+confirm the GPU process is the cause.
 
 ---
 

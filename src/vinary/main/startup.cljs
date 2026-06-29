@@ -4,45 +4,48 @@
 
 (def chromium-switches
   "Chromium command-line switches the app appends unconditionally at launch (applied by the doseq in
-   vinary.main.core/main, BEFORE app `whenReady` — the required timing for compositor switches).
+   vinary.main.core/main, BEFORE app `whenReady` — the required timing for compositor switches):
 
-   Two distinct Chromium stages produce stale-pixel artifacts under software compositing on this class
-   of host (NVIDIA + Wayland, where app.getGPUFeatureStatus() reports gpu_compositing = disabled_software);
-   RASTER ≠ SWAP — rasterization produces tile bitmaps, swap/present pushes the final composited frame to
-   the screen — so each stage needs its own switch:
+     - \"disable-gpu-sandbox\"      — Linux often sandboxes the GPU process so it cannot open the system
+                                      DRI/GBM driver (\"MESA-LOADER: failed to open dri … Permission
+                                      denied\"); loosen only the GPU sandbox (the renderer stays sandboxed).
 
-     - \"disable-gpu-sandbox\"       — Linux often sandboxes the GPU process so it cannot open the system
-                                       DRI/GBM driver (\"MESA-LOADER: failed to open dri … Permission
-                                       denied\"); loosen only the GPU sandbox (the renderer stays sandboxed).
+     - \"disable-partial-raster\"   — RASTERIZATION stage (cc::LayerTreeSettings::use_partial_raster): stop
+                                      reusing previously-rastered TILE CONTENT for sub-regions a layer
+                                      believes unchanged. Defensive only.
 
-     - \"disable-partial-raster\"    — RASTERIZATION stage (cc::LayerTreeSettings::use_partial_raster):
-                                       Chromium reuses previously-rastered TILE CONTENT for sub-regions of a
-                                       layer it believes unchanged. Disabling forces every tile to be fully
-                                       re-rastered. Kept as defense for a stale-content-within-a-tile mode;
-                                       it does NOT by itself fix the present-stage scroll band below.
+     - \"ui-disable-partial-swap\"  — PRESENTATION stage (viz::RendererSettings::partial_swap_enabled):
+                                      present the FULL viewport every frame instead of only the per-frame
+                                      damage rect. Defensive only.
 
-     - \"ui-disable-partial-swap\"   — PRESENTATION stage (viz::RendererSettings::partial_swap_enabled):
-                                       normally only the per-frame DAMAGE RECT of the final composited frame
-                                       is drawn and presented to the output surface. Under software
-                                       compositing on NVIDIA + Wayland, presenting only the damage rect into
-                                       a rotated/recycled buffer can leave a STALE BAND of an earlier scroll
-                                       offset in the buffer's undamaged region — the reported top-fifth →
-                                       bottom-fifth duplication (multiple bands accumulate; cursor motion
-                                       generates more frames and reshuffles them). Setting this switch makes
-                                       use_partial_swap_ = false, so DirectRenderer expands root_damage_rect
-                                       to the FULL viewport every drawn frame and SoftwareRenderer (a
-                                       DirectRenderer subclass) repaints the entire backing buffer — no stale
-                                       region survives. The switch was originally created for an NVIDIA
-                                       partial-present defect. Source: switch in ui/base/ui_base_switches.cc
-                                       (kUIDisablePartialSwap); consumer in
-                                       components/viz/host/renderer_settings_creation.cc
-                                       (partial_swap_enabled = !HasSwitch(kUIDisablePartialSwap)); full-frame
-                                       redraw in components/viz/service/display/direct_renderer.cc;
-                                       SoftwareRenderer : public DirectRenderer in software_renderer.h.
-
-   Cost is per-DRAWN-frame damage area (not frame rate): idle = zero (no damage → no draw), and active
-   scroll of an image-dense doc is already a heavy-repaint scenario. Harmless on GPU-composited hosts —
-   they merely forgo a present-bandwidth optimization (no correctness change). VV_SOFTWARE_GL=1 additionally
-   forces full software rendering via app.disableHardwareAcceleration; that one is conditional and handled
-   separately in core/main."
+   NOTE — neither partial-raster nor partial-swap fixes the NVIDIA + Wayland scroll-band (a copy of the
+   window's top ~1/5 painted into the bottom ~1/5 while scrolling). Screen-captured A/B testing this
+   session showed the band PERSISTS with the GPU process active even with both switches set and with any
+   ANGLE/GL or Vulkan backend forced; it vanishes ONLY when the GPU process is removed. The actual fix is
+   `disable-hardware-acceleration?` below. These two switches are kept (low cost; may help other
+   software-compositor modes) but are NOT the band fix — don't let their names mislead the next reader."
   ["disable-gpu-sandbox" "disable-partial-raster" "ui-disable-partial-swap"])
+
+(defn disable-hardware-acceleration?
+  "Whether to remove Chromium's GPU process at startup (app.disableHardwareAcceleration) — the ACTUAL fix
+   for the NVIDIA + Wayland scroll-band.
+
+   The band (a copy of the window's top ~1/5 painted into the bottom ~1/5 while scrolling; multiple bands
+   accumulate; cursor motion worsens it) comes from the GPU process's Wayland window-surface PRESENTATION
+   path. Screen-captured + visually-verified A/B this session: with the GPU process ON the band is present
+   regardless of presentation backend (default, --use-angle=gl, --use-angle=vulkan all band); removing the
+   GPU process ELIMINATES it. Software compositing is already in force here (gpu_compositing =
+   disabled_software — Chromium blocklists GPU compositing for this NVIDIA + Wayland combo), so the GPU
+   process provides no compositing/raster benefit — only the broken presentation — making removal a
+   low-cost default on Wayland. Kept overridable.
+
+   `env` is a map of the relevant environment-variable values (strings or nil):
+     :VV_GPU           — set to force the GPU process back ON (opt out of this workaround) anywhere.
+     :VV_SOFTWARE_GL   — set to force the GPU process OFF (full software) anywhere.
+     :XDG_SESSION_TYPE / :WAYLAND_DISPLAY — detect a Wayland session (the affected presentation path)."
+  [{:keys [VV_GPU VV_SOFTWARE_GL XDG_SESSION_TYPE WAYLAND_DISPLAY]}]
+  (cond
+    VV_GPU         false
+    VV_SOFTWARE_GL true
+    :else          (boolean (or (= "wayland" XDG_SESSION_TYPE)
+                                (and WAYLAND_DISPLAY (not= "" WAYLAND_DISPLAY))))))

@@ -58,11 +58,23 @@
 (deftest startup-switches
   (testing "software-compositor present/raster artifact fixes ship as invariant startup switches"
     (is (contains? (set startup/chromium-switches) "ui-disable-partial-swap")
-        "core/main must always append --ui-disable-partial-swap (PRESENT stage: stale top→bottom scroll-band)")
+        "core/main must always append --ui-disable-partial-swap (PRESENT stage; defensive, NOT the band fix — that's disable-hardware-acceleration?)")
     (is (contains? (set startup/chromium-switches) "disable-partial-raster")
         "core/main must always append --disable-partial-raster (RASTER stage: tile-content reuse)")
     (is (contains? (set startup/chromium-switches) "disable-gpu-sandbox")
         "core/main must always append --disable-gpu-sandbox (Linux GPU driver access)")))
+
+(deftest disable-hw-accel
+  (testing "Wayland session removes the GPU process (the scroll-band fix); X11/other keep it"
+    (is (true?  (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "wayland"})))
+    (is (true?  (startup/disable-hardware-acceleration? {:WAYLAND_DISPLAY "wayland-0"})))
+    (is (false? (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "x11"})))
+    (is (false? (startup/disable-hardware-acceleration? {})))
+    (is (false? (startup/disable-hardware-acceleration? {:WAYLAND_DISPLAY ""}))))
+  (testing "VV_GPU forces the GPU process on (overrides Wayland); VV_SOFTWARE_GL forces it off anywhere"
+    (is (false? (startup/disable-hardware-acceleration? {:VV_GPU "1" :XDG_SESSION_TYPE "wayland"})))
+    (is (true?  (startup/disable-hardware-acceleration? {:VV_SOFTWARE_GL "1" :XDG_SESSION_TYPE "x11"})))
+    (is (false? (startup/disable-hardware-acceleration? {:VV_GPU "1" :VV_SOFTWARE_GL "1"})))))
 
 (deftest key-normalization
   (testing "modifier folding + named keys"
