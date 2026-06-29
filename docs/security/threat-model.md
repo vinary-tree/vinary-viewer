@@ -336,16 +336,42 @@ expansion of attack surface, mitigated by:
 The MPL ad-blocker (ADR-0014) drops malvertising/tracker requests at `webRequest` **before the page sees
 them**, shrinking the remote-content attack surface for the web view.
 
+### Native password-manager bridge
+
+The native password-manager bridge is intentionally separate from the Chrome-extension runtime. It runs
+provider CLIs in the **trusted main process** (`vinary.main.passwords` and
+`vinary.main.password-adapters`) and keeps the renderer on metadata-only IPC.
+
+Security properties:
+
+- **No shell.** Provider commands use `child_process.spawn` with argv arrays. Restricted custom JSON
+  adapters are also executable-plus-argv; Vinary does not accept arbitrary shell snippets.
+- **External unlock.** Vinary does not collect provider master passwords. Provider re-authentication,
+  MFA, hardware keys, SSO, and LastPass-style periodic extra authorization remain provider-owned flows.
+- **Renderer metadata only.** Search results sent to the app renderer contain provider id, item id, title,
+  username, URL, and origin. Password fields are stripped before `vv:password-items`.
+- **Direct fill path.** Revealed credentials follow this path only:
+  `provider CLI -> main process -> web-view preload -> DOM fields`.
+- **Short-lived save tokens.** Submitted login candidates are held in main memory for a short time. The
+  renderer receives a token plus origin/username/provider metadata; it never receives the password.
+- **No secret persistence by Vinary.** Secrets are not written to `settings.edn`, `recent.edn`,
+  `passwords.edn`, logs, screenshots, or DataScript/app-db.
+
+Residual risk: provider CLIs themselves are part of the trusted computing base for this feature. The
+LastPass CLI does not provide a reliable URL-only metadata search, so origin matching uses its JSON output
+inside the main process, immediately sanitizes it, and never logs it. This is still materially safer than
+patching third-party password-manager extension files or exposing secrets to renderer state.
+
 ### Documented non-support (honest limits)
 
-Native-messaging password managers (1Password, KeePassXC) are **not** provided by Electron and are out of
-scope. For the APIs Electron lacks (`chrome.windows`/`webNavigation`/`cookies`/`notifications`/`contextMenus`/
-`privacy`), a **self-contained chrome.\* polyfill preload** (registered for both the frame and service-worker
-types) injects **inert, correctly-shaped stubs** into the extension's main world — its pages **and** its
-background worker — so an extension that reads them at startup (e.g. LastPass → `chrome.windows.onFocusChanged`)
-registers and its popup loads. The stubs **add no capability** (they fail closed: events never fire, getters
-resolve empty), so they do **not** expand the extension's reach beyond the network access it already had on
-`persist:vinary-web`. `offscreen`/`nativeMessaging`/`sidePanel` remain absent entirely.
+Native-messaging password managers (1Password, KeePassXC, Bitwarden desktop integration) are **not**
+provided by Electron extensions. Use the native password-manager bridge for that class of integration. For
+the APIs Electron lacks (`chrome.windows`/`webNavigation`/`cookies`/`notifications`/`contextMenus`/
+`privacy`), a **self-contained chrome.\* polyfill preload** injects **inert, correctly-shaped stubs** into
+extension pages. Those stubs **add no capability** (they fail closed: events never fire, getters resolve
+empty). Real/heavy MV3 password-manager workers such as LastPass can still fail before the missing
+`chrome.*` surfaces are present in their worker realm. `offscreen`/`nativeMessaging`/`sidePanel` remain
+absent entirely.
 
 ---
 
@@ -362,6 +388,7 @@ resolve empty), so they do **not** expand the extension's reach beyond the netwo
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
 | CSP                                        | **None yet** — Forthcoming. A future renderer CSP must allow `'unsafe-eval'`: pdf.js JIT-compiles a PDF's PostScript/Type-4 shading functions via `eval` (`isEvalSupported true`), and the pdf.js ESM module loads through `new Function` (ADR-0013). PDFs follow the local-document trust model. |
 | Navigation lock-down                       | **None yet** — Forthcoming.                                                                       |
+| Native password-manager bridge             | **Main-owned** — provider CLIs run without a shell; renderer receives metadata/tokens only; revealed secrets go directly to the web-view preload. |
 
 The current design is appropriate for its intended **local, single-user, trusted-document** use, and it
 already follows the most important Electron isolation recommendations. The Forthcoming items in §6 are

@@ -15,6 +15,23 @@
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
 (defn- app-wc    ^js []   (some-> ^js (:win @state) .-webContents))   ; ^js return: extern-safe interop under advanced (parity with shell/wc)
 
+(defn app-webcontents ^js [] (app-wc))
+
+(defn active-webcontents ^js []
+  (some-> ^js (:view @state) .-webContents))
+
+(defn active-webcontents? [^js wc]
+  (identical? wc (active-webcontents)))
+
+(defn active-url [] (:url @state))
+
+(defn fill-password!
+  "Send revealed credentials directly to the isolated web-view preload. The renderer only ever receives
+   non-secret item metadata; username/password values enter the web page through this main-owned path."
+  [payload]
+  (when-let [^js wc (active-webcontents)]
+    (.send wc "vv:password-fill" (clj->js payload))))
+
 ;; ---- pre-cached page snapshot ------------------------------------------------------------------
 ;; The native view always paints above the DOM, so an overlay is shown by hiding the view and painting this
 ;; raster in the DOM. We capture it PROACTIVELY (after load + after scroll, while the page is live + visible)

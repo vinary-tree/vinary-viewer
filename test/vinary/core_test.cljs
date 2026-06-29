@@ -20,6 +20,8 @@
             [vinary.main.service-util :as service-util]
             [vinary.main.startup :as startup]
             [vinary.main.ext-util :as eu]
+            [vinary.main.password-util :as pw-util]
+            [vinary.main.password-adapters :as pw-adapters]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.renderer.history-input :as history-input]
@@ -762,6 +764,59 @@
     (is (eu/cache-stale? nil 24 1000))
     (is (eu/cache-stale? 1 24 (+ 1 (* 25 3600000))))
     (is (not (eu/cache-stale? 1000 24 (+ 1000 (* 1 3600000)))))))
+
+(deftest password-util-helpers
+  (testing "web URL origin and host matching"
+    (is (= "https://login.example.com" (pw-util/url-origin "https://login.example.com/path")))
+    (is (= "login.example.com" (pw-util/url-host "https://login.example.com/path")))
+    (is (pw-util/host-suffix-match? "login.example.com" "example.com"))
+    (is (not (pw-util/host-suffix-match? "evil-example.com" "example.com")))
+    (is (not (pw-util/web-url? "file:///tmp/a.html"))))
+  (testing "matching ranks exact-origin entries before parent-domain entries"
+    (let [items [{:provider "onepassword" :id "1" :title "Exact" :username "a"
+                  :url "https://login.example.com/signin"}
+                 {:provider "lastpass" :id "2" :title "Parent" :username "b"
+                  :url "https://example.com"}]
+          rows  (pw-util/matching-items "https://login.example.com/signin" items)]
+      (is (= ["1" "2"] (map :id rows)))
+      (is (> (:score (first rows)) (:score (second rows))))))
+  (testing "sanitize-item keeps metadata and drops secrets"
+    (let [safe (pw-util/sanitize-item {:provider "onepassword" :id "abc" :title "A"
+                                       :username "u" :url "https://example.com"
+                                       :password "secret"})]
+      (is (= {:provider "onepassword" :id "abc" :username "u" :url "https://example.com"}
+             (select-keys safe [:provider :id :username :url])))
+      (is (not (contains? safe :password)))))
+  (testing "status inference recognizes reauth and MFA outputs"
+    (is (= "reauth-required" (pw-util/status-from-process-output 1 "Not logged in." "")))
+    (is (= "mfa-required" (pw-util/status-from-process-output 1 "" "TOTP required")))
+    (is (= "ready" (pw-util/status-from-process-output 0 "" "")))))
+
+(deftest password-adapter-parsers
+  (let [op-provider {:id "onepassword" :label "1Password"}
+        lp-provider {:id "lastpass" :label "LastPass"}]
+    (testing "1Password list items become sanitized-compatible metadata"
+      (let [row (pw-adapters/parse-op-item op-provider
+                                           {:id "i1" :title "Example" :additional_information "me@example.com"
+                                            :vault {:id "v1"} :urls [{:href "https://example.com/login"}]})]
+        (is (= "i1" (:id row)))
+        (is (= "v1" (:vault-id row)))
+        (is (= "me@example.com" (:username row)))
+        (is (= ["https://example.com/login"] (:urls row)))))
+    (testing "1Password reveal extracts username/password fields"
+      (is (= {:username "me@example.com" :password "pw" :url "https://example.com" :urls ["https://example.com"]}
+             (pw-adapters/extract-op-credentials
+              {:fields [{:id "username" :purpose "USERNAME" :type "STRING" :value "me@example.com"}
+                        {:id "password" :purpose "PASSWORD" :type "CONCEALED" :value "pw"}]
+               :urls [{:href "https://example.com"}]}))))
+    (testing "LastPass JSON entries become metadata without exposing passwords"
+      (let [row  (pw-adapters/parse-lastpass-entry lp-provider
+                                                   {:id "7" :name "Example" :username "me"
+                                                    :password "secret" :url "https://example.com"})
+            safe (pw-util/sanitize-item row)]
+        (is (= "7" (:id safe)))
+        (is (= "me" (:username safe)))
+        (is (not (contains? safe :password)))))))
 
 (deftest history-input-coalescing
   (let [[s1 ok1?] (history-input/accept {:dir nil :time 0} "back" 1000)

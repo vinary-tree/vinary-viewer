@@ -45,7 +45,8 @@
             {:submenu "Key Bindings" :access-key "k" :radio :sub/keymaps}
             :sep
             {:label "Preferences…"   :access-key "p" :event [:settings/open]}
-            {:label "Extensions…"    :access-key "x" :event [:extensions/open]}]}
+            {:label "Extensions…"    :access-key "x" :event [:extensions/open]}
+            {:label "Passwords…"     :access-key "w" :event [:passwords/open]}]}
    {:label "Help" :access-key "h"
     :items [{:label "Command Palette" :access-key "c" :accel "Ctrl+Shift+P" :event [:palette/open {:source :command}]}
             :sep

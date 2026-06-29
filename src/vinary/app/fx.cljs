@@ -159,6 +159,11 @@
 (rf/reg-fx :vv/adblock-set-enabled (fn [on] (when-let [^js v (vv)] (when (.-adblockSetEnabled v) (.adblockSetEnabled v on)))))
 (rf/reg-fx :vv/adblock-set-lists  (fn [kw]  (when-let [^js v (vv)] (when (.-adblockSetLists v) (.adblockSetLists v (name kw))))))
 (rf/reg-fx :vv/adblock-refresh    (fn [_]   (when-let [^js v (vv)] (when (.-adblockRefresh v) (.adblockRefresh v)))))
+(rf/reg-fx :vv/password-state      (fn [_]   (when-let [^js v (vv)] (when (.-passwordState v) (.passwordState v)))))
+(rf/reg-fx :vv/password-search     (fn [url] (when-let [^js v (vv)] (when (.-passwordSearch v) (.passwordSearch v url)))))
+(rf/reg-fx :vv/password-fill       (fn [item] (when-let [^js v (vv)] (when (.-passwordFill v) (.passwordFill v (clj->js item))))))
+(rf/reg-fx :vv/password-save       (fn [payload] (when-let [^js v (vv)] (when (.-passwordSave v) (.passwordSave v (clj->js payload))))))
+(rf/reg-fx :vv/password-dismiss-save (fn [token] (when-let [^js v (vv)] (when (.-passwordDismissSave v) (.passwordDismissSave v token)))))
 (defonce ^:private ext-config-save-timer (atom nil))
 (rf/reg-fx :vv/save-ext-config    ; debounced — toggles can fire rapidly
            (fn [edn]

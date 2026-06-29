@@ -81,8 +81,8 @@
                                        (:ok update-status)        "✓ Up to date"
                                        :else                      (str "✗ " (:error update-status)))])]
          [:div.vv-ext-note
-          "Autofill + vault popups work for cloud password managers; native-messaging managers "
-          "(1Password, KeePassXC) and some MV3 background features are not supported in Electron."]]))))
+          "Heavy MV3 password-manager workers and native messaging are not supported by Electron extensions; "
+          "use the native password-manager bridge from the key icon on web tabs."]]))))
 
 (defn dialog []
   (when @(subscribe [:ui/extensions-open?])

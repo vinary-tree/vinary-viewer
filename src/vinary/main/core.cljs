@@ -18,6 +18,7 @@
             [vinary.main.extensions :as extensions]
             [vinary.main.ext-config :as ext-config]
             [vinary.main.ext-popup :as ext-popup]
+            [vinary.main.passwords :as passwords]
             [vinary.main.grammars :as grammars]))
 
 (def ^js app (.-app electron))
@@ -68,6 +69,7 @@
       (extensions/init! win prefs)
       (adblock/init! win (:adblock prefs)))
     (web/init! win)
+    (passwords/init! win)
     (shell/init! win)
     (reset! main-window win)
     win))

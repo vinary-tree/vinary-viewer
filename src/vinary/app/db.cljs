@@ -63,5 +63,8 @@
         :extensions-open? false
         :extensions {:enabled? true :installed [] :install-status nil :update-status nil}
         :adblock {:enabled? true :lists :ads-and-tracking :last-updated nil :status nil}
+        ;; native password-manager bridge (main-owned CLIs; renderer stores only metadata/status)
+        :passwords {:open? false :providers [] :forms {:count 0} :items [] :busy? false
+                    :error nil :result nil :save-prompt nil}
         ;; command palette / fuzzy finder
         :palette {:open? false :source :command :prefix "" :query "" :items [] :selected 0}}})

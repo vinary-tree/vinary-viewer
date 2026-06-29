@@ -50,6 +50,8 @@
                            (get-in db [:ui :about-open?])
                            (get-in db [:ui :kbedit :open?])
                            (get-in db [:ui :extensions-open?])
+                           (get-in db [:ui :passwords :open?])
+                           (get-in db [:ui :passwords :save-prompt])
                            (get-in db [:ui :palette :open?])))))
 (rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
@@ -96,6 +98,7 @@
 (rf/reg-sub :ui/extensions-open? (fn [db _] (get-in db [:ui :extensions-open?])))
 (rf/reg-sub :ui/extensions       (fn [db _] (get-in db [:ui :extensions])))
 (rf/reg-sub :ui/adblock          (fn [db _] (get-in db [:ui :adblock])))
+(rf/reg-sub :ui/passwords        (fn [db _] (get-in db [:ui :passwords])))
 
 ;; ---- the browser-tab model (app-db) ----
 (rf/reg-sub :ui/tabs          (fn [db _] (nav/tabs db)))

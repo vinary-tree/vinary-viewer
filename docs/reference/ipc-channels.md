@@ -36,6 +36,11 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:ext-check-updates` | `extCheckUpdates()` | none | `vinary.main.extensions` | Trigger a Web-Store update check. |
 | `vv:ext-action-clicked` / `vv:ext-popup-close` | `extActionClicked(id, popup, bounds)` / `extPopupClose()` | `{id, popup, bounds}` / none | `vinary.main.ext-popup` | Open / close a browser-action popup. |
 | `vv:adblock-set-enabled` / `vv:adblock-set-lists` / `vv:adblock-refresh` | `adblockSetEnabled(on)` / `adblockSetLists(kw)` / `adblockRefresh()` | bool / string / none | `vinary.main.adblock` | Toggle / set list-set / refresh the ad-blocker. |
+| `vv:password-state-request` | `passwordState()` | none | `vinary.main.passwords` | Refresh provider status for the native password-manager bridge. |
+| `vv:password-search` | `passwordSearch(url)` | URL string | `vinary.main.passwords` | Search ready providers for logins matching the current web origin. Results are sanitized metadata only. |
+| `vv:password-fill` | `passwordFill(item)` | `{provider, id, vault-id?, ...}` metadata | `vinary.main.passwords` | Reveal the selected item in main, then send credentials directly to the web-view preload. Passwords do not cross into renderer app-db. |
+| `vv:password-save` | `passwordSave(payload)` | `{token, provider}` | `vinary.main.passwords` | Save a short-lived main-memory login candidate into the chosen provider. The token references the secret; the renderer does not carry the password. |
+| `vv:password-dismiss-save` | `passwordDismissSave(token)` | token string | `vinary.main.passwords` | Drop an unsaved login candidate from main memory. |
 | `vv:pdf-show` / `vv:pdf-hide` / `vv:pdf-bounds` | `pdfShow` / `pdfHide` / `pdfBounds` | — | *RETIRED* | Native PDF view seam — retired for in-renderer pdf.js (ADR-0013); no main listener (harmless no-ops). |
 | `vv:http-show` | `httpShow(url, bounds, tabId)` | `{url, bounds, tabId}` | `vinary.main.web/show!` | Show/load the in-app HTTP `WebContentsView`. `tabId` is the **owning** tab (the active http tab at show time); main stores it so the navigation relay updates that tab even after the user switches away mid-load. |
 | `vv:http-hide` | `httpHide()` | none | `vinary.main.web/hide!` | Hide the in-app HTTP view. |
@@ -79,8 +84,25 @@ fields derived from `getBoundingClientRect()`.
 | `vv:ext-state` | `onExtState(cb)` | EDN string | `[:ext/state-received ...]` | Deliver the installed-extensions list + master toggle. |
 | `vv:ext-install-result` / `vv:ext-update-result` | `onExtInstallResult` / `onExtUpdateResult` | object | `[:ext/install-result ...]` / `[:ext/update-result ...]` | Install / update outcome. |
 | `vv:adblock-status` | `onAdblockStatus(cb)` | `{:status :updating\|:ok\|:offline\|:error :last-updated? :error?}` | `[:adblock/status-received ...]` | Ad-block refresh feedback for the Extensions dialog ("Updating…" → "✓ Updated" / "⚠ Offline" / "✗ …"). |
+| `vv:password-state` | `onPasswordState(cb)` | `{providers, forms, busy?, error?}` | `[:passwords/state-received ...]` | Provider status and web-form presence for the native password-manager UI. |
+| `vv:password-items` | `onPasswordItems(cb)` | `{url, origin, items}` | `[:passwords/items-received ...]` | Sanitized login matches. Items contain provider/id/title/username/url metadata, never password fields. |
+| `vv:password-save-prompt` | `onPasswordSavePrompt(cb)` | `{token, url, origin, username, providers}` or null | `[:passwords/save-prompt ...]` | Prompt the renderer to save a login candidate held only in main memory. Null closes the prompt. |
+| `vv:password-result` | `onPasswordResult(cb)` | `{ok, action, message}` | `[:passwords/result-received ...]` | Fill/save result message. |
 | `vv:zoom-changed` | `onZoomChanged(cb)` | `{:context "window"\|"web" :factor n}` | `[:view/zoom-changed ...]` | Report the resolved app-window / web-view zoom factor so the zoom bar shows the live %. |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata map | `[:app-info/received ...]` | Deliver app metadata. |
+
+---
+
+## 2.1 Web-View Preload Channels
+
+These channels involve `resources/web-preload.js`, which runs in the isolated in-app web page. They do
+not expose an API to the remote page.
+
+| Channel | Direction | Payload | Receiver | Purpose |
+|---------|-----------|---------|----------|---------|
+| `vv:password-forms` | web preload -> main | `{url, origin, count, hasPassword}` | `vinary.main.passwords` | Report login-form presence so the app can show the key-icon badge. |
+| `vv:password-save-candidate` | web preload -> main | `{url, origin, username, password}` | `vinary.main.passwords` | Store a submitted login candidate in main memory behind a short-lived token. |
+| `vv:password-fill` | main -> web preload | `{username, password, url?}` | `resources/web-preload.js` | Fill the selected login directly into DOM fields and fire `input`/`change` events. |
 
 ---
 

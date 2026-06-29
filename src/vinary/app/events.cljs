@@ -778,6 +778,71 @@
    (let [db' (assoc-in db [:ui :adblock :lists] kw)]
      {:db db' :fx [[:vv/adblock-set-lists kw] [:vv/save-ext-config (ext-config-edn db')]]})))
 
+;; ---- native password-manager bridge ----
+(rf/reg-event-fx
+ :passwords/open
+ (fn [{:keys [db]} _]
+   (let [active-uri (nav/active-uri db)]
+     {:db (-> db
+              (assoc-in [:ui :passwords :open?] true)
+              (assoc-in [:ui :passwords :result] nil)
+              (assoc-in [:ui :passwords :error] nil))
+      :fx (cond-> [[:vv/password-state nil]]
+            (uri/http? active-uri) (conj [:vv/password-search active-uri]))})))
+
+(rf/reg-event-db :passwords/close (fn [db _] (assoc-in db [:ui :passwords :open?] false)))
+
+(rf/reg-event-fx
+ :passwords/retry
+ (fn [{:keys [db]} _]
+   (let [active-uri (nav/active-uri db)]
+     {:db (assoc-in db [:ui :passwords :result] nil)
+      :fx (cond-> [[:vv/password-state nil]]
+            (uri/http? active-uri) (conj [:vv/password-search active-uri]))})))
+
+(rf/reg-event-db
+ :passwords/state-received
+ (fn [db [_ p]]
+   (let [m (js->clj p :keywordize-keys true)]
+     (update-in db [:ui :passwords] merge
+                (select-keys m [:providers :forms :busy? :error])))))
+
+(rf/reg-event-db
+ :passwords/items-received
+ (fn [db [_ p]]
+   (let [m (js->clj p :keywordize-keys true)]
+     (-> db
+         (assoc-in [:ui :passwords :items] (vec (:items m)))
+         (assoc-in [:ui :passwords :busy?] false)))))
+
+(rf/reg-event-db
+ :passwords/result-received
+ (fn [db [_ p]]
+   (let [m (js->clj p :keywordize-keys true)
+         ok? (boolean (:ok m))]
+     (cond-> (assoc-in db [:ui :passwords :result] m)
+       (and ok? (= "fill" (:action m))) (assoc-in [:ui :passwords :open?] false)
+       (and ok? (= "save" (:action m))) (assoc-in [:ui :passwords :save-prompt] nil)))))
+
+(rf/reg-event-db
+ :passwords/save-prompt
+ (fn [db [_ p]]
+   (assoc-in db [:ui :passwords :save-prompt]
+             (when p (js->clj p :keywordize-keys true)))))
+
+(rf/reg-event-fx :passwords/fill (fn [_ [_ item]] {:fx [[:vv/password-fill item]]}))
+
+(rf/reg-event-fx
+ :passwords/save
+ (fn [_ [_ token provider]]
+   {:fx [[:vv/password-save {:token token :provider provider}]]}))
+
+(rf/reg-event-fx
+ :passwords/dismiss-save
+ (fn [{:keys [db]} [_ token]]
+   {:db (assoc-in db [:ui :passwords :save-prompt] nil)
+    :fx [[:vv/password-dismiss-save token]]}))
+
 ;; ---- About dialog ----
 (rf/reg-event-db :about/open       (fn [db _] (assoc-in db [:ui :about-open?] true)))
 (rf/reg-event-db :about/close      (fn [db _] (assoc-in db [:ui :about-open?] false)))

@@ -46,6 +46,12 @@ contextBridge.exposeInMainWorld('vv', {
   adblockSetEnabled: (on) => ipcRenderer.send('vv:adblock-set-enabled', on),
   adblockSetLists: (kw) => ipcRenderer.send('vv:adblock-set-lists', kw),
   adblockRefresh: () => ipcRenderer.send('vv:adblock-refresh'),
+  // native password-manager bridge (renderer → main)
+  passwordState: () => ipcRenderer.send('vv:password-state-request'),
+  passwordSearch: (url) => ipcRenderer.send('vv:password-search', url),
+  passwordFill: (item) => ipcRenderer.send('vv:password-fill', item),
+  passwordSave: (payload) => ipcRenderer.send('vv:password-save', payload),
+  passwordDismissSave: (token) => ipcRenderer.send('vv:password-dismiss-save', token),
   requestAppInfo: () => ipcRenderer.send('vv:app-info-request'),
   quit: () => ipcRenderer.send('vv:quit'),
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),
@@ -131,6 +137,10 @@ contextBridge.exposeInMainWorld('vv', {
   onExtInstallResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-install-result', h); return () => ipcRenderer.removeListener('vv:ext-install-result', h); },
   onExtUpdateResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ext-update-result', h); return () => ipcRenderer.removeListener('vv:ext-update-result', h); },
   onAdblockStatus: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:adblock-status', h); return () => ipcRenderer.removeListener('vv:adblock-status', h); },
+  onPasswordState: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-state', h); return () => ipcRenderer.removeListener('vv:password-state', h); },
+  onPasswordItems: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-items', h); return () => ipcRenderer.removeListener('vv:password-items', h); },
+  onPasswordSavePrompt: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-save-prompt', h); return () => ipcRenderer.removeListener('vv:password-save-prompt', h); },
+  onPasswordResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-result', h); return () => ipcRenderer.removeListener('vv:password-result', h); },
   onZoomChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:zoom-changed', h); return () => ipcRenderer.removeListener('vv:zoom-changed', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);

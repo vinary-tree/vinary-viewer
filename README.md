@@ -19,11 +19,11 @@ aesthetics), a responsive feel, and will never become laden with extraneous or
 heavy features.
 
 Ad blocking is supported by default (this is a documentation previewer, not a
-revenue generator), and there is experimental support for Chrome extensions but
-that is intended for integration with password managers and related. Vinary
-Viewer is not and never will be intended to be used as a full-featured web
-browser but it must support web browsing to cover the most common forms
-documentation.
+revenue generator), and there is experimental support for scoped Chrome
+extensions. Password-manager integration is handled by a native CLI bridge
+instead of relying on heavyweight browser extensions. Vinary Viewer is not and
+never will be intended to be used as a full-featured web browser but it must
+support web browsing to cover the most common forms documentation.
 
 Vinary Viewer has been built, from the ground up, by an engineer for engineers!
 
@@ -82,6 +82,7 @@ npm run dev
 | PDFs and images  | PDFs use Chromium's native PDF viewer in a main-owned view; images open in a focused image preview.                                                                                |
 | Source files     | Source files open in a read-only CodeMirror 6 view, with tree-sitter highlighting from bundled/user grammars and filename/pattern filetype mappings such as `Cargo.lock` → TOML.    |
 | Web links        | HTTP and HTTPS links can open in an in-app web view whose heading outline feeds the same Contents panel model.                                                                     |
+| Passwords        | Web-view login forms can be filled and saved through main-process provider CLIs for 1Password, LastPass, optional Bitwarden/Proton Pass, and restricted JSON adapters.             |
 | Sidebar          | Files and Contents panels provide a multi-project tree, filtering, tab mirroring, and Markdown/HTML scroll-spy outlines.                                                           |
 | Keybindings      | Built-in default, vim, and emacs keymap sets; a visual keybinding editor; live switching; command palette integration; persisted user config.                                      |
 | Preferences      | Live theme switching, variable/fixed font settings, and persisted user preferences under `~/.config/vinary-viewer/`.                                                               |

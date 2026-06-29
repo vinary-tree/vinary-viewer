@@ -28,6 +28,7 @@
    :section-tabs     "fa-solid fa-window-restore"
    :backspace        "fa-solid fa-delete-left"
    :keyboard         "fa-solid fa-keyboard"
+   :key              "fa-solid fa-key"
    :undo             "fa-solid fa-rotate-left"
    :redo             "fa-solid fa-rotate-right"
    :folder           "fa-solid fa-folder"

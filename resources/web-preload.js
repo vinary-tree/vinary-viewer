@@ -76,6 +76,163 @@ window.addEventListener('DOMContentLoaded', function () {
   }
 });
 
+// ---- Native password-manager bridge ---------------------------------------------------------------
+// No API is exposed to the remote page. The preload only observes the DOM, reports sanitized form presence
+// to main, accepts explicit fill messages from main, and sends save candidates to main memory on submit.
+(function () {
+  function safeOrigin() {
+    try { return location.origin; } catch (e) { return ''; }
+  }
+
+  function fieldType(el) {
+    return String((el && el.getAttribute('type')) || 'text').toLowerCase();
+  }
+
+  function visible(el) {
+    if (!el || el.disabled || el.readOnly || fieldType(el) === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  }
+
+  function inputs(root) {
+    return Array.prototype.slice.call((root || document).querySelectorAll('input'));
+  }
+
+  function passwordInputs(root) {
+    return inputs(root).filter(function (el) { return fieldType(el) === 'password' && visible(el); });
+  }
+
+  function usernameInputs(root) {
+    const allowed = { text: true, email: true, tel: true, search: true, url: true, username: true };
+    return inputs(root).filter(function (el) {
+      const t = fieldType(el);
+      return visible(el) && allowed[t] && !/otp|totp|2fa|mfa|code|token/i.test((el.name || '') + ' ' + (el.id || '') + ' ' + (el.autocomplete || ''));
+    });
+  }
+
+  function rootForPassword(password) {
+    return password && (password.form || password.closest('form') || document.body || document.documentElement);
+  }
+
+  function loginRoots() {
+    const seen = [];
+    passwordInputs(document).forEach(function (p) {
+      const root = rootForPassword(p);
+      if (root && seen.indexOf(root) === -1) seen.push(root);
+    });
+    return seen;
+  }
+
+  function scoreUsername(el, password) {
+    const text = ((el.autocomplete || '') + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '')).toLowerCase();
+    let s = 0;
+    if (/username|user|login|email|mail/.test(text)) s += 20;
+    if ((el.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) s += 8;
+    if (fieldType(el) === 'email') s += 6;
+    return s;
+  }
+
+  function usernameFor(root, password) {
+    const candidates = usernameInputs(root);
+    if (!candidates.length) return null;
+    return candidates.slice().sort(function (a, b) { return scoreUsername(b, password) - scoreUsername(a, password); })[0];
+  }
+
+  function setNativeValue(el, value) {
+    if (!el) return;
+    const proto = Object.getPrototypeOf(el);
+    const desc = proto && Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function collectCredentials(root) {
+    const passes = passwordInputs(root);
+    if (!passes.length) return null;
+    const password = passes.find(function (el) { return el.value; }) || passes[0];
+    const username = usernameFor(root, password);
+    return {
+      url: location.href,
+      origin: safeOrigin(),
+      username: username ? (username.value || '') : '',
+      password: password ? (password.value || '') : ''
+    };
+  }
+
+  function reportForms() {
+    try {
+      const roots = loginRoots();
+      ipcRenderer.send('vv:password-forms', {
+        url: location.href,
+        origin: safeOrigin(),
+        count: roots.length,
+        hasPassword: roots.length > 0
+      });
+    } catch (e) {}
+  }
+
+  let formTimer = null;
+  function scheduleFormReport() {
+    if (formTimer) clearTimeout(formTimer);
+    formTimer = setTimeout(function () {
+      formTimer = null;
+      reportForms();
+    }, 120);
+  }
+
+  function sendSaveCandidate(root) {
+    try {
+      const c = collectCredentials(root);
+      if (c && c.password) ipcRenderer.send('vv:password-save-candidate', c);
+    } catch (e) {}
+  }
+
+  ipcRenderer.on('vv:password-fill', function (_event, payload) {
+    try {
+      const roots = loginRoots();
+      if (!roots.length) return;
+      const root = roots[0];
+      const password = passwordInputs(root)[0];
+      const username = usernameFor(root, password);
+      if (username && Object.prototype.hasOwnProperty.call(payload || {}, 'username')) setNativeValue(username, String(payload.username || ''));
+      if (password && Object.prototype.hasOwnProperty.call(payload || {}, 'password')) setNativeValue(password, String(payload.password || ''));
+      if (password) password.focus();
+    } catch (e) {}
+  });
+
+  document.addEventListener('submit', function (e) {
+    sendSaveCandidate(e.target || document);
+  }, true);
+
+  document.addEventListener('click', function (e) {
+    const el = e.target && e.target.closest && e.target.closest('button,input[type="submit"],input[type="button"]');
+    if (!el) return;
+    const root = el.form || el.closest('form') || document.body || document.documentElement;
+    setTimeout(function () { sendSaveCandidate(root); }, 0);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (!t || t.tagName !== 'INPUT') return;
+    const root = rootForPassword(t);
+    if (root && passwordInputs(root).length) setTimeout(function () { sendSaveCandidate(root); }, 0);
+  }, true);
+
+  window.addEventListener('DOMContentLoaded', scheduleFormReport);
+  window.addEventListener('load', scheduleFormReport);
+  window.addEventListener('pageshow', scheduleFormReport);
+  document.addEventListener('input', scheduleFormReport, true);
+  if (window.MutationObserver) {
+    window.addEventListener('DOMContentLoaded', function () {
+      if (document.body) new MutationObserver(scheduleFormReport).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'autocomplete', 'name', 'id'] });
+    });
+  }
+})();
+
 // app TOC click → scroll the page to that heading id
 ipcRenderer.on('vv:web-scroll-to', function (_e, id) {
   const el = id && document.getElementById(id);

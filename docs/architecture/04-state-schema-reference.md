@@ -76,6 +76,9 @@ Current default shape:
       :find {:visible? false :query "" :count 0 :idx 0}
       :input {:mode :insert :sequence [] :count nil :in-input? false
               :timeout-id nil}
+      :passwords {:open? false :providers [] :forms {:count 0}
+                  :items [] :busy? false :error nil
+                  :result nil :save-prompt nil}
       :palette {:open? false :source :command :prefix "" :query ""
                 :items [] :selected 0}}}
 ```
@@ -95,6 +98,7 @@ Important slices:
 | `[:ui :pdf]` | In-renderer PDF view-state `{:scale :fit :invert?}` (fit + invert persisted in `settings.edn`). |
 | `[:ui :extensions]` | Extension runtime state pushed from main: `{:enabled? :installed [...] :install-status :update-status}`. |
 | `[:ui :adblock]` | Ad-block prefs `{:enabled? :lists :last-updated}` (persisted in `extensions.edn`). |
+| `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Git-rooted file trees. |
 | `[:ui :settings]` | Persisted settings loaded from `settings.edn`. |

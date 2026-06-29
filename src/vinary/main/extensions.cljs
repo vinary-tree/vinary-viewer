@@ -1,11 +1,11 @@
 (ns vinary.main.extensions
-  "Scoped Chrome-extension runtime (GPL-free). Electron 42 provides the extension APIs natively
-   (chrome.runtime/storage/action/tabs/i18n + content scripts + MV3 service workers — verified by the
-   spike). For the APIs Electron does NOT implement (windows/webNavigation/cookies/notifications/contextMenus/
-   privacy) we inject an inert chrome.* polyfill into extension main worlds via a self-contained session
-   preload (resources/ext-chrome-polyfill.js) registered for BOTH the service-worker and frame types — so a
-   LastPass-class extension whose background SW reads e.g. chrome.windows.onFocusChanged at startup registers
-   cleanly and its popup loads (ADR-0015). We add: Web-Store install +
+  "Scoped Chrome-extension runtime (GPL-free). Electron 42 provides some extension APIs natively
+   (chrome.runtime/storage/action/tabs/i18n + content scripts + MV3 service workers). For APIs Electron does
+   NOT implement (windows/webNavigation/cookies/notifications/contextMenus/privacy) we inject an inert
+   chrome.* polyfill into extension page main worlds via a self-contained session preload
+   (resources/ext-chrome-polyfill.js). The frame/popup path works; real/heavy password-manager MV3 service
+   workers such as LastPass can still evaluate in a separate V8 realm before the missing APIs are present, so
+   this runtime must not claim LastPass-class worker support. We add: Web-Store install +
    periodic auto-update (electron-chrome-web-store, MIT), reading each extension's MANIFEST to drive a
    first-party toolbar (Electron renders no browser-action UI), and a popup WebContentsView host. All
    loading happens on the persistent web session (persist:vinary-web). Provenance: Web-Store-only
@@ -115,12 +115,10 @@
     ;; register load/unload listeners BEFORE installChromeWebStore (which loads stored extensions)
     (.on ^js (.-extensions sess) "extension-loaded"   (fn [_e ^js ext] (cache-path! ext) (push-state!)))
     (.on ^js (.-extensions sess) "extension-unloaded" (fn [_e ^js _ext] (push-state!)))
-    ;; chrome.* polyfill for the APIs Electron lacks (windows/webNavigation/cookies/…), registered BEFORE
-    ;; extensions load. ONE self-contained preload covers BOTH the background service worker AND extension
-    ;; popup/option pages: SW preloads require the sandbox (it's on) and run in a sandboxed realm with no
-    ;; relative require, so the file inlines its polyfill + injects via contextBridge.executeInMainWorld. This
-    ;; lets LastPass-class extensions (whose SW reads e.g. chrome.windows.onFocusChanged at startup) register
-    ;; and their popups load (ADR-0015).
+    ;; chrome.* polyfill for APIs Electron lacks (windows/webNavigation/cookies/…), registered BEFORE
+    ;; extensions load. The frame/popup path works. The service-worker registration is retained for the
+    ;; narrow probe path documented in ADR-0015, but real LastPass-class MV3 workers can still run in a
+    ;; different V8 realm whose native chrome object lacks those APIs.
     (when-not @inited
       (let [pf (polyfill-preload-path)]
         (try (.registerPreloadScript sess #js {:type "service-worker" :filePath pf})

@@ -25,6 +25,7 @@
             [vinary.ui.about :as about]
             [vinary.ui.ext-toolbar :as ext-toolbar]
             [vinary.ui.extensions :as extensions-ui]
+            [vinary.ui.passwords :as passwords-ui]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.renderer.figures :as figures]
@@ -926,6 +927,7 @@
                  matches))])
             (when (:error? uc)
               [:div.vv-uri-errmsg "No matching file or directory"])])
+         [passwords-ui/toolbar-button]
          [ext-toolbar/ext-toolbar]]))))
 
 (defn find-bar []
@@ -1006,6 +1008,8 @@
    [ctx-menu/context-menu]
    [settings-ui/dialog]
    [extensions-ui/dialog]
+   [passwords-ui/dialog]
+   [passwords-ui/save-prompt]
    [about/dialog]
    (when @(rf/subscribe [:kbedit/open?]) [kbedit/dialog])
    [hints-overlay]])

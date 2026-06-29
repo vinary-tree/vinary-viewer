@@ -70,6 +70,7 @@
    :view/re-frame-10x {:id :view/re-frame-10x :title "re-frame-10x" :category "View" :dispatch [:view/re-frame-10x]}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
+   :passwords/open {:id :passwords/open :title "Passwords" :category "Web" :dispatch [:passwords/open]}
    :about/open     {:id :about/open :title "About vinary-viewer" :category "Help" :dispatch [:about/open]}
    ;; ---- Editor (key-binding editor; active only while the editor is open) ----
    :kbedit/undo {:id :kbedit/undo :title "Undo (key-binding editor)" :category "Editor" :dispatch [:kbedit/undo]}
