@@ -329,6 +329,14 @@ ipcRenderer.on('vv:web-scroll-to', function (_e, id) {
     else return false;
     return true;
   }
+  // app-forwarded page/edge keys (PageDown/PageUp/Home/End) when app chrome holds focus instead of this view
+  ipcRenderer.on('vv:web-scroll', function (_e, kind) {
+    const vh = window.innerHeight;
+    if (kind === 'page-down') sby(vh * 0.9, true);
+    else if (kind === 'page-up') sby(-vh * 0.9, true);
+    else if (kind === 'home') sto(0);
+    else if (kind === 'end') sto(document.documentElement.scrollHeight);
+  });
   window.addEventListener('keydown', function (e) {
     if (active) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); clear(); }

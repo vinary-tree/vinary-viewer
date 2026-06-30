@@ -51,11 +51,17 @@
          (or (= oy "auto") (= oy "scroll") (= oy "overlay")))))
 
 (defn- focused-scroll-el
-  "The scroll container to move: the focused element's nearest scrollable ancestor, else the content pane."
+  "The scroll container to move: the focused element's nearest scrollable ancestor; else the content pane —
+   or, when the content pane itself doesn't scroll (the source view, whose CodeMirror scrolls inside its
+   own .cm-scroller and is never focused), that .cm-scroller. This makes every scroll path (page keys,
+   arrows, vim C-f/C-b/C-d/C-u/gg/G, emacs C-v/M-v) reach the source view too."
   []
   (or (loop [n (.-activeElement js/document)]
         (cond (nil? n) nil (scrollable? n) n :else (recur (.-parentElement n))))
-      (content-el)))
+      (let [^js content (content-el)]
+        (if (or (nil? content) (scrollable? content))
+          content
+          (or (.querySelector content ".cm-scroller") content)))))
 
 (defn- anim-step! []
   (let [{:keys [^js el top left]} @scroll-anim]

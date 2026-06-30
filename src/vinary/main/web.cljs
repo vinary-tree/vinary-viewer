@@ -220,6 +220,13 @@
                    nf (max 0.4 (min 3.0 (js->clj f)))]
                (.setZoomFactor c nf)
                (when-let [^js awc (app-wc)] (.send awc "vv:zoom-changed" (clj->js {:context "web" :factor nf})))))))
+    ;; page/edge keys (PageDown/PageUp/Home/End) forwarded from the app's capture handler — scroll the web
+    ;; PAGE only when the native view is visible/active (else app chrome handled it), so they work even when
+    ;; app chrome holds focus instead of the web view (which handles them itself via its preload when focused).
+    (.on ipcMain "vv:http-scroll"
+         (fn [_e ^js kind]
+           (when (and (:visible? @state) (:view @state))
+             (.send (.-webContents ^js (:view @state)) "vv:web-scroll" kind))))
     ;; cold-cache fallback: return the latest cached snapshot (the proactive capture+push keeps it fresh);
     ;; capture on-demand only if nothing is cached yet and the page is live-visible.
     (.handle ipcMain "vv:http-snapshot"

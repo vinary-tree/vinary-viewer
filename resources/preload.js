@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('vv', {
   httpBounds: (bounds) => ipcRenderer.send('vv:http-bounds', { bounds }),
   httpSnapshot: () => ipcRenderer.invoke('vv:http-snapshot'),
   httpTocGoto: (id) => ipcRenderer.send('vv:http-toc-goto', id),
+  httpScroll: (kind) => ipcRenderer.send('vv:http-scroll', kind),   // page/edge keys → native web view (when visible)
   openDialog: () => ipcRenderer.send('vv:open-dialog'),
   copyText: (text) => ipcRenderer.send('vv:clipboard-write', text),
   openPath: (p) => ipcRenderer.send('vv:open-path', p),

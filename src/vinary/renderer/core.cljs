@@ -221,22 +221,45 @@
    "ArrowRight" [:nav/scroll {:dx :right}]
    "ArrowLeft"  [:nav/scroll {:dx :left}]})
 
-(defn arrow-scroll!
-  "Bare arrow keys smoothly scroll the focused pane (the focused element's scrollable ancestor, else the
-   content pane). Skipped inside editable elements (inputs / textareas / CodeMirror), which keep their
-   native cursor movement, and while a menu/overlay is open. Held keys auto-repeat into the smooth scroll
-   animator (vinary.input.fx) for continuous motion. Capture-phase so it preempts the keymap resolver."
+(def ^:private page->scroll
+  ;; PageDown/PageUp/Home/End — page and jump-to-edge, the same in every view. Shift is allowed (unlike the
+  ;; arrows), so Shift+PageDown still pages and Shift+Home/End still jumps.
+  {"PageDown" [:nav/scroll {:dy :page}]
+   "PageUp"   [:nav/scroll {:dy :-page}]
+   "End"      [:nav/scroll {:to :bottom}]
+   "Home"     [:nav/scroll {:to :top}]})
+
+(def ^:private key->web-scroll
+  ;; page/edge keys also forwarded to the native web view (main applies them only when that view is
+  ;; visible), so they scroll the web page even when app chrome — not the web view — holds focus.
+  {"PageDown" "page-down" "PageUp" "page-up" "End" "end" "Home" "home"})
+
+(defn key-scroll!
+  "Bare arrow keys and PageDown/PageUp/Home/End smoothly scroll the focused pane (the focused element's
+   scrollable ancestor, else the content pane / its CodeMirror scroller — see vinary.input.fx). Handled
+   here in ONE capture-phase listener so they work UNIFORMLY across every keymap set (vim/emacs/default):
+   otherwise Vim's resolver swallows them (:consume) and Standard/Emacs pass them to the empty document
+   scroller (html/#app are overflow:hidden), so neither scrolls. Skipped inside editable elements (inputs /
+   textareas / CodeMirror), which keep their native caret + Page/Home/End movement, and while a
+   menu/overlay is open. (The native web view scrolls these keys itself via its own preload when it holds
+   focus.) Arrows ignore all modifiers; the page/home/end keys ignore Shift but not Ctrl/Alt/Meta. Held
+   keys auto-repeat into the smooth-scroll animator. Capture-phase so it preempts the keymap resolver."
   []
   (.addEventListener js/window "keydown"
                      (fn [^js e]
-                       (when-let [ev (and (not (.-altKey e)) (not (.-ctrlKey e)) (not (.-metaKey e))
-                                          (not (.-shiftKey e))
-                                          (not (editable-target? (.-target e)))
-                                          (not (overlay-open-now?))
-                                          (get arrow->scroll (.-key e)))]
-                         (.preventDefault e)
-                         (.stopPropagation e)
-                         (rf/dispatch ev)))
+                       (let [no-cam? (and (not (.-altKey e)) (not (.-ctrlKey e)) (not (.-metaKey e)))
+                             ev      (when (and no-cam?
+                                                (not (editable-target? (.-target e)))
+                                                (not (overlay-open-now?)))
+                                       (or (get page->scroll (.-key e))
+                                           (when-not (.-shiftKey e) (get arrow->scroll (.-key e)))))]
+                         (when ev
+                           (.preventDefault e)
+                           (.stopPropagation e)
+                           (rf/dispatch ev)
+                           (when-let [kind (get key->web-scroll (.-key e))]
+                             (when-let [^js vv (.-vv js/window)]
+                               (when (.-httpScroll vv) (.httpScroll vv kind)))))))
                      true))
 
 (defn mount! []
@@ -257,7 +280,7 @@
   (mouse-nav!)
   (hints!)
   (ctrl-tracker!)
-  (arrow-scroll!)
+  (key-scroll!)
   (mount!)
   (rf/dispatch [:view/re-frame-10x-hide]))
 
