@@ -14,6 +14,9 @@
    "M-down"  :nav/open-target
    "C-tab"   :tab/next
    "C-S-tab" :tab/prev
+   ;; Ctrl+PageUp / Ctrl+PageDown cycle tabs left / right (browser-style; Vim also has g t / g T)
+   "C-prior" :tab/prev
+   "C-next"  :tab/next
    "C-w"     :tab/close
    "C-o"     :file/open-dialog
    "C-S-o"   :file/open-dialog-new-tab

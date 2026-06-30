@@ -58,6 +58,9 @@
    "C-S-o" :file/open-dialog-new-tab
    "C-l" :focus/uri
    "C-t" :tab/new-blank
+   ;; Ctrl+PageUp / Ctrl+PageDown cycle tabs left / right, in every mode (Vim also has g t / g T in :normal)
+   "C-prior" :tab/prev
+   "C-next"  :tab/next
    ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
    "C-0" :view/zoom-reset
    "C-=" :view/zoom-in

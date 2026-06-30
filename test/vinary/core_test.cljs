@@ -155,7 +155,18 @@
     (doseq [preset [:default :vim :emacs]]
       (keymap/install! preset)
       (is (= :focus/uri (get-in (keymap/modes) [:all "C-l"]))
-          (str preset " C-l")))))
+          (str preset " C-l"))))
+  (testing "Ctrl+PageUp / Ctrl+PageDown cycle tabs left / right across bundled keymaps"
+    (doseq [preset [:default :vim :emacs]]
+      (keymap/install! preset)
+      (is (= :tab/prev (get-in (keymap/modes) [:all "C-prior"])) (str preset " C-prior"))
+      (is (= :tab/next (get-in (keymap/modes) [:all "C-next"]))  (str preset " C-next")))
+    ;; placed in :all → resolves in every Vim mode, including :insert (not only :normal)
+    (keymap/install! :vim)
+    (is (= :tab/prev (:command (resolver/step (keymap/modes) :insert [] "C-prior" {:in-input? false})))
+        "vim insert-mode Ctrl+PageUp cycles to the previous tab")
+    (is (= :tab/next (:command (resolver/step (keymap/modes) :normal [] "C-next" {:in-input? false})))
+        "vim normal-mode Ctrl+PageDown cycles to the next tab")))
 
 (deftest keymap-init-applies-persisted-set
   ;; Regression for the init bug (a persisted Vim set was not live until a manual Standard→Vim switch). The

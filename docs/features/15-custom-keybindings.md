@@ -16,7 +16,7 @@ vinary-viewer resolves every keystroke through a small, data-driven keybinding e
 **command registry** — the "API". Three bundled **keymaps** bind those commands in different styles:
 
 - **`default`** — a non-modal keymap that reproduces and extends the original shortcuts
-  (`Ctrl+F` find, `Alt+←/→` history, plus `Ctrl+Tab`/`Ctrl+W`/`Ctrl+P`/`Ctrl+T`…).
+  (`Ctrl+F` find, `Alt+←/→` history, plus `Ctrl+Tab`/`Ctrl+PageUp`/`Ctrl+PageDown`/`Ctrl+W`/`Ctrl+P`/`Ctrl+T`…).
 - **`vim`** — modal (`normal`/`insert`/`visual`), with `j`/`k` scrolling, `g g`/`G`, tab verbs
   (`g t`/`g T`), a `Space` **leader** (`SPC f f` → open file, `SPC b b` → buffer switcher…), `:` ex
   command line, and `/` search.

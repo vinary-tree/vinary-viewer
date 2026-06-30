@@ -1333,6 +1333,22 @@ async function main() {
   assert.ok(multi.bBeforeC, 'the additional argument tabs must preserve command-line order');
   console.log('[ok] multi-arg launch: a tab per argument, command-line order, first focused');
 
+  // ── Ctrl+PageDown / Ctrl+PageUp cycle tabs right / left (browser-style, wrapping) ──
+  // A real window keydown: the capture-phase scroll handler ignores it (its `no-cam?` guard requires NO Ctrl),
+  // so the bubble-phase resolver maps C-next/C-prior → :tab/next/:tab/prev — the same wrapping commands as the
+  // Vim g t / g T sequence. (The default keymap is active at this point.)
+  const cyc = await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    return { active: ui['active-tab'], order: ui.tabs.map((t) => t.id) }; })()`);
+  assert.ok(cyc.order.length >= 2, 'the multi-arg block must leave >= 2 tabs open for the cycle test');
+  const cycNext = cyc.order[(cyc.order.indexOf(cyc.active) + 1) % cyc.order.length];
+  await dispatchWindowKey(win, 'PageDown', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${cycNext}`),
+    'Ctrl+PageDown activates the next (right) tab');
+  await dispatchWindowKey(win, 'PageUp', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${cyc.active}`),
+    'Ctrl+PageUp returns to the previous (left) tab');
+  console.log('[ok] Ctrl+PageDown / Ctrl+PageUp cycle tabs right / left');
+
   win.close();
 }
 

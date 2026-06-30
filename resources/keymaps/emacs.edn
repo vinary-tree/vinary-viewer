@@ -27,6 +27,9 @@
    "C-S-o" :file/open-dialog-new-tab
    "C-l" :focus/uri
    "C-t" :tab/new-blank
+   ;; Ctrl+PageUp / Ctrl+PageDown cycle tabs left / right (browser-style; Emacs also has M-f / M-b)
+   "C-prior" :tab/prev
+   "C-next"  :tab/next
    "C-c" {"left" :history/back "right" :history/forward "b" :history/back "f" :history/forward}
    ;; Alt+arrow navigation, keymap-independent: ←/→ history, ↑ parent dir, ↓ open highlighted target.
    "M-left"  :history/back
