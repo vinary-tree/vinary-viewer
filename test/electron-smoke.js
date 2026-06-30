@@ -1298,6 +1298,41 @@ async function main() {
   assert.strictEqual(tabsAfterGhost, tabsBeforeGhost, 'a navigation for a closed/unknown tab id must be a no-op');
   console.log('[ok] web-view navigation updates its owner tab, never the active tab');
 
+  // ── Multi-argument launch — `vv a.md b.md https://x` opens each argument in its own tab (first focused) ──
+  // The main process parses every non-flag argument (startup/doc-uris, unit-tested) and pushes them over THIS
+  // channel with focus-first; here we drive the renderer pipeline directly with one real IPC to prove the live
+  // outcome: every argument gets a tab, the extra-argument tabs preserve command-line order, and the FIRST
+  // argument's tab ends active (the Open dialog, by contrast, leaves the last-opened tab active).
+  const argA = path.join(ROOT, 'test', 'fixtures', 'multi-arg-a.md');
+  const argB = path.join(ROOT, 'test', 'fixtures', 'multi-arg-b.md');
+  const argC = 'http://127.0.0.1:9/multi-arg-c';
+  for (const p of [argA, argB]) {
+    state.contentByPath.set(p, { path: p, kind: 'markdown', text: `# ${path.basename(p)}\n\nbody`, stamp: Date.now() });
+  }
+  const idsBeforeMulti = await evalIn(win, `window.__vvdb().ui.tabs.map((t) => t.id)`);
+  win.webContents.send('vv:open-files', { paths: [argA, argB, argC], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => {
+    const uris = window.__vvdb().ui.tabs.map((t) => t.uri);
+    return [${JSON.stringify(argA)}, ${JSON.stringify(argB)}, ${JSON.stringify(argC)}].every((u) => uris.includes(u));
+  })()`), 'multi-arg launch opens a tab for every argument');
+  const multi = await evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    const idx = (u) => ui.tabs.findIndex((t) => t.uri === u);
+    const tabFor = (u) => ui.tabs.find((t) => t.uri === u) || {};
+    const active = ui.tabs.find((t) => t.id === ui['active-tab']);
+    const before = ${JSON.stringify(idsBeforeMulti)};
+    return {
+      activeUri: active ? active.uri : null,
+      bNew: !before.includes(tabFor(${JSON.stringify(argB)}).id),
+      cNew: !before.includes(tabFor(${JSON.stringify(argC)}).id),
+      bBeforeC: idx(${JSON.stringify(argB)}) < idx(${JSON.stringify(argC)})
+    };
+  })()`);
+  assert.strictEqual(multi.activeUri, argA, 'multi-arg launch must focus the FIRST argument\'s tab');
+  assert.ok(multi.bNew && multi.cNew, 'every non-first argument must open in its own NEW tab');
+  assert.ok(multi.bBeforeC, 'the additional argument tabs must preserve command-line order');
+  console.log('[ok] multi-arg launch: a tab per argument, command-line order, first focused');
+
   win.close();
 }
 

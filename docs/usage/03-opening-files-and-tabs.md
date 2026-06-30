@@ -9,8 +9,8 @@ watching model, and per-tab history behavior.
 
 | Entry point | Behavior |
 |-------------|----------|
-| `vv <path>` or `vinary-viewer <path>` | Launches Electron with the first non-flag argument as the initial document. |
-| `electron . <path>` or `npm run start -- <path>` | Development equivalent of launcher-based open. |
+| `vv <path\|URL> …` or `vinary-viewer <path\|URL> …` | Launches Electron, opening **every** non-flag argument in its own tab (in argument order; the **first** is focused). Accepts local file paths and `file://` / `http(s)://` / archive URIs; relative paths resolve against the launch directory. Flags (leading `-`) are ignored. |
+| `electron . <path\|URL> …` or `npm run start -- <path\|URL> …` | Development equivalent; same multi-argument open. |
 | `File > Open` | Native multi-file dialog. One selected file navigates the active tab; multiple selected files open one tab each. |
 | Sidebar file tree | Clicking a file dispatches `[:doc/open path]`. |
 | Markdown links | Left-click navigates the active tab; `Ctrl+click` opens a new tab. |
@@ -136,8 +136,8 @@ persists to `recent.edn` (see [05-configuration.md](05-configuration.md)).
 
 | Goal | Use |
 |------|-----|
-| Open from shell | `vv <path>` |
-| Open in development | `npm run start -- <path>` |
+| Open one or many from shell | `vv <path\|URL> …` (each in its own tab; first focused) |
+| Open in development | `npm run start -- <path\|URL> …` |
 | Open one or many files in the app | `File > Open` |
 | Open local link in active tab | left-click |
 | Open local link in new tab | `Ctrl+click` |

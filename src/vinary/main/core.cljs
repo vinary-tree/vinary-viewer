@@ -1,10 +1,10 @@
 (ns vinary.main.core
   "Electron MAIN process entry. Creates the window (sandboxed renderer + contextBridge preload),
-   wires the IO/watch service, and opens any file named on the command line (`vv README.md`).
+   wires the IO/watch service, and opens any files/URIs named on the command line
+   (`vv a.md b.pdf https://…`), each in its own tab.
    Original code (Apache-2.0); a new application inspired by vmd (MIT)."
   (:require ["electron" :as electron]
             ["path" :as path]
-            [clojure.string :as str]
             [vinary.main.service :as service]
             [vinary.main.startup :as startup]
             [vinary.main.config :as config]
@@ -29,15 +29,12 @@
 (defn renderer-index [] (path/join js/__dirname ".." ".." "resources" "public" "index.html"))
 (defn preload-path  [] (path/join js/__dirname ".." ".." "resources" "preload.js"))
 
-(defn initial-file
-  "The document path passed on the command line (e.g. `vv README.md`), resolved to an absolute path
-   (relative to the launch CWD), or nil. argv[0]=electron, argv[1]=app path; the first remaining
-   non-flag argument is the document."
+(defn initial-args
+  "All non-flag document arguments passed on the command line (e.g. `vv a.md b.pdf https://…`),
+   normalized to canonical tab uris in order — see `startup/doc-uris`. node's `path.resolve` is the
+   injected cwd-relative resolver for local paths."
   []
-  (when-let [f (->> (drop 2 (js->clj js/process.argv))
-                    (remove #(str/starts-with? % "-"))
-                    first)]
-    (.resolve path f)))
+  (startup/doc-uris (js->clj js/process.argv) #(.resolve path %)))
 
 (defn create-window! []
   (let [win (BrowserWindow.
@@ -60,7 +57,11 @@
              (recent/init! (.-webContents win))
              (ext-config/init! (.-webContents win))
              (grammars/init! (.-webContents win))
-             (when-let [f (initial-file)] (service/open! (.-webContents win) f))))
+             ;; open every file/URI named on the command line, each in its own tab (first focused);
+             ;; reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx)
+             (when-let [args (seq (initial-args))]
+               (.send (.-webContents win) "vv:open-files"
+                      (clj->js {:paths (vec args) :focus-first true})))))
     (.on win "closed" (fn [] (reset! main-window nil)))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
     ;; extension runtime + ad-blocking on the web session (before the lazy web view's first load)

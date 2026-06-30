@@ -556,16 +556,21 @@
   (if (= mode :new-tab) :new-tab :current))
 
 (defn files-opened-fx
-  "Dispatches for files chosen from the native Open dialog."
-  [mode paths]
-  (let [paths (vec (or paths []))]
-    (case (open-dialog-mode mode)
-      :new-tab (mapv (fn [p] [:dispatch [:doc/open-new p]]) paths)
-      (case (count paths)
-        0 []
-        1 [[:dispatch [:doc/open (first paths)]]]
-        (vec (cons [:dispatch [:doc/open (first paths)]]
-                   (map (fn [p] [:dispatch [:doc/open-new p]]) (rest paths))))))))
+  "Dispatches for files chosen from the native Open dialog OR named on the command line. `focus-first?`
+   (the command-line launch path) re-activates the FIRST path's tab once all have opened — the Open
+   dialog leaves the last-opened tab active (default; a single/empty selection needs no re-activation)."
+  ([mode paths] (files-opened-fx mode paths false))
+  ([mode paths focus-first?]
+   (let [paths (vec (or paths []))
+         base  (case (open-dialog-mode mode)
+                 :new-tab (mapv (fn [p] [:dispatch [:doc/open-new p]]) paths)
+                 (case (count paths)
+                   0 []
+                   1 [[:dispatch [:doc/open (first paths)]]]
+                   (vec (cons [:dispatch [:doc/open (first paths)]]
+                              (map (fn [p] [:dispatch [:doc/open-new p]]) (rest paths))))))]
+     (cond-> base
+       (and focus-first? (> (count paths) 1)) (conj [:dispatch [:doc/open (first paths)]])))))
 
 (rf/reg-event-fx
  :file/open-dialog
@@ -651,9 +656,9 @@
 ;; the Open dialog returns chosen paths; the pending mode decides current-tab vs new-tab handling.
 (rf/reg-event-fx
  :files/opened
- (fn [{:keys [db]} [_ {:keys [paths]}]]
+ (fn [{:keys [db]} [_ {:keys [paths focus-first]}]]
    (let [mode (get-in db [:ui :open-dialog-mode])
-         fx   (files-opened-fx mode paths)]
+         fx   (files-opened-fx mode paths focus-first)]
      (cond-> {:db (assoc-in db [:ui :open-dialog-mode] :current)}
        (seq fx) (assoc :fx fx)))))
 

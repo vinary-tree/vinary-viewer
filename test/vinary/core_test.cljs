@@ -80,6 +80,25 @@
     (is (false? (startup/disable-hardware-acceleration? {:XDG_SESSION_TYPE "wayland"})))
     (is (false? (startup/disable-hardware-acceleration? {})))))
 
+(deftest cli-doc-args
+  (testing "non-flag file/URI command-line arguments → normalized tab uris, in order"
+    ;; a fake cwd-relative resolver (node's path.resolve is injected in core.cljs); absolute stays put
+    (let [resolve-abs (fn [p] (if (str/starts-with? p "/") p (str "/cwd/" p)))]
+      ;; argv[0]=electron, argv[1]=app path; user args from index 2. Flags dropped; order preserved.
+      (is (= ["/cwd/a.md" "/abs/b.pdf" "https://example.com"]
+             (startup/doc-uris ["electron" "/app" "a.md" "--inspect" "/abs/b.pdf" "https://example.com"]
+                               resolve-abs)))
+      ;; file:// reduced to its (absolute) path; http(s) and vv-archive:// kept verbatim
+      (is (= ["/etc/hostname" "vv-archive://open?chain=%5B%22%2Fz.zip%22%5D"]
+             (startup/doc-uris ["e" "/app" "file:///etc/hostname" "vv-archive://open?chain=%5B%22%2Fz.zip%22%5D"]
+                               resolve-abs)))
+      ;; relative paths resolved against the launch cwd
+      (is (= ["/cwd/docs/x.md"] (startup/doc-uris ["e" "/app" "docs/x.md"] resolve-abs)))
+      ;; no user args, flags-only, and blanks all drop out
+      (is (= [] (startup/doc-uris ["e" "/app"] resolve-abs)))
+      (is (= [] (startup/doc-uris ["e" "/app" "--foo" "-x"] resolve-abs)))
+      (is (= ["/cwd/a.md"] (startup/doc-uris ["e" "/app" "" "a.md"] resolve-abs))))))
+
 (deftest key-normalization
   (testing "modifier folding + named keys"
     (is (= "C-f"   (keys/event->chord (ev {:key "f" :ctrlKey true}) false)))
@@ -223,7 +242,23 @@
   (testing "empty and unknown modes are stable"
     (is (= [] (events/files-opened-fx :new-tab [])))
     (is (= :current (events/open-dialog-mode nil)))
-    (is (= :current (events/open-dialog-mode :unexpected)))))
+    (is (= :current (events/open-dialog-mode :unexpected))))
+  (testing "command-line launch (focus-first?) re-activates the FIRST tab after opening all"
+    ;; ≥2 paths: open the first in the current tab, the rest in new tabs, then re-focus the first
+    (is (= [[:dispatch [:doc/open "/tmp/a.md"]]
+            [:dispatch [:doc/open-new "/tmp/b.md"]]
+            [:dispatch [:doc/open-new "/tmp/c.md"]]
+            [:dispatch [:doc/open "/tmp/a.md"]]]
+           (events/files-opened-fx :current ["/tmp/a.md" "/tmp/b.md" "/tmp/c.md"] true)))
+    ;; a single path is already the active/only tab — no redundant re-activation appended
+    (is (= [[:dispatch [:doc/open "/tmp/a.md"]]]
+           (events/files-opened-fx :current ["/tmp/a.md"] true)))
+    ;; nothing to open, nothing to focus
+    (is (= [] (events/files-opened-fx :current [] true)))
+    ;; the 2-arity dialog path is unchanged (no re-activation)
+    (is (= [[:dispatch [:doc/open "/tmp/a.md"]]
+            [:dispatch [:doc/open-new "/tmp/b.md"]]]
+           (events/files-opened-fx :current ["/tmp/a.md" "/tmp/b.md"])))))
 
 ;; ---- navigation: per-tab history with scroll (Phase A) + reorder/view-source (Phase B) ----
 (deftest nav-history-scroll

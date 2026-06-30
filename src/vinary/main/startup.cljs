@@ -1,6 +1,9 @@
 (ns vinary.main.startup
   "Pure, electron-free startup configuration for the main process, so the node :test build can assert
-   the app's invariant Chromium switches and the GPU-mode predicates without loading electron.")
+   the app's invariant Chromium switches, the GPU-mode predicates, and command-line argument parsing
+   without loading electron."
+  (:require [clojure.string :as str]
+            [vinary.app.uri :as uri]))
 
 (def chromium-switches
   "Chromium command-line switches the app appends unconditionally at launch (applied by the doseq in
@@ -58,3 +61,25 @@
    `env`: {:VV_SOFTWARE_GL <string|nil>}."
   [{:keys [VV_SOFTWARE_GL]}]
   (boolean VV_SOFTWARE_GL))
+
+(defn doc-uris
+  "Ordered, normalized tab uris for the non-flag document arguments in `argv` — supporting any number of
+   files/URIs named on the command line (`vv a.md b.pdf https://example.com`), each opened in its own tab.
+
+   argv[0]=electron, argv[1]=app path (install.sh runs `electron \"$REPO\" \"$@\"`, and `npm start` =
+   `electron .`), so the user's arguments begin at index 2. http(s) and vv-archive:// URLs are kept
+   verbatim; a file:// URI is reduced to its path; a local path (absolute or relative) is made absolute
+   via `resolve-abs` (a 1-argument, cwd-relative resolver — node's `path.resolve`, injected so this stays
+   electron- and node-builtin-free). Leading-'-' flags and blank arguments are dropped."
+  [argv resolve-abs]
+  (->> (drop 2 argv)
+       (remove #(str/starts-with? % "-"))
+       (map (fn [arg]
+              (let [u (uri/normalize arg)]   ; blank→nil, http kept, archive kept, file:// stripped, else as-is
+                (cond
+                  (nil? u)         nil
+                  (uri/http? u)    u
+                  (uri/archive? u) u
+                  :else            (resolve-abs u)))))
+       (remove nil?)
+       vec))
