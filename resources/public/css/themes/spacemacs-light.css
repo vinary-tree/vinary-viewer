@@ -20,6 +20,13 @@
   --vv-highlight: #d3d3e7;      /* text selection; current tree/TOC item (highlight) */
   --vv-disabled: #b3aebb;       /* disabled control text */
 
+  /* dialog elevation (modals/menus): a crisper border than --vv-border + theme-aware shadow/scrim, so
+     dialogs read as clearly-bordered panels and use a soft (not black) shadow on the light surface */
+  --vv-dialog-border: #8b9299;  /* dialog/menu border — darker/more visible than --vv-border on the light panel */
+  --vv-shadow: 0 10px 32px rgba(60,40,70,0.16);    /* modal / palette elevation (soft, not black) */
+  --vv-shadow-menu: 0 6px 18px rgba(60,40,70,0.14);/* dropdown / context-menu elevation */
+  --vv-scrim: rgba(40,30,50,0.22);  /* dimmed backdrop behind blocking modals (light) */
+
   /* headings + meta */
   --vv-head1: #3a81c3;          /* h1 / links / keyword / active accent (blue) */
   --vv-head2: #2d9574;          /* h2 / blockquote rule / strings (green) */

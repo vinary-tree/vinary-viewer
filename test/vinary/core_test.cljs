@@ -30,6 +30,8 @@
             [vinary.renderer.media :as media]
             [vinary.ui.access-keys :as access]
             [vinary.ui.context-menu :as context-menu]
+            [vinary.ui.palette :as palette]
+            [vinary.ui.keybindings-editor :as kbe]
             [vinary.ui.menu-focus :as menu-focus]
             [vinary.ui.menubar :as menubar]
             [vinary.ui.preview-context :as preview-context]
@@ -899,6 +901,67 @@
       (is (some #{"Duplicate tab"} (labels :horizontal)))
       (is (some #{"Close to the Right"} (labels :horizontal)))
       (is (some #{"Close Below"} (labels :vertical))))))
+
+;; ---- command palette: the fuzzy matcher + candidate sources ----
+(deftest palette-fuzzy-match
+  (testing "order-preserving, case-insensitive subsequence match"
+    (is (true?  (palette/fuzzy? "" "anything")))            ; empty query always matches
+    (is (true?  (palette/fuzzy? "abc" "aXbXc")))            ; chars appear in order
+    (is (true?  (palette/fuzzy? "ABC" "a-b-c")))            ; query case-insensitive
+    (is (true?  (palette/fuzzy? "ot" "Open in new Tab")))   ; spread across words
+    (is (false? (palette/fuzzy? "cba" "abc")))              ; wrong order
+    (is (false? (palette/fuzzy? "abcd" "abc")))))           ; query longer than the target
+
+(deftest palette-candidates
+  (testing ":file source maps the git tree, fuzzy-filters by label, caps at 60"
+    (let [projects [{:root "/p" :files ["readme.md" "core.cljs" "deps.edn"]}]]
+      (is (= [{:label "readme.md" :path "/p/readme.md" :kind :file}
+              {:label "core.cljs" :path "/p/core.cljs" :kind :file}
+              {:label "deps.edn"  :path "/p/deps.edn"  :kind :file}]
+             (palette/candidates :file "" projects)))
+      (is (= ["core.cljs"] (mapv :label (palette/candidates :file "cor" projects))))
+      (is (= 60 (count (palette/candidates :file ""
+                                           [{:root "/p" :files (mapv #(str "f" % ".md") (range 100))}]))))))
+  (testing ":theme source lists both themes, fuzzy-filtered"
+    (is (= ["Spacemacs Dark" "Spacemacs Light"] (mapv :label (palette/candidates :theme "" nil))))
+    (is (= [{:label "Spacemacs Light" :theme "spacemacs-light" :kind :theme}]
+           (palette/candidates :theme "light" nil)))))
+
+;; ---- context menu: items adapt to the right-clicked target kind ----
+(deftest context-menu-items-for
+  (let [labels (fn [items] (->> items (remove #{:sep}) (keep :label) set))]
+    (testing "each target kind yields its expected items"
+      (is (= #{"Open" "Open in new tab" "Copy file path" "Copy file name"}
+             (labels (context-menu/items-for {:kind :file :path "/x/a.md"} false))))
+      (is (contains? (labels (context-menu/items-for {:kind :dir :path "/x/d"} false))
+                     "Open in file manager"))
+      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false))
+                     "Open in system browser"))
+      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false))
+                     "Copy link text"))
+      (is (= #{"Copy" "Copy source location"}
+             (labels (context-menu/items-for {:kind :preview-body :text "hi" :source-location "f:1"} false))))
+      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} false)) "View Source"))
+      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} true)) "View Preview"))
+      (is (= #{} (labels (context-menu/items-for {:kind :unknown} false)))))   ; unknown → nil → no items
+    (testing "an http link without text omits Copy link text"
+      (is (not (contains? (labels (context-menu/items-for {:kind :http :path "https://x"} false))
+                          "Copy link text"))))))
+
+;; ---- keybindings editor: chord humanization (drives the editor's binding chips) ----
+(deftest kbedit-chord-format
+  (testing "pretty-chord humanizes modifier prefixes + named keys"
+    (is (= "Ctrl+PgUp" (kbe/pretty-chord "C-prior")))   ; the Ctrl+PageUp tab-cycle binding renders cleanly
+    (is (= "Ctrl+PgDn" (kbe/pretty-chord "C-next")))
+    (is (= "Ctrl+Shift+Tab" (kbe/pretty-chord "C-S-tab")))
+    (is (= "Alt+←"     (kbe/pretty-chord "M-left")))
+    (is (= "Alt+→"     (kbe/pretty-chord "M-right")))
+    (is (= "Esc"       (kbe/pretty-chord "escape")))
+    (is (= "F3"        (kbe/pretty-chord "f3"))))
+  (testing "parse-chord splits the C-/M-/S- prefixes from the base key"
+    (is (= {:mods ["Ctrl"] :base "prior"} (kbe/parse-chord "C-prior")))
+    (is (= {:mods ["Ctrl" "Shift"] :base "tab"} (kbe/parse-chord "C-S-tab")))
+    (is (= {:mods [] :base "f3"} (kbe/parse-chord "f3")))))
 
 (deftest markdown-render-preview-metadata
   (async done

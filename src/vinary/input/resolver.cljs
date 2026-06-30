@@ -34,7 +34,16 @@
             :sequence      @pending
             :in-input?     (get-in db [:ui :input :in-input?])
             :find-visible? (get-in db [:ui :find :visible?])
-            :palette-open? (get-in db [:ui :palette :open?])})))
+            :palette-open? (get-in db [:ui :palette :open?])
+            ;; a blocking modal dialog owns the keyboard while open, so the resolver must not fire background
+            ;; commands (vim j/k, etc.). The dialog's own React handlers — incl. the shared modal's keydown
+            ;; stopPropagation — handle its keys; this flag guards the case where focus escapes the panel.
+            :modal-open?   (boolean (or (get-in db [:ui :settings-open?])
+                                        (get-in db [:ui :about-open?])
+                                        (get-in db [:ui :extensions-open?])
+                                        (get-in db [:ui :passwords :open?])
+                                        (get-in db [:ui :passwords :save-prompt])
+                                        (get-in db [:ui :kbedit :open?])))})))
 
 (defn- leaf-decision [node]
   (cond
@@ -67,6 +76,7 @@
       ;; the palette owns all keys while open; and a bare printable key always reaches a focused input
       ;; (so typing a find query / vim "/" search works even in normal mode)
       (when-not (or (:palette-open? ctx)
+                    (:modal-open? ctx)
                     (and (:in-input? ctx) (keys/bare-printable? token)))
         (let [decision (step (keymap/modes) mode seqv token ctx)]
           (case (:action decision)

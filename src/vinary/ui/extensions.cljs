@@ -3,7 +3,8 @@
    Store URL/ID, enable/disable/remove, check for updates). Mirrors vinary.ui.settings (.vv-modal)."
   (:require [re-frame.core :as rf]
             [reagent.core :as r]
-            [vinary.ui.icons :as icons]))
+            [vinary.ui.icons :as icons]
+            [vinary.ui.modal :as modal]))
 
 (def ^:private subscribe rf/subscribe)
 (def ^:private dispatch  rf/dispatch)
@@ -86,11 +87,11 @@
 
 (defn dialog []
   (when @(subscribe [:ui/extensions-open?])
-    [:div.vv-modal-overlay {:on-click #(dispatch [:extensions/close])}
-     [:div.vv-modal.vv-modal-wide {:on-click #(.stopPropagation %)}
-      [:div.vv-modal-title "Extensions & Ad Blocking"]
-      [:div.vv-modal-body
-       [adblock-section]
-       [ext-section]]
-      [:div.vv-modal-actions
-       [:button.vv-btn {:on-click #(dispatch [:extensions/close])} "Close"]]]]))
+    [modal/modal
+     {:on-close #(dispatch [:extensions/close])
+      :title    "Extensions & Ad Blocking"
+      :class    "vv-modal-wide"
+      :actions  [:button.vv-btn {:on-click #(dispatch [:extensions/close])} "Close"]}
+     [:div.vv-modal-body
+      [adblock-section]
+      [ext-section]]]))

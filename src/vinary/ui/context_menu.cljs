@@ -27,7 +27,7 @@
    (when path {:label "Copy file path" :event [:clipboard/copy path]})
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
-(defn- items-for [{:keys [kind path uri text source-location] :as target} vs?]
+(defn items-for [{:keys [kind path uri text source-location] :as target} vs?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}

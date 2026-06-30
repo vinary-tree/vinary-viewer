@@ -2,7 +2,8 @@
   "The Preferences dialog: variable + fixed-width font families and sizes (the theme lives in the Settings
    menu). Each change applies live (CSS vars) and persists to settings.edn via :settings/set."
   (:require [re-frame.core :as rf]
-            [vinary.ui.access-keys :as access]))
+            [vinary.ui.access-keys :as access]
+            [vinary.ui.modal :as modal]))
 
 (defn- text-field [label access-key k value placeholder access-active?]
   [:div.vv-pref-row
@@ -37,18 +38,17 @@
         s     @(rf/subscribe [:ui/settings])
         access-active? @(rf/subscribe [:ui/access-keys-active?])]
     (when open?
-      [:div.vv-modal-overlay {:on-click #(rf/dispatch [:settings/close])}
-       [:div.vv-modal {:on-click #(.stopPropagation %)
-                       :on-key-down on-key-down}
-        [:div.vv-modal-title "Preferences"]
-        [:div.vv-modal-body
-         [:div.vv-pref-section "Fonts"]
-         [text-field "Variable-width font" "v" :font-variable (:font-variable s)
-          "Inter, system-ui, sans-serif" access-active?]
-         [num-field  "Document font size (px)" "d" :font-size (:font-size s) access-active?]
-         [text-field "Fixed-width font" "f" :font-fixed (:font-fixed s) "Fira Code, monospace" access-active?]
-         [num-field  "Code font size (px)" "s" :code-font-size (:code-font-size s) access-active?]]
-        [:div.vv-modal-actions
-         [:button.vv-btn (merge {:on-click #(rf/dispatch [:settings/close])}
-                                (access/access-attrs "c"))
-          [access/label "Close" "c" access-active?]]]]])))
+      [modal/modal
+       {:on-close    #(rf/dispatch [:settings/close])
+        :title       "Preferences"
+        :on-key-down on-key-down
+        :actions     [:button.vv-btn (merge {:on-click #(rf/dispatch [:settings/close])}
+                                            (access/access-attrs "c"))
+                      [access/label "Close" "c" access-active?]]}
+       [:div.vv-modal-body
+        [:div.vv-pref-section "Fonts"]
+        [text-field "Variable-width font" "v" :font-variable (:font-variable s)
+         "Inter, system-ui, sans-serif" access-active?]
+        [num-field  "Document font size (px)" "d" :font-size (:font-size s) access-active?]
+        [text-field "Fixed-width font" "f" :font-fixed (:font-fixed s) "Fira Code, monospace" access-active?]
+        [num-field  "Code font size (px)" "s" :code-font-size (:code-font-size s) access-active?]]])))

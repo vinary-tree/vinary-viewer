@@ -267,6 +267,17 @@ function installIpc(state) {
   ipcMain.on('vv:clipboard-write', (_event, text) => {
     state.lastCopiedText = text;
   });
+  // native password-manager bridge mocks (so the Passwords dialog populates with a provider row)
+  ipcMain.on('vv:password-state-request', (event) => {
+    event.sender.send('vv:password-state', {
+      providers: [{ id: 'op', label: '1Password', status: 'ready', 'save-supported?': true, message: '' }],
+      forms: { count: 0 }
+    });
+  });
+  ipcMain.on('vv:password-search', (_event, url) => { state.pwSearch = url; });
+  ipcMain.on('vv:password-fill', (_event, item) => { state.pwFill = item; });
+  ipcMain.on('vv:password-save', (_event, payload) => { state.pwSave = payload; });
+  ipcMain.on('vv:password-dismiss-save', (_event, token) => { state.pwDismiss = token; });
 }
 
 async function main() {
@@ -282,6 +293,7 @@ async function main() {
     // a minimal valid 1x1 PNG, returned by the mocked vv:http-snapshot so web-host can freeze the page
     snapshotDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
     lastCopiedText: null,
+    pwSearch: null, pwFill: null, pwSave: null, pwDismiss: null,
     openedPaths: [],
     contentByPath: new Map()
   };
@@ -1297,6 +1309,150 @@ async function main() {
   const tabsAfterGhost = await evalIn(win, `JSON.stringify(window.__vvdb().ui.tabs.map(t => [t.id, t.uri || null]))`);
   assert.strictEqual(tabsAfterGhost, tabsBeforeGhost, 'a navigation for a closed/unknown tab id must be a no-op');
   console.log('[ok] web-view navigation updates its owner tab, never the active tab');
+
+  // ════════ Dialog UIX — the shared modal shell + each dialog's features ════════
+  // open a top-level menu (Alt+<key>) and click the dropdown/sub-dropdown item whose text matches
+  const openMenuItem = async (menuKey, itemText) => {
+    await dispatchWindowKey(win, menuKey, { altKey: true });
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-menu-dropdown'))`), `Alt+${menuKey} menu`);
+    await evalIn(win, `(() => {
+      const it = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item, .vv-menu-subdropdown .vv-menu-item'))
+        .find((n) => n.textContent.includes(${JSON.stringify(itemText)}));
+      if (it) it.click();
+      return Boolean(it);
+    })()`);
+  };
+  const modalShown = () => evalIn(win, `Boolean(document.querySelector('.vv-modal'))`);
+  // dispatch a bubbling Escape on the dialog panel (the shared modal handles Esc on the panel, not the window)
+  const escModal = () => evalIn(win, `(() => { const p = document.querySelector('.vv-modal');
+    if (p) p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    return Boolean(p); })()`);
+
+  // ── Settings/Preferences — exercises the SHARED modal behaviors (autofocus, modality, focus-trap, Esc) ──
+  await openMenuItem('s', 'Preferences');
+  await waitFor(() => evalIn(win, `(() => { const m = document.querySelector('.vv-modal');
+    return Boolean(m) && /Preferences/.test(m.querySelector('.vv-modal-title')?.textContent || '')
+           && Boolean(m.querySelector('.vv-modal-x')); })()`), 'Settings dialog: title + ✕ render');
+  assert.strictEqual(await evalIn(win, `(() => { const m = document.querySelector('.vv-modal');
+    return m === document.activeElement || m.contains(document.activeElement); })()`), true,
+    'opening a modal moves focus into the dialog (autofocus)');
+  // true modality: a background command chord (Ctrl+T → new tab) must NOT fire while a modal owns the
+  // keyboard. A window-dispatched chord reaches the keymap resolver directly, so this validates the
+  // resolver's :modal-open? guard (no false-pass from a key that simply wasn't delivered).
+  const tabsDuringModal = await evalIn(win, `document.querySelectorAll('.vv-tab').length`);
+  await dispatchWindowKey(win, 't', { ctrlKey: true });
+  await delay(140);
+  assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-tab').length`), tabsDuringModal,
+    'a modal suppresses background command chords (Ctrl+T added no tab while Settings was open)');
+  assert.strictEqual(await modalShown(), true, 'the Settings modal stayed open');
+  // focus trap: Tab from the last focusable wraps to the first
+  assert.strictEqual(await evalIn(win, `(() => {
+    const m = document.querySelector('.vv-modal');
+    const sel = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const f = Array.from(m.querySelectorAll(sel)).filter((e) => e.offsetWidth > 0);
+    if (f.length < 2) return false;
+    f[f.length - 1].focus();
+    f[f.length - 1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    return document.activeElement === f[0];
+  })()`), true, 'Tab wraps focus within the dialog (focus trap)');
+  // editing a font field live-applies + persists (:settings/set)
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-pref-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'Iosevka'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['font-variable'] === 'Iosevka'`),
+    'editing a font field updates settings live');
+  await escModal();
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['settings-open?']`), 'Esc closes the Settings dialog');
+  console.log('[ok] Settings: autofocus + modality + focus-trap + live font edit + Esc-close');
+
+  // ✕ and backdrop-click also close (consistency)
+  await openMenuItem('s', 'Preferences');
+  await waitFor(modalShown, 'Settings reopened (✕)');
+  await evalIn(win, `document.querySelector('.vv-modal-x').click()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['settings-open?']`), '✕ closes the dialog');
+  await openMenuItem('s', 'Preferences');
+  await waitFor(modalShown, 'Settings reopened (backdrop)');
+  await evalIn(win, `document.querySelector('.vv-modal-overlay').click()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['settings-open?']`), 'backdrop click closes the dialog');
+  console.log('[ok] Settings: ✕ and backdrop-click both close');
+
+  // ── About ──
+  await openMenuItem('h', 'About');
+  await waitFor(() => evalIn(win, `(() => { const m = document.querySelector('.vv-modal.vv-about');
+    return Boolean(m) && m.textContent.includes('smoke-test'); })()`), 'About shows the app version');
+  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-about .vv-about-link'))`), true,
+    'About has the repository link');
+  await escModal();
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['about-open?']`), 'Esc closes About');
+  console.log('[ok] About: name/version/link render + Esc-close');
+
+  // ── Command palette: open → fuzzy filter → arrow-select → Esc close ──
+  await openMenuItem('h', 'Command Palette');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.palette['open?'])`), 'palette opens');
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-palette-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, 'tab'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-palette-item').length > 0`),
+    'palette fuzzy-filters to tab commands');
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-palette-input');
+    i.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-palette-selected'))`), 'ArrowDown selects a row');
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-palette-input');
+    i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.palette['open?']`), 'Escape closes the palette');
+  console.log('[ok] Command palette: open → fuzzy filter → arrow-select → Esc-close');
+
+  // ── Extensions: opens, ad-block toggle flips state, Esc closes ──
+  await openMenuItem('s', 'Extensions');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-modal')) && Boolean(document.querySelector('.vv-ext-sect'))`),
+    'Extensions dialog open');
+  const ab0 = await evalIn(win, `Boolean(window.__vvdb().ui.adblock && window.__vvdb().ui.adblock['enabled?'])`);
+  await evalIn(win, `(() => { const cb = document.querySelector('.vv-ext-sect input[type="checkbox"]'); cb.click(); return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.adblock && window.__vvdb().ui.adblock['enabled?']) !== ${ab0}`),
+    'ad-block toggle flips its state');
+  await escModal();
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui['extensions-open?']`), 'Esc closes Extensions');
+  console.log('[ok] Extensions: opens + ad-block toggle + Esc-close');
+
+  // ── Passwords panel (populated from the mocked bridge state) ──
+  await openMenuItem('s', 'Passwords');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-modal.vv-pw-dialog'))`), 'Passwords dialog open');
+  await waitFor(() => evalIn(win, `(document.querySelector('.vv-pw-providers')?.textContent || '').includes('1Password')`),
+    'a provider row renders from mocked state');
+  await escModal();
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.passwords['open?']`), 'Esc closes Passwords');
+  console.log('[ok] Passwords panel: opens with provider rows + Esc-close');
+
+  // ── Passwords save-prompt (push-driven) → renders, Save enabled, Dismiss notifies main ──
+  state.pwDismiss = null;
+  win.webContents.send('vv:password-save-prompt', { token: 'tok-1', origin: 'https://example.com', username: 'alice',
+    providers: [{ id: 'op', label: '1Password', status: 'ready', 'save-supported?': true }] });
+  await waitFor(() => evalIn(win, `(() => { const m = document.querySelector('.vv-modal.vv-pw-save');
+    return Boolean(m) && m.textContent.includes('Save Login'); })()`), 'save-prompt renders');
+  assert.strictEqual(await evalIn(win, `!document.querySelector('.vv-pw-save .vv-btn[disabled]')`), true,
+    'Save is enabled once a provider auto-selects');
+  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-pw-save .vv-btn'))
+    .find((x) => x.textContent.includes('Dismiss')); if (b) b.click(); return Boolean(b); })()`);
+  await waitFor(() => state.pwDismiss === 'tok-1', 'Dismiss notifies main with the token');
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.passwords['save-prompt']`), 'Dismiss clears the save-prompt');
+  console.log('[ok] Passwords save-prompt: renders + Save enabled + Dismiss');
+
+  // ── Error view text is selectable AND copyable (Ctrl+C) — selectable-root now includes .vv-error ──
+  const errPath = path.join(ROOT, 'test', 'fixtures', 'copy-error.md');
+  win.webContents.send('vv:open-files', { paths: [errPath] });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.tabs.some((t) => t.uri === ${JSON.stringify(errPath)})`),
+    'a tab exists for the error path');
+  win.webContents.send('vv:error', { path: errPath, message: 'EISDIR: illegal operation on a directory, read' });
+  await waitFor(() => evalIn(win, `(document.querySelector('.vv-error')?.textContent || '').includes('EISDIR')`),
+    'the error view renders');
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => { const el = document.querySelector('.vv-error');
+    const r = document.createRange(); r.selectNodeContents(el);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); return s.toString(); })()`);
+  assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C is handled for an error selection');
+  await waitFor(() => state.lastCopiedText && state.lastCopiedText.includes('EISDIR'),
+    'selected error text copies to the clipboard');
+  console.log('[ok] error view text is selectable and copyable (Ctrl+C)');
 
   // ── Multi-argument launch — `vv a.md b.md https://x` opens each argument in its own tab (first focused) ──
   // The main process parses every non-flag argument (startup/doc-uris, unit-tested) and pushes them over THIS

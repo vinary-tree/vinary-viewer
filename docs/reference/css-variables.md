@@ -25,7 +25,8 @@ resources/public/index.html
 ```
 
 > **Token-naming convention.** `--vv-bg*` = backgrounds; `--vv-fg*` = text; structural
-> (`--vv-border`, `--vv-highlight`, `--vv-disabled`); headings/meta (`--vv-head1..4`, `--vv-meta`);
+> (`--vv-border`, `--vv-highlight`, `--vv-disabled`); dialog elevation (`--vv-dialog-border`,
+> `--vv-shadow`, `--vv-shadow-menu`, `--vv-scrim`); headings/meta (`--vv-head1..4`, `--vv-meta`);
 > syntax/emphasis (`--vv-const`, `--vv-func`, `--vv-em`, `--vv-var`, `--vv-comment`, `--vv-error`,
 > `--vv-code`); and the in-page-find trio (`--vv-find-*`).
 
@@ -58,6 +59,25 @@ resources/public/index.html
 | `--vv-border` | Rules, borders, header underlines | `#5d4d7a` | `#b3b9be` | most `border`/`border-*` (tree, toc, tabs, toolbar, find, `nav-btn`, `theme-select`, headings underline, `pre`, `th/td`, `hr`) |
 | `--vv-highlight` | Text selection; current tree/TOC item | `#444155` | `#d3d3e7` | `::selection` bg, `.vv-file-active` bg, `::highlight(vv-find)` bg |
 | `--vv-disabled` | Disabled control text | `#44475a` | `#b3aebb` | *(reserved for disabled controls)* |
+
+#### 2.3.1 Dialog elevation (modals & menus)
+
+Theme-aware tokens for the dialog/menu surfaces (added with the dialog UIX overhaul) so every modal, the
+command palette, and every dropdown reads as a clearly-bordered, elevated panel — and the **light** theme
+gets a soft, light-tinted shadow instead of inheriting the dark theme's black one. The crisp
+`--vv-dialog-border` replaces the low-contrast `--vv-border` on these surfaces (the panel edge was barely
+visible against the panel background before).
+
+| Token | Meaning | Dark | Light | Used by (`app.css`) |
+| --- | --- | --- | --- | --- |
+| `--vv-dialog-border` | Crisp dialog/menu border (higher-contrast than `--vv-border`) | `#7a6a9c` | `#8b9299` | `.vv-modal`, `.vv-palette`, `.vv-ctx-menu`, `.vv-menu-dropdown`, `.vv-menu-subdropdown`, `.vv-kb-capture`, `.vv-find`, `.vv-uri-complete`, `.vv-zoom-menu`, `.vv-uri-errmsg` |
+| `--vv-shadow` | Modal/palette drop-shadow (elevation) | `0 12px 40px rgba(0,0,0,.55)` | `0 10px 32px rgba(60,40,70,.16)` | `.vv-modal`, `.vv-palette`, `.vv-kb-capture` |
+| `--vv-shadow-menu` | Dropdown/context-menu drop-shadow | `0 6px 22px rgba(0,0,0,.45)` | `0 6px 18px rgba(60,40,70,.14)` | `.vv-menu-dropdown`, `.vv-menu-subdropdown`, `.vv-ctx-menu`, `.vv-uri-complete`, `.vv-find` |
+| `--vv-scrim` | Dimmed backdrop behind blocking modals | `rgba(0,0,0,.5)` | `rgba(40,30,50,.22)` | `.vv-modal-overlay`, `.vv-palette-overlay`, `.vv-kb-capture-overlay` |
+
+> The shared modal shell (`src/vinary/ui/modal.cljs`) renders every blocking dialog with these tokens, so
+> the border + elevation is consistent across Settings, About, Extensions, Passwords, and the keybindings
+> editor. Menus and the context menu deliberately use the lighter `--vv-shadow-menu` and **no** scrim.
 
 ### 2.4 Headings & meta
 

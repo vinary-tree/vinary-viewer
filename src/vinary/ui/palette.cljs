@@ -8,7 +8,7 @@
             [vinary.app.nav :as nav]
             [vinary.app.commands :as commands]))
 
-(defn- fuzzy?
+(defn fuzzy?
   "Subsequence fuzzy match: do q's chars appear in order within s?"
   [q s]
   (let [q (str/lower-case q) s (str/lower-case s)]
@@ -28,7 +28,7 @@
            {:find-visible? (get-in db [:ui :find :visible?])
             :in-input?     true})))
 
-(defn- candidates [source query projects]
+(defn candidates [source query projects]
   (case source
     :file  (->> projects
                 (mapcat (fn [{:keys [root files]}]

@@ -4,7 +4,8 @@
   (:require [re-frame.core :as rf]
             [reagent.core :as r]
             [vinary.app.uri :as uri]
-            [vinary.ui.icons :as icons]))
+            [vinary.ui.icons :as icons]
+            [vinary.ui.modal :as modal]))
 
 (def ^:private subscribe rf/subscribe)
 (def ^:private dispatch rf/dispatch)
@@ -58,31 +59,29 @@
 (defn dialog []
   (let [{:keys [open? providers items busy? error result]} @(subscribe [:ui/passwords])]
     (when open?
-      [:div.vv-modal-overlay {:on-click #(dispatch [:passwords/close])}
-       [:div.vv-modal.vv-modal-wide.vv-pw-dialog {:on-click #(.stopPropagation %)}
-        [:div.vv-modal-title
-         [:span "Passwords"]
-         [:button.vv-modal-x {:title "Close" :on-click #(dispatch [:passwords/close])}
-          (icons/icon :close)]]
-        [:div.vv-modal-body
-         [:div.vv-pw-providers
-          (if (seq providers)
-            (doall (for [p providers] ^{:key (:id p)} [provider-row p]))
-            [:div.vv-ext-empty "No providers configured."])]
-         (when error [:div.vv-pw-error error])
-         (when result
-           [:div.vv-pw-result {:class (if (:ok result) "vv-pw-result-ok" "vv-pw-result-error")}
-            (:message result)])
-         [:div.vv-pw-list
-          (cond
-            busy? [:div.vv-pw-empty [:span.vv-pw-spinner] "Searching..."]
-            (seq items) (doall (for [item items]
-                                 ^{:key (str (:provider item) ":" (:id item))}
-                                 [item-row item]))
-            :else [:div.vv-pw-empty "No matching logins."])]]
-        [:div.vv-modal-actions
-         [:button.vv-btn {:on-click #(dispatch [:passwords/retry])} "Retry"]
-         [:button.vv-btn {:on-click #(dispatch [:passwords/close])} "Close"]]]])))
+      [modal/modal
+       {:on-close #(dispatch [:passwords/close])
+        :title    "Passwords"
+        :class    "vv-modal-wide vv-pw-dialog"
+        :actions  [:<>
+                   [:button.vv-btn {:on-click #(dispatch [:passwords/retry])} "Retry"]
+                   [:button.vv-btn {:on-click #(dispatch [:passwords/close])} "Close"]]}
+       [:div.vv-modal-body
+        [:div.vv-pw-providers
+         (if (seq providers)
+           (doall (for [p providers] ^{:key (:id p)} [provider-row p]))
+           [:div.vv-ext-empty "No providers configured."])]
+        (when error [:div.vv-pw-error error])
+        (when result
+          [:div.vv-pw-result {:class (if (:ok result) "vv-pw-result-ok" "vv-pw-result-error")}
+           (:message result)])
+        [:div.vv-pw-list
+         (cond
+           busy? [:div.vv-pw-empty [:span.vv-pw-spinner] "Searching..."]
+           (seq items) (doall (for [item items]
+                                ^{:key (str (:provider item) ":" (:id item))}
+                                [item-row item]))
+           :else [:div.vv-pw-empty "No matching logins."])]]])))
 
 (defn save-prompt []
   (let [selected (r/atom nil)
@@ -96,26 +95,27 @@
           (reset! selected (or (:id (first (filter #(= "ready" (:status %)) ready-providers)))
                                (:id (first ready-providers)))))
         (when save-prompt
-          [:div.vv-modal-overlay {:on-click #(dispatch [:passwords/dismiss-save token])}
-           [:div.vv-modal.vv-pw-save {:on-click #(.stopPropagation %)}
-            [:div.vv-modal-title "Save Login"]
-            [:div.vv-modal-body
-             [:div.vv-pw-save-target
-              [:div.vv-pw-save-origin origin]
-              [:div.vv-pw-save-user (if (seq username) username "No username")]]
-             (if (seq ready-providers)
-               [:select.vv-pw-select
-                {:value (or @selected "")
-                 :on-focus #(dispatch [:input/set-in-input true])
-                 :on-blur #(dispatch [:input/set-in-input false])
-                 :on-change #(reset! selected (.. % -target -value))}
-                (for [{:keys [id label status]} ready-providers]
-                  ^{:key id}
-                  [:option {:value id} (str label " - " (status-text status))])]
-               [:div.vv-pw-empty "No save-capable provider is available."])]
-            [:div.vv-modal-actions
-             [:button.vv-btn
-              {:disabled (not (seq @selected))
-               :on-click #(dispatch [:passwords/save token @selected])}
-              "Save"]
-             [:button.vv-btn {:on-click #(dispatch [:passwords/dismiss-save token])} "Dismiss"]]]])))))
+          [modal/modal
+           {:on-close #(dispatch [:passwords/dismiss-save token])
+            :title    "Save Login"
+            :class    "vv-pw-save"
+            :actions  [:<>
+                       [:button.vv-btn
+                        {:disabled (not (seq @selected))
+                         :on-click #(dispatch [:passwords/save token @selected])}
+                        "Save"]
+                       [:button.vv-btn {:on-click #(dispatch [:passwords/dismiss-save token])} "Dismiss"]]}
+           [:div.vv-modal-body
+            [:div.vv-pw-save-target
+             [:div.vv-pw-save-origin origin]
+             [:div.vv-pw-save-user (if (seq username) username "No username")]]
+            (if (seq ready-providers)
+              [:select.vv-pw-select
+               {:value (or @selected "")
+                :on-focus #(dispatch [:input/set-in-input true])
+                :on-blur #(dispatch [:input/set-in-input false])
+                :on-change #(reset! selected (.. % -target -value))}
+               (for [{:keys [id label status]} ready-providers]
+                 ^{:key id}
+                 [:option {:value id} (str label " - " (status-text status))])]
+              [:div.vv-pw-empty "No save-capable provider is available."])]])))))

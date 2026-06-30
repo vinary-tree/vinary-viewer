@@ -121,7 +121,10 @@
 
 (defn- selectable-root [^js node]
   (some-> (element-for-node node)
-          (.closest ".markdown-body, .vv-source, .vv-pdf-doc, .vv-table-doc, .vv-log-doc")))
+          ;; the error view (.vv-error) and inline diagram errors are selectable content too — include them
+          ;; so Ctrl+C copies a selected error message (it would otherwise be silently refused)
+          (.closest (str ".markdown-body, .vv-source, .vv-pdf-doc, .vv-table-doc, .vv-log-doc, "
+                         ".vv-error, .vv-math-error, .vv-mermaid-error"))))
 
 (defn- focused-source-selection []
   (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]

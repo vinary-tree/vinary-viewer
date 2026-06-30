@@ -36,7 +36,7 @@
         (re-matches #"f\d{1,2}" b)       (str/upper-case b)
         :else                            b))
 
-(defn- parse-chord [chord]
+(defn parse-chord [chord]
   (loop [s chord mods []]
     (cond
       (str/starts-with? s "C-") (recur (subs s 2) (conj mods "Ctrl"))
@@ -44,7 +44,7 @@
       (str/starts-with? s "S-") (recur (subs s 2) (conj mods "Shift"))
       :else                     {:mods mods :base s})))
 
-(defn- pretty-chord [chord]
+(defn pretty-chord [chord]
   (let [{:keys [mods base]} (parse-chord chord)]
     (str/join "+" (conj (vec mods) (base-pretty base)))))
 

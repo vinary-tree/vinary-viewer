@@ -2,7 +2,8 @@
   "The Help ▸ About dialog: the app name + version (pushed by main from package.json), the GitHub repo
    link (opened in the system browser), and a short summary."
   (:require [re-frame.core :as rf]
-            [vinary.ui.access-keys :as access]))
+            [vinary.ui.access-keys :as access]
+            [vinary.ui.modal :as modal]))
 
 (def ^:private repo-url "https://github.com/vinary-tree/vinary-viewer")
 
@@ -20,21 +21,21 @@
         repo  (or repo repo-url)
         access-active? @(rf/subscribe [:ui/access-keys-active?])]
     (when open?
-      [:div.vv-modal-overlay {:on-click #(rf/dispatch [:about/close])}
-       [:div.vv-modal.vv-about {:on-click #(.stopPropagation %)
-                                :on-key-down #(on-key-down repo %)}
-        [:img.vv-about-logo {:src "assets/vinary-tree-logo.svg" :alt ""}]
-        [:div.vv-modal-title (or name "vinary-viewer")]
-        [:div.vv-about-version (str "Version " (or version "0.2.0"))]
-        [:p.vv-about-summary
-         "A reactive, browser-like previewer for repository documentation and source code — live-refreshing "
-         "Markdown, diagrams, PDFs, images, and tree-sitter-highlighted source, with navigable tabs, a URI "
-         "bar, HTTP browsing, and a multi-project sidebar. Inspired by vmd."]
-        [:a.vv-about-link
-         (merge {:href "#" :on-click (fn [^js e] (.preventDefault e) (rf/dispatch [:shell/open-external repo]))}
-                (access/access-attrs "r"))
-         [access/label repo "r" access-active?]]
-        [:div.vv-modal-actions
-         [:button.vv-btn (merge {:on-click #(rf/dispatch [:about/close])}
-                                (access/access-attrs "c"))
-          [access/label "Close" "c" access-active?]]]]])))
+      [modal/modal
+       {:on-close    #(rf/dispatch [:about/close])
+        :title       (or name "vinary-viewer")
+        :class       "vv-about"
+        :on-key-down #(on-key-down repo %)
+        :actions     [:button.vv-btn (merge {:on-click #(rf/dispatch [:about/close])}
+                                            (access/access-attrs "c"))
+                      [access/label "Close" "c" access-active?]]}
+       [:img.vv-about-logo {:src "assets/vinary-tree-logo.svg" :alt ""}]
+       [:div.vv-about-version (str "Version " (or version "0.2.0"))]
+       [:p.vv-about-summary
+        "A reactive, browser-like previewer for repository documentation and source code — live-refreshing "
+        "Markdown, diagrams, PDFs, images, and tree-sitter-highlighted source, with navigable tabs, a URI "
+        "bar, HTTP browsing, and a multi-project sidebar. Inspired by vmd."]
+       [:a.vv-about-link
+        (merge {:href "#" :on-click (fn [^js e] (.preventDefault e) (rf/dispatch [:shell/open-external repo]))}
+               (access/access-attrs "r"))
+        [access/label repo "r" access-active?]]])))
