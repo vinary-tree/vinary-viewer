@@ -84,12 +84,14 @@
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
          stamp   (if (some? stamp) stamp (js/Date.now))
+         ir-on?  (ir-flag/enabled? (get-in db [:ui :settings :ir-enabled?]))
+         ir-office? (and (= kind "office") ir-on?)   ; office renders via :office/render (IR → HTML + TOC)
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
          ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
          ;; directory carries its :doc/entries listing instead.
          attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
                    text                  (assoc :doc/text text)
-                   html                  (assoc :doc/html html)
+                   (and html (not ir-office?)) (assoc :doc/html html)   ; office-IR fills :doc/html via :office/render
                    (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
                    sheets                (assoc :doc/sheets (vec sheets))
                    page                  (assoc :doc/page page)
@@ -98,7 +100,8 @@
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
-                   (not= kind "markdown") (assoc :doc/toc [] :doc/assets []))
+                   ;; office-IR gets its :doc/toc from :office/render; every other non-markdown kind resets it
+                   (and (not= kind "markdown") (not ir-office?)) (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
@@ -113,8 +116,11 @@
        {:db db'
         :fx (cond-> [[:ds/transact tx]]
               (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
-                                                            :ir? (ir-flag/enabled? (get-in db [:ui :settings :ir-enabled?]))
+                                                            :ir? ir-on?
                                                             :on-done [:content/rendered path stamp]}])
+              ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
+              ir-office?          (conj [:office/render {:html html :path path
+                                                         :on-done [:content/rendered path stamp]}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}

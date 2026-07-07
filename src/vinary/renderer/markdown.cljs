@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
             [vinary.ir.frontend.markdown :as ir-md]
+            [vinary.ir.frontend.office :as ir-office]
             [vinary.ir.backend.html :as ir-html]
             [vinary.ir.capability.toc :as ir-toc]
             [vinary.renderer.media :as media]
@@ -296,3 +297,12 @@
                                   :ir ir
                                   :toc (ir-toc/toc-of ir)
                                   :assets (vec (:assets @metadata))}))))))))))
+
+(defn render-office-ir
+  "Render office HTML through the common IR: parse via rehype-raw + the shared sanitizer + rehype-slug
+   (ir-office/html->ir) → hast->IR → lower → post-passes. Returns Promise<{:html :toc}>, giving office
+   documents a heading TOC and the single sanitize policy. No base-dir — office HTML carries no relative URLs."
+  [html]
+  (let [ir (ir-office/html->ir html)]
+    (-> (apply-posts (ir-html/lower ir))
+        (.then (fn [h] {:html h :toc (ir-toc/toc-of ir)})))))

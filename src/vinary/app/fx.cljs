@@ -57,6 +57,15 @@
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
+;; Office render (docx / ODF HTML) through the common IR when :vv/ir is on → HTML + a heading TOC (office
+;; previously produced neither a TOC nor went through the GitHub-allowlist sanitizer).
+(rf/reg-fx
+ :office/render
+ (fn [{:keys [html path on-done]}]
+   (-> (md/render-office-ir html)
+       (.then (fn [result] (rf/dispatch (conj on-done result))))
+       (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "office render error: " (.-message e))}]))))))
+
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
 (rf/reg-fx
  :theme/apply
