@@ -884,6 +884,29 @@ async function main() {
   assert.strictEqual(codeSpanMath.isMath, false, 'the code span must NOT be a math node');
   assert.strictEqual(codeSpanMath.hasMjx, false, 'the code span must contain no MathJax rendering');
   console.log('[ok] `$x^2$` inline code stays literal (no math leak); $`x^2`$ + bare $…$ still render as math');
+
+  // MathJax renditions are SVG (glyph paths, not text), so native ::selection can't paint them; selecting
+  // across an equation must give it a .vv-math-selected background so math highlights with the surrounding
+  // prose. The listener is selectionchange + rAF-throttled, so wait a frame after selecting.
+  await evalIn(win, `(() => {
+    const p = document.querySelector('.markdown-body .vv-math-inline').closest('p');
+    const sel = window.getSelection(); sel.removeAllRanges();
+    const range = document.createRange(); range.selectNodeContents(p); sel.addRange(range);
+    return true;
+  })()`);
+  const mathSel = await waitFor(
+    () => evalIn(win, `(() => {
+      const el = document.querySelector('.markdown-body .vv-math-inline');
+      if (!el || !el.classList.contains('vv-math-selected')) return null;
+      return { bg: getComputedStyle(el).backgroundColor };
+    })()`),
+    'inline math gets .vv-math-selected while selected');
+  assert.ok(mathSel.bg && mathSel.bg !== 'rgba(0, 0, 0, 0)' && mathSel.bg !== 'transparent',
+    `selected math must have a non-transparent highlight background (got ${mathSel.bg})`);
+  await evalIn(win, `window.getSelection().removeAllRanges(); true`);
+  await waitFor(() => evalIn(win, `!document.querySelector('.markdown-body .vv-math-inline.vv-math-selected')`),
+    'math highlight clears when the selection is collapsed');
+  console.log('[ok] MathJax renditions highlight together with the prose during selection (.vv-math-selected)');
   // Regression guard for the double-render bug: MathJax's <mjx-assistive-mml> must stay in the DOM (a11y)
   // but be clipped + unselectable by our re-added rule, so Chromium can't paint it as a text-size duplicate.
   const assistive = await evalIn(win, `(() => {

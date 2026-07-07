@@ -205,6 +205,34 @@
                              (rf/dispatch [:clipboard/copy text]))))
                        true)))
 
+(defonce ^:private math-select-installed? (atom false))
+(defonce ^:private math-select-raf (atom nil))
+
+(defn- update-math-selection! []
+  (let [sel        (.getSelection js/window)
+        collapsed? (or (nil? sel) (zero? (.-rangeCount sel)) (.-isCollapsed sel))
+        nodes      (.querySelectorAll js/document ".vv-content .vv-math-inline, .vv-content .vv-math-display")]
+    (dotimes [i (.-length nodes)]
+      (let [^js el (aget nodes i)
+            on?    (and (not collapsed?) (.containsNode sel el true))]   ; true = allow partial containment
+        (.toggle (.-classList el) "vv-math-selected" on?)))))
+
+(defn math-selection-highlight!
+  "MathJax renders equations as SVG (glyph <path>s, not text), so the browser's native ::selection highlight
+   skips them — a drag-selection across prose+math leaves the math un-highlighted. On selectionchange, give any
+   math element the selection intersects a `vv-math-selected` class (CSS paints it with the selection colour),
+   so math highlights together with the surrounding prose. rAF-throttled — selectionchange fires rapidly during
+   a drag; coalesce to one pass per frame."
+  []
+  (when-not @math-select-installed?
+    (reset! math-select-installed? true)
+    (.addEventListener js/document "selectionchange"
+                       (fn [_]
+                         (when-not @math-select-raf
+                           (reset! math-select-raf
+                                   (js/requestAnimationFrame
+                                    (fn [_] (reset! math-select-raf nil) (update-math-selection!)))))))))
+
 (defn mouse-nav!
   "Mouse thumb buttons: button 3 → Back, button 4 → Forward (like a browser). preventDefault on the
    capture-phase mousedown cancels Chromium's own back/forward so it never replaces the page."
@@ -318,6 +346,7 @@
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (bridge!)
   (copy-shortcuts!)
+  (math-selection-highlight!)
   (keybindings!)
   (menubar/install-access-keys!)
   (mouse-nav!)

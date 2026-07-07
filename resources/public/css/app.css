@@ -497,6 +497,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body .vv-math-inline mjx-container { margin: 0 0.12em; }
 .markdown-body .vv-math-display { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; text-align: center; }
 .markdown-body .vv-math-display mjx-container { margin: 0 auto; }
+/* MathJax renditions are SVG (glyph paths, not text), so native ::selection can't paint them; when a
+   selection intersects an equation, vinary.renderer.core toggles .vv-math-selected — paint it with the same
+   selection colour so math highlights together with the surrounding prose (see math-selection-highlight!). */
+.markdown-body :is(.vv-math-inline, .vv-math-display).vv-math-selected { background: var(--vv-highlight); border-radius: 2px; }
 /* MathJax's tex2svg emits <mjx-assistive-mml><math> next to the SVG for screen readers, but because we
    typeset to an HTML string (startup.typeset=false) MathJax never inserts its own hiding stylesheet — so
    Chromium's native MathML paints the <math> as a text-size duplicate under the SVG. Re-add MathJax's own
