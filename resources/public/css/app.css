@@ -40,9 +40,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-pdf-text :is(span, br) { color: transparent; position: absolute; white-space: pre;
   cursor: text; transform-origin: 0 0; }
 .vv-pdf-text span.markedContent { top: 0; height: 0; }
-/* link layer (external + intra-doc destinations) over the text */
-.vv-pdf-anno { position: absolute; inset: 0; z-index: 2; }
-.vv-pdf-anno a.vv-pdf-link { position: absolute; }
+/* link layer (external + intra-doc destinations) over the text. The container is a full-page overlay ABOVE
+   the text layer (z-index 2 > 1), so it MUST be pointer-transparent (pointer-events:none) — otherwise it
+   swallows mouse-drag before the text layer and text can't be drag-selected (find + programmatic copy still
+   work, since neither needs pointer events, which is why this hid). Only the actual links opt back in. */
+.vv-pdf-anno { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.vv-pdf-anno a.vv-pdf-link { position: absolute; pointer-events: auto; }
 /* optional dark-invert: invert the CANVAS only, so text/selection/find highlights stay normal */
 .vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
 /* per-page status chip: a "rendering…" hint while a slow (heavy) page rasterizes on the main thread, or a

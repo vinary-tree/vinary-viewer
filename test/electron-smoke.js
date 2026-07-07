@@ -565,6 +565,35 @@ async function main() {
   await waitFor(() => state.lastCopiedText && state.lastCopiedText.includes('Vinary'), 'PDF selection Ctrl+C clipboard write');
   console.log('[ok] PDF text selection copies via Ctrl+C');
 
+  // Hit-test: mouse-drag selection requires the TEXT layer to be the topmost element at a text span's
+  // position. The link overlay (.vv-pdf-anno, z-index 2) covers the whole page ABOVE the text layer, so it
+  // must be pointer-transparent — else it swallows the drag and text can't be selected (the copy test above
+  // uses a PROGRAMMATIC range, which needs no pointer events, so it never caught this). elementFromPoint at a
+  // span's center must resolve into .vv-pdf-text, NOT .vv-pdf-anno / the canvas.
+  // close any menu left open by an earlier step — its full-screen .vv-menu-overlay (z-index 49) would sit
+  // over the page and defeat the hit-test (the find/copy tests above don't care: no pointer events needed).
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("menu","close"))); true`);
+  await waitFor(() => evalIn(win, `!document.querySelector('.vv-menu-overlay')`), 'no menu overlay before the PDF hit-test');
+  const hitTest = await evalIn(win, `(() => {
+    // a real, laid-out glyph span: non-empty, not the zero-height marked-content marker, real box
+    const span = Array.from(document.querySelectorAll('.vv-pdf-text span'))
+      .find(s => s.textContent.trim().length > 0 && !s.classList.contains('markedContent')
+                 && s.getBoundingClientRect().width > 1 && s.getBoundingClientRect().height > 1);
+    if (!span) return { ok: false, reason: 'no laid-out text span' };
+    const r = span.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      ok: Boolean(hit && hit.closest('.vv-pdf-text')),
+      inAnno: Boolean(hit && hit.closest('.vv-pdf-anno')),
+      hitClass: hit ? (hit.className || hit.tagName.toLowerCase()) : null,
+      annoPE: getComputedStyle(document.querySelector('.vv-pdf-anno')).pointerEvents
+    };
+  })()`);
+  assert.strictEqual(hitTest.inAnno, false, 'link overlay must not intercept pointer events over text (pointer-events:none)');
+  assert.strictEqual(hitTest.annoPE, 'none', '.vv-pdf-anno container must be pointer-transparent');
+  assert.strictEqual(hitTest.ok, true, `a text span must be the topmost hit target for drag-selection (got .${hitTest.hitClass})`);
+  console.log('[ok] PDF text layer is the topmost hit target — drag-selection reaches it (link overlay is click-through)');
+
   // in-page find covers the PDF text layer (materialized on find)
   await evalIn(win, `window.getSelection().removeAllRanges()`);
   await dispatchWindowKey(win, 'f', { ctrlKey: true });
