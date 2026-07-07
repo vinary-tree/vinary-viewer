@@ -9,6 +9,7 @@
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
             [vinary.renderer.math :as math]
+            [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
@@ -332,10 +333,18 @@
     (r/create-class
      {:display-name "vv-ir-stream-body"
       :component-did-mount  (fn [this]
-                              (let [[_ path kind text stamp] (r/argv this)]
+                              (let [[_ path kind text stamp] (r/argv this)
+                                    ;; progressive kinds inject a block-provider (full-document render → parity);
+                                    ;; log/text leave it nil and take the bounded transport engine instead.
+                                    blocks-fn (case kind
+                                                "markdown"   (fn [] (md/stream-blocks text (md/dir-of path) stamp))
+                                                "pdf-reflow" (fn [] (pdf/reflow-blocks! path))
+                                                nil)]
                                 (reset! path* path)
                                 (reset! detach* (attach-content-interactions! @node source* path* last-link))
-                                (reset! ctrl* (stream-scheduler/start! @node path kind {:text text :stamp stamp}))))
+                                (reset! ctrl* (stream-scheduler/start! @node path kind
+                                                                       (cond-> {:text text :stamp stamp}
+                                                                         blocks-fn (assoc :blocks-fn blocks-fn))))))
       :component-did-update (fn [this]
                               ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
                               ;; while markdown is still draining (its whole outline is set upfront, but the
@@ -821,7 +830,8 @@
         tabs    @(rf/subscribe [:ui/tabs])
         uri     @(rf/subscribe [:ui/active-uri])
         vs?     @(rf/subscribe [:ui/active-view-source?])
-        reflow? @(rf/subscribe [:pdf/reflow?])]
+        reflow? @(rf/subscribe [:pdf/reflow?])
+        stream? (:stream? @(rf/subscribe [:ui/settings]))]   ; streaming enabled → the reflow view streams too
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
                    (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
@@ -848,9 +858,16 @@
        ;; PDF: the fixed-layout canvas by default; when "Reflow Text" is on and the extracted-text HTML is
        ;; ready, show that reflowable prose instead (an additive facet — the canvas render is untouched).
        (= "pdf" (:doc/kind doc))
-       (if (and reflow? (:doc/reflow-html doc))
+       (cond
+         ;; reflow + streaming on → progressively commit the extracted-text blocks (pdf/reflow-blocks!, stored
+         ;; by the :pdf/reflow fx while the doc was mounted); byte-identical to the batch reflow HTML
+         (and reflow? (:doc/reflow-html doc) stream?)
+         ^{:key (str "pdf-reflow-stream:" (:doc/path doc) ":" (:doc/stamp doc))}
+         [ir-stream-body (:doc/path doc) "pdf-reflow" nil (:doc/stamp doc)]
+         (and reflow? (:doc/reflow-html doc))
          ^{:key (str "pdf-reflow:" (:doc/path doc))}
          [markdown-body (:doc/reflow-html doc) nil (:doc/path doc)]
+         :else
          ^{:key (str "pdf:" (:doc/path doc))}
          [pdf-view (:doc/path doc) (:doc/stamp doc)])
        (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}

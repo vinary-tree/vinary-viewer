@@ -8,6 +8,7 @@
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
             [vinary.renderer.toc :as toc]
+            [vinary.ir.node :as node]
             [vinary.ir.frontend.pdf :as pdf-fe]
             [vinary.ir.backend.html :as ir-html]
             [re-frame.core :as rf]))
@@ -457,11 +458,13 @@
 ;; ---- opt-in reflow: re-extract the current PDF's text as reflowable prose HTML (augments the canvas) ----
 (defonce ^:private current-doc (atom nil))   ; {:doc :path} of the most-recently-mounted PDF
 
-(defn reflow-html!
-  "Extract text from the currently-mounted PDF (bounded page scan) → common IR → reflow-ir (prose) → lowered
-   HTML (ir.backend.html). Returns Promise<{:path :html}|nil> (nil when no PDF is mounted), keyed by the
-   mounted doc's own :doc/path so the store matches the active doc. The faithful pdf.js canvas render is
-   untouched — reflow is a separate, additive view."
+;; blocks for the STREAMING reflow view, populated by the :pdf/reflow fx while the PDF is still mounted (so the
+;; pdf.js doc is alive for text extraction); the streaming view drains from here after content-view swaps it in.
+(defonce ^:private reflow-store (atom {}))                    ; path -> {:blocks :toc :assets}
+
+(defn- compute-reflow!
+  "Extract the currently-mounted PDF's text (bounded page scan) → PDF IR → reflow IR + page-anchored outline.
+   Returns Promise<{:path :reflow-ir :toc}|nil> (nil when no PDF is mounted)."
   []
   (let [{d :doc path :path} @current-doc]
     (if d
@@ -469,18 +472,39 @@
         (-> (js/Promise.all (into-array (map (fn [p] (-> (page-items d p) (.then (fn [items] [p items]))))
                                              (range 1 (inc n)))))
             (.then (fn [^js pages]
-                     {:path path :html (ir-html/lower (pdf-fe/reflow-ir (pdf-fe/doc->ir (array-seq pages))))}))
+                     (let [pdf-ir (pdf-fe/doc->ir (array-seq pages))]
+                       {:path path :reflow-ir (pdf-fe/reflow-ir pdf-ir) :toc (pdf-fe/outline pdf-ir)})))
             (.catch (fn [_] nil))))
       (js/Promise.resolve nil))))
+
+(defn reflow-html!
+  "Extract text from the currently-mounted PDF → reflowable prose HTML (ir.backend.html). Returns
+   Promise<{:path :html}|nil>, keyed by the mounted doc's own :doc/path. The faithful pdf.js canvas render is
+   untouched — reflow is a separate, additive view."
+  []
+  (-> (compute-reflow!)
+      (.then (fn [res] (when res {:path (:path res) :html (ir-html/lower (:reflow-ir res))})))))
+
+(defn reflow-blocks!
+  "Block-provider for the PROGRESSIVE (streaming) reflow view: return the reflow IR's top-level blocks + the
+   page-anchored Contents, as stored by the :pdf/reflow fx (computed while the doc was mounted). A 0-arg-style
+   provider taking `path`; returns Promise<{:blocks :toc :assets}>."
+  [path]
+  (js/Promise.resolve (or (get @reflow-store path) {:blocks [] :toc [] :assets []})))
 
 ;; The reflow effect lives HERE (not in vinary.app.fx) so requiring it does not pull pdf.js — which touches
 ;; `document` at load — into the DOM-free :node-test build. pdf.cljs is loaded at renderer init (via ui.views).
 (rf/reg-fx
  :pdf/reflow
  (fn [_]
-   (-> (reflow-html!)
-       (.then (fn [res] (when (and res (seq (:html res)))
-                          (rf/dispatch [:pdf/reflowed (:path res) (:html res)]))))
+   (-> (compute-reflow!)
+       (.then (fn [res]
+                (when res
+                  ;; stash the IR blocks for the streaming view, and set the batch reflow HTML for the non-stream view
+                  (swap! reflow-store assoc (:path res)
+                         {:blocks (vec (node/children (:reflow-ir res))) :toc (:toc res) :assets []})
+                  (let [html (ir-html/lower (:reflow-ir res))]
+                    (when (seq html) (rf/dispatch [:pdf/reflowed (:path res) html]))))))
        (.catch (fn [_] nil)))))
 
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------

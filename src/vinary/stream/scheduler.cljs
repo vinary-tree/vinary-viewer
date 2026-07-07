@@ -27,8 +27,13 @@
     ("log" "text") (log-stream/parser)
     (log-stream/parser)))                                    ; markdown/pdf front-ends land in later phases
 
+;; markdown reuses the batch string post-passes per block; pdf-reflow's batch view (markdown-body reflow-html)
+;; runs NONE (reflow-html! is a bare lower), so its stream must skip them too for byte-parity; logs need none.
 (defn- posts-for [kind] (case kind "markdown" md/apply-posts nil))
 (defn- input-for [kind batch] (if (= "markdown" kind) (:text batch) (:lines batch)))
+;; progressive kinds emit pre-rendered IR children whose whitespace/structure already carries every separator →
+;; concatenate with ""; the transport (log/text) kinds carry no separators → the sink supplies one "\n".
+(defn- sep-for [kind] (if (#{"markdown" "pdf-reflow"} kind) "" "\n"))
 
 (defn- toc-entries
   "Bounded Contents entries for a batch of log records: those whose first line names a warning/error level."
@@ -61,9 +66,7 @@
   [node path kind opts]
   (let [ctrl   (atom {:node node :path path :kind kind :destroyed? false :toc-n 0
                       :parser (parser-for kind) :posts (posts-for kind)
-                      ;; markdown emits the batch IR's children verbatim (whitespace leaves carry the separators)
-                      ;; → join with ""; logs/records carry no separators → the sink supplies one "\n" between them
-                      :sep (if (= kind "markdown") "" "\n")
+                      :sep (sep-for kind)
                       :q (atom (js/Promise.resolve nil)) :started? (atom false) :session nil})
         alive? (fn [] (not (:destroyed? @ctrl)))]
     (letfn [(emit-blocks [blocks]
@@ -102,15 +105,17 @@
                     (emit-blocks (subvec blocks idx end))
                     (rf/dispatch [:stream/progress path (/ end total)])
                     (ric (fn [_] (drain blocks total end)))))))
+            ;; progressive engine (markdown, pdf-reflow): opts :blocks-fn is a 0-arg fn → Promise<{:blocks :toc
+            ;; :assets}> rendered whole (full document context = byte-parity), committed across idle frames.
             (start-progressive []
-              (-> (md/stream-blocks (:text opts) (md/dir-of path) (:stamp opts))
+              (-> ((:blocks-fn opts))
                   (.then (fn [{:keys [blocks toc assets]}]
                            (when (alive?)
                              (rf/dispatch [:stream/md-ready path toc assets])
                              (let [bs (vec blocks)]
                                (if (seq bs) (drain bs (count bs) 0) (rf/dispatch [:stream/done path]))))))
                   (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "stream error: " (.-message e))}])))))]
-      (if (= kind "markdown")
+      (if (:blocks-fn opts)
         (start-progressive)
         (-> (transport/open! path kind)
             (.then (fn [session] (when (alive?) (swap! ctrl assoc :session session) (ric tick))))

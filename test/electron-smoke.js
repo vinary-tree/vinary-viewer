@@ -2170,6 +2170,47 @@ async function main() {
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
   console.log('[ok] streamed markdown Contents is populated');
 
+  // ── Phase 3 — PDF reflow streaming parity (dev-only: the reflow toggle drives the re-frame global) ──
+  // The opt-in "Reflow Text" view renders the extracted PDF text as prose. With streaming on it commits that
+  // text progressively (ir-stream-body "pdf-reflow") and must be BYTE-IDENTICAL to the batch reflow HTML.
+  if (!releaseBuild) {
+    const toggleReflow = () => evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("pdf","reflow-toggle"))); true`);
+    const reflowPdf = path.join(ROOT, 'test', 'fixtures', 'reflow-stream.pdf');   // virtual path; smoke.pdf bytes carry real text
+    state.contentByPath.set(reflowPdf, { path: reflowPdf, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'smoke.pdf'))), stamp: Date.now() });
+
+    // batch reflow (stream OFF) → reference innerHTML
+    win.webContents.send('vv:settings', '{:stream? false}');
+    await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'stream off for the batch reflow reference');
+    win.webContents.send('vv:open-files', { paths: [reflowPdf], 'focus-first': true });
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), 'reflow PDF canvas mounts', 15000);
+    await toggleReflow();
+    await waitCalm(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+      return b && b.textContent.includes('Smoke') && !document.querySelector('.vv-content .vv-stream-progress'); })()`,
+      'batch reflow renders the extracted text', 15000);
+    const batchReflow = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+    await toggleReflow();   // back to canvas
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), 'canvas returns after reflow off', 10000);
+
+    // streamed reflow (stream ON) → progressive block-commit of the same extracted text
+    win.webContents.send('vv:settings', '{:stream? true}');
+    await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'stream on for reflow streaming');
+    await toggleReflow();
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-stream-progress'))`), 'reflow streams (progress strip present)', 10000);
+    await waitCalm(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+      const p = document.querySelector('.vv-content .vv-stream-progress');
+      return b && b.textContent.includes('Smoke') && p && p.classList.contains('vv-stream-progress-done'); })()`,
+      'streamed reflow completes', 15000);
+    await delay(300);
+    const streamReflow = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+    if (streamReflow !== batchReflow) {
+      const at = firstDiff(streamReflow, batchReflow);
+      console.error(`reflow parity MISMATCH at ${at}`, JSON.stringify(streamReflow.slice(Math.max(0, at - 60), at + 80)),
+        'vs', JSON.stringify(batchReflow.slice(Math.max(0, at - 60), at + 80)));
+    }
+    assert.strictEqual(streamReflow, batchReflow, 'streamed PDF reflow must be byte-identical to the batch reflow');
+    console.log('[ok] streamed PDF reflow is byte-identical to the batch reflow (progressive extracted-text commit)');
+  }
+
   win.close();
 }
 
