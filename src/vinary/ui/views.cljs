@@ -301,6 +301,12 @@
                                 (when @detach* (@detach*) (reset! detach* nil)))
       :reagent-render       (fn [_html _source _path] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
 
+;; Scroll re-anchor across a streamed doc's remount (live-refresh bumps :doc/stamp → the [path stamp]-keyed
+;; ir-stream-body remounts and re-streams from the top; a tab-switch away/back likewise re-streams). We save the
+;; .vv-content scrollTop on unmount (keyed by path) and restore it as the re-stream grows tall enough — so a
+;; live log/markdown edit doesn't jump the reader back to the top.
+(defonce ^:private stream-scroll (atom {}))                    ; :doc/path → last scrollTop
+
 (defn ir-stream-body
   "Streaming counterpart of markdown-body: a .markdown-body whose content is APPENDED incrementally by the
    stream scheduler (bounded memory) instead of written whole. Shares markdown-body's link + context-menu
@@ -317,6 +323,7 @@
         detach*     (atom nil)
         ctrl*       (atom nil)
         ensurer*    (atom nil)                                 ; find-materialize hook (drains the stream before search)
+        restore-to* (atom nil)                                 ; scrollTop to re-anchor after a live-refresh remount
         last-toc-n  (atom 0)
         refresh-raf (atom false)
         ;; As blocks append: font-match embedded SVG/image figures (parity with markdown-body), THEN re-measure
@@ -351,7 +358,23 @@
                                 ;; only one content view is active, so a single global ensurer never conflicts
                                 (let [ens (fn [] (stream-scheduler/materialize! @ctrl*))]
                                   (reset! ensurer* ens)
-                                  (pdf-cache/set-ensurer! ens))))
+                                  (pdf-cache/set-ensurer! ens))
+                                ;; consume any saved scroll for this path (from a prior remount) → re-anchor after
+                                ;; the whole doc has settled (drain done + appends landed), so the target height
+                                ;; exists; the browser clamps if the doc came back shorter
+                                (reset! restore-to* (get @stream-scroll path))
+                                (swap! stream-scroll dissoc path)
+                                (when @restore-to*
+                                  (let [set-scroll! (fn [] (when-let [^js content (and @node (some-> @node (.closest ".vv-content")))]
+                                                             (set! (.-scrollTop content) @restore-to*)))]
+                                    (-> (stream-scheduler/when-settled @ctrl*)
+                                        ;; re-apply across a few frames: post-passes (syntax highlight) can grow the
+                                        ;; layout height AFTER the appends settle, so one early set would clamp short
+                                        (.then (fn [_]
+                                                 (set-scroll!)
+                                                 (js/requestAnimationFrame
+                                                  (fn [_] (set-scroll!)
+                                                    (js/requestAnimationFrame (fn [_] (set-scroll!)))))))))) ))
       :component-did-update (fn [this]
                               ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
                               ;; while markdown is still draining (its whole outline is set upfront, but the
@@ -366,6 +389,9 @@
                                 (when (or grew? (and (= kind "markdown") (some? p)))
                                   (refresh-view!))))
       :component-will-unmount (fn [_]
+                                ;; save scroll so a live-refresh / tab-switch remount re-anchors instead of jumping to top
+                                (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                                  (when (pos? (.-scrollTop content)) (swap! stream-scroll assoc @path* (.-scrollTop content))))
                                 (when @ensurer* (pdf-cache/clear-ensurer! @ensurer*) (reset! ensurer* nil))
                                 (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))

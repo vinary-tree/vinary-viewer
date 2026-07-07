@@ -2182,6 +2182,28 @@ async function main() {
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
   console.log('[ok] streamed markdown Contents is populated');
 
+  // ── live-refresh scroll re-anchor: a streamed doc that re-renders keeps the reader's scroll position ──
+  await evalIn(win, `(() => { document.querySelector('.vv-content').scrollTop = 3000; return true; })()`);
+  await delay(120);
+  const beforeScroll = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+  assert.ok(beforeScroll > 1000, `precondition: scrolled the streamed markdown down (got ${beforeScroll})`);
+  win.webContents.send('vv:content', { path: md.streamPath, kind: 'markdown', text: md.text, stamp: Date.now(), sourceable: true, meta: { size: md.size } });
+  // wait for the remount to CLEAR + restart the stream (h2 drops as the new body begins empty) so we don't
+  // match the still-present old completed render, THEN wait for the re-stream to finish
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length < ${batchH2}`),
+    're-stream restarts (old content cleared)', 15000);
+  await waitCalm(win, `(() => { const p = document.querySelector('.vv-content .vv-stream-progress');
+    return p && p.classList.contains('vv-stream-progress-done')
+      && document.querySelectorAll('.vv-content .markdown-body h2').length >= ${batchH2}; })()`,
+    'streamed markdown re-streams after a live-refresh', 60000);
+  await delay(500);
+  const geo = JSON.parse(await evalIn(win, `(() => { const c = document.querySelector('.vv-content');
+    return JSON.stringify({ top: c.scrollTop, sh: c.scrollHeight, ch: c.clientHeight,
+      h2: document.querySelectorAll('.vv-content .markdown-body h2').length }); })()`));
+  const afterScroll = geo.top;
+  assert.ok(afterScroll > beforeScroll * 0.7, `scroll re-anchored after live-refresh (was ${beforeScroll}, now ${afterScroll}; geo=${JSON.stringify(geo)})`);
+  console.log(`[ok] streamed doc re-anchors scroll across a live-refresh (${beforeScroll} → ${afterScroll})`);
+
   // ── Phase 3 — PDF reflow streaming parity (dev-only: the reflow toggle drives the re-frame global) ──
   // The opt-in "Reflow Text" view renders the extracted PDF text as prose. With streaming on it commits that
   // text progressively (ir-stream-body "pdf-reflow") and must be BYTE-IDENTICAL to the batch reflow HTML.

@@ -137,6 +137,15 @@
     (swap! ctrl assoc :destroyed? true)
     (when-let [s (:session @ctrl)] (transport/close! s))))
 
+(defn when-settled
+  "Promise resolved once the WHOLE document has been fed AND every queued append has landed in the DOM — with
+   NO rushing (unlike materialize!). Used by the scroll re-anchor so it restores against the fully laid-out
+   document. Immediately resolved when `ctrl` is nil."
+  [ctrl]
+  (if ctrl
+    (-> ^js (:done-p @ctrl) (.then (fn [_] @(:q @ctrl))))
+    (js/Promise.resolve nil)))
+
 (defn materialize!
   "Fast-forward the stream to completion (the find-materialize hook, analogous to pdf ensure-all-text!): drop
    the idle pacing so the WHOLE document lands in the DOM, then resolve once every queued append has settled —
