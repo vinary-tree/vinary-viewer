@@ -1,5 +1,9 @@
 # Address-bar completion
 
+![Fish-style address-bar completion with a match dropdown](../screenshots/address-completion.png)
+
+*Fish-style address-bar completion with a match dropdown.*
+
 **Status: Available now.**
 
 ---

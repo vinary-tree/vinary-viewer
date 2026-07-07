@@ -1,5 +1,9 @@
 # Web-view keyboard, Copy & cookies
 
+![The in-app web view following an HTTP link](../screenshots/web-preview.png)
+
+*The in-app web view following an HTTP link.*
+
 **Status: Available now.**
 
 ---

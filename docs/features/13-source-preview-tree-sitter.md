@@ -1,5 +1,9 @@
 # Source preview (tree-sitter)
 
+![Read-only CodeMirror with tree-sitter syntax highlighting](../screenshots/source-tree-sitter.png)
+
+*Read-only CodeMirror with tree-sitter syntax highlighting.*
+
 **Status: Available now.**
 
 ---

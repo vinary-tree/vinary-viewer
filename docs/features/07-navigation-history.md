@@ -1,5 +1,9 @@
 # Navigation history
 
+![Browser-style back/forward and the URI bar](../screenshots/uri-bar-nav.png)
+
+*Browser-style back/forward and the URI bar.*
+
 **Status: Available now.**
 
 Each tab owns its own browser-like history stack. Back/Forward act on the active

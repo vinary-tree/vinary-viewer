@@ -1,7 +1,8 @@
 (ns vinary.renderer.pdf-layout
   "Pure, DOM-free geometry + zoom + outline helpers for the in-renderer PDF view. Kept separate from
    vinary.renderer.pdf so the node :test build can cover them without transitively requiring pdfjs-dist
-   (which touches DOMMatrix/Worker). All functions are referentially transparent and unit-tested.")
+   (which touches DOMMatrix/Worker). All functions are referentially transparent and unit-tested."
+  (:require [clojure.string :as str]))
 
 (def ^:const min-zoom 0.25)
 (def ^:const max-zoom 8.0)
@@ -84,3 +85,32 @@
                     acc
                     items))]
     (walk (or outline []) 1 [])))
+
+(def ^:private numbered-prefix
+  ;; a leading section-number: 1, 1., 2.1, 1) — requires a dot/paren/space separator right after the digits,
+  ;; so a title like "3D rendering" (digits glued to a letter) is NOT treated as already-numbered.
+  #"^\s*\d+(\.\d+)*[.)]?\s")
+
+(defn- already-numbered?
+  "True when the outline already carries its own numbering — at least half of the entries' :text begin with a
+   section-number prefix. Guards `number-outline` against double-numbering the author's own scheme."
+  [entries]
+  (boolean
+   (and (seq entries)
+        (>= (count (filter #(re-find numbered-prefix (str (:text %))) entries))
+            (/ (count entries) 2)))))
+
+(defn number-outline
+  "Add a derived hierarchical :number (\"1\", \"2\", \"2.1\", …) to each outline entry [{:level :text :id}…]
+   from its :level and sibling order. Returns entries unchanged (no :number) when the outline already appears
+   numbered, so the author's own numbering is never doubled. Pure; :id/:level/:text are preserved."
+  [entries]
+  (if (already-numbered? entries)
+    (vec entries)
+    (loop [items entries, counters [], acc []]
+      (if-let [item (first items)]
+        (let [lvl    (max 1 (or (:level item) 1))
+              base   (vec (take (dec lvl) (concat counters (repeat 0))))
+              bumped (conj base (inc (nth counters (dec lvl) 0)))]
+          (recur (rest items) bumped (conj acc (assoc item :number (str/join "." bumped)))))
+        acc))))

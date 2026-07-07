@@ -7,6 +7,7 @@
    (scripts/sync-pdfjs.mjs). Pure geometry/zoom/outline helpers live in vinary.renderer.pdf-layout."
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
+            [vinary.renderer.toc :as toc]
             [re-frame.core :as rf]))
 
 (def ^:const gap 16)        ; px between pages
@@ -85,16 +86,22 @@
   (if on? (.add (.-classList el) cls) (.remove (.-classList el) cls)))
 
 (defn- apply-layout!
-  "Size each page placeholder div to the current scale (preallocates exact height → no scroll jank)."
+  "Size each page placeholder div to the current scale (preallocates exact height → no scroll jank), then
+   re-measure the scroll-spy offsets for the outline anchors at the new scale. Heights are preallocated here
+   and the offset formula is scroll-invariant, so measurement is correct even before canvases paint. This one
+   hook covers mount (via build-placeholders!, :toc-ids still empty → measures nothing) and zoom/resize (via
+   rescale!, re-measures the retained ids)."
   [state]
-  (let [{:keys [sizes scale page-divs]} @state
+  (let [{:keys [sizes scale page-divs container toc-ids]} @state
         rects (layout/page-rects sizes scale gap)]
     (swap! state assoc :rects rects)
     (dotimes [i (count page-divs)]
       (let [^js div (nth page-divs i)
             {:keys [height width]} (nth rects i)]
         (set! (.. div -style -height) (str height "px"))
-        (set! (.. div -style -width) (str width "px"))))))
+        (set! (.. div -style -width) (str width "px"))))
+    (when-let [^js scroller (scroller-of container)]
+      (toc/refresh! scroller toc-ids))))
 
 (defn- build-placeholders! [state]
   (let [{:keys [container sizes]} @state
@@ -317,7 +324,18 @@
       (.then (fn [^js outline]
                (when (and outline (.-length outline) (not (:destroyed? @state)))
                  (-> (walk-outline doc outline 1)
-                     (.then (fn [toc] (when (seq toc) (rf/dispatch [:pdf/outline path (vec toc)]))))))))
+                     (.then (fn [toc]
+                              ;; recheck :destroyed? — this is a second async hop past the getOutline .then
+                              (when (and (seq toc) (not (:destroyed? @state)))
+                                ;; derive hierarchical section numbers (1, 2, 2.1, …) for the Contents display;
+                                ;; number-outline preserves :id, so :toc-ids and the scroll-spy are unaffected.
+                                (let [numbered (layout/number-outline (vec toc))]
+                                  (rf/dispatch [:pdf/outline path numbered])
+                                  ;; retain the outline ids so apply-layout! can re-measure them on zoom/resize,
+                                  ;; then measure now (page divs already carry these ids from build-placeholders!).
+                                  (swap! state assoc :toc-ids (mapv :id numbered))
+                                  (when-let [^js scroller (scroller-of (:container @state))]
+                                    (toc/refresh! scroller (:toc-ids @state)))))))))))
       (.catch (fn [_] nil))))
 
 ;; ---- IntersectionObserver: render visible, release offscreen ------------------------------------
@@ -417,7 +435,7 @@
    Dispatches [:pdf/outline path toc] when the document outline resolves."
   [container bytes path view-state]
   (let [state (atom {:container container :path path :doc nil
-                     :sizes [] :rects [] :page-divs []
+                     :sizes [] :rects [] :page-divs [] :toc-ids []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
                      :rendered #{} :text-built #{} :tasks {} :observer nil :destroyed? false :gen 0})

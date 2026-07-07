@@ -1,5 +1,9 @@
 # In-page find
 
+![In-page find with match highlighting and a match counter](../screenshots/in-page-find.png)
+
+*In-page find with match highlighting and a match counter.*
+
 **Status: Available now.**
 
 ---

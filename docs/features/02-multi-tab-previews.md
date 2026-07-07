@@ -1,5 +1,9 @@
 # Multi-tab previews
 
+![Multiple documents open, one tab each](../screenshots/multi-tab.png)
+
+*Multiple documents open, one tab each.*
+
 **Status: Available now.**
 
 vinary-viewer uses browser-like tabs. A tab is a view over a URI plus its own

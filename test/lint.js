@@ -20,6 +20,7 @@ const jsFiles = [
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
   'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
   'scripts/sync-pdfjs.mjs', 'scripts/check-pdfjs.mjs',
+  'scripts/screenshots.cjs',
   'resources/ext-chrome-polyfill.js',
 ];
 for (const f of jsFiles) {

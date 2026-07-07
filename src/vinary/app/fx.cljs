@@ -76,12 +76,20 @@
 (rf/reg-fx :find/cycle (fn [dir] (rf/dispatch [:find/idx (finder/cycle! dir)])))
 (rf/reg-fx :find/clear (fn [_]   (finder/clear!)))
 
-;; scroll a heading (by rehype-slug id) to the top of the content
+;; scroll a heading/section (by id) to the top of the content. Use a CONFINED scroll of the .vv-content
+;; scroller (not el.scrollIntoView, which scrolls every scrollable ancestor up to the viewport and can scroll
+;; #app itself when a tall PDF overflows it — pushing the menu bar out of the clipped viewport). .scrollTo
+;; targets only .vv-content, so chrome outside it never moves. Same offset formula the scroll-spy uses.
 (rf/reg-fx
  :toc/scroll
  (fn [id]
    (when-let [^js el (.getElementById js/document id)]
-     (.scrollIntoView el #js {:block "start" :behavior "smooth"}))))
+     (if-let [^js c (.closest el ".vv-content")]
+       (.scrollTo c #js {:top      (+ (.-scrollTop c)
+                                      (- (.. el getBoundingClientRect -top)
+                                         (.. c getBoundingClientRect -top)))
+                         :behavior "smooth"})
+       (.scrollIntoView el #js {:block "start" :behavior "smooth"})))))  ; fallback: not inside a scroller
 
 ;; renderer → main (over the contextBridge seam)
 (rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))

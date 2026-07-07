@@ -1,5 +1,13 @@
 # Custom Keybindings (vim / emacs / default + a visual editor) — *Available now*
 
+![The fuzzy command palette](../screenshots/command-palette.png)
+
+*The fuzzy command palette.*
+
+![The two-pane visual keybinding editor](../screenshots/keybinding-editor.png)
+
+*The two-pane visual keybinding editor.*
+
 > **Status:** Available now. A full, user-customizable keybinding system with preset **default**,
 > **vim**, and **emacs** keymaps, a named **command registry**, a modal/chord/leader **resolver**, a
 > **command palette / fuzzy finder**, and a live-reloaded **`~/.config/vinary-viewer/keybindings.edn`**.

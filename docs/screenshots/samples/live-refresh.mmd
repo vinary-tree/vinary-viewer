@@ -1,0 +1,12 @@
+sequenceDiagram
+    actor You as You (editor)
+    participant FS as Filesystem
+    participant Watch as chokidar
+    participant Main as Main process
+    participant Render as Renderer
+    You->>FS: save document.md
+    FS-->>Watch: change event
+    Watch->>Main: file changed
+    Main->>Render: vv:content { path, kind, text / bytes }
+    Render->>Render: re-render (keep scroll, tabs, history)
+    Render-->>You: preview repaints in place

@@ -8,21 +8,60 @@
             [vinary.ui.tree :as tree]
             [vinary.ui.tabs :as tabs-ui]))
 
+(defn- reveal-active!
+  "Scroll the sidebar's own scroll container (.vv-sidebar-body) just enough to bring the active TOC row into
+   view — only when it is out of view, and only that container (never the content pane, which is not an
+   ancestor). A no-op when the row is already visible, so it won't fight manual sidebar scrolling."
+  [^js list-node]
+  (when-let [^js c (some-> list-node (.closest ".vv-sidebar-body"))]
+    (when-let [^js el (.querySelector c ".vv-toc-active")]
+      (let [cr (.getBoundingClientRect c)
+            er (.getBoundingClientRect el)]
+        (cond
+          (< (.-top er) (.-top cr))
+          (set! (.-scrollTop c) (+ (.-scrollTop c) (- (.-top er) (.-top cr))))
+          (> (.-bottom er) (.-bottom cr))
+          (set! (.-scrollTop c) (+ (.-scrollTop c) (- (.-bottom er) (.-bottom cr)))))))))
+
 (defn- contents-panel
-  "The Contents tab: the active document's section outline (Markdown headings or, for an HTTP page, the
-   web view's outline — :doc/toc is unified). Click scrolls to the section; scroll-spy highlights it."
+  "The Contents tab: the active document's section outline — Markdown headings, the PDF outline, or an HTTP
+   page's web-view outline (:doc/toc is unified across content types). Click scrolls to the section; the
+   scroll-spy highlights the current one and this panel auto-scrolls the list to keep it in view. Content-
+   agnostic: it acts on .vv-toc-active regardless of which preview produced it."
   []
-  (let [headings @(rf/subscribe [:doc/toc])
-        active   @(rf/subscribe [:ui/active-heading])]
-    (if (seq headings)
-      [:div.vv-toc-list
-       (for [{:keys [level text id]} headings]
-         ^{:key id}
-         [:a.vv-toc-item {:class    (str "vv-toc-l" level (when (= id active) " vv-toc-active"))
-                          :title    text
-                          :on-click #(rf/dispatch [:toc/goto id])}
-          text])]
-      [:div.vv-sidebar-empty "No sections"])))
+  (let [node (atom nil)
+        prev (atom nil)]
+    (r/create-class
+     {:display-name "vv-contents-panel"
+      :component-did-mount  (fn [_]
+                              (reset! prev @(rf/subscribe [:ui/active-heading]))
+                              (reveal-active! @node))
+      :component-did-update (fn [_]
+                              (let [active @(rf/subscribe [:ui/active-heading])]
+                                (when (not= active @prev)
+                                  (reset! prev active)
+                                  (reveal-active! @node))))
+      :reagent-render
+      (fn []
+        (let [headings @(rf/subscribe [:doc/toc])
+              active   @(rf/subscribe [:ui/active-heading])]
+          (if (seq headings)
+            [:div.vv-toc-list {:ref (fn [el] (reset! node el))}
+             ;; key by [id idx]: PDF outlines can list two sections on one page (same vv-pdf-page-N id), so id
+             ;; alone is not unique. Both same-page rows share the active id and highlight together — correct,
+             ;; since both sections begin on the page currently being read.
+             (map-indexed
+              (fn [idx {:keys [level text id number]}]
+                ^{:key (str id "-" idx)}
+                [:a.vv-toc-item {:class    (str "vv-toc-l" level (when (= id active) " vv-toc-active"))
+                                 :title    (if number (str number " " text) text)
+                                 :on-click #(rf/dispatch [:toc/goto id])}
+                 ;; :number is present only for PDF outlines (derived by pdf-layout/number-outline); Markdown/web
+                 ;; entries have none and render exactly as before — the panel stays content-agnostic.
+                 (when number [:span.vv-toc-num number])
+                 text])
+              headings)]
+            [:div.vv-sidebar-empty "No sections"])))})))
 
 (defn- tabs-panel
   "The Tabs tab: a vertical list of the open tabs in the same order as the horizontal strip (top→bottom ==

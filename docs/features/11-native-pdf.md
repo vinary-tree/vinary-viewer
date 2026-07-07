@@ -1,5 +1,9 @@
 # PDF preview (in-renderer)
 
+![A PDF rendered in-renderer via pdf.js, with its bookmarked outline](../screenshots/native-pdf.png)
+
+*A PDF rendered in-renderer via pdf.js, with its bookmarked outline.*
+
 **Status: Available now.** *(Supersedes the original native-PDF view — see [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md).)*
 
 ---

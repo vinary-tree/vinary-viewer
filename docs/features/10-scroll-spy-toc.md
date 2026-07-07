@@ -1,5 +1,9 @@
 # Scroll-spy table of contents
 
+![The Contents outline tracking the current section](../screenshots/scroll-spy-toc.png)
+
+*The Contents outline tracking the current section.*
+
 **Status: Available now.**
 
 The Contents panel lists headings for the active Markdown document and highlights

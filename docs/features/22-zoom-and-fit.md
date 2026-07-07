@@ -1,5 +1,9 @@
 # Zoom & Fit
 
+![The bottom zoom bar with its preset dropdown open](../screenshots/zoom-fit.png)
+
+*The bottom zoom bar with its preset dropdown open.*
+
 **Status: Available now.**
 
 ---

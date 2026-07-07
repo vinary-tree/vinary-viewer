@@ -1,5 +1,9 @@
 # Image view
 
+![An image rendered directly in the preview pane](../screenshots/image-view.png)
+
+*An image rendered directly in the preview pane.*
+
 **Status: Available now.**
 
 ---

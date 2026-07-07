@@ -50,6 +50,23 @@ Key terms used in this project:
 - **Content cache**: the bounded DataScript store for loaded document content.
   Browser-like tabs and their history stacks live in re-frame `app-db`.
 
+## Screenshots
+
+<!-- These 800x600 PNGs are generated headlessly by `npm run screenshots`
+     (scripts/screenshots.cjs). Regenerate them whenever the UI changes. -->
+
+|  |  |
+|---|---|
+| ![Markdown rendering](docs/screenshots/markdown-rendering.png)<br>*GitHub-Flavored Markdown — tables, highlighted code, math, diagrams* | ![Live theme switching](docs/screenshots/markdown-rendering-light.png)<br>*The same document in the light theme* |
+| ![Tree-sitter source preview](docs/screenshots/source-tree-sitter.png)<br>*Read-only source view with tree-sitter highlighting* | ![Git file tree](docs/screenshots/git-file-tree.png)<br>*Sidebar git file tree with live filtering* |
+| ![In-renderer PDF](docs/screenshots/native-pdf.png)<br>*PDFs render in-app via pdf.js, with a bookmarked outline* | ![Directory browser](docs/screenshots/directory-browser.png)<br>*Browse folders in-pane* |
+| ![Command palette](docs/screenshots/command-palette.png)<br>*Fuzzy command palette* | ![Browser-like tabs](docs/screenshots/multi-tab.png)<br>*Multiple documents, one tab each* |
+| ![In-app web view](docs/screenshots/web-preview.png)<br>*Follow HTTP links in an in-app web view* | ![Extensions & ad-blocking](docs/screenshots/dialog-extensions.png)<br>*Ad-blocking and scoped browser extensions* |
+
+More previews — office documents, spreadsheets/CSV, logs, and archives — appear in
+[Content previews](docs/features/25-content-previews.md). Every feature page under
+[`docs/features/`](docs/features/README.md) opens with its own screenshot.
+
 ## Quick Start
 
 Requirements: Node.js with `npm`/`npx`, a JDK for `shadow-cljs`, and Electron's
@@ -169,6 +186,7 @@ or personal launcher paths.
 | `node test/lint.js`      | Parse-check JavaScript, verify CSS braces, and verify theme variables. |
 | `npm run test:electron`  | Run the Electron smoke test.                                           |
 | `npm run grammars:check` | Validate checked-in grammar metadata.                                  |
+| `npm run screenshots`    | Regenerate the 800×600 UI screenshots headlessly (xvfb + ImageMagick). |
 
 For validation work, capture command output to a temporary log, inspect it, and
 remove the log after use.

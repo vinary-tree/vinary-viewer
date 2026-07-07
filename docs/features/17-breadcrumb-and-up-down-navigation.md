@@ -1,5 +1,9 @@
 # Breadcrumb and up/down navigation
 
+![The Ctrl-hover breadcrumb URI bar](../screenshots/breadcrumb.png)
+
+*The Ctrl-hover breadcrumb URI bar.*
+
 **Status: Available now.**
 
 Three small, related capabilities make folder traversal fast and reversible:

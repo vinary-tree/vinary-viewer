@@ -1,5 +1,9 @@
 # Native password-manager bridge
 
+![The Passwords dialog listing a provider](../screenshots/dialog-passwords.png)
+
+*The Passwords dialog listing a provider.*
+
 **Status: Available now.**
 
 ---

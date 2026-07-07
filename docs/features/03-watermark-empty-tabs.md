@@ -1,5 +1,9 @@
 # Watermark on empty tabs
 
+![The themed Vinary Tree watermark on an empty tab](../screenshots/watermark.png)
+
+*The themed Vinary Tree watermark on an empty tab.*
+
 **Status: Available now.**
 
 ---

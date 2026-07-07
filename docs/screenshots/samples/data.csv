@@ -1,0 +1,15 @@
+Language,Extensions,Category,Bundled
+Rholang,.rho,Process calculus,yes
+MeTTa,.metta,Knowledge graph,yes
+Rust,.rs,Systems,yes
+Python,.py .pyi,Scripting,yes
+JavaScript,.js .mjs .cjs,Scripting,yes
+TypeScript,.ts .tsx,Scripting,yes
+Clojure,.clj .cljs .cljc .edn,Lisp,yes
+Go,.go,Systems,yes
+Haskell,.hs,Functional,yes
+OCaml,.ml,Functional,yes
+Lean,.lean,Proof assistant,yes
+TLA+,.tla,Specification,yes
+Markdown,.md .markdown,Markup,yes
+JSON,.json,Data,yes

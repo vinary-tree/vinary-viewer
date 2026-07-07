@@ -1,5 +1,9 @@
 # In-pane directory browser
 
+![A folder listed in the preview pane](../screenshots/directory-browser.png)
+
+*A folder listed in the preview pane.*
+
 **Status: Available now.**
 
 Opening a **directory** (a `file://` path that is a folder, not a file) renders a

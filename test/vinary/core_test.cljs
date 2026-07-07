@@ -776,6 +776,28 @@
               {:level 2 :text "A1" :id "vv-pdf-page-2"}]
              (pdf-layout/outline->toc outline d->p))))))
 
+(deftest number-outline
+  (let [entry (fn [level text] {:level level :text text :id (str "vv-pdf-page-" level)})]
+    (testing "unnumbered nested outline → hierarchical section numbers, :id/:level/:text preserved"
+      (let [in  [(entry 1 "Purpose") (entry 1 "Model") (entry 2 "A PF") (entry 2 "Grounding")
+                 (entry 2 "Two holes") (entry 1 "Architecture")]
+            out (pdf-layout/number-outline in)]
+        (is (= ["1" "2" "2.1" "2.2" "2.3" "3"] (mapv :number out)))
+        (is (= (mapv #(dissoc % :number) out) in))))   ; nothing but :number added
+    (testing "already-numbered outline (majority) is returned unchanged — no double-numbering"
+      (let [in [(entry 1 "1. Intro") (entry 1 "2. Methods") (entry 2 "2.1 Setup") (entry 1 "3) Results")]]
+        (is (= in (pdf-layout/number-outline in)))
+        (is (every? #(nil? (:number %)) (pdf-layout/number-outline in)))))
+    (testing "a lone coincidental number-prefixed title stays under the ½ threshold → still auto-numbers"
+      (is (= ["1" "2" "3"]
+             (mapv :number (pdf-layout/number-outline
+                            [(entry 1 "Overview") (entry 1 "2 kinds of hole") (entry 1 "Summary")])))))
+    (testing "\"3D rendering\" is NOT treated as numbered (digits glued to a letter)"
+      (is (= ["1"] (mapv :number (pdf-layout/number-outline [(entry 1 "3D rendering")])))))
+    (testing "single flat level numbers sequentially; empty → empty"
+      (is (= ["1" "2" "3"] (mapv :number (pdf-layout/number-outline [(entry 1 "a") (entry 1 "b") (entry 1 "c")]))))
+      (is (= [] (pdf-layout/number-outline []))))))
+
 (deftest ext-util-helpers
   (testing "parse-store-id: 32-char id from a URL or bare id, else nil"
     (is (= "abcdefghijklmnopabcdefghijklmnop" (eu/parse-store-id "abcdefghijklmnopabcdefghijklmnop")))

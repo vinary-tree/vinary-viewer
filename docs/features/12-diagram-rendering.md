@@ -1,5 +1,9 @@
 # Diagram rendering
 
+![A Mermaid diagram rendered to inline SVG](../screenshots/diagram-mermaid.png)
+
+*A Mermaid diagram rendered to inline SVG.*
+
 **Status: Available now for Mermaid.**
 
 Mermaid diagrams render inline from Markdown fences and from direct `.mmd` /

@@ -1,5 +1,9 @@
 # Themes and live switching
 
+![The Spacemacs Light theme (compare the dark hero in the README)](../screenshots/markdown-rendering-light.png)
+
+*The Spacemacs Light theme (compare the dark hero in the README).*
+
 **Status: Available now.**
 
 ---

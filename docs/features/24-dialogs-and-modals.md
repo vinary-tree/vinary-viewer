@@ -1,5 +1,13 @@
 # Dialogs & modals
 
+![The Preferences dialog in the shared modal shell](../screenshots/dialog-preferences.png)
+
+*The Preferences dialog in the shared modal shell.*
+
+![The Extensions & Ad Blocking dialog](../screenshots/dialog-extensions.png)
+
+*The Extensions & Ad Blocking dialog.*
+
 > **Status: Available now.** Every blocking dialog renders through one shared **modal shell**, so they
 > all share a defined border, theme-aware elevation, and accessible keyboard behavior.
 
