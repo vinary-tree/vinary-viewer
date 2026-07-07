@@ -1,6 +1,6 @@
 {
   "name": "vinary-viewer",
-  "version": "0.2.0-dev",
+  "version": "0.3.0-dev",
   "private": true,
   "description": "A reactive ClojureScript (re-frame/re-com) desktop previewer for Markdown, diagrams, images, PDFs, and source code, with live refresh. A new application inspired by vmd.",
   "keywords": [
