@@ -17,6 +17,9 @@
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
+            [vinary.ir.frontend.markdown :as ir-md]
+            [vinary.ir.backend.html :as ir-html]
+            [vinary.ir.capability.toc :as ir-toc]
             [vinary.renderer.media :as media]
             [vinary.renderer.math :as math]
             [vinary.renderer.mermaid :as mermaid]
@@ -217,6 +220,38 @@
 ;; images) now lives in vinary.ir.backend.sanitize as the single schema shared by this pipeline and the IR
 ;; back-end. See that namespace for the policy rationale.
 
+(defn- base-pipeline
+  "The shared remark → rehype pipeline through collect-metadata (everything BEFORE the stringify/compile
+   step). Both the legacy string render and the IR render build on this identical prefix, so they can never
+   diverge on parsing/sanitizing/slugging/highlighting/URL-rewriting/source-positions."
+  [metadata base-dir cache-token]
+  (-> (unified)
+      (.use remark-parse)
+      (.use remark-gfm)
+      (.use remark-math)
+      ;; allowDangerousHtml keeps raw HTML as `raw` nodes; rehype-raw parses them into real hast elements;
+      ;; rehype-sanitize (GitHub allowlist) then strips anything dangerous. This MUST run before the app's
+      ;; own trusted hast plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize
+      ;; additions (file:// srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip
+      ;; every app-generated file:// image src and break all local images.
+      (.use remark-rehype #js {:allowDangerousHtml true})
+      (.use rehype-raw)
+      (.use rehype-sanitize sanitize/schema)
+      (.use rehype-slug)
+      (.use rehype-highlight)
+      (.use (rewrite-urls base-dir cache-token))
+      (.use (wrap-images))
+      (.use (source-positions))
+      (.use (collect-metadata metadata))))
+
+(defn- apply-posts
+  "The shared string post-passes applied to serialized HTML: MathJax SVG (synchronous), then Mermaid SVG
+   (async), then tree-sitter fenced-code highlighting (async). Returns Promise<html>."
+  [html]
+  (-> (js/Promise.resolve (math/render-html-math html))
+      (.then mermaid/render-html-diagrams)
+      (.then syntax/highlight-html-code-blocks)))
+
 (defn render
   "Render a Markdown string. base-dir (the source doc's absolute directory, or nil) is used to resolve
    relative img/link URLs to absolute file://. Returns a Promise resolving to
@@ -224,30 +259,40 @@
   ([^String md base-dir] (render md base-dir nil))
   ([^String md base-dir cache-token]
    (let [metadata (atom {:toc [] :assets #{}})]
-     (-> (unified)
-         (.use remark-parse)
-         (.use remark-gfm)
-         (.use remark-math)
-         ;; allowDangerousHtml keeps raw HTML as `raw` nodes; rehype-raw parses them into real hast elements;
-         ;; rehype-sanitize (GitHub allowlist) then strips anything dangerous. This MUST run before the app's
-         ;; own trusted hast plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize
-         ;; additions (file:// srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip
-         ;; every app-generated file:// image src and break all local images.
-         (.use remark-rehype #js {:allowDangerousHtml true})
-         (.use rehype-raw)
-         (.use rehype-sanitize sanitize/schema)
-         (.use rehype-slug)
-         (.use rehype-highlight)
-         (.use (rewrite-urls base-dir cache-token))
-         (.use (wrap-images))
-         (.use (source-positions))
-         (.use (collect-metadata metadata))
+     (-> (base-pipeline metadata base-dir cache-token)
          (.use rehype-stringify)
          (.process (math/normalize-github-math-escapes md))
-         (.then (fn [file] (math/render-html-math (str file))))
-         (.then mermaid/render-html-diagrams)
-         (.then syntax/highlight-html-code-blocks)
+         (.then (fn [file] (apply-posts (str file))))
          (.then (fn [html]
                   {:html html
                    :toc (:toc @metadata)
                    :assets (vec (:assets @metadata))}))))))
+
+(defn- capture-hast
+  "A rehype transformer that captures the final HAST tree into `store` (for the IR back-end) and passes it
+   through unchanged."
+  [store]
+  (fn [_opts] (fn [tree _file] (reset! store tree) tree)))
+
+(defn render-ir
+  "Like render, but builds the common document IR from the pipeline HAST (ir-md/hast->ir) and lowers it back
+   to HTML through the IR back-end (ir-html/lower = ir->hast->rehype-stringify), then applies the same
+   post-passes. The :toc is derived from the IR (ir-toc/toc-of), the :assets from the shared collect-metadata.
+   Returns Promise<{:html :ir :toc :assets}>. Because the IR round-trips the HAST faithfully, :html and :toc
+   are byte-equal to render's — the :vv/ir cutover is invisible (proven by parity-test + the electron smoke)."
+  ([^String md base-dir] (render-ir md base-dir nil))
+  ([^String md base-dir cache-token]
+   (let [metadata (atom {:toc [] :assets #{}})
+         captured (atom nil)]
+     (-> (base-pipeline metadata base-dir cache-token)
+         (.use (capture-hast captured))
+         (.use rehype-stringify)
+         (.process (math/normalize-github-math-escapes md))
+         (.then (fn [_file]
+                  (let [ir (ir-md/hast->ir @captured)]
+                    (-> (apply-posts (ir-html/lower ir))
+                        (.then (fn [html]
+                                 {:html html
+                                  :ir ir
+                                  :toc (ir-toc/toc-of ir)
+                                  :assets (vec (:assets @metadata))}))))))))))

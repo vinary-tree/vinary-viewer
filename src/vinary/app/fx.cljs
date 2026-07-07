@@ -48,11 +48,12 @@
 ;; DataScript writes go through this fx (keeps event handlers pure).
 (rf/reg-fx :ds/transact (fn [tx] (d/transact! ds/conn tx)))
 
-;; Markdown render (async unified pipeline) → dispatch the HTML back into the loop.
+;; Markdown render (async unified pipeline) → dispatch the HTML back into the loop. When :ir? is set (the
+;; :vv/ir flag), render through the common-IR back-end (render-ir) — byte-identical output, proven by parity.
 (rf/reg-fx
  :markdown/render
- (fn [{:keys [text path stamp on-done]}]
-   (-> (md/render text (md/dir-of path) stamp)   ; base-dir resolves relative img/link URLs → absolute file://
+ (fn [{:keys [text path stamp ir? on-done]}]
+   (-> ((if ir? md/render-ir md/render) text (md/dir-of path) stamp)   ; base-dir resolves relative URLs → file://
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 

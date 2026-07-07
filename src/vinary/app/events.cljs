@@ -9,6 +9,7 @@
             [cljs.reader :as reader]
             [vinary.app.db :as db]
             [vinary.app.ds :as ds]
+            [vinary.ir.flag :as ir-flag]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -112,6 +113,7 @@
        {:db db'
         :fx (cond-> [[:ds/transact tx]]
               (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
+                                                            :ir? (ir-flag/enabled? (get-in db [:ui :settings :ir-enabled?]))
                                                             :on-done [:content/rendered path stamp]}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
@@ -128,6 +130,14 @@
                                [:db/add eid :doc/toc (vec (or toc []))]
                                [:db/add eid :doc/assets (vec (or assets []))]]]
                [:vv/watch-assets {:doc-path path :paths assets}]]})))))
+
+;; The :vv/ir migration flag — route Markdown (and, in later phases, every tree format) through the common-IR
+;; render path (render-ir → hast->IR->lower). Experimental; default off. Read in :content/received to pick
+;; render vs render-ir; the output is byte-identical (parity), so toggling is invisible to the user.
+(rf/reg-event-db
+ :ir/set-enabled
+ (fn [db [_ on?]]
+   (assoc-in db [:ui :settings :ir-enabled?] (boolean on?))))
 
 (defn content-error-tx
   "Create/update a document error transaction for path, even if no content entity exists yet."

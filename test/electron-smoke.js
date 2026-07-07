@@ -871,6 +871,44 @@ async function main() {
   await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
   console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
 
+  // --- :vv/ir parity: the common-IR render path (render-ir → hast->IR->lower) must render the SAME markdown
+  // as the legacy path — identical text, heading ids, and math LaTeX — so the flag cutover is invisible.
+  // (Byte-parity of the HAST round-trip is proven by ir.parity-test; this asserts it end-to-end in the app.)
+  const captureRender = `(() => {
+    const b = document.querySelector('.markdown-body');
+    return {
+      h1: b.querySelector('h1') ? b.querySelector('h1').textContent.trim() : null,
+      text: b.textContent.replace(/\\s+/g, ' ').trim(),
+      ids: Array.from(b.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) => h.id),
+      inlineTex: (document.querySelector('.markdown-body .vv-math-inline') || {}).getAttribute
+                   ? document.querySelector('.markdown-body .vv-math-inline').getAttribute('data-tex') : null,
+      displayTex: (document.querySelector('.markdown-body .vv-math-display') || {}).getAttribute
+                   ? document.querySelector('.markdown-body .vv-math-display').getAttribute('data-tex') : null,
+      mermaid: Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))
+    };
+  })()`;
+  const legacyRender = await evalIn(win, captureRender);
+  // toggle the :vv/ir flag ON (dev build ⇒ stable cljs symbol names) and re-render the same document
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), true)); true`);
+  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
+  await delay(250);
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'
+                       && Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))
+                       && Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`),
+    ':vv/ir re-render produces a valid markdown DOM (no render error)'
+  );
+  const irRender = await evalIn(win, captureRender);
+  assert.strictEqual(irRender.h1, legacyRender.h1, ':vv/ir render must keep the H1');
+  assert.deepStrictEqual(irRender.ids, legacyRender.ids, ':vv/ir render must produce identical heading ids');
+  assert.strictEqual(irRender.text, legacyRender.text, ':vv/ir render must produce identical text content');
+  assert.strictEqual(irRender.inlineTex, legacyRender.inlineTex, ':vv/ir render must preserve inline math LaTeX');
+  assert.strictEqual(irRender.displayTex, legacyRender.displayTex, ':vv/ir render must preserve display math LaTeX');
+  assert.strictEqual(irRender.mermaid && legacyRender.mermaid, true, ':vv/ir render must keep the Mermaid SVG');
+  // restore the flag OFF for later markdown opens (the current DOM stays IR-rendered — parity-identical)
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), false)); true`);
+  console.log('[ok] :vv/ir parity — common-IR render matches the legacy render (text + heading ids + math + mermaid)');
+
   // Copy LaTeX (path 1): Ctrl+C over a paragraph containing inline math must substitute the rendered
   // equation with its raw $…$ source — prose preserved, no glyphs, no leaked assistive MathML ("x2").
   state.lastCopiedText = null;
