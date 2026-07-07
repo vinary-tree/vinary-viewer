@@ -125,13 +125,6 @@
   (or (.contains (.-classList code) "math-display")
       (some-> code .-parentElement .-tagName (= "PRE"))))
 
-(defn- math-code? [^js code]
-  (let [classes (.-classList code)]
-    (or (.contains classes "language-math")
-        (.contains classes "lang-math")
-        (.contains classes "math-inline")
-        (.contains classes "math-display"))))
-
 (defn delimit-tex
   "Wrap raw TeX in markdown math delimiters so it round-trips into Markdown.
    display? → $$…$$, else $…$. Blank/nil source → nil (nothing copyable)."
