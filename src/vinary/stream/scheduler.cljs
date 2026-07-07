@@ -20,6 +20,7 @@
 
 (def ^:private toc-cap 1000)                                  ; bound the outline so a log of errors can't grow it unboundedly
 (def ^:private log-level-re #"(?i)\b(ERROR|WARN|WARNING|FATAL|CRITICAL)\b")
+(def ^:private md-drain-batch 48)                             ; top-level Markdown blocks committed per idle frame
 
 (defn- parser-for [kind]
   (case kind
@@ -48,16 +49,26 @@
     (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)})))))
 
 (defn start!
-  "Begin streaming `path` (of `kind`) into DOM `node`. Returns a controller atom → pass to stop!. Progress is
-   reported by the transport per batch (bytes/lines read over the total), so the byte size isn't needed here."
-  [node path kind]
+  "Begin streaming `path` (of `kind`) into DOM `node`; returns a controller atom → pass to stop!. Two engines:
+
+   • **transport engine** (log/text): pull bounded LINE batches from the main-process session, feed the WPDA
+     StreamParser, append completed records. Bytes are not in renderer memory → genuinely bounded-memory.
+   • **progressive engine** (markdown): the whole text is already in `:doc/text` (opts `:text`), so run the
+     batch base-pipeline ONCE and commit the resulting top-level blocks across idle frames — a non-blocking,
+     byte-parity-exact progressive paint (see md/stream-blocks, ADR-0018).
+
+   `opts` carries `:text`/`:stamp` for the progressive engine (ignored by the transport engine)."
+  [node path kind opts]
   (let [ctrl   (atom {:node node :path path :kind kind :destroyed? false :toc-n 0
                       :parser (parser-for kind) :posts (posts-for kind)
-                      :q (atom (js/Promise.resolve nil)) :session nil})
+                      ;; markdown emits the batch IR's children verbatim (whitespace leaves carry the separators)
+                      ;; → join with ""; logs/records carry no separators → the sink supplies one "\n" between them
+                      :sep (if (= kind "markdown") "" "\n")
+                      :q (atom (js/Promise.resolve nil)) :started? (atom false) :session nil})
         alive? (fn [] (not (:destroyed? @ctrl)))]
     (letfn [(emit-blocks [blocks]
-              (let [{:keys [node q posts]} @ctrl]
-                (sink/append-blocks! node q blocks alive? posts)
+              (let [{:keys [node q posts started? sep]} @ctrl]
+                (sink/append-blocks! node q blocks alive? posts started? sep)
                 (when (< (:toc-n @ctrl) toc-cap)
                   (let [entries (toc-entries blocks)
                         room    (- toc-cap (:toc-n @ctrl))
@@ -65,6 +76,7 @@
                     (when (seq entries)
                       (swap! ctrl update :toc-n + (count entries))
                       (rf/dispatch [:stream/toc-append path entries]))))))
+            ;; ---- transport engine (log/text) ----
             (handle [batch]
               (let [{p :parser blocks :blocks} (proto/feed (:parser @ctrl) (input-for (:kind @ctrl) batch))]
                 (swap! ctrl assoc :parser p)
@@ -80,10 +92,29 @@
                              (when (alive?)
                                (handle batch)
                                (when-not (:done batch) (ric tick)))))
-                    (.catch (fn [_] (rf/dispatch [:stream/done path]))))))]
-      (-> (transport/open! path kind)
-          (.then (fn [session] (when (alive?) (swap! ctrl assoc :session session) (ric tick))))
-          (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "stream error: " (.-message e))}]))))
+                    (.catch (fn [_] (rf/dispatch [:stream/done path]))))))
+            ;; ---- progressive engine (markdown) ----
+            (drain [blocks total idx]
+              (when (alive?)
+                (if (>= idx total)
+                  (rf/dispatch [:stream/done path])
+                  (let [end (min total (+ idx md-drain-batch))]
+                    (emit-blocks (subvec blocks idx end))
+                    (rf/dispatch [:stream/progress path (/ end total)])
+                    (ric (fn [_] (drain blocks total end)))))))
+            (start-progressive []
+              (-> (md/stream-blocks (:text opts) (md/dir-of path) (:stamp opts))
+                  (.then (fn [{:keys [blocks toc assets]}]
+                           (when (alive?)
+                             (rf/dispatch [:stream/md-ready path toc assets])
+                             (let [bs (vec blocks)]
+                               (if (seq bs) (drain bs (count bs) 0) (rf/dispatch [:stream/done path]))))))
+                  (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "stream error: " (.-message e))}])))))]
+      (if (= kind "markdown")
+        (start-progressive)
+        (-> (transport/open! path kind)
+            (.then (fn [session] (when (alive?) (swap! ctrl assoc :session session) (ric tick))))
+            (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "stream error: " (.-message e))}])))))
       ctrl)))
 
 (defn stop!

@@ -10,10 +10,18 @@
 
 (defn append-blocks!
   "Lower `blocks`, optionally run `posts-fn` (md/apply-posts, or nil to skip — logs need no post-passes), and
-   append them to `node` in one insertion, separated by `\\n` (matching remark-rehype's inter-block text nodes
-   so streamed output matches the batch render). `alive?` (0-arg) gates the async completion. `q` is an atom
-   holding the serializing Promise; returns the updated Promise."
-  [node q blocks alive? posts-fn]
+   append them to `node` in one insertion, joined by `sep`. `sep` is a LEADING separator on every append EXCEPT
+   the very first to `node` (tracked by `started?*`, an atom<bool> per controller), so the streamed body carries
+   no trailing separator. Two callers:
+
+   • **logs** pass `sep = \"\\n\"`: records don't carry separators, so the sink supplies exactly one `\\n`
+     between them — `record₁\\nrecord₂\\n…` with no trailing newline.
+   • **markdown** passes `sep = \"\"`: the emitted blocks ARE the batch IR document's children, INCLUDING the
+     inter-block whitespace `:text` leaves that already carry remark-rehype's exact separators, so concatenating
+     them with no added separator is byte-identical to `lower(whole-document)`.
+
+   `alive?` (0-arg) gates the async completion. `q` is an atom holding the serializing Promise; returns it."
+  [node q blocks alive? posts-fn started?* sep]
   (when (seq blocks)
     (let [htmls (mapv ir-html/lower blocks)]
       (reset! q
@@ -21,12 +29,17 @@
             (.then (fn [_]
                      (when (alive?)
                        (if posts-fn
-                         (-> (js/Promise.all (into-array (map posts-fn htmls)))
-                             (.then (fn [arr] (str/join "\n" (array-seq arr)))))
-                         (str/join "\n" htmls)))))
+                         ;; skip the post-passes for whitespace-only fragments (markdown's inter-block `\n`
+                         ;; separator leaves) — they carry no math/mermaid/code, and running them through a
+                         ;; parse+serialize post-pass would normalize the whitespace away and break parity.
+                         (-> (js/Promise.all (into-array (map (fn [h] (if (str/blank? h) (js/Promise.resolve h) (posts-fn h))) htmls)))
+                             (.then (fn [arr] (str/join sep (array-seq arr)))))
+                         (str/join sep htmls)))))
             (.then (fn [joined]
                      (when (and joined (alive?))
-                       (.insertAdjacentHTML ^js node "beforeend" (str joined "\n")))))
+                       (let [piece (if @started?* (str sep joined) joined)]
+                         (reset! started?* true)
+                         (.insertAdjacentHTML ^js node "beforeend" piece)))))
             (.catch (fn [_] nil))))))
   @q)
 

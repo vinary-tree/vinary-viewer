@@ -16,6 +16,7 @@
             ["rehype-sanitize$default"  :as rehype-sanitize]
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
+            [vinary.ir.node :as node]
             [vinary.ir.backend.sanitize :as sanitize]
             [vinary.ir.frontend.markdown :as ir-md]
             [vinary.ir.frontend.office :as ir-office]
@@ -328,6 +329,34 @@
                                   :ir ir
                                   :toc (ir-toc/toc-of ir)
                                   :assets (vec (:assets @metadata))}))))))))))
+
+(defn stream-blocks
+  "Progressive-commit streaming for Markdown. Runs the EXACT batch base-pipeline on the WHOLE `text` once (so
+   heading-slug dedup, reference definitions, footnotes, and source positions all have full document context —
+   byte-parity is guaranteed by construction), then returns the IR document's top-level children IN FULL —
+   element blocks AND the inter-block whitespace `:text` leaves that carry remark-rehype's exact separators.
+   Returns Promise<{:blocks [ir-child] :toc :assets}>; the scheduler commits the children across idle frames
+   (pacing the per-block lower + math/mermaid/syntax post-passes + DOM writes) and the sink concatenates them
+   with NO separator, so `concat(map lower children)` == `lower(whole-document)` == render-ir's `:html`, byte
+   for byte (the separators live in the emitted whitespace leaves, not a re-synthesized `\\n`).
+
+   (Unlike logs/PDF — whose bytes are NOT in renderer memory and so stream bounded from main — a Markdown doc's
+   text is already fully in `:doc/text`; there is no bounded-parse win to be had, and CommonMark's document-
+   global constructs make a byte-parity bounded-parse infeasible, so the win here is a NON-BLOCKING progressive
+   paint that never holds the whole HTML string. See ADR-0018 / theory/09.)"
+  ([text base-dir] (stream-blocks text base-dir nil))
+  ([text base-dir cache-token]
+   (let [metadata (atom {:toc [] :assets #{}})
+         captured (atom nil)]
+     (-> (base-pipeline metadata base-dir cache-token)
+         (.use (capture-hast captured))
+         (.use rehype-stringify)
+         (.process text)
+         (.then (fn [_]
+                  (let [ir (ir-md/hast->ir @captured)]
+                    {:blocks (vec (node/children ir))   ; ALL children (elements + the whitespace separator leaves)
+                     :toc    (ir-toc/toc-of ir)
+                     :assets (vec (:assets @metadata))})))))))
 
 (defn render-office-ir
   "Render office HTML through the common IR: parse via rehype-raw + the shared sanitizer + rehype-slug

@@ -305,8 +305,9 @@
    interactions and the .vv-content scroll-spy contract, so find / Contents / copy work on the growing
    document. Mounting starts a stream of `path` (of `kind`); unmounting tears it down. The render is never
    snapshotted, so a re-mount (tab-switch back / live-refresh) simply re-streams from the top — keeping the
-   working set bounded for arbitrarily large files. A thin top progress bar shows completion while loading."
-  [_path _kind]
+   working set bounded for arbitrarily large files. A thin top progress bar shows completion while loading.
+   `text`/`stamp` feed the progressive (markdown) engine, whose source is the in-memory `:doc/text`."
+  [_path _kind _text _stamp]
   (let [node        (atom nil)
         source*     (atom nil)                                 ; logs carry no source-map; kept for the shared ctx menu
         path*       (atom nil)
@@ -315,32 +316,43 @@
         ctrl*       (atom nil)
         last-toc-n  (atom 0)
         refresh-raf (atom false)
-        ;; Records append at the END, so an already-measured record's offset never shifts — we only need to
-        ;; (re)measure when the outline GREW. rAF-coalesce bursts of batches into one spy refresh.
-        refresh-spy! (fn []
-                       (when-not @refresh-raf
-                         (reset! refresh-raf true)
-                         (js/requestAnimationFrame
-                          (fn []
-                            (reset! refresh-raf false)
-                            (when-let [^js content (some-> @node (.closest ".vv-content"))]
-                              (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))]
+        ;; As blocks append: font-match embedded SVG/image figures (parity with markdown-body), THEN re-measure
+        ;; the scroll-spy (figure sizing changes offsets). rAF-coalesce bursts of appends into one refresh.
+        refresh-view! (fn []
+                        (when-not @refresh-raf
+                          (reset! refresh-raf true)
+                          (js/requestAnimationFrame
+                           (fn []
+                             (reset! refresh-raf false)
+                             (when @node
+                               (-> (figures/scale-figures! @node)
+                                   (.then (fn [_]
+                                            (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                                              (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))))))]
     (r/create-class
      {:display-name "vv-ir-stream-body"
       :component-did-mount  (fn [this]
-                              (let [[_ path kind] (r/argv this)]
+                              (let [[_ path kind text stamp] (r/argv this)]
                                 (reset! path* path)
                                 (reset! detach* (attach-content-interactions! @node source* path* last-link))
-                                (reset! ctrl* (stream-scheduler/start! @node path kind))))
-      :component-did-update (fn [_]
-                              (let [n (count @(rf/subscribe [:doc/toc]))]
-                                (when (not= n @last-toc-n)
-                                  (reset! last-toc-n n)
-                                  (refresh-spy!))))
+                                (reset! ctrl* (stream-scheduler/start! @node path kind {:text text :stamp stamp}))))
+      :component-did-update (fn [this]
+                              ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
+                              ;; while markdown is still draining (its whole outline is set upfront, but the
+                              ;; heading elements only appear as blocks commit — the rAF guard coalesces bursts).
+                              (let [kind  (nth (r/argv this) 2)
+                                    n     (count @(rf/subscribe [:doc/toc]))
+                                    grew? (not= n @last-toc-n)
+                                    p     @(rf/subscribe [:doc/stream-progress])]
+                                (reset! last-toc-n n)
+                                ;; markdown re-measures on every drain tick AND the final one (p reaches 1), since
+                                ;; its outline is set upfront but the headings/figures appear as blocks commit.
+                                (when (or grew? (and (= kind "markdown") (some? p)))
+                                  (refresh-view!))))
       :component-will-unmount (fn [_]
                                 (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))
-      :reagent-render (fn [_path _kind]
+      :reagent-render (fn [_path _kind _text _stamp]
                         ;; deref the streamed outline + progress so the component re-renders as the stream
                         ;; grows → did-update re-measures the scroll-spy for the newly-appended records
                         @(rf/subscribe [:doc/toc])
@@ -832,7 +844,7 @@
        ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
        ;; :doc/streaming? (stream-flag/enabled?), so they fall through to the byte-identical batch renderers.
        (:doc/streaming? doc)       ^{:key (str "stream:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [ir-stream-body (:doc/path doc) (:doc/kind doc)]
+                                   [ir-stream-body (:doc/path doc) (:doc/kind doc) (:doc/text doc) (:doc/stamp doc)]
        ;; PDF: the fixed-layout canvas by default; when "Reflow Text" is on and the extracted-text HTML is
        ;; ready, show that reflowable prose instead (an additive facet — the canvas render is untouched).
        (= "pdf" (:doc/kind doc))

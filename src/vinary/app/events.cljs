@@ -160,6 +160,16 @@
    (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
      {:fx [[:ds/transact [[:db/add eid :doc/stream-progress 1]]]]})))
 
+;; markdown progressive stream: the whole outline + asset list are known upfront (one base-pipeline pass), so
+;; set :doc/toc + :doc/assets at once and start watching the assets (image live-refresh parity with the batch).
+(rf/reg-event-fx
+ :stream/md-ready
+ (fn [_ [_ path toc assets]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/toc (vec (or toc []))]
+                          [:db/add eid :doc/assets (vec (or assets []))]]]
+           [:vv/watch-assets {:doc-path path :paths assets}]]})))
+
 ;; (The :vv/ir migration flag + :ir/set-enabled toggle are RETIRED — the common IR is now the unconditional
 ;;  render path for Markdown and office; see ADR-0017 and vinary.ir.flag.)
 

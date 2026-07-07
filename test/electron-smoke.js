@@ -173,6 +173,70 @@ function createSmallLogFixture() {
   return { docPath, size: fs.statSync(docPath).size };
 }
 
+// Two byte-identical Markdown files (same directory → identical base-dir URL rewriting) larger than the 256 KiB
+// streaming threshold, exercising the parity-critical base-pipeline features: heading-slug DEDUP across repeated
+// headings, a FORWARD reference definition (used in the intro, defined at the very end — proves whole-document
+// context), tight + loose lists, a highlighted fenced code block, a table, a blockquote, inline raw HTML, and a
+// thematic break. Deliberately NO math/images: MathJax uses a shared, monotonic ID counter (so even two batch
+// renders differ) and figure sizing is measured at layout time — both are covered by separate feature
+// assertions, not byte-comparison. `batch.md` renders whole (flag off), `stream.md` streams (flag on); their
+// .markdown-body innerHTML must be byte-identical.
+function createLargeMarkdownFixtures() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-md-stream-'));
+  tempDirs.push(dir);
+  // a ~1.2 KB filler sentence so each section is a realistically-sized block group (few hundred sections for
+  // 280 KiB, not thousands of tiny blocks) — keeps the streamed render fast enough for the smoke budget.
+  const filler = 'The quick brown fox jumps over the lazy dog while pangrams exercise every glyph. '.repeat(15);
+  const section = (i) => `## Section ${i}
+
+Paragraph ${i} with **bold**, _italic_, \`inline code\`, and a [back reference][ref${i}] plus raw <abbr title="x">HTML</abbr>. ${filler}
+
+- tight one
+- tight two
+
+1. ordered a
+2. ordered b
+
+- loose one
+
+- loose two
+
+> a blockquote
+> across two lines
+
+\`\`\`clojure
+(defn add-${i} [a b] (+ a b ${i}))
+\`\`\`
+
+| Col A | Col B |
+|-------|-------|
+| ${i}  | ${i + 1} |
+
+### Repeated Heading
+
+Body under the repeated heading (slug dedup must number these across the whole document).
+
+---
+
+[ref${i}]: https://example.com/back/${i}
+`;
+  let body = '# Big Markdown Document\n\nIntro paragraph referencing a [forward definition][fwd] resolved at EOF.\n\n';
+  let i = 0;
+  while (Buffer.byteLength(body, 'utf8') < 300 * 1024) { body += section(i); i += 1; }
+  body += '\n[fwd]: https://example.com/forward-defined-at-end\n';
+  const batchPath = path.join(dir, 'batch.md');
+  const streamPath = path.join(dir, 'stream.md');
+  fs.writeFileSync(batchPath, body);
+  fs.writeFileSync(streamPath, body);
+  return { dir, batchPath, streamPath, text: body, size: Buffer.byteLength(body, 'utf8'), sections: i };
+}
+
+function firstDiff(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+  return a.length === b.length ? -1 : n;
+}
+
 function makeOutlinePdf() {
   const content = 'q 0 0 1 rg 20 20 120 120 re f Q';
   const objs = [
@@ -2050,6 +2114,62 @@ async function main() {
   assert.strictEqual(contentService.streamCount(), 0, 'no main-process stream session may leak after teardown');
   console.log('[ok] stream session drains to 0 on teardown — no fd/session leak');
 
+  // ========================================================================================================
+  // ── Phase 2 — MARKDOWN streaming parity: streamed HTML == batch HTML (the load-bearing gate) ──
+  // A >256 KiB Markdown doc rendered whole (flag off) vs streamed as progressive block-commits (flag on) must
+  // produce BYTE-IDENTICAL .markdown-body innerHTML — proving heading-slug dedup, forward reference resolution,
+  // loose lists, code highlighting, tables, and source positions all survive per-block progressive rendering.
+  // ========================================================================================================
+  const md = createLargeMarkdownFixtures();
+  assert.ok(md.size > 256 * 1024, `markdown fixture (${md.size} B) must exceed the 256 KiB stream threshold`);
+  const mdStamp = Date.now();
+
+  // batch render (flag OFF) → capture the reference innerHTML
+  win.webContents.send('vv:settings', '{:stream? false}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'streaming disabled for the batch reference');
+  state.contentByPath.set(md.batchPath, { path: md.batchPath, kind: 'markdown', text: md.text, stamp: mdStamp, sourceable: true, meta: { size: md.size } });
+  win.webContents.send('vv:open-files', { paths: [md.batchPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+    return b && b.querySelectorAll('h2').length >= ${md.sections} && !document.querySelector('.vv-content .vv-stream-progress'); })()`),
+    'batch markdown renders whole (no stream progress strip)', 25000);
+  await delay(400);   // let the post-passes (syntax highlight) + figure pass settle
+  const batchHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  const batchH2 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length`);
+  assert.ok(batchH2 >= md.sections, 'batch reference rendered every section');
+  console.log(`[ok] batch markdown reference rendered (${batchH2} sections, ${(md.size / 1024).toFixed(0)} KiB)`);
+
+  // streamed render (flag ON) → progressive block-commit
+  win.webContents.send('vv:settings', '{:stream? true}');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming re-enabled for the streamed render');
+  state.contentByPath.set(md.streamPath, { path: md.streamPath, kind: 'markdown', text: md.text, stamp: mdStamp, sourceable: true, meta: { size: md.size } });
+  win.webContents.send('vv:open-files', { paths: [md.streamPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => {
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
+    const h2 = document.querySelectorAll('.vv-content .markdown-body h2').length;
+    return streaming && h2 > 0;
+  })()`), 'markdown streams — progress strip + first blocks paint', 20000);
+  const midH2 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length`);
+  // converge to the whole document, then let the async append queue + post-passes settle
+  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h2').length >= ${batchH2}
+    && (() => { const p = document.querySelector('.vv-content .vv-stream-progress'); return p && p.classList.contains('vv-stream-progress-done'); })()`,
+    'streamed markdown converges to the whole document', 60000);
+  await delay(600);   // final refresh-view (figure scale + spy) + trailing appends
+  const streamHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  if (midH2 < batchH2) console.log(`[ok] progressive markdown paint observed (${midH2} → ${batchH2} sections)`);
+
+  if (streamHtml !== batchHtml) {
+    const at = firstDiff(streamHtml, batchHtml);
+    console.error(`markdown parity MISMATCH at char ${at} / stream ${streamHtml.length} vs batch ${batchHtml.length}`);
+    console.error('stream …', JSON.stringify(streamHtml.slice(Math.max(0, at - 80), at + 120)));
+    console.error('batch  …', JSON.stringify(batchHtml.slice(Math.max(0, at - 80), at + 120)));
+  }
+  assert.strictEqual(streamHtml, batchHtml, 'streamed markdown innerHTML must be byte-identical to the batch render');
+  console.log('[ok] streamed markdown is BYTE-IDENTICAL to the batch render (slug dedup, forward refs, lists, code, tables, positions)');
+
+  // Contents populated from the streamed markdown headings (set upfront from the one base-pipeline pass)
+  await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
+  console.log('[ok] streamed markdown Contents is populated');
+
   win.close();
 }
 
@@ -2057,7 +2177,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 120000);   // headroom for the document-streaming section (a >5 MiB log streamed to completion)
+}, 240000);   // headroom for the document-streaming sections (a >5 MiB log + a >256 KiB markdown parity render)
 
 main()
   .then(() => {

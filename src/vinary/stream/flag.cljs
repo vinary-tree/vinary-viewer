@@ -22,8 +22,8 @@
 
 ;; Kinds whose streaming front-end is actually implemented (grows as each phase lands). `enabled?` requires
 ;; this so a large doc of an as-yet-unimplemented kind stays on the batch path rather than streaming with the
-;; wrong parser. Phase 1: logs/text.
-(def implemented-kinds #{"log" "text"})
+;; wrong parser. Phase 1: logs/text (bounded byte-stream). Phase 2: markdown (progressive block-commit).
+(def implemented-kinds #{"log" "text" "markdown"})
 
 (defn implemented? [kind] (contains? implemented-kinds kind))
 
