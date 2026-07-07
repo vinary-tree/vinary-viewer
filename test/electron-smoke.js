@@ -1879,6 +1879,18 @@ async function main() {
     setter.call(i, 'Iosevka'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['font-variable'] === 'Iosevka'`),
     'editing a font field updates settings live');
+  // the document-streaming toggle: present, checked by default (Phase 4 default-on), and persists on toggle
+  const streamCheck = await evalIn(win, `(() => {
+    const box = document.querySelector('.vv-pref-checkbox');
+    return box ? { present: true, checked: box.checked } : { present: false };
+  })()`);
+  assert.strictEqual(streamCheck.present, true, 'the "Stream large documents" checkbox is present in Preferences');
+  assert.strictEqual(streamCheck.checked, true, 'streaming is checked by default (Phase 4 default-on)');
+  await evalIn(win, `(() => { document.querySelector('.vv-pref-checkbox').click(); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'toggling the checkbox persists :stream? false');
+  console.log('[ok] Settings: document-streaming toggle present, default-on, persists on toggle');
+  win.webContents.send('vv:settings', '{:stream? true}');   // restore default-on for the rest of the run
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === true`), 'streaming restored after the toggle test');
   await escModal();
   await waitFor(() => evalIn(win, `!window.__vvdb().ui['settings-open?']`), 'Esc closes the Settings dialog');
   console.log('[ok] Settings: autofocus + modality + focus-trap + live font edit + Esc-close');

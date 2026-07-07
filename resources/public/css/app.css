@@ -634,6 +634,10 @@ mjx-container mjx-assistive-mml[display="block"] { width: 100% !important; }
   font-family: inherit; outline: none; }
 .vv-pref-input:focus { border-color: var(--vv-head1); }
 .vv-pref-num { flex: 0 0 80px; }
+/* a boolean preference row: the whole label (checkbox + text) sits on the left, so justify to the start */
+.vv-pref-check { justify-content: flex-start; }
+.vv-pref-check .vv-pref-label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--vv-fg); }
+.vv-pref-checkbox { width: 15px; height: 15px; accent-color: var(--vv-head1); cursor: pointer; }
 
 /* About dialog */
 .vv-about { text-align: center; }

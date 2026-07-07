@@ -6,8 +6,8 @@
             [vinary.stream.flag :as flag]))
 
 (deftest flag-on-override
-  (testing "the runtime setting overrides the compile-time default; nil falls back to the default (off)"
-    (is (false? (flag/flag-on? nil)))
+  (testing "the runtime setting overrides the compile-time default; nil falls back to the default (ON in Phase 4)"
+    (is (true?  (flag/flag-on? nil)))
     (is (true?  (flag/flag-on? true)))
     (is (false? (flag/flag-on? false)))))
 
@@ -20,7 +20,8 @@
 
 (deftest enabled-requires-flag-kind-and-size
   (testing "off unless flag on AND streamable AND size ≥ threshold"
-    (is (not (flag/enabled? "log" 999999999 nil)) "flag off by default")
+    (is (flag/enabled? "log" 999999999 nil) "flag ON by default (Phase 4) → a large log streams with no explicit setting")
+    (is (not (flag/enabled? "log" 999999999 false)) "an explicit false setting disables streaming")
     (is (not (flag/enabled? "office" 999999999 true)) "non-streamable kind never streams")
     (is (not (flag/enabled? "log" 1024 true)) "a small log stays batch (below the 5 MiB threshold)")
     (is (flag/enabled? "log" 6000000 true) "a large log streams")

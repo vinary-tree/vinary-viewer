@@ -30,6 +30,7 @@
             [vinary.ui.passwords :as passwords-ui]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
+            [vinary.stream.flag :as stream-flag]
             [vinary.stream.scheduler :as stream-scheduler]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.media :as media]
@@ -315,6 +316,7 @@
         last-link   (atom nil)
         detach*     (atom nil)
         ctrl*       (atom nil)
+        ensurer*    (atom nil)                                 ; find-materialize hook (drains the stream before search)
         last-toc-n  (atom 0)
         refresh-raf (atom false)
         ;; As blocks append: font-match embedded SVG/image figures (parity with markdown-body), THEN re-measure
@@ -344,7 +346,12 @@
                                 (reset! detach* (attach-content-interactions! @node source* path* last-link))
                                 (reset! ctrl* (stream-scheduler/start! @node path kind
                                                                        (cond-> {:text text :stamp stamp}
-                                                                         blocks-fn (assoc :blocks-fn blocks-fn))))))
+                                                                         blocks-fn (assoc :blocks-fn blocks-fn))))
+                                ;; in-page find materializes the whole stream first (the PDF ensure-all-text! analog):
+                                ;; only one content view is active, so a single global ensurer never conflicts
+                                (let [ens (fn [] (stream-scheduler/materialize! @ctrl*))]
+                                  (reset! ensurer* ens)
+                                  (pdf-cache/set-ensurer! ens))))
       :component-did-update (fn [this]
                               ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
                               ;; while markdown is still draining (its whole outline is set upfront, but the
@@ -359,6 +366,7 @@
                                 (when (or grew? (and (= kind "markdown") (some? p)))
                                   (refresh-view!))))
       :component-will-unmount (fn [_]
+                                (when @ensurer* (pdf-cache/clear-ensurer! @ensurer*) (reset! ensurer* nil))
                                 (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))
       :reagent-render (fn [_path _kind _text _stamp]
@@ -831,7 +839,7 @@
         uri     @(rf/subscribe [:ui/active-uri])
         vs?     @(rf/subscribe [:ui/active-view-source?])
         reflow? @(rf/subscribe [:pdf/reflow?])
-        stream? (:stream? @(rf/subscribe [:ui/settings]))]   ; streaming enabled → the reflow view streams too
+        stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))]   ; streaming on → reflow streams too
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
                    (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)

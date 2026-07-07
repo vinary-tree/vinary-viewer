@@ -5,7 +5,11 @@
    kind streamable, AND the size at or above a per-kind byte threshold. Default off until each format's
    parity/perf gate passes (mirrors the retired vinary.ir.flag pattern). Pure + DOM-free.")
 
-(goog-define ^boolean stream-default false)
+;; Default ON as of Phase 4: streaming is byte-parity-verified (markdown/PDF-reflow) and bounded-memory (logs),
+;; so large documents stream by default (progressive, non-blocking). The persisted `:stream?` setting overrides
+;; this (Preferences ▸ Documents ▸ "Stream large documents"), and only docs at/above the per-kind threshold ever
+;; stream — small/medium docs always take the identical, faster batch path.
+(goog-define ^boolean stream-default true)
 
 ;; Per-kind size thresholds (bytes). Below the threshold a document renders whole (batch); at/above it streams.
 ;; Log aligns with the existing large-log boundary (content_service.js flips to paged at ~5 MB), so large logs

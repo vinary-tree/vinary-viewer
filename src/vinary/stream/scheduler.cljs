@@ -64,11 +64,16 @@
 
    `opts` carries `:text`/`:stamp` for the progressive engine (ignored by the transport engine)."
   [node path kind opts]
-  (let [ctrl   (atom {:node node :path path :kind kind :destroyed? false :toc-n 0
+  (let [done-res (atom nil)
+        done-p   (js/Promise. (fn [res _] (reset! done-res res)))   ; resolves once the whole stream has been fed
+        ctrl   (atom {:node node :path path :kind kind :destroyed? false :toc-n 0
                       :parser (parser-for kind) :posts (posts-for kind)
                       :sep (sep-for kind)
+                      :rush? (atom false)                          ; find-materialize: drain without idle pacing
+                      :done-p done-p
                       :q (atom (js/Promise.resolve nil)) :started? (atom false) :session nil})
-        alive? (fn [] (not (:destroyed? @ctrl)))]
+        alive? (fn [] (not (:destroyed? @ctrl)))
+        finish! (fn [] (when-let [r @done-res] (r nil) (reset! done-res nil)) (rf/dispatch [:stream/done path]))]
     (letfn [(emit-blocks [blocks]
               (let [{:keys [node q posts started? sep]} @ctrl]
                 (sink/append-blocks! node q blocks alive? posts started? sep)
@@ -87,24 +92,27 @@
                 (rf/dispatch [:stream/progress path (:progress batch)])
                 (when (:done batch)
                   (emit-blocks (:blocks (proto/finish (:parser @ctrl))))
-                  (rf/dispatch [:stream/done path]))))
+                  (finish!))))
             (tick [_]
               (when (alive?)
                 (-> (transport/pull! (:session @ctrl))
                     (.then (fn [batch]
                              (when (alive?)
                                (handle batch)
-                               (when-not (:done batch) (ric tick)))))
-                    (.catch (fn [_] (rf/dispatch [:stream/done path]))))))
+                               ;; find-materialize rushes the pull loop (no idle wait between batches)
+                               (when-not (:done batch) (if @(:rush? @ctrl) (tick nil) (ric tick))))))
+                    (.catch (fn [_] (finish!))))))
             ;; ---- progressive engine (markdown) ----
             (drain [blocks total idx]
               (when (alive?)
                 (if (>= idx total)
-                  (rf/dispatch [:stream/done path])
+                  (finish!)
                   (let [end (min total (+ idx md-drain-batch))]
                     (emit-blocks (subvec blocks idx end))
                     (rf/dispatch [:stream/progress path (/ end total)])
-                    (ric (fn [_] (drain blocks total end)))))))
+                    ;; find-materialize tight-loops the remaining blocks (no idle wait) so the whole doc is in
+                    ;; the DOM before the search runs; otherwise pace one block-batch per idle frame
+                    (if @(:rush? @ctrl) (drain blocks total end) (ric (fn [_] (drain blocks total end))))))))
             ;; progressive engine (markdown, pdf-reflow): opts :blocks-fn is a 0-arg fn → Promise<{:blocks :toc
             ;; :assets}> rendered whole (full document context = byte-parity), committed across idle frames.
             (start-progressive []
@@ -128,3 +136,14 @@
   (when ctrl
     (swap! ctrl assoc :destroyed? true)
     (when-let [s (:session @ctrl)] (transport/close! s))))
+
+(defn materialize!
+  "Fast-forward the stream to completion (the find-materialize hook, analogous to pdf ensure-all-text!): drop
+   the idle pacing so the WHOLE document lands in the DOM, then resolve once every queued append has settled —
+   so an in-page find run right after covers the entire document, not just the streamed-so-far prefix. Returns
+   a Promise (immediately resolved when `ctrl` is nil or already torn down)."
+  [ctrl]
+  (if (and ctrl (not (:destroyed? @ctrl)))
+    (do (reset! (:rush? @ctrl) true)
+        (-> ^js (:done-p @ctrl) (.then (fn [_] @(:q @ctrl)))))
+    (js/Promise.resolve nil)))

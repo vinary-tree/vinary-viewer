@@ -3,6 +3,7 @@
    menu). Each change applies live (CSS vars) and persists to settings.edn via :settings/set."
   (:require [re-frame.core :as rf]
             [vinary.ui.access-keys :as access]
+            [vinary.stream.flag :as stream-flag]
             [vinary.ui.modal :as modal]))
 
 (defn- text-field [label access-key k value placeholder access-active?]
@@ -22,6 +23,17 @@
                           (when-not (js/isNaN n) (rf/dispatch [:settings/set k n])))}
            (access/access-attrs access-key))]])
 
+(defn- check-field
+  "A boolean preference rendered as a checkbox; persists via :settings/set like the text/number fields."
+  [label access-key k checked? access-active?]
+  [:div.vv-pref-row.vv-pref-check
+   [:label.vv-pref-label
+    [:input.vv-pref-checkbox
+     (merge {:type "checkbox" :checked (boolean checked?)
+             :on-change #(rf/dispatch [:settings/set k (.. % -target -checked)])}
+            (access/access-attrs access-key))]
+    [access/label label access-key access-active?]]])
+
 (defn- on-key-down [^js e]
   (when-let [k (and (.-altKey e) (access/event-letter e))]
     (when (case k
@@ -29,6 +41,7 @@
             "d" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='d']")
             "f" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='f']")
             "s" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='s']")
+            "t" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='t']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
       (access/consume! e))))
@@ -51,4 +64,7 @@
          "Inter, system-ui, sans-serif" access-active?]
         [num-field  "Document font size (px)" "d" :font-size (:font-size s) access-active?]
         [text-field "Fixed-width font" "f" :font-fixed (:font-fixed s) "Fira Code, monospace" access-active?]
-        [num-field  "Code font size (px)" "s" :code-font-size (:code-font-size s) access-active?]]])))
+        [num-field  "Code font size (px)" "s" :code-font-size (:code-font-size s) access-active?]
+        [:div.vv-pref-section "Documents"]
+        [check-field "Stream large documents (progressive rendering)" "t" :stream?
+         (stream-flag/flag-on? (:stream? s)) access-active?]]])))
