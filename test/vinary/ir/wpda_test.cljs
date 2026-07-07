@@ -3,6 +3,7 @@
    golden context-free grammars (balanced brackets, aⁿbⁿ — which no regular/finite-state machine can accept),
    incremental `legal-next`, bounded ε-closure termination, and semiring weight accumulation (Tropical
    best-cost). This is the machinery that will rank ambiguous PDF/log segmentations."
+  (:refer-clojure :exclude [chars])   ; local `chars` helper (string → single-char-string tokens)
   (:require [cljs.test :refer [deftest is testing]]
             [vinary.ir.semiring :as sr]
             [vinary.ir.wpda :as wpda]

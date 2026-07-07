@@ -16,6 +16,7 @@
      {:op :all     :state q}             ; (child slot) transduce EVERY input child at q → one output child each
      {:op :sub     :pattern P}           ; a constant output pattern (independent of the input)
      {:op :project :index i :state q}    ; delete this node — hoist the transduced input child i"
+  (:refer-clojure :exclude [transduce])   ; ir.transducer/transduce is the tree-transduction entry point
   (:require [vinary.ir.semiring :as sr]
             [vinary.ir.node :as node]))
 

@@ -7,6 +7,7 @@
             [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
+            [vinary.renderer.syntax :as syntax]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.find :as finder]))
 
@@ -48,12 +49,13 @@
 ;; DataScript writes go through this fx (keeps event handlers pure).
 (rf/reg-fx :ds/transact (fn [tx] (d/transact! ds/conn tx)))
 
-;; Markdown render (async unified pipeline) → dispatch the HTML back into the loop. When :ir? is set (the
-;; :vv/ir flag), render through the common-IR back-end (render-ir) — byte-identical output, proven by parity.
+;; Markdown render → dispatch the HTML back into the loop. The common IR IS the render path now (ADR-0017):
+;; render-ir builds the IR from the pipeline HAST and lowers it back through the single sanitizer, producing
+;; byte-identical output to the retired legacy string render (proven by ir.parity-test + the electron smoke).
 (rf/reg-fx
  :markdown/render
- (fn [{:keys [text path stamp ir? on-done]}]
-   (-> ((if ir? md/render-ir md/render) text (md/dir-of path) stamp)   ; base-dir resolves relative URLs → file://
+ (fn [{:keys [text path stamp on-done]}]
+   (-> (md/render-ir text (md/dir-of path) stamp)   ; base-dir resolves relative URLs → file://
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
@@ -93,13 +95,16 @@
 (rf/reg-fx
  :toc/scroll
  (fn [id]
-   (when-let [^js el (.getElementById js/document id)]
+   (if-let [^js el (.getElementById js/document id)]
      (if-let [^js c (.closest el ".vv-content")]
        (.scrollTo c #js {:top      (+ (.-scrollTop c)
                                       (- (.. el getBoundingClientRect -top)
                                          (.. c getBoundingClientRect -top)))
                          :behavior "smooth"})
-       (.scrollIntoView el #js {:block "start" :behavior "smooth"})))))  ; fallback: not inside a scroller
+       (.scrollIntoView el #js {:block "start" :behavior "smooth"}))            ; fallback: not inside a scroller
+     ;; no DOM anchor: a source Contents "L<line>" id — scroll the CodeMirror source view to that line.
+     (when-let [[_ n] (re-matches #"L(\d+)" (str id))]
+       (syntax/scroll-source-to-line! (js/parseInt n))))))
 
 ;; renderer → main (over the contextBridge seam)
 (rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))

@@ -190,13 +190,16 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function sanitizeHtml(html) {
-  return String(html || '')
-    .replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[^>]*>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s+(href|src)\s*=\s*(['"]?)\s*javascript:[^'"\s>]*/gi, ' $1=$2#');
-}
+// RETIRED (ADR-0017): office HTML is now sanitized by the single GitHub-allowlist schema in the renderer's
+// IR back-end (vinary.ir.backend.sanitize) via render-office-ir, replacing this weaker main-process regex
+// sanitizer. Kept commented for reference rather than deleted.
+// function sanitizeHtml(html) {
+//   return String(html || '')
+//     .replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+//     .replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[^>]*>/gi, '')
+//     .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+//     .replace(/\s+(href|src)\s*=\s*(['"]?)\s*javascript:[^'"\s>]*/gi, ' $1=$2#');
+// }
 
 function escapeHtml(s) {
   return String(s == null ? '' : s)
@@ -272,7 +275,7 @@ async function officeBufferPayload(uri, name, bytes, stamp, meta) {
     return {
       path: uri,
       kind: 'office',
-      html: sanitizeHtml(result.value),
+      html: result.value,   // sanitized downstream by the IR back-end (render-office-ir); ADR-0017
       text,
       stamp,
       meta: Object.assign({}, meta, { warnings: (result.messages || []).map(m => m.message || String(m)) })

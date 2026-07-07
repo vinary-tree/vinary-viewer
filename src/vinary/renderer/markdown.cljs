@@ -253,7 +253,11 @@
       (.then mermaid/render-html-diagrams)
       (.then syntax/highlight-html-code-blocks)))
 
-(defn render
+;; The legacy string render (direct rehype-stringify) is RETIRED (ADR-0017): the common IR is now the
+;; UNCONDITIONAL render path (render-ir below), which lowers the IR back to HTML through the single sanitizer
+;; with byte-identical output — ir.parity-test proves HAST -> IR -> HAST -> HTML == HAST -> HTML. Kept
+;; #_-disabled for reference rather than deleted (per the repo's comment-don't-delete rule).
+#_(defn render
   "Render a Markdown string. base-dir (the source doc's absolute directory, or nil) is used to resolve
    relative img/link URLs to absolute file://. Returns a Promise resolving to
    {:html string :toc [{:level :text :id}] :assets [absolute-path ...]}."

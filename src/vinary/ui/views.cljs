@@ -423,7 +423,11 @@
     (letfn [(build! [this]
               (let [[_ text path] (r/argv this)]
                 (reset! path* path)
-                (reset! view (syntax/create-source-view @node text (syntax/grammar-for path)))))
+                (reset! view (syntax/create-source-view @node text (syntax/grammar-for path)))
+                ;; derive a code Contents outline from the tree-sitter parse (common IR) -> sidebar :doc/toc
+                (-> (syntax/parse-outline text path)
+                    (.then (fn [toc] (rf/dispatch [:toc/set path toc])))
+                    (.catch (fn [_] nil)))))
             (destroy! [] (when @view (.destroy ^js @view) (reset! view nil)))
             (on-ctx [^js e]
               (.preventDefault e)

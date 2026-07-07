@@ -19,28 +19,28 @@
 ;; ---- Boolean (∨, ∧, ⊥, ⊤): recognition — 'is there ANY valid derivation?' (idempotent) ----
 (defrecord BoolW [v]
   Semiring
-  (plus  [_ b] (->BoolW (or v (:v b))))
-  (times [_ b] (->BoolW (and v (:v b))))
-  (zero  [_]   (->BoolW false))
-  (one   [_]   (->BoolW true)))
+  (plus  [_ b] (BoolW. (or v (:v b))))
+  (times [_ b] (BoolW. (and v (:v b))))
+  (zero  [_]   (BoolW. false))
+  (one   [_]   (BoolW. true)))
 (defn bool [v] (->BoolW (boolean v)))
 
 ;; ---- Tropical (min, +, +∞, 0): best / shortest derivation — Viterbi in −log space (idempotent) ----
 (defrecord TropicalW [c]
   Semiring
-  (plus  [_ b] (->TropicalW (min c (:c b))))
-  (times [_ b] (->TropicalW (+ c (:c b))))
-  (zero  [_]   (->TropicalW js/Infinity))
-  (one   [_]   (->TropicalW 0)))
+  (plus  [_ b] (TropicalW. (min c (:c b))))
+  (times [_ b] (TropicalW. (+ c (:c b))))
+  (zero  [_]   (TropicalW. js/Infinity))
+  (one   [_]   (TropicalW. 0)))
 (defn tropical [c] (->TropicalW c))
 
 ;; ---- Probability (+, ×, 0, 1): total probability mass ----
 (defrecord ProbW [p]
   Semiring
-  (plus  [_ b] (->ProbW (+ p (:p b))))
-  (times [_ b] (->ProbW (* p (:p b))))
-  (zero  [_]   (->ProbW 0.0))
-  (one   [_]   (->ProbW 1.0)))
+  (plus  [_ b] (ProbW. (+ p (:p b))))
+  (times [_ b] (ProbW. (* p (:p b))))
+  (zero  [_]   (ProbW. 0.0))
+  (one   [_]   (ProbW. 1.0)))
 (defn prob [p] (->ProbW p))
 
 ;; ---- Log (⊕ = −log(e^−a + e^−b), ⊗ = +, +∞, 0): total mass in −log space (numerically-stable log-sum-exp) ----
@@ -48,23 +48,23 @@
   Semiring
   (plus  [_ b] (let [y (:x b)]
                  (cond
-                   (= x js/Infinity) (->LogW y)
-                   (= y js/Infinity) (->LogW x)
+                   (= x js/Infinity) (LogW. y)
+                   (= y js/Infinity) (LogW. x)
                    :else (let [m (min x y)]
-                           (->LogW (- m (js/Math.log (+ (js/Math.exp (- m x))
-                                                        (js/Math.exp (- m y))))))))))
-  (times [_ b] (->LogW (+ x (:x b))))
-  (zero  [_]   (->LogW js/Infinity))
-  (one   [_]   (->LogW 0)))
+                           (LogW. (- m (js/Math.log (+ (js/Math.exp (- m x))
+                                                       (js/Math.exp (- m y))))))))))
+  (times [_ b] (LogW. (+ x (:x b))))
+  (zero  [_]   (LogW. js/Infinity))
+  (one   [_]   (LogW. 0)))
 (defn logw [x] (->LogW x))
 
 ;; ---- Product (componentwise): multi-objective — carry two semirings at once ----
 (defrecord ProductW [a b]
   Semiring
-  (plus  [_ o] (->ProductW (plus a (:a o)) (plus b (:b o))))
-  (times [_ o] (->ProductW (times a (:a o)) (times b (:b o))))
-  (zero  [_]   (->ProductW (zero a) (zero b)))
-  (one   [_]   (->ProductW (one a) (one b))))
+  (plus  [_ o] (ProductW. (plus a (:a o)) (plus b (:b o))))
+  (times [_ o] (ProductW. (times a (:a o)) (times b (:b o))))
+  (zero  [_]   (ProductW. (zero a) (zero b)))
+  (one   [_]   (ProductW. (one a) (one b))))
 (defn product [a b] (->ProductW a b))
 
 ;; ---- Lexicographic (ordered pair): tie-break — ⊕ selects by the primary (idempotent) component,
@@ -73,12 +73,12 @@
   Semiring
   (plus  [_ o] (let [oa (:a o)]
                  (cond
-                   (= a oa)          (->LexW a (plus b (:b o)))   ; tie on the primary → merge secondaries
-                   (= (plus a oa) a) (->LexW a b)                 ; primary a is ⊕-optimal → keep this pair
-                   :else             (->LexW oa (:b o)))))
-  (times [_ o] (->LexW (times a (:a o)) (times b (:b o))))
-  (zero  [_]   (->LexW (zero a) (zero b)))
-  (one   [_]   (->LexW (one a) (one b))))
+                   (= a oa)          (LexW. a (plus b (:b o)))   ; tie on the primary → merge secondaries
+                   (= (plus a oa) a) (LexW. a b)                 ; primary a is ⊕-optimal → keep this pair
+                   :else             (LexW. oa (:b o)))))
+  (times [_ o] (LexW. (times a (:a o)) (times b (:b o))))
+  (zero  [_]   (LexW. (zero a) (zero b)))
+  (one   [_]   (LexW. (one a) (one b))))
 (defn lex [a b] (->LexW a b))
 
 ;; ---- helpers ----

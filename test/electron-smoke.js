@@ -871,49 +871,10 @@ async function main() {
   await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
   console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
 
-  // --- :vv/ir parity: the common-IR render path (render-ir → hast->IR->lower) must render the SAME markdown
-  // as the legacy path — identical text, heading ids, and math LaTeX — so the flag cutover is invisible.
-  // (Byte-parity of the HAST round-trip is proven by ir.parity-test; this asserts it end-to-end in the app.)
-  const captureRender = `(() => {
-    const b = document.querySelector('.markdown-body');
-    return {
-      h1: b.querySelector('h1') ? b.querySelector('h1').textContent.trim() : null,
-      text: b.textContent.replace(/\\s+/g, ' ').trim(),
-      ids: Array.from(b.querySelectorAll('h1,h2,h3,h4,h5,h6')).map((h) => h.id),
-      inlineTex: (document.querySelector('.markdown-body .vv-math-inline') || {}).getAttribute
-                   ? document.querySelector('.markdown-body .vv-math-inline').getAttribute('data-tex') : null,
-      displayTex: (document.querySelector('.markdown-body .vv-math-display') || {}).getAttribute
-                   ? document.querySelector('.markdown-body .vv-math-display').getAttribute('data-tex') : null,
-      mermaid: Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))
-    };
-  })()`;
-  // The flag-toggle parity check dispatches through re-frame as a global, which only the dev (:none) build
-  // exposes; the release (:simple) build encapsulates namespaces. So run the explicit off<->on parity in DEV
-  // only — release still exercises the IR path because it is the DEFAULT (the markdown assertions above and
-  // the office check below both flow through render-ir / render-office-ir). releaseBuild is defined earlier.
-  if (!releaseBuild) {
-  const validRender = `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'
-                       && Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))
-                       && Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`;
-  // IR is the DEFAULT render path now: toggle OFF to capture the legacy render, then back ON for the IR render.
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), false)); true`);
-  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
-  await delay(250);
-  await waitFor(() => evalIn(win, validRender), 'legacy markdown re-render (flag off)');
-  const legacyRender = await evalIn(win, captureRender);
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), true)); true`);
-  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
-  await delay(250);
-  await waitFor(() => evalIn(win, validRender), ':vv/ir re-render produces a valid markdown DOM (no render error)');
-  const irRender = await evalIn(win, captureRender);
-  assert.strictEqual(irRender.h1, legacyRender.h1, ':vv/ir render must keep the H1');
-  assert.deepStrictEqual(irRender.ids, legacyRender.ids, ':vv/ir render must produce identical heading ids');
-  assert.strictEqual(irRender.text, legacyRender.text, ':vv/ir render must produce identical text content');
-  assert.strictEqual(irRender.inlineTex, legacyRender.inlineTex, ':vv/ir render must preserve inline math LaTeX');
-  assert.strictEqual(irRender.displayTex, legacyRender.displayTex, ':vv/ir render must preserve display math LaTeX');
-  assert.strictEqual(irRender.mermaid && legacyRender.mermaid, true, ':vv/ir render must keep the Mermaid SVG');
-  console.log('[ok] :vv/ir parity — common-IR render (now default) matches the legacy render (text + ids + math + mermaid)');
-  }
+  // The common IR is the UNCONDITIONAL render path (ADR-0017): the Markdown assertions above (H1, MathJax SVG,
+  // Mermaid SVG, badge layout, preview copy) already flow through render-ir, so they ARE the end-to-end
+  // IR-render verification. Byte-parity of the HAST round-trip is proven separately by ir.parity-test. (The
+  // retired :vv/ir flag's off<->on A/B toggle check was removed together with the flag.)
 
   // --- office via the common IR: a synthetic office document renders through render-office-ir — its headings
   // gain slug ids (the Contents TOC office lacked) and the shared GitHub-allowlist sanitizer strips dangerous

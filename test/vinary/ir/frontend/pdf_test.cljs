@@ -44,7 +44,8 @@
     (is (= :document (node/kind doc)))
     (is (= [:page] (mapv node/kind (node/children doc))))
     (testing "the font-size outline picks the large-font line as a heading (fallback for outline-less PDFs)"
-      (is (= [{:level 1 :text "Title" :id "p1-h0"}] (pdf/outline doc))))))
+      (is (= [{:level 1 :text "Title" :id "vv-pdf-page-1"}] (pdf/outline doc))
+          "id is the page anchor so a Contents click scrolls to the heading's page"))))
 
 (deftest empty-page
   (testing "a page with no text items → an empty :page (canvas-only fallback)"

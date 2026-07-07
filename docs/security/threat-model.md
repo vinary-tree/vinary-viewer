@@ -261,10 +261,11 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
 > **same** `rehype-raw` + GitHub-allowlist `rehype-sanitize` path as Markdown (the single
 > `vinary.ir.backend.sanitize` schema), so office now enjoys GitHub's allowlist as its effective policy — a
 > strict upgrade over the previous weaker main-process regex sanitizer (`content_service.js/sanitizeHtml`).
-> That regex sanitizer is **retained as defense-in-depth in front of** the IR allowlist, so an office document
-> is sanitized even on the `:vv/ir`-off escape-hatch path (the weaker filter can only remove more, never
-> re-introduce, dangerous markup that the allowlist would strip). The office render is covered end-to-end by
-> the electron smoke (a synthetic office document with `<script>`/`on*`/`javascript:` is asserted stripped).
+> That weaker main-process regex sanitizer is now **RETIRED** (ADR-0017): office always renders through the
+> common IR, so the GitHub allowlist is the **sole** office sanitizer — strictly stronger than the retired
+> regex, and there is **no un-IR office path** that could bypass it. The office render is covered end-to-end by
+> the electron smoke (a synthetic office document containing `<script>` / `on*` / `javascript:` is asserted
+> stripped, in both the dev and release builds).
 
 ---
 

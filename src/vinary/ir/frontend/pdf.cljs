@@ -113,8 +113,9 @@
 
 (defn outline
   "A heading TOC from relative font size: lines taller than ~1.3× the median line height are headings, leveled
-   by descending size (largest = level 1). id = `p<page>-l<line-index>` for page/line navigation. Intended as
-   a fallback for PDFs whose getOutline is empty."
+   by descending size (largest = level 1). The id is the page anchor `vv-pdf-page-<page>` so a Contents click
+   scrolls to the heading's page via the existing PDF page navigation. Intended as a fallback for PDFs whose
+   getOutline is empty."
   [ir]
   (let [lines   (filterv #(= :line (node/kind %)) (node/preorder ir))
         heights (sort (remove nil? (map line-height lines)))]
@@ -126,8 +127,8 @@
             sizes  (->> heads (map line-height) distinct (sort >) vec)
             level  (fn [l] (inc (min 5 (.indexOf sizes (line-height l)))))]
         (into []
-              (map-indexed (fn [i l]
-                             {:level (level l)
-                              :text  (str/trim (line-text l))
-                              :id    (str "p" (get-in (node/node-meta l) [:bbox :page]) "-h" i)}))
+              (map (fn [l]
+                     {:level (level l)
+                      :text  (str/trim (line-text l))
+                      :id    (str "vv-pdf-page-" (get-in (node/node-meta l) [:bbox :page]))}))
               heads)))))

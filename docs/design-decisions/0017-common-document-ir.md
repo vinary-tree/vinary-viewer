@@ -48,8 +48,10 @@ route rendering and capabilities through it. Specifically:
    Markdown pipeline and the office path. Because the front-ends preserve tags/properties verbatim,
    `HAST -> IR -> HAST` round-trips **losslessly** — the rendered HTML is byte-identical to the legacy output
    (`ir.parity-test` + the electron smoke), so the cutover is invisible.
-5. **Migrate incrementally behind a flag** (`:vv/ir`), format by format, with the app green at every step; then
-   flip the flag **default-on** once parity was proven.
+5. **Migrate incrementally behind a flag** (`:vv/ir`), format by format, with the app green at every step;
+   flip the flag **default-on** once parity was proven; then **retire the legacy** — make the IR the
+   unconditional render path and remove (comment out) the legacy string render, the main-process office regex
+   sanitizer, and the flag itself.
 
 ## Consequences
 
@@ -63,22 +65,32 @@ route rendering and capabilities through it. Specifically:
   ship no `getOutline`, without touching the faithful canvas render.
 - The weighted core (semiring/WPDA/Earley/forest) is reusable substrate for future ambiguity-ranked parsing.
 
+**Legacy retired.**
+
+- The common IR is the **unconditional** render path. The legacy Markdown string `render`, the main-process
+  office regex sanitizer (`content_service.js/sanitizeHtml`), and the `:vv/ir` flag / `:ir/set-enabled` toggle
+  are **removed** (kept `#_`-/comment-disabled for reference per the repo's comment-don't-delete rule). Office
+  HTML is now sanitised **solely** by the GitHub-allowlist IR schema — strictly stronger than the retired
+  regex — and there is no un-IR office path, so no un-sanitised path exists. Markdown/office render errors
+  surface as the normal error view. Byte-parity is guaranteed structurally by the lossless HAST round-trip
+  (`ir.parity-test`), not by an A/B fallback.
+
 **Neutral / deliberate.**
 
-- The legacy Markdown `render` and the main-process office sanitizer are **kept as an escape hatch and
-  defense-in-depth**, not removed. Keeping the weaker office regex sanitizer *in front of* the stronger IR
-  allowlist is strictly safer (a `:vv/ir`-off office path stays sanitised), and the legacy string render backs
-  the per-user `:vv/ir` toggle. This is a security-over-simplicity choice, not incomplete work.
 - Table/log/archive keep their **interactive Reagent views** (paging/sorting), which IR-produced HTML would
   regress; their IR is the canonical structural parse, and the content-agnostic in-page find already covers
   them, so the capabilities that *make sense* for those types are served.
-- Source and PDF **outline capabilities** are built and unit-tested; wiring their outlines into the sidebar
-  Contents with per-view scroll (CodeMirror line-scroll; PDF page-scroll) is a follow-on view integration on
-  top of the completed parse.
+- Source and PDF **outlines are wired into the sidebar Contents**. The source view derives a code outline from
+  its tree-sitter parse (`syntax/parse-outline` → `:toc/set`) and a Contents click scrolls the CodeMirror view
+  to the line (`:toc/scroll` resolves an `L<line>` id via `syntax/scroll-source-to-line!`). The PDF renderer
+  falls back to the font-size outline (`ir.frontend.pdf/outline`, page-anchor ids) when `getOutline` is empty,
+  so outline-less PDFs gain a navigable Contents that reuses the existing page-scroll.
 
 **Risks and mitigations.**
 
 - *Performance* — the heavy WPDA/Earley/forest run **only** on ambiguous segmentation (PDF/log); Markdown/
   office/source lowering is an `O(n)` Boolean single-derivation walk. Segmentation is beam-bounded.
-- *Parity* — guarded by `ir.parity-test` (byte-identical round-trip) plus the dev electron smoke (identical
-  text/heading-ids/math) and the release smoke (office renders via IR).
+- *Parity* — guaranteed structurally by the lossless HAST round-trip (`ir.parity-test`: `HAST -> IR -> HAST ->
+  HTML == HAST -> HTML`) and exercised end-to-end by the dev + release electron smoke (markdown renders with
+  the expected H1/math/mermaid; office renders + sanitises). With the legacy retired there is no A/B fallback —
+  the round-trip losslessness is the guarantee.

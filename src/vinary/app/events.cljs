@@ -9,7 +9,6 @@
             [cljs.reader :as reader]
             [vinary.app.db :as db]
             [vinary.app.ds :as ds]
-            [vinary.ir.flag :as ir-flag]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -84,8 +83,7 @@
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
          stamp   (if (some? stamp) stamp (js/Date.now))
-         ir-on?  (ir-flag/enabled? (get-in db [:ui :settings :ir-enabled?]))
-         ir-office? (and (= kind "office") ir-on?)   ; office renders via :office/render (IR → HTML + TOC)
+         ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
          ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
          ;; directory carries its :doc/entries listing instead.
@@ -116,7 +114,6 @@
        {:db db'
         :fx (cond-> [[:ds/transact tx]]
               (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
-                                                            :ir? ir-on?
                                                             :on-done [:content/rendered path stamp]}])
               ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
               ir-office?          (conj [:office/render {:html html :path path
@@ -137,13 +134,18 @@
                                [:db/add eid :doc/assets (vec (or assets []))]]]
                [:vv/watch-assets {:doc-path path :paths assets}]]})))))
 
-;; The :vv/ir migration flag — route Markdown (and, in later phases, every tree format) through the common-IR
-;; render path (render-ir → hast->IR->lower). Experimental; default off. Read in :content/received to pick
-;; render vs render-ir; the output is byte-identical (parity), so toggling is invisible to the user.
-(rf/reg-event-db
- :ir/set-enabled
- (fn [db [_ on?]]
-   (assoc-in db [:ui :settings :ir-enabled?] (boolean on?))))
+;; (The :vv/ir migration flag + :ir/set-enabled toggle are RETIRED — the common IR is now the unconditional
+;;  render path for Markdown and office; see ADR-0017 and vinary.ir.flag.)
+
+;; Set a document's Contents outline (:doc/toc) out of band — used by the source-code view, which derives a
+;; code outline from its tree-sitter parse (common IR) after mounting, and by any other format whose outline
+;; is computed in its own view rather than at :content/rendered.
+(rf/reg-event-fx
+ :toc/set
+ (fn [_ [_ path toc]]
+   (let [snap (ds/snapshot)]
+     (when-let [eid (ds/eid-for-path snap path)]
+       {:fx [[:ds/transact [[:db/add eid :doc/toc (vec (or toc []))]]]]}))))
 
 (defn content-error-tx
   "Create/update a document error transaction for path, even if no content entity exists yet."

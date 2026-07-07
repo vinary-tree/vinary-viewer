@@ -29,16 +29,20 @@ Added
     - A font-size heading outline for PDFs that ship no getOutline, plus reading-order
       text extraction for find / copy over the PDF text facet.
 
-Changed
-    - Markdown and office render through the common IR by default. Output is
-      byte-identical to the legacy path (proven by ir.parity-test + the electron
-      smoke), so the change is invisible; the :vv/ir setting remains a per-user
-      escape hatch and :closure-defines can force it off in a build.
+    - Source files gain a code Contents outline (from their tree-sitter parse) with
+      line-scroll navigation; PDFs without a built-in getOutline gain a font-size
+      heading outline (page-scroll navigation).
 
-Notes
-    - The legacy string renderer and the main-process office regex sanitizer are kept
-      as an escape hatch and defense-in-depth (a :vv/ir-off office path stays
-      sanitized in front of the IR allowlist).
+Changed
+    - Markdown and office render through the common IR unconditionally; output is
+      byte-identical to the retired legacy path (guaranteed by the lossless HAST
+      round-trip, ir.parity-test).
+
+Removed
+    - The legacy Markdown string renderer, the main-process office regex sanitizer,
+      and the :vv/ir migration flag / :ir/set-enabled toggle are retired (kept
+      comment-disabled for reference). Office is now sanitized solely by the stronger
+      GitHub-allowlist IR schema, with no un-IR path.
 
 
 [0.2.0] - 2026-07-07

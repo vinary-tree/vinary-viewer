@@ -9,7 +9,8 @@
             ["@codemirror/state" :refer [EditorState Compartment StateField]]
             ["@codemirror/view" :refer [EditorView Decoration lineNumbers]]
             ["web-tree-sitter" :refer [Language Parser Query]]
-            [vinary.grammar-catalog :as grammar-catalog]))
+            [vinary.grammar-catalog :as grammar-catalog]
+            [vinary.ir.frontend.source :as source-fe]))
 
 ;; tree-sitter capture name → CodeMirror CSS class (styled in app.css against the --vv-* palette)
 (def ^:private style-map
@@ -346,6 +347,31 @@
                 :update  (fn [v _] v)            ; read-only: decorations are computed once
                 :provide (fn [f] (.. EditorView -decorations (from f)))}))
 
+;; the currently-mounted source EditorView, so a source Contents-outline click can scroll it to a line
+(defonce ^:private current-view (atom nil))
+
+(defn parse-outline
+  "Load path's grammar (if any), parse `text`, and derive the source-code Contents outline via the common IR
+   (source-fe/tree->ir → outline). Returns Promise<[{:level :text :id :line}]> — [] when there is no grammar
+   for the extension or the parse fails."
+  [text path]
+  (if-let [grammar (grammar-for path)]
+    (-> (load-grammar grammar)
+        (.then (fn [loaded] (source-fe/outline (source-fe/tree->ir (parse-tree loaded text) (or text "")))))
+        (.catch (fn [_] [])))
+    (js/Promise.resolve [])))
+
+(defn scroll-source-to-line!
+  "Scroll the mounted source view to 1-based `line` (for a source Contents-outline click). No-op if no source
+   view is mounted."
+  [line]
+  (when-let [^js view @current-view]
+    (let [doc (.. view -state -doc)
+          n   (max 1 (min line (.-lines doc)))
+          pos (.-from (.line doc n))]
+      (.dispatch view #js {:effects   (.scrollIntoView EditorView pos #js {:y "start"})
+                           :selection #js {:anchor pos}}))))
+
 (defn create-source-view
   "Mount a read-only CodeMirror view of text in parent. If grammar (a {:wasm-url :scm-url}) is given,
    asynchronously load the tree-sitter grammar and reconfigure with highlighting. Returns the view."
@@ -358,6 +384,7 @@
                   (.of hl #js [])]
         state (.create EditorState #js {:doc text :extensions exts})
         view  (EditorView. #js {:state state :parent parent})]
+    (reset! current-view view)          ; register for source-outline line-scroll
     (when grammar
       (-> (highlight-ranges text grammar)
           (.then (fn [ranges]

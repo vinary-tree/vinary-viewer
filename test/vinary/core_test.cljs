@@ -988,9 +988,11 @@
 (deftest markdown-render-preview-metadata
   (async done
     (-> (js/Promise.all
-         #js [(markdown/render "Hello **world**\n\n![Alt](img.png)\n" "/tmp" 1)
-              (markdown/render "# Title\n\n[![Alt](img.png)](target.md)\n" "/tmp" 1)
-              (markdown/render "[diagram](diagram.svg)\n" "/tmp" 1)])
+         ;; render-ir is the render path now (ADR-0017); it returns {:html :toc :assets (+ :ir)} byte-identical
+         ;; to the retired legacy render, so this metadata test exercises the live path.
+         #js [(markdown/render-ir "Hello **world**\n\n![Alt](img.png)\n" "/tmp" 1)
+              (markdown/render-ir "# Title\n\n[![Alt](img.png)](target.md)\n" "/tmp" 1)
+              (markdown/render-ir "[diagram](diagram.svg)\n" "/tmp" 1)])
         (.then (fn [results]
                  (let [bare   (aget results 0)
                        linked (aget results 1)

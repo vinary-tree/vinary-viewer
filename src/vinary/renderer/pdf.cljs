@@ -8,6 +8,7 @@
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
             [vinary.renderer.toc :as toc]
+            [vinary.ir.frontend.pdf :as pdf-fe]
             [re-frame.core :as rf]))
 
 (def ^:const gap 16)        ; px between pages
@@ -319,23 +320,47 @@
              (array-seq items))))
       (.then (fn [arr] (vec (mapcat identity (array-seq arr)))))))
 
+(defn- publish-outline!
+  "Number a resolved TOC (1, 2, 2.1, …; number-outline preserves :id so the scroll-spy is unaffected),
+   dispatch it as :doc/toc, and measure the anchors now. Shared by the getOutline and font-size paths."
+  [state path toc]
+  (when (and (seq toc) (not (:destroyed? @state)))
+    (let [numbered (layout/number-outline (vec toc))]
+      (rf/dispatch [:pdf/outline path numbered])
+      (swap! state assoc :toc-ids (mapv :id numbered))
+      (when-let [^js scroller (scroller-of (:container @state))]
+        (toc/refresh! scroller (:toc-ids @state))))))
+
+(def ^:private outline-scan-pages 40)   ; bound the font-size-fallback scan for large PDFs
+
+(defn- page-items
+  "Promise<[normalized-item]> for 1-based page `pnum` via getTextContent (ir.frontend.pdf/normalize-item)."
+  [^js doc pnum]
+  (-> (.getPage doc pnum)
+      (.then (fn [^js pg] (.getTextContent pg)))
+      (.then (fn [^js tc] (mapv pdf-fe/normalize-item (array-seq (.-items tc)))))
+      (.catch (fn [_] []))))
+
+(defn- extract-text-outline!
+  "Fallback outline for a PDF with no getOutline: extract text over a bounded page scan, build the common IR
+   (ir.frontend.pdf/doc->ir), and derive a font-size heading outline keyed by page anchor."
+  [state ^js doc path]
+  (let [n (min outline-scan-pages (.-numPages doc))]
+    (-> (js/Promise.all (into-array (map (fn [p] (-> (page-items doc p) (.then (fn [items] [p items]))))
+                                         (range 1 (inc n)))))
+        (.then (fn [^js pages]
+                 (when-not (:destroyed? @state)
+                   (publish-outline! state path (pdf-fe/outline (pdf-fe/doc->ir (array-seq pages)))))))
+        (.catch (fn [_] nil)))))
+
 (defn- extract-outline! [state ^js doc path]
   (-> (.getOutline doc)
       (.then (fn [^js outline]
-               (when (and outline (.-length outline) (not (:destroyed? @state)))
+               (if (and outline (pos? (.-length outline)) (not (:destroyed? @state)))
                  (-> (walk-outline doc outline 1)
-                     (.then (fn [toc]
-                              ;; recheck :destroyed? — this is a second async hop past the getOutline .then
-                              (when (and (seq toc) (not (:destroyed? @state)))
-                                ;; derive hierarchical section numbers (1, 2, 2.1, …) for the Contents display;
-                                ;; number-outline preserves :id, so :toc-ids and the scroll-spy are unaffected.
-                                (let [numbered (layout/number-outline (vec toc))]
-                                  (rf/dispatch [:pdf/outline path numbered])
-                                  ;; retain the outline ids so apply-layout! can re-measure them on zoom/resize,
-                                  ;; then measure now (page divs already carry these ids from build-placeholders!).
-                                  (swap! state assoc :toc-ids (mapv :id numbered))
-                                  (when-let [^js scroller (scroller-of (:container @state))]
-                                    (toc/refresh! scroller (:toc-ids @state)))))))))))
+                     (.then (fn [toc] (publish-outline! state path toc))))       ; built-in outline
+                 (when-not (:destroyed? @state)
+                   (extract-text-outline! state doc path)))))                    ; font-size fallback
       (.catch (fn [_] nil))))
 
 ;; ---- IntersectionObserver: render visible, release offscreen ------------------------------------
