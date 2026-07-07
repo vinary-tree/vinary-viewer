@@ -256,6 +256,16 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
 > plain-text kind — is what makes the `innerHTML` body safe: dangerous markup (script, handlers,
 > `javascript:`, iframe, style) is removed while GitHub-safe tags render.
 
+> **Office documents (v0.3.0, common document IR — [ADR-0017](../design-decisions/0017-common-document-ir.md)).**
+> With the IR render path default-on, office HTML (docx via `mammoth`, ODF block HTML) is parsed through the
+> **same** `rehype-raw` + GitHub-allowlist `rehype-sanitize` path as Markdown (the single
+> `vinary.ir.backend.sanitize` schema), so office now enjoys GitHub's allowlist as its effective policy — a
+> strict upgrade over the previous weaker main-process regex sanitizer (`content_service.js/sanitizeHtml`).
+> That regex sanitizer is **retained as defense-in-depth in front of** the IR allowlist, so an office document
+> is sanitized even on the `:vv/ir`-off escape-hatch path (the weaker filter can only remove more, never
+> re-introduce, dangerous markup that the allowlist would strip). The office render is covered end-to-end by
+> the electron smoke (a synthetic office document with `<script>`/`on*`/`javascript:` is asserted stripped).
+
 ---
 
 ## 6. Hardenings

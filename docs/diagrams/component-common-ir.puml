@@ -1,0 +1,62 @@
+@startuml component-common-ir
+'' ============================================================================
+'' vinary-viewer — Component view of the COMMON DOCUMENT IR pipeline
+''
+'' PlantUML over Mermaid because this is a layered dataflow where the SAME colour
+'' must mean the SAME concept as in every other figure (green = markdown/HTML
+'' surface, teal = renderer, gold = the trust boundary / sanitizer, blue =
+'' re-frame). Only PlantUML lets us reuse the shared `_vv-theme` palette macros.
+'' ============================================================================
+!include _vv-theme.iuml
+
+!define IR_COLOR   #E67E22
+!define IR_BORDER  #A84E00
+
+title Common document IR — format front-ends -> weighted-transducer IR -> HTML back-end + capabilities
+
+package "Format front-ends (parse -> IR)" {
+  component "frontend.markdown\n(rehype HAST -> IR)" as FMd  MARKDOWN_COLOR
+  component "frontend.office\n(office HTML -> IR)" as FOf     MARKDOWN_COLOR
+  component "frontend.source\n(tree-sitter -> IR)" as FSrc    RENDERER_COLOR
+  component "frontend.pdf\n(pdf.js text runs -> IR)" as FPdf  RENDERER_COLOR
+  component "frontend.{table,log,archive}" as FData           RENDERER_COLOR
+}
+
+package "Common IR core  (DOM-free, node-tested)" {
+  component "node / meta\ntagged node {kind,children,text,meta}\nspan / bbox / role / anchor-id" as Node IR_COLOR
+  component "semiring\n(K, (+), (x), 0, 1)\nBoolean/Tropical/Log/Prob/..." as Sem IR_COLOR
+  component "transducer\nweighted tree transducer\n(+ exact composition)" as TT IR_COLOR
+  component "wpda / decode\nearley / forest\n(weighted segmentation)" as Auto IR_COLOR
+}
+
+package "Back-end + capabilities" {
+  component "backend.html\nIR -> HAST -> rehype-stringify" as BHtml MARKDOWN_COLOR
+  component "backend.sanitize\nsingle GitHub allowlist" as San        IPC_COLOR
+  component "capability.toc\nheadings/outline -> :doc/toc" as Toc     REFRAME_COLOR
+}
+
+FMd  --> Node
+FOf  --> Node
+FSrc --> Node
+FPdf --> Node
+FData --> Node
+
+Node --> TT
+Sem  --> TT
+Sem  --> Auto
+FPdf ..> Auto : ambiguous run->line\n->block grouping
+
+TT   --> BHtml
+BHtml --> San : one sanitizer
+Node --> Toc
+
+legend right
+  |= colour |= concept |
+  |<#E67E22>| common IR core |
+  |<#67B11D>| HTML surface (markdown/office) |
+  |<#2D9574>| renderer-side facet |
+  |<#B1951D>| trust boundary / sanitizer |
+  |<#4F97D7>| re-frame (:doc/toc) |
+endlegend
+
+@enduml

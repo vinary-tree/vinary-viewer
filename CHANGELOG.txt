@@ -6,6 +6,41 @@ The format is based on Keep a Changelog (https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning (https://semver.org/spec/v2.0.0.html).
 
 
+[0.3.0-dev] - unreleased
+------------------------
+The common document IR: every supported format now parses into one uniform,
+metadata-rich intermediate representation, which lowers to HTML through a single
+sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-document-ir.md
+and docs/design-decisions/0017-common-document-ir.md.
+
+Added
+    - A DOM-free, node-tested common-IR core (vinary.ir.*): a tagged node with
+      span/bbox/role/anchor-id metadata; a semiring algebra (Boolean/Tropical/Log/
+      Probability/Product/Lexicographic) with full law coverage; a weighted tree
+      transducer with exact composition; a weighted pushdown automaton + streaming
+      decoder; and an Earley-over-lattice parser with a packed parse forest and
+      Viterbi best-parse.
+    - Format front-ends parsing into the IR: markdown (rehype HAST), office (docx /
+      ODF HTML), source code (web-tree-sitter), PDF (pdf.js text runs → a reflowable
+      page/block/line/run facet with bounding boxes), and table / log / archive.
+    - Office documents now gain a heading Contents outline and are sanitized by the
+      GitHub allowlist (upgrading the previous main-process regex sanitizer), via the
+      shared ir/backend/sanitize schema.
+    - A font-size heading outline for PDFs that ship no getOutline, plus reading-order
+      text extraction for find / copy over the PDF text facet.
+
+Changed
+    - Markdown and office render through the common IR by default. Output is
+      byte-identical to the legacy path (proven by ir.parity-test + the electron
+      smoke), so the change is invisible; the :vv/ir setting remains a per-user
+      escape hatch and :closure-defines can force it off in a build.
+
+Notes
+    - The legacy string renderer and the main-process office regex sanitizer are kept
+      as an escape hatch and defense-in-depth (a :vv/ir-off office path stays
+      sanitized in front of the IR allowlist).
+
+
 [0.2.0] - 2026-07-07
 --------------------
 A complete rewrite as a self-contained Electron application in ClojureScript /

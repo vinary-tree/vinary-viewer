@@ -74,6 +74,7 @@ The next free number is **0017**.
 | [0014](0014-native-ad-blocking-ghostery.md) | Native ad/tracker blocking with @ghostery/adblocker-electron | Accepted |
 | [0015](0015-scoped-extension-runtime-gpl-free.md) | A GPL-free, scoped Chrome-extension runtime (password managers + ad-blocker-class) | Accepted |
 | [0016](0016-main-process-simple-optimization.md) | Compile the Electron main process with `:simple`, not `:advanced` | Accepted |
+| [0017](0017-common-document-ir.md) | A common document IR with a weighted-transducer pipeline (all formats → one IR → HTML) | Accepted |
 
 ---
 
