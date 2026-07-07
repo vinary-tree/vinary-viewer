@@ -6,6 +6,73 @@ The format is based on Keep a Changelog (https://keepachangelog.com/en/1.1.0/),
 and this project adheres to Semantic Versioning (https://semver.org/spec/v2.0.0.html).
 
 
+[0.2.0] - 2026-07-07
+--------------------
+A complete rewrite as a self-contained Electron application in ClojureScript /
+re-frame, superseding the 0.1.0 vmd-patching approach (preserved at tag v0.1.0).
+vinary-viewer no longer depends on vmd: it is a standalone desktop previewer for
+Markdown, PDFs, images, source code, Office/OpenDocument files, tables, logs,
+archives, and web pages, across multiple tabs, with live refresh.
+
+Added
+  Application
+    - Standalone Electron app (main = dist/main/main.js), built with shadow-cljs
+      (two builds: :main -> Electron main process, :renderer -> Chromium), re-frame +
+      DataScript state, React 19 renderer. No longer patches vmd.
+    - Multi-tab previews; every file/URI passed on the command line opens in its own
+      tab (first focused). Empty-tab watermark (the Vinary Tree shield).
+  Document types
+    - Markdown (GitHub-Flavored): tables, task lists, strikethrough; stable heading
+      anchors; syntax highlighting; GitHub-compatible math typeset to cached MathJax
+      SVG; Mermaid diagrams; sanitized raw HTML (rehype-raw + rehype-sanitize, GitHub
+      allowlist); copyable LaTeX (Ctrl+C selection rewrite + a "Copy LaTeX" menu item);
+      centered, themed-framed standalone figures.
+    - PDF: in-renderer pdf.js (canvas + selectable text layer + link layer), windowed
+      rendering, zoom / fit / invert, outline-driven scroll-spy TOC, in-page find,
+      edge-to-edge layout.
+    - Source code: tree-sitter highlighting via a bundled + user grammar registry;
+      read-only CodeMirror view.
+    - Images: dedicated full-width image view.
+    - Content previews: Office / OpenDocument (docx/odt/ods), delimited tables and
+      workbooks (paged), large logs (paged), and archives (zip/tar, nested).
+    - Web pages / local HTML: a native WebContentsView with native ad-blocking and a
+      scoped, GPL-free browser-extension runtime.
+  Navigation & reading
+    - Git file-tree sidebar with a live filter box; Contents scroll-spy TOC; in-page
+      find (CSS Custom Highlight, content-agnostic); navigation history (keyboard,
+      mouse thumb buttons, OS app-commands) with scroll restoration; in-pane directory
+      browser; breadcrumb + up/down navigation; address-bar path completion; zoom & fit;
+      live refresh on save.
+    - Themes via CSS-variable palettes (spacemacs-dark default + spacemacs-light),
+      live-switchable.
+    - Custom keybindings (including Vim-style keymaps); themed dialogs & modals; a
+      command palette; a native password-manager bridge (1Password, LastPass).
+  Security
+    - A renderer Content-Security-Policy (no unsafe-inline script), a navigation
+      lock-down (will-navigate / setWindowOpenHandler deny), a pinned MathJax TeX
+      package set, and a fail-closed in-content link handler, backing the raw-HTML
+      sanitizer.
+
+Changed
+    - Architecture: superseded the 0.1.0 vmd-patch model (apply.sh, patch-*.js,
+      sidebar.js) with a standalone application; the legacy patch files remain in-tree
+      for reference but are not loaded by the running app.
+    - Git file-tree now lists tracked AND untracked-but-not-ignored files
+      (git ls-files --cached --others --exclude-standard), so newly created files
+      appear in the sidebar immediately.
+
+Fixed
+    - Markdown math rendered twice (the assistive-MathML copy is now hidden via CSS).
+    - Embedded svgbob byte-field SVGs (no root viewBox) rendered as tiny squares; the
+      figure sizer now reads the root <svg> dimensions.
+    - PDF pages showing white (GPU compositing / willReadFrequently), GPU/Wayland
+      scroll bands, raster/remote markdown image scroll-jump, directory-open EISDIR,
+      and release-build web-view / PDF / extension crashes.
+
+Notes
+    - Platform: Linux + X11 tested (Electron 42). Requires git on PATH for the file tree.
+
+
 [0.1.0] - 2026-06-23
 --------------------
 Initial release. vinary-viewer packages a set of enhancements that turn the vmd
