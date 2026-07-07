@@ -35,8 +35,17 @@ Added
     - View > Reflow Text: an opt-in view that renders a PDF's extracted text as
       reflowable prose (the page/block/line/run IR -> prose -> HTML), augmenting --
       never replacing -- the faithful canvas render.
+    - Full AMS LaTeX family for MathJax: amscd commutative diagrams (\begin{CD}) and
+      boldsymbol (\boldsymbol), in addition to the existing amsmath/amssymb + AMS
+      fonts.
 
 Changed
+    - MathJax is now built from source (mathjax-full/js/*, bundled by shadow-cljs) as
+      one engine shared by the renderer and the Node tests, importing only the safe
+      TeX packages -- replacing the separately-loaded es5 tex-svg.js script. The
+      dangerous html/require/autoload packages are never imported (absent from the
+      bundle), so \href{javascript:...} is unreachable by construction. Assistive
+      MathML (a11y) is preserved; math now renders synchronously (no async load).
     - Markdown and office render through the common IR unconditionally; output is
       byte-identical to the retired legacy path (guaranteed by the lossless HAST
       round-trip, ir.parity-test).

@@ -849,6 +849,7 @@ async function main() {
       'Copyable preview text lives here.\n\n' +
       'Inline math $`x^2`$ and display math:\n\n$$\n\\frac{a}{b}\n$$\n\n' +
       'A code span `$x^2$` stays literal.\n\n' +
+      'AMS family: bold $\\boldsymbol{v}$ and a commutative diagram:\n\n$$\n\\begin{CD} A @>f>> B \\end{CD}\n$$\n\n' +
       '```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n',
     stamp: Date.now()
   });
@@ -886,6 +887,27 @@ async function main() {
   assert.strictEqual(codeSpanMath.isMath, false, 'the code span must NOT be a math node');
   assert.strictEqual(codeSpanMath.hasMjx, false, 'the code span must contain no MathJax rendering');
   console.log('[ok] `$x^2$` inline code stays literal (no math leak); $`x^2`$ + bare $…$ still render as math');
+
+  // AMS family via the shadow-bundled engine: boldsymbol (amsbsy) + amscd commutative diagrams render. The
+  // authoritative "package is active" signal is the assistive MathML structure (SVG glyphs aren't inspectable).
+  const amsMath = await evalIn(win, `(() => {
+    const bs = Array.from(document.querySelectorAll('.markdown-body .vv-math-inline'))
+      .find(e => (e.getAttribute('data-tex') || '').includes('boldsymbol'));
+    const cd = Array.from(document.querySelectorAll('.markdown-body .vv-math-display'))
+      .find(e => (e.getAttribute('data-tex') || '').includes('begin{CD}'));
+    const mml = (el) => el ? ((el.querySelector('mjx-assistive-mml') || {}).innerHTML || '') : '';
+    return {
+      bsSvg: Boolean(bs && bs.querySelector('mjx-container svg')),
+      bsBoldItalic: /bold-italic/.test(mml(bs)),
+      cdSvg: Boolean(cd && cd.querySelector('mjx-container svg')),
+      cdMtable: /<mtable/.test(mml(cd))
+    };
+  })()`);
+  assert.strictEqual(amsMath.bsSvg, true, 'boldsymbol inline math renders an SVG');
+  assert.strictEqual(amsMath.bsBoldItalic, true, 'boldsymbol → bold-italic MathML (AMS boldsymbol package active)');
+  assert.strictEqual(amsMath.cdSvg, true, 'amscd commutative diagram renders an SVG');
+  assert.strictEqual(amsMath.cdMtable, true, 'amscd \\begin{CD} builds an mtable (AMS amscd package active)');
+  console.log('[ok] AMS family active — boldsymbol → bold-italic, amscd \\begin{CD} → mtable (shadow-bundled engine)');
 
   // MathJax renditions are SVG (glyph paths, not text), so native ::selection can't paint them; selecting
   // across an equation must give it a .vv-math-selected background so math highlights with the surrounding

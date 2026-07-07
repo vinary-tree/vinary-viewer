@@ -228,8 +228,14 @@ runs immediately after `rehype-raw` and *before* the app's own trusted hast plug
   (not in the allowlist). `rehype-slug` ids, `rehype-highlight` `hljs` spans, and the app's `file://`
   srcs / `data-vv-source-*` / `vv-figure-link` are all added *after* sanitize and are trusted.
 - Math (MathJax) and Mermaid (`securityLevel:"strict"`) run as post-stringify SVG generators over local
-  document text. MathJax's TeX package set is pinned to `[base ams newcommand configmacros noerrors
-  noundefined]`, excluding `html`/`require`/`autoload`, so author TeX can't reach `\href{javascript:…}`.
+  document text. MathJax is built **from source** (`mathjax-full/js/…`, bundled by shadow-cljs — one engine for
+  the renderer and the Node tests; see `vinary.renderer.math`) importing **only** the safe TeX packages
+  `[base ams amscd boldsymbol newcommand configmacros noerrors noundefined]`. The dangerous `html` (`\href`),
+  `require`, and `autoload` packages are **never imported**, so they are absent from the module graph entirely
+  — author TeX cannot reach `\href{javascript:…}`, and cannot re-enable it (`\require{html}` is undefined).
+  This is stronger than an allowlist over a full bundle (which would still *ship* the `html` code): here it
+  simply isn't present. (`amscd`/`boldsymbol` — the AMS commutative-diagram + bold-symbol packages — are pure
+  math and carry no active-markup capability.)
 
 So the `innerHTML` write receives HTML that has passed **GitHub's sanitizer**, further backed by a renderer
 CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` sink is safe.

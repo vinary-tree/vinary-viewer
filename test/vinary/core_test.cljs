@@ -477,7 +477,19 @@
   (testing "GitHub backtick-dollar inline math ($`x^2`$) has its fence stripped to clean TeX"
     ;; the former raw-string normalize was replaced by an mdast-level fence strip (math/strip-math-fence),
     ;; so a code span `$x$` stays literal; full-pipeline behavior is covered by markdown-code-span-vs-math
-    (is (= "x^2" (math/strip-math-fence "`x^2`")))))
+    (is (= "x^2" (math/strip-math-fence "`x^2`"))))
+  (testing "AMS family (boldsymbol + amscd) render via the shadow-bundled engine, with assistive MathML"
+    (let [bs (math/render-tex "\\boldsymbol{x}" false)
+          cd (math/render-tex "\\begin{CD} A @>f>> B \\end{CD}" true)]
+      (is (str/includes? bs "<svg") "boldsymbol renders an SVG")
+      (is (str/includes? bs "mjx-assistive-mml") "assistive MathML is emitted (a11y preserved)")
+      (is (re-find #"bold-italic" bs) "boldsymbol → bold-italic MathML (amsbsy package active)")
+      (is (str/includes? cd "<svg") "amscd renders an SVG")
+      (is (re-find #"<mtable" cd) "amscd \\begin{CD} builds an mtable (amscd package active)")))
+  (testing "the html package is absent from the engine — \\href cannot inject a link (renders inert)"
+    (let [out (math/render-tex "\\href{javascript:alert(1)}{x}" false)]
+      (is (not (re-find #"<a\b" out)) "no anchor element is produced")
+      (is (not (re-find #"href=" out)) "no href attribute is produced"))))
 
 (deftest menu-access-keys
   (testing "top-level Alt access keys resolve to menus"
