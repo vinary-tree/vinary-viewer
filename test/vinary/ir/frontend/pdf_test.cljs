@@ -53,3 +53,19 @@
       (is (= :page (node/kind page)))
       (is (empty? (node/children page)))
       (is (= "" (pdf/page-text page))))))
+
+(def ^:private reflow-items
+  [{:str "Chapter One" :x 50 :y 700 :w 120 :h 20 :font "Fbig"}   ; heading, own block (large gap below)
+   {:str "Line one."   :x 50 :y 650 :w 60  :h 10 :font "Fbody"}
+   {:str "Line two."   :x 50 :y 636 :w 60  :h 10 :font "Fbody"}
+   {:str "Line three." :x 50 :y 622 :w 70  :h 10 :font "Fbody"}
+   {:str "Line four."  :x 50 :y 608 :w 65  :h 10 :font "Fbody"}])
+
+(deftest reflow
+  (testing "fixed-layout PDF IR reflows to prose: heading-sized block → :heading, text block → :paragraph"
+    (let [r (pdf/reflow-ir (pdf/doc->ir [[1 reflow-items]]))]
+      (is (= :document (node/kind r)))
+      (is (node/valid-tree? r))
+      (is (= [:heading :paragraph] (mapv node/kind (node/children r))))
+      (is (= "Chapter One" (node/text-content (first (node/children r)))))
+      (is (= "Line one. Line two. Line three. Line four." (node/text-content (second (node/children r))))))))

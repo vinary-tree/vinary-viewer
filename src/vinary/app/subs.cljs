@@ -120,6 +120,7 @@
  (fn [[_rev path] _] (when path (ds/active-doc (ds/snapshot) path))))
 
 (rf/reg-sub :ui/web-toc (fn [db _] (get-in db [:ui :web-toc])))
+(rf/reg-sub :pdf/reflow? (fn [db _] (boolean (get-in db [:ui :pdf :reflow?]))))
 
 ;; the Contents/TOC outline of the active document: the web view's headings for an HTTP page, else the
 ;; Markdown headings captured during rendering

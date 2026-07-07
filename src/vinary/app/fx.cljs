@@ -78,6 +78,8 @@
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
 (rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
+;; the :pdf/reflow effect is registered in vinary.renderer.pdf (a renderer-only ns; keeping it there avoids
+;; pulling pdf.js — which touches `document` at load — into the DOM-free :node-test build).
 
 ;; in-page find (imperative DOM highlight, dispatches counts/index back into the loop). For a PDF, first
 ;; materialize ALL text layers so find covers the whole document (canvases are windowed; text is not).

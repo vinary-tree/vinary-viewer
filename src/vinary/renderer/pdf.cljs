@@ -9,6 +9,7 @@
             [vinary.renderer.pdf-cache :as cache]
             [vinary.renderer.toc :as toc]
             [vinary.ir.frontend.pdf :as pdf-fe]
+            [vinary.ir.backend.html :as ir-html]
             [re-frame.core :as rf]))
 
 (def ^:const gap 16)        ; px between pages
@@ -453,6 +454,35 @@
         (.observe obs scroller)
         (swap! state assoc :resize-observer obs)))))
 
+;; ---- opt-in reflow: re-extract the current PDF's text as reflowable prose HTML (augments the canvas) ----
+(defonce ^:private current-doc (atom nil))   ; {:doc :path} of the most-recently-mounted PDF
+
+(defn reflow-html!
+  "Extract text from the currently-mounted PDF (bounded page scan) → common IR → reflow-ir (prose) → lowered
+   HTML (ir.backend.html). Returns Promise<{:path :html}|nil> (nil when no PDF is mounted), keyed by the
+   mounted doc's own :doc/path so the store matches the active doc. The faithful pdf.js canvas render is
+   untouched — reflow is a separate, additive view."
+  []
+  (let [{d :doc path :path} @current-doc]
+    (if d
+      (let [n (min outline-scan-pages (.-numPages ^js d))]
+        (-> (js/Promise.all (into-array (map (fn [p] (-> (page-items d p) (.then (fn [items] [p items]))))
+                                             (range 1 (inc n)))))
+            (.then (fn [^js pages]
+                     {:path path :html (ir-html/lower (pdf-fe/reflow-ir (pdf-fe/doc->ir (array-seq pages))))}))
+            (.catch (fn [_] nil))))
+      (js/Promise.resolve nil))))
+
+;; The reflow effect lives HERE (not in vinary.app.fx) so requiring it does not pull pdf.js — which touches
+;; `document` at load — into the DOM-free :node-test build. pdf.cljs is loaded at renderer init (via ui.views).
+(rf/reg-fx
+ :pdf/reflow
+ (fn [_]
+   (-> (reflow-html!)
+       (.then (fn [res] (when (and res (seq (:html res)))
+                          (rf/dispatch [:pdf/reflowed (:path res) (:html res)]))))
+       (.catch (fn [_] nil)))))
+
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------
 (defn mount!
   "Render `bytes` (a PDF) into `container` (a .vv-pdf-doc div inside .vv-content). Returns a controller
@@ -473,6 +503,7 @@
                  (if (:destroyed? @state)
                    (try (.destroy doc) (catch :default _ nil))
                    (do (swap! state assoc :doc doc)
+                       (reset! current-doc {:doc doc :path path})   ; for opt-in reflow-html!
                        (-> (page-sizes doc)
                            (.then (fn [sizes]
                                     (when-not (:destroyed? @state)

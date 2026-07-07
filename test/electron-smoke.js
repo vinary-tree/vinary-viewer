@@ -580,6 +580,28 @@ async function main() {
     i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
   console.log('[ok] in-page find matches PDF text');
 
+  // --- opt-in PDF reflow (ADR-0017): "Reflow Text" swaps the fixed-layout canvas for the extracted text as
+  // reflowable prose (an additive facet — the canvas render is untouched). smoke.pdf is the active PDF here
+  // and carries text. Dev-only: it dispatches through the re-frame global, which the release :simple build
+  // encapsulates (release still covers the reflow-ir transform via the DOM-free unit tests).
+  if (!releaseBuild) {
+    const isReflowOn = () => evalIn(win, `(() => { const p = (((window.__vvdb()||{}).ui||{}).pdf)||{}; return Boolean(p["reflow?"]); })()`);
+    if (await isReflowOn())   // a prior run may have persisted it on — normalize to OFF first
+      await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("pdf", "reflow-toggle"))); true`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), 'canvas active before reflow');
+    await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("pdf", "reflow-toggle"))); true`);
+    const reflowedLen = await waitFor(
+      () => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+                                  return b && b.textContent.trim().length > 0 ? b.textContent.trim().length : null; })()`),
+      'PDF reflow renders the extracted text as prose');
+    assert.ok(reflowedLen > 0, 'reflow view shows the extracted PDF text');
+    assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), false,
+      'reflow replaces the canvas while active (additive: the canvas returns when toggled off)');
+    await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("pdf", "reflow-toggle"))); true`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), 'canvas PDF view returns after reflow off');
+    console.log('[ok] PDF reflow — extracted text renders as reflowable prose; canvas returns when off');
+  }
+
   // Fix 2 — the PDF pane is edge-to-edge (drops the 45px document reading gutter)
   const pdfEdge = await evalIn(win, `(() => {
     const c = document.querySelector('.vv-content');

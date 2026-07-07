@@ -37,6 +37,7 @@
             :sep
             {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-only true}
             {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle] :pdf-only true}
+            {:label "Reflow Text"       :access-key "r" :event [:pdf/reflow-toggle] :pdf-only true}
             :sep
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
             {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x] :dev-only true}]}

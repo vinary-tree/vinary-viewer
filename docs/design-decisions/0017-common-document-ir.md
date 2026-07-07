@@ -61,8 +61,10 @@ route rendering and capabilities through it. Specifically:
   from the regex sanitizer), because office HTML is parsed through `rehype-raw` + the shared schema + slug.
 - Capabilities are defined once over the IR: `capability/toc` reproduces the Markdown TOC harvest and extends
   it to office/source/PDF; figure-sizing already covered office (both render via `markdown-body`).
-- The PDF text facet enables find/copy over extracted text and a font-size **outline** for the many PDFs that
-  ship no `getOutline`, without touching the faithful canvas render.
+- The PDF text facet enables find/copy over extracted text, a font-size **outline** for the many PDFs that
+  ship no `getOutline`, and an opt-in **reflow view** (View ▸ Reflow Text) that renders the extracted text as
+  reflowable prose — all additive, never touching the faithful canvas render (a page with no extractable runs
+  simply has nothing to reflow and stays canvas-only).
 - The weighted core (semiring/WPDA/Earley/forest) is reusable substrate for future ambiguity-ranked parsing.
 
 **Legacy retired.**

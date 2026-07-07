@@ -32,6 +32,9 @@ Added
     - Source files gain a code Contents outline (from their tree-sitter parse) with
       line-scroll navigation; PDFs without a built-in getOutline gain a font-size
       heading outline (page-scroll navigation).
+    - View > Reflow Text: an opt-in view that renders a PDF's extracted text as
+      reflowable prose (the page/block/line/run IR -> prose -> HTML), augmenting --
+      never replacing -- the faithful canvas render.
 
 Changed
     - Markdown and office render through the common IR unconditionally; output is

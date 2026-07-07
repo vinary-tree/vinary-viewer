@@ -653,6 +653,23 @@
      {:db (-> db (assoc-in [:ui :pdf :invert?] inv) (assoc-in [:ui :settings] settings))
       :fx [[:vv/save-settings (pr-str settings)]]})))
 
+;; Opt-in PDF text reflow (ADR-0017): show the extracted text as reflowable prose instead of the fixed-layout
+;; canvas. The canvas facet is untouched; enabling recomputes the reflow HTML for the active PDF.
+(rf/reg-event-fx
+ :pdf/reflow-toggle
+ (fn [{:keys [db]} _]
+   (let [on       (not (get-in db [:ui :pdf :reflow?]))
+         settings (assoc (get-in db [:ui :settings]) :pdf-reflow? on)]
+     {:db (-> db (assoc-in [:ui :pdf :reflow?] on) (assoc-in [:ui :settings] settings))
+      :fx (cond-> [[:vv/save-settings (pr-str settings)]]
+            on (conj [:pdf/reflow {}]))})))   ; the fx keys off the mounted PDF's own path
+
+(rf/reg-event-fx
+ :pdf/reflowed
+ (fn [_ [_ path html]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/reflow-html html]]]]})))
+
 (rf/reg-event-fx
  :pdf/outline
  (fn [_ [_ path toc]]
@@ -696,7 +713,8 @@
             (contains? s :sidebar-visible?) (assoc-in [:ui :sidebar-visible?] (:sidebar-visible? s))
             (:sidebar-width s)              (assoc-in [:ui :sidebar-width] (:sidebar-width s))
             (:pdf-fit s)                    (assoc-in [:ui :pdf :fit] (:pdf-fit s))
-            (contains? s :pdf-invert?)      (assoc-in [:ui :pdf :invert?] (:pdf-invert? s)))
+            (contains? s :pdf-invert?)      (assoc-in [:ui :pdf :invert?] (:pdf-invert? s))
+            (contains? s :pdf-reflow?)      (assoc-in [:ui :pdf :reflow?] (:pdf-reflow? s)))
       :fx (cond-> [[:fonts/apply settings]]
             (:theme s) (conj [:theme/apply (:theme s)]))})))
 

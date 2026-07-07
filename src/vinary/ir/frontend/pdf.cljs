@@ -111,6 +111,27 @@
 
 (defn- line-height [line-node] (get-in (node/node-meta line-node) [:bbox :h]))
 
+(defn reflow-ir
+  "Transform the fixed-layout :page/:block/:line/:run PDF IR into a REFLOWABLE prose :document: each block
+   becomes a :paragraph of its joined line text; a lone heading-sized line becomes a :heading. Lowered through
+   ir.backend.html this yields extracted text that reflows to the viewport width — the opt-in reflow view.
+   The faithful canvas render is unaffected (this is a separate, additive facet)."
+  [pdf-ir]
+  (let [lines   (filterv #(= :line (node/kind %)) (node/preorder pdf-ir))
+        heights (sort (remove nil? (map line-height lines)))
+        median  (if (seq heights) (nth heights (quot (count heights) 2)) 0)
+        block->node
+        (fn [b]
+          (let [blines (filterv #(= :line (node/kind %)) (node/children b))
+                txt    (str/join " " (remove str/blank? (map line-text blines)))]
+            (when (seq txt)
+              (if (and (= 1 (count blines)) (> (or (line-height (first blines)) 0) (* 1.3 median)))
+                (node/node :heading   [(node/leaf :text txt)] {:level 2})
+                (node/node :paragraph [(node/leaf :text txt)] {})))))]
+    (node/node :document
+               (into [] (comp (filter #(= :block (node/kind %))) (keep block->node)) (node/preorder pdf-ir))
+               {})))
+
 (defn outline
   "A heading TOC from relative font size: lines taller than ~1.3× the median line height are headings, leveled
    by descending size (largest = level 1). The id is the page anchor `vv-pdf-page-<page>` so a Contents click

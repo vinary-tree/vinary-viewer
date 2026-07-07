@@ -740,10 +740,11 @@
   "Renderer registry (Strategy): the active tab's content is shown by its URI scheme (http → web view)
    or, for a local file, its :doc/kind."
   []
-  (let [doc  @(rf/subscribe [:doc/active])
-        tabs @(rf/subscribe [:ui/tabs])
-        uri  @(rf/subscribe [:ui/active-uri])
-        vs?  @(rf/subscribe [:ui/active-view-source?])]
+  (let [doc     @(rf/subscribe [:doc/active])
+        tabs    @(rf/subscribe [:ui/tabs])
+        uri     @(rf/subscribe [:ui/active-uri])
+        vs?     @(rf/subscribe [:ui/active-view-source?])
+        reflow? @(rf/subscribe [:pdf/reflow?])]
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
                    (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
@@ -762,8 +763,14 @@
        (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [web-host (media/path->file-url (:doc/path doc))]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
-       (= "pdf" (:doc/kind doc))   ^{:key (str "pdf:" (:doc/path doc))}
-                                   [pdf-view (:doc/path doc) (:doc/stamp doc)]
+       ;; PDF: the fixed-layout canvas by default; when "Reflow Text" is on and the extracted-text HTML is
+       ;; ready, show that reflowable prose instead (an additive facet — the canvas render is untouched).
+       (= "pdf" (:doc/kind doc))
+       (if (and reflow? (:doc/reflow-html doc))
+         ^{:key (str "pdf-reflow:" (:doc/path doc))}
+         [markdown-body (:doc/reflow-html doc) nil (:doc/path doc)]
+         ^{:key (str "pdf:" (:doc/path doc))}
+         [pdf-view (:doc/path doc) (:doc/stamp doc)])
        (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
        (and vs?
