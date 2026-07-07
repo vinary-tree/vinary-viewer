@@ -31,7 +31,7 @@ new chan, ack in {
 
 ## Math, inline and display
 
-Euler's identity, $`e^{i\pi} + 1 = 0`$, sits inline at the baseline; the Gaussian
+Euler's identity, $e^{i\pi} + 1 = 0$, sits inline at the baseline; the Gaussian
 integral stands on its own:
 
 $$

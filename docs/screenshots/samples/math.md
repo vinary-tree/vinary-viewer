@@ -5,8 +5,8 @@ in Markdown prose and in `$$`-fenced blocks.
 
 ## Inline
 
-Euler's identity $`e^{i\pi} + 1 = 0`$ threads through the text at the baseline, as
-does a fraction like $`\tfrac{1}{2}`$ or a subscript $`a_{n+1}`$.
+Euler's identity $e^{i\pi} + 1 = 0$ threads through the text at the baseline, as
+does a fraction like $\tfrac{1}{2}$ or a subscript $a_{n+1}$.
 
 ## Display
 
