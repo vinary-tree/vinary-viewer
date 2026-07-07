@@ -24,14 +24,19 @@
 (defn- positive-number? [n]
   (and (number? n) (not (js/isNaN n)) (pos? n)))
 
-(defn- parse-svg-meta
+(defn parse-svg-meta
   "Extract {:v viewBox-width :h viewBox-height :f dominant-font-size} from SVG source text. viewBox
    dimensions fall back to `<svg width=\"Npx\" height=\"Npx\">`; dominant font is the most-frequent
    rounded `font-size:` value across the file. Missing dimensions may be 0 -> natural sizing."
   [txt]
-  (let [vb (re-find #"viewBox\s*=\s*[\"']\s*[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)" txt)
-        w  (when-not vb (re-find #"<svg[^>]*\swidth\s*=\s*[\"']([\d.]+)(?:px)?[\"']" txt))
-        h  (when-not vb (re-find #"<svg[^>]*\sheight\s*=\s*[\"']([\d.]+)(?:px)?[\"']" txt))
+  ;; Read dimensions from the ROOT <svg> opening tag ONLY. svgbob output has no root viewBox but embeds
+  ;; nested <marker>/<symbol> viewBoxes (e.g. 8×8 arrow-heads); a whole-text viewBox scan would grab one of
+  ;; those as the figure width and shrink the image to a few px ("tiny white square"). Scoping to the root
+  ;; tag falls back to its width/height (the true figure size) instead.
+  (let [root (or (re-find #"(?i)<svg\b[^>]*>" txt) "")
+        vb (re-find #"viewBox\s*=\s*[\"']\s*[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)" root)
+        w  (when-not vb (re-find #"\swidth\s*=\s*[\"']([\d.]+)(?:px)?[\"']" root))
+        h  (when-not vb (re-find #"\sheight\s*=\s*[\"']([\d.]+)(?:px)?[\"']" root))
         v  (cond vb (parse-positive-float (nth vb 1)) w (parse-positive-float (nth w 1)) :else 0)
         vh (cond vb (parse-positive-float (nth vb 2)) h (parse-positive-float (nth h 1)) :else 0)
         counts (let [re (js/RegExp. "font-size\\s*[:=]\\s*[\"']?\\s*([\\d.]+)" "g")]

@@ -12,6 +12,9 @@
             ["remark-rehype$default"    :as remark-rehype]
             ["rehype-slug$default"      :as rehype-slug]
             ["rehype-highlight$default" :as rehype-highlight]
+            ["rehype-raw$default"       :as rehype-raw]
+            ["rehype-sanitize$default"  :as rehype-sanitize]
+            ["rehype-sanitize$defaultSchema" :as default-schema]
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
             [vinary.renderer.media :as media]
@@ -210,6 +213,21 @@
       (collect-metadata! state tree)
       tree)))
 
+;; GitHub's HTML sanitize allowlist — hast-util-sanitize's defaultSchema IS the policy GitHub uses — plus
+;; two minimal, safe extensions: (1) keep `code.math-inline`/`code.math-display` so render-html-math still
+;; distinguishes inline vs display math (defaultSchema only keeps /^language-./); (2) allow `data:` image
+;; URIs so `![](data:image/svg+xml,…)` still renders. structuredClone so the shared defaultSchema isn't
+;; mutated. Everything dangerous (script/style/iframe/on*-handlers/javascript:/vbscript:/file:/<base>/<meta>)
+;; stays blocked by the default schema — the desired GitHub posture.
+(def ^:private sanitize-schema
+  ;; aget with string literals (not .-prop) so the :advanced release build can't mangle these accesses on
+  ;; the external defaultSchema object.
+  (let [s     (js/structuredClone default-schema)
+        attrs (aget s "attributes")]
+    (.push (aget (aget attrs "code") 0) "math-inline" "math-display")
+    (.push (aget (aget s "protocols") "src") "data")
+    s))
+
 (defn render
   "Render a Markdown string. base-dir (the source doc's absolute directory, or nil) is used to resolve
    relative img/link URLs to absolute file://. Returns a Promise resolving to
@@ -221,7 +239,14 @@
          (.use remark-parse)
          (.use remark-gfm)
          (.use remark-math)
-         (.use remark-rehype)
+         ;; allowDangerousHtml keeps raw HTML as `raw` nodes; rehype-raw parses them into real hast elements;
+         ;; rehype-sanitize (GitHub allowlist) then strips anything dangerous. This MUST run before the app's
+         ;; own trusted hast plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize
+         ;; additions (file:// srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip
+         ;; every app-generated file:// image src and break all local images.
+         (.use remark-rehype #js {:allowDangerousHtml true})
+         (.use rehype-raw)
+         (.use rehype-sanitize sanitize-schema)
          (.use rehype-slug)
          (.use rehype-highlight)
          (.use (rewrite-urls base-dir cache-token))

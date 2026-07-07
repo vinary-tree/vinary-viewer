@@ -8,6 +8,7 @@
             [vinary.app.uri :as uri]
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
+            [vinary.renderer.math :as math]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
@@ -181,7 +182,9 @@
         last-link (atom nil)
         refresh-toc! (fn []
                        (when-let [^js content (some-> @node (.closest ".vv-content"))]
-                         (toc/refresh! content)))
+                         ;; feed the generalized spy this doc's :doc/toc ids (== the rendered heading ids;
+                         ;; collect-metadata! runs after rehype-slug) so spy ids match the sidebar exactly.
+                         (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc])))))
         after-figures! (fn [token f]
                          (-> (figures/scale-figures! @node)
                              (.then (fn [_]
@@ -210,9 +213,12 @@
                               (reset! resize-observer o))
                             (.addEventListener js/window "resize" on-resize)))
         follow (fn [^js a new-tab? ^js e]
+                 ;; Fail closed: prevent default navigation for EVERY in-content <a> click, so a link the app
+                 ;; doesn't recognize (or a javascript:/data: one the sanitizer somehow missed) can never
+                 ;; navigate the privileged app frame. Only recognized safe targets then dispatch an open event.
+                 (.preventDefault e)
                  (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
                    (when-let [event (preview-nav/open-event target new-tab?)]
-                     (.preventDefault e)
                      (rf/dispatch event))))
         on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
         on-aux   (fn [^js e] (when (= 1 (.-button e))
@@ -231,9 +237,13 @@
                          ^js a (.closest (.-target e) "a")
                          target (or (when a (preview-link-target a source path))
                                     (let [{:keys [text node offset] :as current} (selection-or-term body e)
-                                          source-node (or node (.-target e))]
+                                          source-node (or node (.-target e))
+                                          ^js math-el (.closest (.-target e) ".vv-math-inline, .vv-math-display")]
                                       {:kind :preview-body
                                        :text (or text "")
+                                       :math-tex (when math-el
+                                                   (math/delimit-tex (.contains (.-classList math-el) "vv-math-display")
+                                                                     (.getAttribute math-el "data-tex")))
                                        :source-location (source-location source path source-node offset text)}))]
                      (.preventDefault e)
                      (.stopPropagation e)
@@ -252,11 +262,15 @@
                               (.addEventListener @node "mouseleave" on-leave)
                               (.addEventListener @node "contextmenu" on-ctx))
       :component-did-update (fn [this]
-                              (let [[_ html source path] (r/argv this)]
+                              (let [[_ html source path] (r/argv this)
+                                    doc-changed? (not= path @path*)]
                                 (reset! source* source)
                                 (reset! path* path)
-                                (when (not= html @html*)
-                                  (render-html! html))))
+                                ;; a new doc with byte-identical HTML doesn't re-render (html unchanged) but the
+                                ;; scroll-spy's doc-key changed → re-measure so the highlight follows the new doc.
+                                (cond
+                                  (not= html @html*) (render-html! html)
+                                  doc-changed?       (refresh-toc!))))
       :component-will-unmount (fn [_]
                                 (.removeEventListener js/window "resize" on-resize)
                                 (when @resize-observer
@@ -730,6 +744,10 @@
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
                    (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
                    :else                                           nil)
+      ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
+      ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri
+      ;; (not stamp) — a same-path live-refresh re-measures in place, so its cache stays valid.
+      :data-doc-key (cond (uri/http? uri) uri :else (:doc/path doc))
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]

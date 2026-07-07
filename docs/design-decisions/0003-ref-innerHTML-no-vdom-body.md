@@ -62,4 +62,4 @@ diffs the body's internals.
 > **ADR-0003 ↔ find.** This decision is *why* the find feature could choose the CSS Custom Highlight API
 > (no DOM mutation): the body is a stable, React-untouched node, so painting `Range`s over it is safe.
 > See [security/threat-model.md §5](../security/threat-model.md) for the `innerHTML` XSS analysis (raw
-> HTML is not passed through because `rehype-raw` is not enabled).
+> HTML is sanitized against GitHub's allowlist by `rehype-raw` + `rehype-sanitize`).

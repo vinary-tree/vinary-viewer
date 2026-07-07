@@ -1,5 +1,9 @@
 # Git file-tree and filter
 
+![The sidebar git file tree, narrowed by a live filter](../screenshots/git-file-tree.png)
+
+*The sidebar git file tree, narrowed by a live filter.*
+
 **Status: Available now.**
 
 ---
@@ -7,8 +11,10 @@
 ## 1 · What it is
 
 When you open a file that lives inside a **git repository**, vinary-viewer shows a **sidebar
-tree** of that repository's tracked files. The tree is built from `git ls-files`, so it shows
-exactly what git tracks — no `.gitignore`d noise, no untracked clutter. Folders are collapsible
+tree** of that repository's files. The tree is built from `git ls-files --cached --others
+--exclude-standard`, so it shows everything in the repo **except** `.gitignore`d clutter — tracked
+files **plus** untracked-but-not-ignored ones. A file you just created — including the one you
+opened — shows up immediately, while build output and `node_modules` stay out. Folders are collapsible
 (native HTML `<details>`), files are clickable to open in a tab, and a **filter box** at the top
 narrows the tree to files whose path matches what you type (folders containing a match are
 force-expanded so the matches are visible).
@@ -42,7 +48,7 @@ box to restore the full tree.
 ### MAIN process: ask git for the repo and its files
 
 `src/vinary/main/service.cljs` shells out to `git` twice — once to find the repository root, once
-to list its tracked files:
+to list its tracked **and untracked-but-not-ignored** files:
 
 ```clojure
 (defn- git [args cwd]
@@ -56,7 +62,7 @@ to list its tracked files:
   (let [dir  (path/dirname file-path)
         root (git ["rev-parse" "--show-toplevel"] dir)]
     (when (and root (not (str/blank? root)))
-      (let [out   (git ["ls-files"] root)
+      (let [out   (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)
             files (when out (vec (remove str/blank? (str/split out #"\n"))))]
         {:root root :files (or files [])}))))
 ```
@@ -71,7 +77,10 @@ Terms:
 - **`git rev-parse --show-toplevel`** — prints the absolute path of the repository root that
   contains `dir` (the directory of the open file). This is how the tree is rooted at the repo, not
   at the file's folder.
-- **`git ls-files`** — prints every *tracked* file, one per line, as **repo-relative** paths. We
+- **`git ls-files --cached --others --exclude-standard`** — prints every file worth navigating, one
+  per line, as **repo-relative** paths: `--cached` lists tracked files, `--others` lists untracked
+  files, and `--exclude-standard` drops anything matched by `.gitignore` / `.git/info/exclude` / the
+  global excludes. `--cached` and `--others` are disjoint, so there are no duplicates to remove. We
   split on newlines and drop blanks. The result `{:root <abs> :files [repo-relative…]}` is sent to
   the renderer:
 
@@ -209,10 +218,14 @@ pass.
 
 ## 4 · Design notes / trade-offs
 
-- **Why `git ls-files` rather than reading the directory?** It gives precisely the *tracked* files
-  — ignoring build output, `node_modules`, and anything `.gitignore`d — for free, and it is fast
-  even on large repos. The cost is a dependency on `git` being on `PATH`; if it is absent, the
-  feature degrades gracefully (no tree).
+- **Why `git ls-files` rather than reading the directory?** With `--cached --others
+  --exclude-standard` it gives precisely the files worth navigating — tracked **plus**
+  untracked-but-not-ignored — while still ignoring build output, `node_modules`, and anything
+  `.gitignore`d, for free by reusing git's own ignore engine. It is fast even on large repos; the
+  working-tree walk that `--others` adds is bounded (the heavy ignored dirs are pruned first) and
+  blocks the main process only briefly — the same synchronous-`execFileSync` trade-off noted below.
+  The cost is a dependency on `git` being on `PATH`; if it is absent, the feature degrades
+  gracefully (no tree).
 - **Why `<details>`/`<summary>` for folders?** Native disclosure widgets keep the open/closed
   state in the DOM, so vinary-viewer does not have to track a per-folder expansion map in app-db.
   Less state, less to keep in sync.
@@ -235,7 +248,7 @@ See the [ADR index](../design-decisions/README.md) for the full list.
 ## 5 · Diagram
 
 - **Sequence — building and rendering the tree:** [`../diagrams/seq-tree.puml`](../diagrams/seq-tree.puml)
-  (written by the architecture pillar). Open file → MAIN `git rev-parse` + `git ls-files` →
+  (written by the architecture pillar). Open file → MAIN `git rev-parse` + `git ls-files --cached --others --exclude-standard` →
   `vv:tree {:root :files}` → `:tree/received` (store flat) → `build-tree` (flat → nested) →
   `nodes->hiccup` (`<details>`/`<a>`), with the filter branch narrowing the flat list and
   force-expanding folders.

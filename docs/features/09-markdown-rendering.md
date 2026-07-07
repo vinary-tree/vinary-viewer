@@ -1,5 +1,13 @@
 # Markdown rendering
 
+![GitHub-Flavored Markdown: tables, highlighted code, math, and figures](../screenshots/markdown-rendering.png)
+
+*GitHub-Flavored Markdown: tables, highlighted code, math, and figures.*
+
+![MathJax-typeset inline and display math](../screenshots/math.png)
+
+*MathJax-typeset inline and display math.*
+
 **Status: Available now.**
 
 ---
@@ -73,10 +81,11 @@ Badge rows follow GitHub's paragraph behavior. A paragraph containing several li
 badge images keeps them inline; a paragraph containing one standalone image still centers it as a
 figure.
 
-> **Raw embedded HTML is not passed through.** The pipeline does **not** include `rehype-raw`, so
-> literal HTML written inside a Markdown file is not injected into the output as live markup. This
-> is a deliberate safety property (see Design notes and
-> [security/threat-model.md](../security/threat-model.md)).
+> **Raw embedded HTML is rendered — sanitized.** The pipeline runs `rehype-raw` + `rehype-sanitize`
+> (GitHub's `hast-util-sanitize` allowlist), so literal HTML in a Markdown file renders like GitHub —
+> `<img>`, tables, `<details>`/`<summary>`, `<sub>`/`<sup>`, etc. — while `<script>`, `on*` handlers,
+> `javascript:` URLs, `<iframe>`, and `<style>` are stripped. See Design notes and
+> [security/threat-model.md](../security/threat-model.md).
 
 ---
 
@@ -277,10 +286,12 @@ is escaped and wrapped in a `<pre>` directly (`src/vinary/app/events.cljs`):
   so it bundles cleanly into the `:browser` shadow-cljs build and runs where the result is needed
   (the renderer). It is also the same family of public libraries the previewer's predecessor used,
   so behavior is familiar. Running it in the renderer keeps MAIN a thin IO service.
-- **Why no `rehype-raw`?** Omitting `rehype-raw` means raw HTML embedded in a Markdown file is **not**
-  rendered as live markup — a meaningful safety property for a tool that previews arbitrary files,
-  since it prevents embedded `<script>`/event-handler injection from the document content. It is a
-  deliberate trade-off against rendering hand-authored inline HTML; documented in the
+- **Why `rehype-raw` + `rehype-sanitize`?** Raw HTML embedded in a Markdown file is parsed by
+  `rehype-raw` and then sanitized by `rehype-sanitize` against GitHub's own allowlist
+  (`hast-util-sanitize`'s `defaultSchema`), so hand-authored inline HTML renders like GitHub —
+  `<img>`, tables, `<details>`/`<summary>`, etc. — while `<script>`, `on*` handlers, `javascript:`
+  URLs, `<iframe>`, and `<style>` are stripped. Sanitize runs right after `rehype-raw` and before the
+  app's own trusted hast plugins, so its `file://`/`data-vv-*`/`id` additions survive; documented in the
   [threat model](../security/threat-model.md).
 - **Why imperative `innerHTML` instead of hiccup/VDOM?** The pipeline already produces a complete
   HTML string; re-parsing it into hiccup to let React diff it would be wasteful for large documents

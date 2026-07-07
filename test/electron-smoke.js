@@ -121,6 +121,29 @@ function createLocalRasterScrollFixture() {
   return { docPath, text };
 }
 
+function makeOutlinePdf() {
+  const content = 'q 0 0 1 rg 20 20 120 120 re f Q';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 800] /Contents 5 0 R /Resources << >> >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 800] /Contents 5 0 R /Resources << >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Outlines /First 7 0 R /Last 8 0 R /Count 2 >>',
+    '<< /Title (Section One) /Parent 6 0 R /Next 8 0 R /First 9 0 R /Last 9 0 R /Count 1 /Dest [3 0 R /XYZ 0 800 0] >>',
+    '<< /Title (Section Two) /Parent 6 0 R /Prev 7 0 R /Dest [4 0 R /XYZ 0 800 0] >>',
+    '<< /Title (Subsection A) /Parent 7 0 R /Dest [3 0 R /XYZ 0 400 0] >>'   // nested under Section One → 1.1
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+  objs.forEach((body, i) => { offsets[i] = Buffer.byteLength(pdf, 'latin1'); pdf += `${i + 1} 0 obj\n${body}\nendobj\n`; });
+  const xrefStart = Buffer.byteLength(pdf, 'latin1');
+  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((off) => { pdf += `${String(off).padStart(10, '0')} 00000 n \n`; });
+  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(pdf, 'latin1');
+}
+
 async function waitFor(predicate, label, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -143,6 +166,20 @@ async function waitFor(predicate, label, timeoutMs = 6000) {
 
 async function evalIn(win, source) {
   return win.webContents.executeJavaScript(source, true);
+}
+
+// A gentle poller (500ms cadence) for eventually-consistent state that settles over seconds — e.g. a PDF
+// outline resolving via async worker round-trips, or a reagent re-render deferred behind main-thread page
+// rasterization. Deliberately slower than waitFor's 50ms loop: tight executeJavaScript polling during a
+// pdf.js remount can transiently destabilize the headless IPC channel, so we probe calmly instead.
+async function waitCalm(win, expr, label, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    try { last = await evalIn(win, expr); if (last) return last; } catch (err) { last = 'ERR ' + err.message; }
+    await delay(500);
+  }
+  throw new Error(`Timed out waiting for ${label} (last=${JSON.stringify(last)})`);
 }
 
 async function dispatchWindowKey(win, key, opts = {}) {
@@ -572,6 +609,69 @@ async function main() {
   await delay(120);
   console.log('[ok] PDF page stays rendered through a zoom rescale');
 
+  // ── PDF Contents scroll-spy — the generalized follow must TRACK a bookmarked PDF's sections on scroll ──
+  // (the reported bug: PDF sections were listed but the reading position was never followed). Load a 2-page
+  // OUTLINED PDF, confirm its outline fills the Contents, then scroll to the bottom / top and assert the
+  // active section FOLLOWS (page-2 then page-1 bookmarks) and the active row is highlighted. Exercises
+  // pdf.cljs's outline → :toc-ids → toc/refresh! wiring and the content-agnostic spy (toc.cljs) end-to-end.
+  // The PDF is the active view here (before the Bug A/B hint tests, which inject their own link and don't
+  // depend on smoke.pdf's content). Uses waitCalm because the outline resolves asynchronously and a scrolled
+  // page rasterizes on the main thread, briefly deferring the sidebar re-render.
+  const outlinePdfPath = path.join(ROOT, 'test', 'fixtures', 'outline-smoke.pdf'); // virtual path; bytes below
+  state.contentByPath.set(outlinePdfPath, {
+    path: outlinePdfPath, kind: 'pdf', bytes: new Uint8Array(makeOutlinePdf()), stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [outlinePdfPath] });
+  await evalIn(win, `(() => { const t = Array.from(document.querySelectorAll('.vv-sidebar-tab')).find((n) => n.textContent.trim() === 'Contents'); if (t) t.click(); return true; })()`);
+  await delay(1500);   // let the pdf-view remount + first render settle before probing (avoids tight polling mid-remount)
+  await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length === 3`,
+    'the PDF outline fills the Contents (Section One, Subsection A, Section Two)');
+  // scroll to the bottom → the page-2 section becomes active AND its Contents row is highlighted
+  await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); c.scrollTop = Math.max(0, c.scrollHeight - c.clientHeight); c.dispatchEvent(new Event('scroll', { bubbles: true })); return true; })()`);
+  await waitCalm(win, `String(window.__vvdb().ui['active-heading']) === 'vv-pdf-page-2' && Boolean(document.querySelector('.vv-toc-item.vv-toc-active'))`,
+    'scrolling to the bottom follows to the page-2 bookmark and highlights its row', 15000);
+  // scroll back to the top → the page-1 section becomes active (follows both directions)
+  await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); c.scrollTop = 0; c.dispatchEvent(new Event('scroll', { bubbles: true })); return true; })()`);
+  await waitCalm(win, `String(window.__vvdb().ui['active-heading']) === 'vv-pdf-page-1'`,
+    'scrolling back to the top follows to the page-1 bookmark');
+  console.log('[ok] PDF Contents scroll-spy follows both scroll directions + highlights the active section');
+
+  // ── PDF Contents auto-numbering — unnumbered outline bookmarks must show derived hierarchical numbers ──
+  // (pdf-layout/number-outline): Section One / Subsection A / Section Two → 1, 1.1, 2.
+  assert.strictEqual(
+    await evalIn(win, `JSON.stringify(Array.from(document.querySelectorAll('.vv-toc-item .vv-toc-num')).map((s) => s.textContent))`),
+    JSON.stringify(['1', '1.1', '2']),
+    'the PDF Contents must show derived section numbers (1, 1.1, 2) from the unnumbered outline');
+  console.log('[ok] PDF Contents auto-numbers the unnumbered outline (1, 1.1, 2)');
+
+  // ── Menu bar must NOT move when clicking a PDF Contents section ──
+  // Root cause: el.scrollIntoView({block:"start"}) aligns the target to the top of EVERY scrollable ancestor,
+  // so when #app has scroll-range (a tall document can create it) it scrolls #app, pushing the menu bar out of
+  // #app's clipped viewport. The confined .scrollTo (the fix) scrolls only .vv-content and can never touch
+  // #app. To make this a real regression test — one the OLD scrollIntoView would FAIL — we deterministically
+  // give #app scroll-range with a temporary spacer (the bug's precondition), click the last section, and
+  // assert the content pane scrolled while #app + the menu bar did NOT.
+  const appRange = await evalIn(win, `(() => {
+    const app = document.getElementById('app');
+    const sp = document.createElement('div'); sp.id = '__vv_menubar_spacer'; sp.style.height = '3000px';
+    app.appendChild(sp); app.scrollTop = 0;
+    return app.scrollHeight - app.clientHeight;   // #app now has real scroll-range (the bug's precondition)
+  })()`);
+  assert.ok(appRange > 0, 'test precondition: the spacer gives #app scroll-range');
+  const menubarTop0 = await evalIn(win, `document.querySelector('.vv-menubar').getBoundingClientRect().top`);
+  await evalIn(win, `(() => { const rows = document.querySelectorAll('.vv-toc-item'); rows[rows.length - 1].click(); return true; })()`);
+  await waitCalm(win, `document.querySelector('.vv-content').scrollTop > 50`,
+    'clicking a PDF Contents section scrolls the content pane', 10000);
+  const chrome = JSON.parse(await evalIn(win, `(() => { const a = document.getElementById('app');
+    return JSON.stringify({ menubarTop: document.querySelector('.vv-menubar').getBoundingClientRect().top,
+                            appScroll: a.scrollTop, rootScroll: document.scrollingElement.scrollTop }); })()`));
+  await evalIn(win, `(() => { const s = document.getElementById('__vv_menubar_spacer'); if (s) s.remove();
+    document.getElementById('app').scrollTop = 0; return true; })()`);   // restore layout for later tests
+  assert.strictEqual(chrome.appScroll, 0, 'clicking a PDF Contents section must NOT scroll #app (the old scrollIntoView did → menu bar vanished)');
+  assert.strictEqual(chrome.menubarTop, menubarTop0, 'the menu bar must not move when clicking a PDF Contents section');
+  assert.strictEqual(chrome.rootScroll, 0, 'the document root must not scroll either');
+  console.log('[ok] PDF Contents click scrolls the pane, not the chrome — menu bar stays put even with #app scroll-range');
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.
@@ -711,6 +811,26 @@ async function main() {
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-display mjx-container svg'))`),
     'display MathJax SVG'
   );
+  // Each equation must stash its raw LaTeX so the copy paths can recover the source the SVG can't carry.
+  const mathTex = await evalIn(win, `(() => ({
+    inline: document.querySelector('.markdown-body .vv-math-inline')?.getAttribute('data-tex') ?? null,
+    display: document.querySelector('.markdown-body .vv-math-display')?.getAttribute('data-tex') ?? null
+  }))()`);
+  assert.strictEqual(mathTex.inline, 'x^2', 'inline math must carry its raw LaTeX in data-tex');
+  assert.strictEqual(mathTex.display, '\\frac{a}{b}', 'display math must carry its raw LaTeX in data-tex');
+  // Regression guard for the double-render bug: MathJax's <mjx-assistive-mml> must stay in the DOM (a11y)
+  // but be clipped + unselectable by our re-added rule, so Chromium can't paint it as a text-size duplicate.
+  const assistive = await evalIn(win, `(() => {
+    const m = document.querySelector('.markdown-body .vv-math-inline mjx-assistive-mml');
+    if (!m) return { present: false };
+    const cs = getComputedStyle(m);
+    return { present: true, position: cs.position, userSelect: cs.userSelect, clip: cs.clip };
+  })()`);
+  assert.strictEqual(assistive.present, true, 'assistive MathML must remain in the DOM for screen readers');
+  assert.strictEqual(assistive.position, 'absolute', 'assistive MathML must be positioned out of flow');
+  assert.strictEqual(assistive.userSelect, 'none', 'assistive MathML must be excluded from text selection');
+  assert.ok(assistive.clip.startsWith('rect') && assistive.clip.includes('1px'),
+    `assistive MathML must be clipped to ~1px (no visible duplicate): ${assistive.clip}`);
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`),
     'Mermaid SVG'
@@ -750,6 +870,129 @@ async function main() {
   assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C must be handled for preview selections');
   await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
   console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
+
+  // Copy LaTeX (path 1): Ctrl+C over a paragraph containing inline math must substitute the rendered
+  // equation with its raw $…$ source — prose preserved, no glyphs, no leaked assistive MathML ("x2").
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => {
+    const p = document.querySelector('.markdown-body .vv-math-inline').closest('p');
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    selection.addRange(range);
+    return true;
+  })()`);
+  assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C must be handled for a math selection');
+  const mathCopied = await waitFor(
+    () => (state.lastCopiedText && state.lastCopiedText.includes('$x^2$')) ? state.lastCopiedText : null,
+    'inline math Ctrl+C copies LaTeX ($x^2$)'
+  );
+  assert.strictEqual(mathCopied.trim(), 'Inline math $x^2$ and display math:',
+    'math selection copies prose with the equation substituted by inline LaTeX (no glyphs, no MathML leak)');
+
+  // Copy LaTeX (path 2): right-click a rendered equation → "Copy LaTeX" is offered and copies the $$…$$
+  // source. Drive it by keyboard (Home focuses the first item, Enter activates) like the other menu tests.
+  state.lastCopiedText = null;
+  await evalIn(win, `(() => {
+    const el = document.querySelector('.markdown-body .vv-math-display');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, button: 2, clientX: r.left + 4, clientY: r.top + 4
+    }));
+    return true;
+  })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-ctx-menu'))`), 'math context menu');
+  const mathMenuHome = await dispatchMenuKey(win, 'Home');
+  assert.strictEqual(mathMenuHome.handled, true, 'Home must be handled by the math context menu');
+  // The .vv-menu-item-focused class lands on the next reagent render, so wait for it (matches the tab-menu test).
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.vv-ctx-menu .vv-menu-item-focused .vv-menu-item-label')?.textContent.trim() === 'Copy LaTeX'`),
+    'right-clicking an equation offers "Copy LaTeX" as the first item'
+  );
+  await dispatchMenuKey(win, 'Enter');
+  await waitFor(() => state.lastCopiedText === '$$\\frac{a}{b}$$', 'Copy LaTeX menu item copies display LaTeX');
+  console.log('[ok] math copies as LaTeX via Ctrl+C selection and the Copy LaTeX menu item');
+
+  // ---- Raw HTML support (rehype-raw + rehype-sanitize, GitHub allowlist) + sanitization ----
+  // GFM docs (e.g. libdictenstein) embed diagrams as raw <img> tags; these must render, with relative src
+  // rewritten to file://. Dangerous raw HTML (script/on*-handlers/javascript:) must be stripped so a
+  // malicious .md cannot script the privileged renderer.
+  const rawHtmlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-rawhtml-'));
+  fs.mkdirSync(path.join(rawHtmlDir, 'diagrams'), { recursive: true });
+  fs.writeFileSync(path.join(rawHtmlDir, 'diagrams', 'fig.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#3b82f6"/></svg>');
+  const rawHtmlDoc = path.join(rawHtmlDir, 'raw-html.md');
+  state.contentByPath.set(rawHtmlDoc, {
+    path: rawHtmlDoc, kind: 'markdown',
+    text: [
+      '# Raw HTML', '',
+      '<img src="diagrams/fig.svg" alt="a figure" width="100%"/>', '',
+      '<details><summary>more</summary>hidden body</details>', '',
+      '<table><thead><tr><th>H</th></tr></thead><tbody><tr><td>cell</td></tr></tbody></table>', '',
+      'E = mc<sup>2</sup> and H<sub>2</sub>O', '',
+      '<script>window.__vvxss = true;</script>',
+      '<img src="does-not-exist" onerror="window.__vvxss = true;">',
+      '<a href="javascript:window.__vvxss = true;">click</a>', ''
+    ].join('\n'),
+    stamp: Date.now()
+  });
+  await evalIn(win, `window.__vvxss = false`);
+  win.webContents.send('vv:open-files', { paths: [rawHtmlDoc] });
+  await waitFor(() => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Raw HTML'`), 'raw-html fixture');
+  // Renders: raw <img> relative src rewritten to file://, width preserved; other GitHub-allowed tags render.
+  const rawImg = await evalIn(win, `(() => {
+    const img = document.querySelector('.markdown-body img[alt="a figure"]');
+    return img ? { src: img.getAttribute('src') || '', width: img.getAttribute('width') } : null;
+  })()`);
+  assert.ok(rawImg, 'raw <img> tag renders as a real element');
+  assert.ok(rawImg.src.startsWith('file://') && rawImg.src.includes('diagrams/fig.svg'),
+    'raw <img> relative src rewritten to file://: ' + rawImg.src);
+  assert.strictEqual(rawImg.width, '100%', 'raw <img> width="100%" preserved through the sanitizer');
+  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.markdown-body details > summary'))`), true, 'raw <details><summary> renders');
+  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.markdown-body table td'))`), true, 'raw <table> renders');
+  assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.markdown-body sup') && document.querySelector('.markdown-body sub'))`), true, 'raw <sup>/<sub> render');
+  // Sanitized: no script/onerror/javascript:, no XSS fired, window.vv bridge intact.
+  const xss = await evalIn(win, `(() => ({
+    script: Boolean(document.querySelector('.markdown-body script')),
+    onerror: Boolean(Array.from(document.querySelectorAll('.markdown-body img')).find(i => i.hasAttribute('onerror'))),
+    jsHref: Boolean(Array.from(document.querySelectorAll('.markdown-body a')).find(a => (a.getAttribute('href')||'').toLowerCase().startsWith('javascript:'))),
+    fired: window.__vvxss === true,
+    vvIntact: typeof window.vv === 'object' && window.vv !== null
+  }))()`);
+  assert.strictEqual(xss.script, false, '<script> stripped by the sanitizer');
+  assert.strictEqual(xss.onerror, false, 'onerror handler stripped by the sanitizer');
+  assert.strictEqual(xss.jsHref, false, 'javascript: href stripped by the sanitizer');
+  assert.strictEqual(xss.fired, false, 'no injected script executed (window.__vvxss stayed false)');
+  assert.strictEqual(xss.vvIntact, true, 'window.vv bridge not clobbered by author id/name');
+  console.log('[ok] raw HTML renders (img/table/details/sub/sup); script/onerror/javascript: sanitized; no XSS');
+
+  // Standalone raw block <img> figures must be CENTERED like markdown ![]() images. A raw block <img> is
+  // wrapped as <a.vv-figure-link><img></a> that is a DIRECT child of .markdown-body (never inside a <p>), so
+  // the new `.markdown-body > a.vv-figure-link` rule centers it. figures.cljs sizes the tiny fixture SVG
+  // narrow, so real, equal side gaps prove centering.
+  await waitFor(() => evalIn(win, `(() => {
+    const img = document.querySelector('.markdown-body > a.vv-figure-link > img[alt="a figure"]');
+    const w = img && img.getBoundingClientRect().width;
+    return Boolean(w) && w < 200;
+  })()`), 'raw <img> figure sized narrow by figures.cljs');
+  const fig = await evalIn(win, `(() => {
+    const body = document.querySelector('.markdown-body');
+    const img  = document.querySelector('.markdown-body > a.vv-figure-link > img[alt="a figure"]');
+    if (!body || !img) return null;
+    const wrap = img.parentElement;
+    const bs = getComputedStyle(body);
+    const b = body.getBoundingClientRect(), r = img.getBoundingClientRect();
+    const leftGap  = r.left - (b.left + (parseFloat(bs.paddingLeft) || 0));
+    const rightGap = (b.right - (parseFloat(bs.paddingRight) || 0)) - r.right;
+    return { directChild: wrap.parentElement === body, imgWidth: Math.round(r.width),
+             leftGap: Math.round(leftGap), rightGap: Math.round(rightGap) };
+  })()`);
+  assert.ok(fig, 'raw <img> figure + its .vv-figure-link wrapper exist');
+  assert.strictEqual(fig.directChild, true, 'raw block <img> wrapper is a direct child of .markdown-body (not inside a <p>)');
+  assert.ok(fig.leftGap > 4 && fig.rightGap > 4, `figure has real side gaps (centered, not full-width): L=${fig.leftGap} R=${fig.rightGap}`);
+  assert.ok(Math.abs(fig.leftGap - fig.rightGap) <= 2, `raw <img> figure is centered (leftGap≈rightGap): ${fig.leftGap} vs ${fig.rightGap}`);
+  console.log('[ok] raw <img> block figures are centered');
 
   const sourceDocPath = path.join(ROOT, 'test', 'fixtures', 'source-copy.toml');
   state.contentByPath.set(sourceDocPath, {
@@ -1388,7 +1631,9 @@ async function main() {
 
   // ── Command palette: open → fuzzy filter → arrow-select → Esc close ──
   await openMenuItem('h', 'Command Palette');
-  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.palette['open?'])`), 'palette opens');
+  // wait for the input DOM (not just the open? state) before driving it — else the native value setter below
+  // can fire with a null element (Illegal invocation) if reagent hasn't committed the input yet.
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.palette['open?'] && document.querySelector('.vv-palette-input'))`), 'palette opens');
   await evalIn(win, `(() => { const i = document.querySelector('.vv-palette-input');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     setter.call(i, 'tab'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -1512,7 +1757,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 45000);
+}, 75000);
 
 main()
   .then(() => {

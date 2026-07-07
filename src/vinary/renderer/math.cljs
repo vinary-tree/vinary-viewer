@@ -39,7 +39,11 @@
   (when-not (mathjax-api)
     (set! (.-MathJax js/globalThis)
           (clj->js {:startup {:typeset false}
-                    :tex     {:packages {"[+]" ["noerrors" "noundefined"]}}
+                    ;; Explicit safe TeX package set (replaces the default-extending {"[+]" …}). Excludes
+                    ;; html(\href)/require/autoload so author TeX can't emit active markup into the SVG (which is
+                    ;; injected post-sanitize — the one MathJax vector the sanitizer can't see); keeps standard
+                    ;; math (base/ams/newcommand/configmacros). Mirrors the Node engine's explicit list.
+                    :tex     {:packages ["base" "ams" "newcommand" "configmacros" "noerrors" "noundefined"]}
                     :svg     {:fontCache "none"}}))))
 
 (defn- load-browser-api! []
@@ -160,6 +164,14 @@
         (.contains classes "math-inline")
         (.contains classes "math-display"))))
 
+(defn delimit-tex
+  "Wrap raw TeX in markdown math delimiters so it round-trips into Markdown.
+   display? → $$…$$, else $…$. Blank/nil source → nil (nothing copyable)."
+  [display? tex]
+  (let [tex (str/trim (or tex ""))]
+    (when (seq tex)
+      (if display? (str "$$" tex "$$") (str "$" tex "$")))))
+
 (defn render-html-math
   "Replace remark-math code placeholders in rendered Markdown HTML with cached MathJax SVG."
   [html]
@@ -172,11 +184,16 @@
       (dotimes [i (.-length node-list)]
         (let [code     (.item node-list i)
               display? (display-code? code)
+              source   (str/trim (.-textContent code))
               wrapper  (.createElement doc (if display? "div" "span"))
               target   (if display? (.-parentElement code) code)]
           (.add (.-classList wrapper) (if display? "vv-math-display" "vv-math-inline"))
+          ;; Stash the raw LaTeX so the copy paths (Ctrl+C selection rewrite, "Copy LaTeX" menu)
+          ;; can recover the source the SVG can't carry. Set before the promise so it survives the
+          ;; error path too. .setAttribute lets the innerHTML serializer escape backslashes/quotes.
+          (.setAttribute wrapper "data-tex" source)
           (.push jobs
-                 (-> (render-tex-async (str/trim (.-textContent code)) display?)
+                 (-> (render-tex-async source display?)
                      (.then (fn [svg]
                               (set! (.-innerHTML wrapper) svg)
                               (.replaceWith target wrapper)))

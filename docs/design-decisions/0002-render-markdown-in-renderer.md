@@ -53,7 +53,7 @@ The **main process stays a thin IO service** (`vinary.main.service`): it reads t
   effect, the event handlers stay **pure** (effects are the only impure boundary), preserving
   re-frame's replayability and time-travel debugging.
 - **Security analysis is localized.** Since rendering and the `innerHTML` write are both in the renderer,
-  the XSS analysis (no `rehype-raw`, so raw HTML is not passed through) is a single, contained argument —
+  the XSS analysis (`rehype-raw` + `rehype-sanitize` sanitize raw HTML against GitHub's allowlist) is a single, contained argument —
   see [security/threat-model.md](../security/threat-model.md).
 - **Math and diagrams are renderer-local presentation features.** MathJax converts GFM-compatible
   TeX expressions such as ``$`x^2`$`` and `$$x^2$$` into SVG, and Mermaid converts fenced

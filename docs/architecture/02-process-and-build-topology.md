@@ -151,9 +151,10 @@ LightningBug tooling baseline).
 | `rehype-stringify` `^10.0.1` | hast → HTML string | RENDERER |
 | `rxjs` `^7.8.2` | Reactive streams (available; auxiliary) | RENDERER |
 
-> **Note: no `rehype-raw`.** The unified chain does *not* include `rehype-raw`, so **raw HTML
-> embedded inside Markdown is not re-parsed or injected** into the output tree — it is dropped by the
-> mdast→hast conversion's default (non-raw) handling. This is a meaningful safety property; see
+> **Note: sanitized raw HTML.** The unified chain runs `rehype-raw` + `rehype-sanitize` (GitHub's
+> allowlist), so **raw HTML embedded inside Markdown is parsed and then sanitized** before the output tree
+> — safe tags (img, tables, details, …) render; script/`on*`/`javascript:`/iframe/style are stripped.
+> This is the primary injection control; see
 > [03 · IPC Protocol](./03-ipc-protocol.md#7-security-seam) and
 > [security/threat-model.md](../security/threat-model.md).
 

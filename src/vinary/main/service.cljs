@@ -42,7 +42,10 @@
   (let [dir  (path/dirname file-path)
         root (git ["rev-parse" "--show-toplevel"] dir)]
     (when (and root (not (str/blank? root)))
-      (let [out   (git ["ls-files"] root)
+      ;; --cached (tracked) + --others (untracked) --exclude-standard (drop .gitignore'd/excluded clutter):
+      ;; shows files you're actively creating — including the one you just opened — while keeping build
+      ;; output / node_modules out. --cached and --others are disjoint, so no de-duplication is needed.
+      (let [out   (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)
             files (when out (vec (remove str/blank? (str/split out #"\n"))))]
         {:root root :files (or files [])}))))
 

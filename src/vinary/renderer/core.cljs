@@ -12,6 +12,7 @@
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
             [vinary.renderer.history-input :as history-input]
+            [vinary.renderer.math :as math]
             [vinary.renderer.syntax :as syntax]
             [cljs.reader :as reader]
             [vinary.ui.menubar :as menubar]
@@ -130,6 +131,45 @@
   (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]
     (some-> (syntax/view-from-dom editor) syntax/selected-text)))
 
+(defn- fragment->text
+  "Serialize a cloned selection fragment to plain text with block-aware line breaks. Plain textContent runs
+   block elements together; instead we briefly attach the fragment off-screen and read innerText, so the
+   browser's own layout logic supplies the paragraph/list/table newlines (matching selection.toString)."
+  [^js frag]
+  (let [host (.createElement js/document "div")]
+    (set! (.-cssText (.-style host)) "position:fixed;left:-99999px;top:0;")
+    (.appendChild host frag)
+    (.appendChild (.-body js/document) host)
+    (try
+      (or (.-innerText host) (.-textContent host) "")
+      (finally
+        (.remove host)))))
+
+(defn- selection-text-with-tex
+  "If the selection contains rendered math, rebuild the copied text with each equation replaced by its raw
+   LaTeX ($…$ inline, $$…$$ display); otherwise return the native selection string unchanged (zero regression
+   for prose-only selections). Rebuilding also removes the hidden assistive MathML so it can't double the text."
+  [^js range plain]
+  (let [frag (.cloneContents range)]
+    (if-not (.querySelector frag ".vv-math-inline, .vv-math-display")
+      plain
+      (do
+        (.forEach (.querySelectorAll frag ".vv-math-inline, .vv-math-display")
+                  (fn [^js el]
+                    (let [display? (.contains (.-classList el) "vv-math-display")
+                          tex      (math/delimit-tex display? (.getAttribute el "data-tex"))]
+                      (cond
+                        (not tex) (.remove el)
+                        ;; keep display math as a block element so innerText brackets it with newlines
+                        display?  (let [d (.createElement js/document "div")]
+                                    (set! (.-textContent d) tex)
+                                    (.replaceWith el d))
+                        :else     (.replaceWith el (.createTextNode js/document tex))))))
+        ;; belt-and-suspenders: a partial range can clone an <mjx-assistive-mml> without its .vv-math-* wrapper
+        ;; (cloneContents ignores user-select); drop any strays so the MathML never leaks into the copied text.
+        (.forEach (.querySelectorAll frag "mjx-assistive-mml") (fn [^js el] (.remove el)))
+        (fragment->text frag)))))
+
 (defn- dom-selection-text []
   (when-let [sel (.getSelection js/window)]
     (when (and (pos? (.-rangeCount sel)) (not (.-isCollapsed sel)))
@@ -138,7 +178,7 @@
             start (selectable-root (.-startContainer range))
             end   (selectable-root (.-endContainer range))]
         (when (and (seq text) start end (identical? start end))
-          text)))))
+          (selection-text-with-tex range text))))))
 
 (defn- selected-preview-or-source-text []
   (or (some-> (focused-source-selection) not-empty)

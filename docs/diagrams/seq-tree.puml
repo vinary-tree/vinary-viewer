@@ -23,8 +23,8 @@ participant "app.db\n(:ui :tree /\n :ui :tree-filter)" as Db APPDB_COLOR
 participant "ui.tree\nfile-tree" as Tree RENDERER_COLOR
 
 == delivery (on open) ==
-Svc -> Git : `rev-parse --show-toplevel`\n+ `ls-files` (cwd = file's dir)
-Git --> Svc : repo root + tracked paths
+Svc -> Git : `rev-parse --show-toplevel`\n+ `ls-files --cached --others --exclude-standard`\n(cwd = file's dir)
+Git --> Svc : repo root + tracked & untracked-not-ignored paths
 Svc -> Vv : `webContents.send`\n**vv:tree** {root, files}
 Vv -> RF : `onTree` → dispatch `[:tree/received]`
 RF -> Db : `assoc-in [:ui :tree] {:root :files}`

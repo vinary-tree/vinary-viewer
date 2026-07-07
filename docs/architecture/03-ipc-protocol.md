@@ -196,9 +196,9 @@ committed as:
 | `contextIsolation` | enabled |
 | `nodeIntegration` | disabled |
 | Renderer filesystem access | none; only `window.vv` methods |
-| Raw Markdown HTML | not enabled via `rehype-raw` |
+| Raw Markdown HTML | sanitized — `rehype-raw` + `rehype-sanitize` (GitHub allowlist) |
 | Renderer sandbox | tracked as a hardening item |
-| Strict CSP | tracked as a hardening item |
+| Strict CSP | applied — `<meta>` in `index.html` |
 
 The seam is intentionally broad enough for current app features but narrow
 enough to audit. New privileged capabilities should be added in main, exposed as

@@ -206,40 +206,43 @@ classic XSS sink, so the question is: **can a malicious Markdown document inject
 ### The pipeline (exact)
 
 ```text
-unified → remark-parse → remark-gfm → remark-math → remark-rehype → rehype-slug
-→ rehype-highlight → rehype-stringify → MathJax SVG postprocess → Mermaid SVG postprocess
+unified → remark-parse → remark-gfm → remark-math → remark-rehype (allowDangerousHtml)
+→ rehype-raw → rehype-sanitize (GitHub allowlist) → rehype-slug → rehype-highlight
+→ rehype-stringify → MathJax SVG postprocess → Mermaid SVG postprocess
 → tree-sitter fenced-code postprocess
 ```
 
-The decisive fact: **`rehype-raw` is NOT in the pipeline** (and is not even a dependency in
-`package.json`). `remark-rehype` runs with its default behavior, which **discards raw HTML embedded in
-the Markdown source** — without `rehype-raw` (or `allowDangerousHtml`), inline/literal HTML nodes are
-**not** passed through into the output tree. Concretely:
+The decisive fact: **raw HTML is parsed by `rehype-raw` and then sanitized by `rehype-sanitize` against
+GitHub's own allowlist** (`hast-util-sanitize`'s `defaultSchema` — the policy GitHub itself uses). Sanitize
+runs immediately after `rehype-raw` and *before* the app's own trusted hast plugins. Concretely:
 
-- A Markdown source containing `<img src=x onerror=alert(1)>` or `<script>…</script>` produces **no**
-  corresponding element in the rendered HTML — the raw HTML is dropped, not executed.
-- What *is* produced is the structured HTML that remark/rehype generate from Markdown constructs
-  (headings, lists, links, code blocks, GFM tables, etc.), plus `rehype-slug` ids and
-  `rehype-highlight` `<span class="hljs-…">` wrappers.
-- Math expressions are parsed by `remark-math` and converted to SVG by MathJax. The TeX source is
-  local document text; MathJax conversion is renderer-local and does not add privileged IPC.
-- Mermaid fenced blocks are converted to SVG by Mermaid's browser renderer with `securityLevel:
-  "strict"`. Direct `.mmd` and `.mermaid` files use the same renderer-side Mermaid helper. Mermaid
-  output is treated as generated SVG markup and inserted into the preview body.
+- A Markdown source containing `<script>…</script>`, `<img src=x onerror=alert(1)>`, an inline `on*`
+  handler, a `javascript:`/`vbscript:` URL, `<iframe>`/`<object>`/`<form>`, `<style>`/`style=`,
+  `<meta http-equiv=refresh>`, or `<base href>` has that markup **removed** by the sanitizer — it never
+  reaches the output. The safe tags GitHub renders (`<img>`, GFM/HTML tables, `<details>`/`<summary>`,
+  `<sub>`/`<sup>`, `<kbd>`, …) **are** kept, so author diagrams embedded as `<img src="…svg">` render.
+- The schema is `defaultSchema` plus two minimal extensions: keep `code.math-inline`/`math-display` (so
+  math still distinguishes inline vs display) and allow `data:` image URIs. Everything else is GitHub's policy.
+- Relative image `src` is left untouched by the sanitizer and rewritten to `file://` by the app's own
+  `rewrite-urls` step *after* sanitize; author-supplied absolute `file:`/`javascript:` URLs are stripped
+  (not in the allowlist). `rehype-slug` ids, `rehype-highlight` `hljs` spans, and the app's `file://`
+  srcs / `data-vv-source-*` / `vv-figure-link` are all added *after* sanitize and are trusted.
+- Math (MathJax) and Mermaid (`securityLevel:"strict"`) run as post-stringify SVG generators over local
+  document text. MathJax's TeX package set is pinned to `[base ams newcommand configmacros noerrors
+  noundefined]`, excluding `html`/`require`/`autoload`, so author TeX can't reach `\href{javascript:…}`.
 
-So the `innerHTML` write receives HTML derived from a pipeline that **does not forward attacker-authored
-raw HTML**. This is the primary reason the `innerHTML` sink is acceptable here.
+So the `innerHTML` write receives HTML that has passed **GitHub's sanitizer**, further backed by a renderer
+CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` sink is safe.
 
 ### Residual considerations (and why they are low-risk today)
 
-- **Links.** Rendered links keep their `href`. A document could contain a `javascript:` link; clicking
-  it could execute script in the page. This is a known Markdown-renderer consideration. Today the app
-  does not intercept link clicks; users open **local, trusted** documents, so the exposure is the same
-  as opening those documents in any Markdown viewer. A future hardening could sanitize/agnostic-ize link
-  schemes (see §6).
-- **Images.** `![alt](url)` produces `<img src=url>`; with `nodeIntegration:false` and no remote-content
-  loading policy yet, an image `src` could trigger a network fetch. Under the strict CSP recommended in
-  §6, such fetches would be constrained.
+- **Links.** Rendered link clicks are intercepted and **fail closed**: the in-content `<a>` handler
+  `preventDefault`s every click and only dispatches an open event for recognized safe targets, so a
+  `javascript:` link (already stripped by the sanitizer) can never navigate the app frame. A stray
+  navigation is additionally blocked by the `will-navigate`/`setWindowOpenHandler` guard (§6).
+- **Images.** `<img src=url>` (Markdown or raw HTML) loads local (`file://`) and `data:` images, and — by
+  project decision — remote **https** images (`http:` is blocked to force TLS). The renderer CSP
+  `img-src 'self' file: data: https:` enforces this, and `connect-src` blocks remote fetch/XHR exfil.
 - **Plain-text kind.** Non-markdown files are wrapped as `<pre class="vv-plain">` with the text
   **HTML-escaped** via `goog.string/htmlEscape` (`vinary.app.events/plain-html`), so a `.txt`/source
   file containing `<script>` is shown as inert, escaped text — never parsed as HTML.
@@ -247,31 +250,26 @@ raw HTML**. This is the primary reason the `innerHTML` sink is acceptable here.
   Mermaid failures are displayed as escaped inline error blocks. Mermaid rendering uses the library's
   strict security mode and does not add a main-process rendering channel.
 
-> **Precise statement.** *Raw HTML embedded in a Markdown document is not passed through to the rendered
-> output, because the pipeline does not enable `rehype-raw`.* That, plus escaping the plain-text kind, is
-> what makes the `innerHTML` body safe for the intended local-document use. The residual link/image
-> considerations are exactly what the CSP and navigation hardenings in §6 are meant to close before the
-> app handles untrusted input.
+> **Precise statement.** *Raw HTML embedded in a Markdown document is parsed and then sanitized against
+> GitHub's allowlist (`rehype-raw` + `rehype-sanitize`) before the `innerHTML` write.* That sanitizer — plus
+> the fail-closed link handler, the renderer CSP, and the navigation guard (§6), and HTML-escaping of the
+> plain-text kind — is what makes the `innerHTML` body safe: dangerous markup (script, handlers,
+> `javascript:`, iframe, style) is removed while GitHub-safe tags render.
 
 ---
 
-## 6. Recommended hardenings — Forthcoming (planned)
+## 6. Hardenings
 
-These are **not yet applied**. They are listed against the Electron security checklist so the path to a
-stricter posture (e.g. for opening untrusted documents) is explicit.
+The first four back the sanitizer (§5) as defense-in-depth and **shipped with raw-HTML support**; the
+renderer sandbox remains planned.
 
 | Hardening                                              | Checklist item                          | Why / what it buys                                                                                  | Status                |
 |--------------------------------------------------------|-----------------------------------------|----------------------------------------------------------------------------------------------------|-----------------------|
-| **Enable `sandbox: true`** on the renderer             | "4. Enable process sandboxing"          | Runs the renderer in an OS-level sandbox, reducing the blast radius of a renderer compromise. **Requires migrating the preload off CommonJS `require`** (a sandboxed preload cannot use Node `require`; today `preload.js` does `require('electron')`). | Forthcoming (planned) |
-| **Strict `Content-Security-Policy`** (`<meta>` in `index.html`) | "7. Define a Content-Security-Policy" | Constrain script/style/img/connect sources; e.g. forbid inline script, remote connects. Closes the image-fetch and `javascript:`-link residuals from §5. | Forthcoming (planned) |
-| **Disable / limit navigation**                          | "13. Disable or limit navigation"       | Prevent the renderer from navigating away from the first-party bundle (e.g. handle `will-navigate`/`window.open`), so a crafted link cannot turn the window into a browser for remote content. | Forthcoming (planned) |
-
-Additional, lower-priority items consistent with the checklist (also Forthcoming):
-
-- **Link-scheme sanitization** for rendered Markdown (drop/neutralize `javascript:` hrefs).
-- If untrusted-document support is ever added, consider an **HTML sanitizer** stage (e.g.
-  `rehype-sanitize`) — though note that *not* enabling `rehype-raw` already removes the main raw-HTML
-  vector for Markdown input.
+| **HTML sanitizer stage** (`rehype-raw` + `rehype-sanitize`) | (Markdown HTML)                    | Parses raw HTML, then strips everything outside GitHub's allowlist (script, `on*`, `javascript:`, iframe, style, meta, base) before the `innerHTML` write — the primary control (§5). | **Applied** |
+| **Strict `Content-Security-Policy`** (`<meta>` in `index.html`) | "7. Define a Content-Security-Policy" | `default-src 'none'`; `script-src` with **no `'unsafe-inline'`** (inline `<script>`/`on*` can't run even on a sanitizer miss) but `'unsafe-eval'`+`'wasm-unsafe-eval'`+`file:`/`blob:` for pdf.js/MathJax/mermaid/tree-sitter; https-only remote images; `connect-src` blocks remote exfil; `object-src`/`base-uri`/`form-action`/`frame-src` locked. | **Applied** |
+| **Navigation lock-down**                                | "13. Disable or limit navigation"       | `will-navigate` is denied for any URL other than the bundled `index.html`, and `setWindowOpenHandler` denies new windows, so a stray navigation can't hand `window.vv` to another origin. | **Applied** |
+| **Link-scheme fail-closed**                             | (Markdown links)                        | The in-content `<a>` handler `preventDefault`s all clicks and only opens recognized safe targets, so a `javascript:` link cannot navigate the app frame. | **Applied** |
+| **Enable `sandbox: true`** on the renderer             | "4. Enable process sandboxing"          | OS-level renderer sandbox, reducing blast radius. **Requires migrating the preload off CommonJS `require`** (today `preload.js` does `require('electron')`). | Forthcoming (planned) |
 
 > **Preload migration caveat.** Turning on `sandbox:true` is the single highest-value hardening, but it
 > is gated on rewriting `resources/preload.js` so it does not call CommonJS `require('electron')` at
@@ -384,10 +382,10 @@ absent entirely.
 | Filesystem reads                           | Any path the user can read (CLI-viewer trust); `git` via `execFileSync` (no shell).               |
 | Office/workbook/archive parsing           | Main-process parsers with capped preview bytes, bounded archive depth/entry count, and no extraction writes. |
 | Large log / delimited previews             | Stream-paged over IPC as finite row/line windows; renderer keeps only nearby pages.               |
-| Markdown XSS via raw HTML                   | **Not passed through** — `rehype-raw` is not enabled; plain-text/source fallback kinds are HTML-escaped. |
+| Markdown XSS via raw HTML                   | **Sanitized** — `rehype-raw` + `rehype-sanitize` (GitHub `defaultSchema`) strip script/`on*`/`javascript:`/iframe/style; safe tags (img, tables, details, …) render. Plain-text/source kinds remain HTML-escaped. |
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
-| CSP                                        | **None yet** — Forthcoming. A future renderer CSP must allow `'unsafe-eval'`: pdf.js JIT-compiles a PDF's PostScript/Type-4 shading functions via `eval` (`isEvalSupported true`), and the pdf.js ESM module loads through `new Function` (ADR-0013). PDFs follow the local-document trust model. |
-| Navigation lock-down                       | **None yet** — Forthcoming.                                                                       |
+| CSP                                        | **Applied** — `<meta>` in `index.html`: `default-src 'none'`, `script-src` without `'unsafe-inline'` (allows `'unsafe-eval'`+`file:` — pdf.js JIT-compiles Type-4 shading via `eval` and loads its ESM via `new Function`, ADR-0013), https-only remote images, `connect-src` blocks remote exfil, `object-src`/`base-uri`/`form-action`/`frame-src` locked. |
+| Navigation lock-down                       | **Applied** — `will-navigate` denies non-index navigation; `setWindowOpenHandler` denies new windows. |
 | Native password-manager bridge             | **Main-owned** — provider CLIs run without a shell; renderer receives metadata/tokens only; revealed secrets go directly to the web-view preload. |
 
 The current design is appropriate for its intended **local, single-user, trusted-document** use, and it

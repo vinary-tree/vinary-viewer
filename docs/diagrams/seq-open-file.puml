@@ -57,7 +57,7 @@ RF -> UI : `:tabs` / `:doc/active` recompute
 UI -> UI : `content-view` → `markdown-body`\n`set! innerHTML html`
 
 == tree ==
-Svc -> Svc : `repo-tree` (`git rev-parse` + `ls-files`)
+Svc -> Svc : `repo-tree` (`git rev-parse` + `ls-files --cached --others --exclude-standard`)
 Svc -> Vv : `webContents.send`\n**vv:tree** {root, files}
 Vv -> RF : `onTree` → `[:tree/received]`
 RF -> UI : `:ui/tree` → `file-tree` renders

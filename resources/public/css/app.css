@@ -206,6 +206,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-toc-l1 { padding-left: 12px; } .vv-toc-l2 { padding-left: 22px; }
 .vv-toc-l3 { padding-left: 32px; } .vv-toc-l4 { padding-left: 42px; }
 .vv-toc-l5 { padding-left: 52px; } .vv-toc-l6 { padding-left: 62px; }
+.vv-toc-num { color: var(--vv-fg-dim); margin-right: 6px; font-variant-numeric: tabular-nums; }
 
 /* command palette / fuzzy finder */
 .vv-palette-overlay { position: fixed; inset: 0; z-index: 100; display: flex; justify-content: center;
@@ -483,9 +484,27 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body p > a.vv-figure-link:only-child { display: block; margin-left: auto; margin-right: auto; }
 .markdown-body p > a.vv-figure-link:only-child > img:not([src^="emoji"]) {
   display: block; margin-left: auto; margin-right: auto; }
+/* Raw-HTML block <img> becomes <a.vv-figure-link><img></a> as a DIRECT child of .markdown-body (never
+   inside a <p>), so the p>… rules above miss it — center these standalone block figures too. */
+.markdown-body > a.vv-figure-link,
+.markdown-body > img:not([src^="emoji"]) {
+  display: block; margin-left: auto; margin-right: auto; }
+.markdown-body > a.vv-figure-link > img:not([src^="emoji"]) {
+  display: block; margin-left: auto; margin-right: auto; }
 .markdown-body .vv-math-inline mjx-container { margin: 0 0.12em; }
 .markdown-body .vv-math-display { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; text-align: center; }
 .markdown-body .vv-math-display mjx-container { margin: 0 auto; }
+/* MathJax's tex2svg emits <mjx-assistive-mml><math> next to the SVG for screen readers, but because we
+   typeset to an HTML string (startup.typeset=false) MathJax never inserts its own hiding stylesheet — so
+   Chromium's native MathML paints the <math> as a text-size duplicate under the SVG. Re-add MathJax's own
+   clip rule verbatim: keeps the MathML in the DOM for a11y, hides it visually, and (user-select:none) keeps
+   it out of copied text. */
+mjx-container mjx-assistive-mml {
+  position: absolute !important; top: 0; left: 0;
+  clip: rect(1px, 1px, 1px, 1px); padding: 1px 0 0 0 !important;
+  border: 0 !important; display: block !important; width: auto !important;
+  overflow: hidden !important; user-select: none; }
+mjx-container mjx-assistive-mml[display="block"] { width: 100% !important; }
 .markdown-body .vv-mermaid { max-width: 100%; overflow-x: auto; margin: 16px 0; text-align: center; }
 .markdown-body .vv-mermaid svg { max-width: 100%; height: auto; }
 .vv-mermaid-view { padding: 24px; overflow: auto; }

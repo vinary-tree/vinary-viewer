@@ -44,8 +44,8 @@ remark-parse
   -> tree-sitter fenced-code postprocess
 ```
 
-The result is HTML plus heading metadata and local asset paths. Raw HTML is not
-enabled through `rehype-raw`.
+The result is HTML plus heading metadata and local asset paths. Raw HTML is parsed and
+sanitized against GitHub's allowlist by `rehype-raw` + `rehype-sanitize`.
 
 ---
 

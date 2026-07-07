@@ -49,6 +49,12 @@
                               ;; restore last position/size (clamped on-screen); defaults to 1280×860
                               (window/options))))]
     (.loadFile win (renderer-index))
+    ;; Lock the app frame to its bundled index.html. Now that markdown renders (sanitized) raw HTML, a stray
+    ;; top-frame navigation must never hand the privileged window.vv bridge to another origin. Real links open
+    ;; in the isolated web view or externally (never here), and new-window requests are denied outright.
+    (.on (.-webContents win) "will-navigate"
+         (fn [^js e ^js url] (when-not (= url (.getURL (.-webContents win))) (.preventDefault e))))
+    (.setWindowOpenHandler (.-webContents win) (fn [_] #js {:action "deny"}))
     (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
     (.once (.-webContents win) "did-finish-load"
            (fn []

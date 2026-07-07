@@ -228,10 +228,10 @@ precisely (full analysis in [`../security/threat-model.md`](../security/threat-m
   further constrain the renderer (and would move the preload to the
   sandbox-compatible API surface).
 - **A strict Content-Security-Policy** on the renderer document.
-- The Markdown pipeline has **no `rehype-raw`**, so **raw embedded HTML inside
-  Markdown is *not* passed through** to the output — a meaningful default reduction
-  of injection surface (verified against the pipeline in
-  `vinary.renderer.markdown`; see Theory 05). This is current behaviour, not a
+- The Markdown pipeline runs **`rehype-raw` + `rehype-sanitize`** (GitHub's allowlist),
+  so **raw embedded HTML inside Markdown is parsed and then sanitized** before the output
+  — script/`on*`/`javascript:`/iframe/style are stripped while safe tags render (verified
+  against the pipeline in `vinary.renderer.markdown`; see Theory 05). This is current behaviour, not a
   recommendation.
 
 ## 5. Where the ports become explicit: the planned `domain.protocols`
@@ -267,8 +267,8 @@ ports* are a roadmap item.
   routing *all* cross-process communication through one minimal, JSON-only object —
   drawn **amber** everywhere.
 - The **actual security posture** is `contextIsolation` + `nodeIntegration:false` +
-  minimal bridge + no `rehype-raw`; **`sandbox:true`** and a strict **CSP** are
-  recommended **Forthcoming** hardenings.
+  minimal bridge + `rehype-raw`/`rehype-sanitize` + a strict **CSP** + navigation
+  lock-down; **`sandbox:true`** remains a **Forthcoming** hardening.
 - Explicit **`domain.protocols`** ports are **planned**; the hexagonal shape exists
   today through effects.
 
