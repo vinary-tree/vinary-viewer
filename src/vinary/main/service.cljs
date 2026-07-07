@@ -264,6 +264,10 @@
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [_e path] (close! path)))
   (.handle ipcMain "vv:content-page" (fn [_e req] (.contentPage content-service req)))
+  ;; bounded-memory document streaming (session pull-cursor) — open/pull/close a paused file read
+  (.handle ipcMain "vv:stream-open"  (fn [_e req] (.streamOpen  content-service req)))
+  (.handle ipcMain "vv:stream-pull"  (fn [_e req] (.streamPull  content-service req)))
+  (.handle ipcMain "vv:stream-close" (fn [_e req] (.streamClose content-service req)))
   (.handle ipcMain "vv:complete-path" (fn [_e raw] (clj->js (complete raw))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"

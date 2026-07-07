@@ -1077,6 +1077,90 @@ function readAll(rs, expectedSize) {
   });
 }
 
+// ---- bounded-memory document streaming (session pull-cursor) ----------------------------------------
+// A session opens a paused read of the file; the renderer pulls batches one at a time (credit-1 = backpressure:
+// main only reads ahead one batch, the renderer holds at most two). The stream stays OPEN and PAUSED between
+// pulls (O(N) total, unlike streamLogPage which re-scans per page). mode 'lines' → readline line batches;
+// mode 'bytes' → decoded utf-8 text chunks (for the markdown streaming tokenizer).
+const streams = new Map();                 // sessionId -> session
+let streamSeq = 0;
+const STREAM_BATCH_LINES = 1000;
+const STREAM_BATCH_BYTES = 65536;
+const STREAM_IDLE_MS = 60000;
+
+function bufBytes(sess) { let n = 0; for (const s of sess.buf) n += s.length; return n; }
+
+function streamOpen(req) {
+  const filePath = req.path;
+  const mode = req.mode === 'bytes' ? 'bytes' : 'lines';
+  let size = 0;
+  try { size = fs.statSync(filePath).size; } catch (e) { size = 0; }
+  const raw = fs.createReadStream(filePath);
+  const decoded = gzipLogName(filePath) ? raw.pipe(zlib.createGunzip()) : raw;
+  const sessionId = 'st' + (++streamSeq);
+  const sess = { raw, rl: null, decoded, buf: [], done: false, waiter: null,
+                 bytesRead: 0, size, mode, seq: 0, lastPull: Date.now() };
+  const wake = () => { const w = sess.waiter; if (w) { sess.waiter = null; w(); } };
+  raw.on('error', () => { sess.done = true; wake(); });
+  if (mode === 'lines') {
+    const rl = readline.createInterface({ input: decoded, crlfDelay: Infinity });
+    sess.rl = rl;
+    rl.on('line', (line) => {
+      sess.buf.push(line);
+      sess.bytesRead += Buffer.byteLength(line, 'utf8') + 1;   // approx raw progress (fine for a progress bar)
+      if (sess.buf.length >= STREAM_BATCH_LINES) { rl.pause(); wake(); }
+    });
+    rl.on('close', () => { sess.done = true; wake(); });
+  } else {
+    decoded.on('data', (chunk) => {
+      const text = chunk.toString('utf8');
+      sess.buf.push(text);
+      sess.bytesRead += chunk.length;
+      if (bufBytes(sess) >= STREAM_BATCH_BYTES) { decoded.pause(); wake(); }
+    });
+    decoded.on('end', () => { sess.done = true; wake(); });
+  }
+  streams.set(sessionId, sess);
+  return { sessionId, size, mode };
+}
+
+async function streamPull(req) {
+  const sess = streams.get(req.sessionId);
+  if (!sess) return { seq: -1, done: true, error: 'no such stream session' };
+  sess.lastPull = Date.now();
+  if (sess.buf.length === 0 && !sess.done) {
+    (sess.rl || sess.decoded).resume();                        // read one more batch, then the source re-pauses
+    await new Promise((ok) => { sess.waiter = ok; });
+  }
+  const taken = sess.buf;
+  sess.buf = [];
+  const out = { seq: (sess.seq = sess.seq + 1),
+                done: sess.done && sess.buf.length === 0,
+                progress: sess.size > 0 ? Math.min(1, sess.bytesRead / sess.size) : (sess.done ? 1 : 0) };
+  if (sess.mode === 'lines') out.lines = taken; else out.text = taken.join('');
+  return out;
+}
+
+function streamClose(req) {
+  const sess = streams.get(req && req.sessionId);
+  if (sess) {
+    try { if (sess.rl) sess.rl.close(); } catch (e) { /* already closed */ }
+    try { sess.raw.destroy(); } catch (e) { /* already destroyed */ }
+    streams.delete(req.sessionId);
+  }
+  return { ok: true };
+}
+
+// fd-leak guard: reap sessions the renderer stopped pulling (e.g. it crashed). unref so it never holds the app open.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, s] of streams) {
+    if (now - s.lastPull > STREAM_IDLE_MS) { streamClose({ sessionId: id }); }
+  }
+}, 30000).unref();
+
+function streamCount() { return streams.size; }   // for the electron smoke's fd-leak assertion
+
 module.exports = {
   archiveUri,
   classifyName,
@@ -1084,5 +1168,9 @@ module.exports = {
   displayArchiveUri,
   isArchiveUri,
   openUri,
-  parseArchiveUri
+  parseArchiveUri,
+  streamOpen,
+  streamPull,
+  streamClose,
+  streamCount
 };

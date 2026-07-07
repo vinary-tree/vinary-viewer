@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('vv', {
   saveRecent: (edn) => ipcRenderer.send('vv:recent-save', edn),
   completePath: (input) => ipcRenderer.invoke('vv:complete-path', input),
   contentPage: (request) => ipcRenderer.invoke('vv:content-page', request),
+  // bounded-memory document streaming (session pull-cursor)
+  streamOpen: (req) => ipcRenderer.invoke('vv:stream-open', req),
+  streamPull: (req) => ipcRenderer.invoke('vv:stream-pull', req),
+  streamClose: (req) => ipcRenderer.invoke('vv:stream-close', req),
   // extensions + ad-blocking (renderer → main)
   requestExtConfig: () => ipcRenderer.send('vv:ext-config-request'),
   saveExtConfig: (edn) => ipcRenderer.send('vv:ext-config-save', edn),

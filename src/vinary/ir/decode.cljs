@@ -55,16 +55,28 @@
   "Comparator: is config a's weight ⊕-preferable to b's? (for beam ordering)"
   [a b] (sr/at-least-as-good? (:weight a) (:weight b)))
 
-(defn- beam-prune [configs beam]
+(defn beam-prune
+  "Keep only the `beam` ⊕-best configs (or all when `beam` is nil). This frontier-width bound is what keeps a
+   streaming decode's working set bounded regardless of how much input has been consumed."
+  [configs beam]
   (if (and beam (> (count configs) beam))
     (vec (take beam (sort #(cond (= (:weight %1) (:weight %2)) 0 (weight-better? %1 %2) -1 :else 1) configs)))
     configs))
 
+(defn advance-step
+  "One streaming step: consume `input` from `frontier`, then beam-prune. THE bounded-memory streaming
+   primitive — hold the frontier yourself (e.g. in a stream controller) and call this per token: the frontier
+   stays ≤ beam wide and each config's stack ≤ max-stack deep, so working memory is independent of input
+   length. `decode` is just a fold of this over a whole input."
+  ([pda frontier input] (advance-step pda frontier input {}))
+  ([pda frontier input {:keys [max-stack beam] :or {max-stack default-max-stack}}]
+   (beam-prune (advance pda frontier input max-stack) beam)))
+
 (defn decode
-  "Fold `advance` over `inputs` from the initial config, beam-pruning the frontier each step. Returns the
-   frontier of live configs after consuming all inputs (NOT yet ε-closed for acceptance)."
-  [pda inputs {:keys [max-stack beam] :or {max-stack default-max-stack}}]
-  (reduce (fn [frontier input] (beam-prune (advance pda frontier input max-stack) beam))
+  "Fold `advance-step` over `inputs` from the initial config. Returns the frontier of live configs after
+   consuming all inputs (NOT yet ε-closed for acceptance)."
+  [pda inputs opts]
+  (reduce (fn [frontier input] (advance-step pda frontier input opts))
           [(wpda/initial-config pda)]
           inputs))
 
