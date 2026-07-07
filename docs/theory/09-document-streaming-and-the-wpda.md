@@ -1,7 +1,8 @@
 # Document streaming and the WPDA — bounded-memory incremental rendering
 
-**Status: Implemented (v0.3.0, Phase 1 — logs/text), default-off behind `stream.flag`; Markdown/PDF/source
-phased.**
+**Status: Implemented (v0.3.0), default-ON for large documents. Two engines share this spine: a bounded WPDA
+*byte-stream* (logs/text — this document's model) and a byte-parity *progressive block-commit* (Markdown,
+PDF-reflow — §6.1). Source stays batch: CodeMirror 6 already viewport-virtualizes.**
 
 ![Streaming pipeline — one batch's lifecycle](../diagrams/seq-document-streaming.svg)
 
@@ -191,6 +192,31 @@ flight, the append is skipped.
 **context-free** — a node's safety is independent of its siblings — so per-block sanitization is provably
 identical to whole-document sanitization. See [security/threat-model](../security/threat-model.md).
 
+### 6.1 · The second engine — progressive block-commit (Markdown, PDF-reflow)
+
+Sections 2–5 describe the **bounded byte-stream** used for logs/text, whose bytes are *not* in renderer memory.
+Markdown and PDF-reflow are different: the whole source (Markdown) or extracted text (PDF) is **already in
+renderer memory**, and their renderers are **document-global** — CommonMark dedups heading slugs, resolves
+*forward* reference definitions, and lays out footnotes across the whole document; `reflow-ir` classifies
+heading-vs-paragraph against a **document-global median line-height**. A byte-parity *bounded-parse* is
+therefore infeasible: any block may depend on content arbitrarily far away.
+
+So these kinds use a **progressive block-commit**. The exact batch renderer runs **once** (`md/stream-blocks`:
+the whole `base-pipeline`; `pdf/reflow-blocks!`: the whole page scan → `reflow-ir`), giving full document
+context, and the resulting IR document's **top-level children** are committed across idle frames by the *same*
+scheduler + sink. Because the children are emitted **verbatim** — element blocks *and* the inter-block
+whitespace `:text` leaves that carry remark-rehype's exact separators — and the sink concatenates them with **no
+added separator** ($\textsf{sep}=\varepsilon$, versus $\textsf{sep}=\texttt{\textbackslash n}$ for logs), the
+result satisfies
+
+$$\textsf{concat}\big(\textsf{map}\ \textsf{lower}\ \textsf{children}\big) \;=\; \textsf{lower}(\text{whole document}) \;=\; \text{batch } \texttt{:html},$$
+
+**byte for byte** (verified by the electron smoke's streamed-vs-batch `innerHTML` comparison over a 300 KiB
+corpus). The win here is **not** bounded parse memory (the text is already resident) but a **non-blocking
+progressive paint**: the expensive per-block post-passes (MathJax → Mermaid → tree-sitter) and DOM writes are
+paced across frames, and the whole HTML string is never held. The sink skips the post-passes for
+whitespace-only fragments, which a parse+serialize pass would otherwise normalise away.
+
 ---
 
 ## 7 · Scheduling and backpressure
@@ -224,14 +250,14 @@ Streaming trades a higher constant on total time for an **asymptotically smaller
 
 ## 9 · Phased roadmap
 
-| Phase | Scope | Gate |
-|-------|-------|------|
-| 0 | Scaffolding (flag, protocol, transport, `advance-step`, main sessions) | tests + lint green, app byte-identical |
-| **1** | **Logs/text end-to-end (this document)** | **a >5 MiB log streams progressively; find + Contents mid-stream; small logs unchanged** |
-| 2 | Markdown via micromark (continuous feed → per-block reuse) | streamed HTML == batch HTML over the parity corpus |
-| 3 | PDF via `streamTextContent` (run→line→block, per-page `earley`/`forest`) | reflow parity + find over streamed text |
-| 4 | Capabilities hardened + windowed DOM + default-on for large docs | no dropped frames on a 1 GB log (profiled) + parity |
-| 5 | Source (viewport-bounded tree-sitter), spike-gated | clean windowed path or stays batch |
+| Phase | Scope | Outcome |
+|-------|-------|---------|
+| 0 | Scaffolding (flag, protocol, transport, `advance-step`, main sessions) | ✅ inert, app byte-identical |
+| **1** | **Logs/text — bounded WPDA byte-stream (this document's model)** | ✅ >5 MiB log streams progressively; find + Contents mid-stream; small logs unchanged; no fd leak |
+| 2 | Markdown — **progressive block-commit** (§6.1), not micromark-incremental | ✅ streamed `innerHTML` **byte-identical** to batch over a 300 KiB corpus |
+| 3 | PDF-reflow — progressive block-commit; canvas already page-windowed | ✅ streamed reflow byte-identical to batch reflow |
+| 4 | Capabilities hardened + **default-on** | ✅ find-materialize, live-refresh re-anchor, Preferences toggle, `stream-default true`. *Windowed DOM: scoped optional, not implemented (streamed DOM = batch DOM → no regression).* |
+| 5 | Source — spike-gated | ✅ **stays batch**: CodeMirror 6 already viewport-virtualizes; async outline parse. No beneficial streaming path. |
 
 ---
 

@@ -1,8 +1,21 @@
 # 0018 — A document-streaming pipeline (bounded-memory, WPDA-segmented)
 
-- **Status:** Accepted — logs/text implemented (v0.3.0, Phase 1); Markdown/PDF/source phased, default-off
+- **Status:** Accepted — implemented (v0.3.0), **default-on** for large documents. Logs/text stream as
+  bounded WPDA byte-streams (Phase 1); Markdown (Phase 2) and PDF-reflow (Phase 3) as byte-parity
+  progressive block-commits; capabilities hardened + default-on (Phase 4); source stays batch — CodeMirror 6
+  already viewport-virtualizes (Phase 5, spike outcome).
 - **Date:** 2026-07-07
 - **Deciders:** vinary-viewer maintainers
+
+> **Two engines, one spine.** As implemented, streaming has *two* modes behind the same scheduler + sink:
+> a **bounded byte-stream** (logs/text — bytes are NOT in renderer memory, pulled from the main session and
+> WPDA-segmented, so the working set is genuinely bounded), and a **progressive block-commit** (markdown,
+> PDF-reflow — the whole source/text is already in memory, and CommonMark's document-global constructs
+> [forward reference definitions, footnotes, whole-document slug dedup] make a byte-parity *bounded-parse*
+> infeasible, so the batch renderer runs ONCE and its top-level blocks are committed across idle frames). The
+> block-commit win is a **non-blocking progressive paint** (pacing the expensive post-passes + DOM writes)
+> that never holds the whole HTML string; byte-parity is guaranteed because it *is* the batch render, in
+> pieces. See [theory/09](../theory/09-document-streaming-and-the-wpda.md).
 
 ## Context
 
@@ -92,23 +105,47 @@ The concrete sub-decisions:
    identical to applying it to the whole document. See the streaming note in
    [security/threat-model](../security/threat-model.md).
 
-Rollout is **phased, each phase green behind the flag** (Phase 0 scaffolding; **Phase 1 logs — the POC**;
-Phase 2 Markdown via micromark, gated on byte-parity; Phase 3 PDF via `streamTextContent`; Phase 4 capabilities
-hardened + windowed DOM + default-on for large docs; Phase 5 source, spike-gated). `stream.flag/implemented?`
-holds the set of kinds whose streaming front-end actually exists, so a large doc of an as-yet-unimplemented
-kind stays on the batch path rather than streaming with the wrong parser.
+Rollout was **phased, each phase green behind the flag**, and is now complete:
+
+- **Phase 0** — scaffolding (flag, protocol, transport, `advance-step`, main sessions), inert.
+- **Phase 1** — **logs/text**, the bounded-byte-stream POC (WPDA record grammar → append sink → paced DOM).
+- **Phase 2** — **Markdown** as a byte-parity **progressive block-commit** (not micromark-incremental: the
+  batch `base-pipeline` runs once — full document context, so slug dedup / forward reference definitions /
+  footnotes / source positions are all correct by construction — and the resulting IR document's children are
+  committed across idle frames; the sink joins them verbatim, so `concat(map lower children)` *is*
+  `lower(whole-document)`).
+- **Phase 3** — **PDF-reflow** as the same progressive block-commit (its `reflow-ir` also needs a
+  document-global median line-height). The fixed-layout **canvas view is untouched** — it already windows pages
+  via `IntersectionObserver` + `release-canvas!`, the PDF's genuine bounded-memory stream.
+- **Phase 4** — capabilities hardened + **default-on**: find-materialize (drain-before-search, the PDF
+  `ensure-all-text!` analog), live-refresh scroll re-anchor, a **Preferences ▸ Documents** toggle, and
+  `stream-default` flipped **true** (large docs stream by default; the setting overrides). *Windowed DOM* (drop
+  off-screen streamed blocks) was scoped **optional** in the plan and is **not** implemented: the streamed DOM
+  is byte-identical to — and thus no larger than — the batch DOM, so its absence is an optimization gap, not a
+  regression; the parse/transport working set is already bounded for logs, and Markdown/PDF text is inherently
+  in memory. It remains a clean future optimization (the `release-canvas!` pattern generalized to blocks).
+- **Phase 5** — **source stays batch** (spike outcome): CodeMirror 6 already **viewport-virtualizes** its
+  rendering (bounded DOM for arbitrarily large files) and the tree-sitter outline parse is already async, so
+  block-streaming a live editor would only fight its own virtualization — there is no clean, beneficial path.
+
+`stream.flag/implemented?` holds the set of kinds whose streaming front-end exists (`log`/`text`/`markdown`),
+so a large doc of an as-yet-unimplemented kind stays on the batch path rather than streaming with the wrong
+parser. (PDF-reflow streaming is gated by the reflow toggle + the flag in `content-view`, not `implemented?`.)
 
 ## Consequences
 
 **Positive.**
 
-- **Arbitrarily large files without OOM/freeze — the headline win.** The working set is bounded end-to-end: the
-  parser retains only the open block + a single WPDA config; the transport holds $\le 2$ batches; main reads $\le 1$
-  ahead. The parse never materialises the whole document. This generalises the ad-hoc paging/windowing into one
-  mechanism and extends it (in later phases) to Markdown and PDF, rendering the *whole* file progressively
-  rather than a paged slice.
-- **Responsiveness.** First content paints after the first batch, not after the whole document; the idle-budget
-  scheduler spreads work across frames so the UI never stalls.
+- **Arbitrarily large logs without OOM/freeze — the headline win (bounded byte-stream).** For logs/text the
+  working set is bounded end-to-end: the parser retains only the open record + a single WPDA config; the
+  transport holds $\le 2$ batches; main reads $\le 1$ ahead. The parse never materialises the whole document.
+  This generalises the ad-hoc paging into one mechanism and renders the *whole* file progressively rather than
+  a paged slice.
+- **Responsiveness for every large doc (progressive block-commit).** Markdown/PDF-reflow can't be bounded-parse
+  (document-global constructs), but committing the batch render's blocks across idle frames still means first
+  content paints early and the UI never stalls — the expensive post-passes (MathJax/mermaid/tree-sitter) and
+  DOM writes are paced, and the whole HTML string is never held. First content paints after the first batch,
+  not after the whole document.
 - **Capabilities keep working on a growing document.** `:doc/toc` grows via `:stream/toc-append` (bounded, and
   the collision-free `ir.meta/anchor-id` keeps ids stable so there is no churn); find and the content-agnostic
   scroll-spy operate on the streamed DOM. Logs gain an error/warning **Contents outline** they never had.
@@ -116,23 +153,28 @@ kind stays on the batch path rather than streaming with the wrong parser.
 **Negative / accepted trade-offs.**
 
 - **Total CPU is not lower.** Deliberate — see Context. Mitigated by never streaming small/medium docs.
-- **The DOM still grows unboundedly** for a huge document even though the *parse* is bounded. Phase 4 windows
-  the DOM (drop off-screen blocks, the `release-canvas!` pattern). Until then, "bounded memory" means the
-  *parse/transport* working set; the rendered node count still tracks the streamed prefix.
-- **Re-mount re-streams from the top,** so a tab-switch away and back loses the precise scroll position until
-  the stream catches up. Phase 4 records the viewport block's `anchor-id` and re-anchors after re-stream.
-- **A second render path exists** (streaming + batch). Byte-parity gates (the parity corpus for Markdown, the
-  electron smoke for logs) keep them from diverging, and the flag holds each format on batch until its gate
-  passes.
+- **The rendered DOM still grows with the streamed prefix** (no windowing — the optional Phase 4 item, above).
+  It is never *larger* than the batch DOM (which the app already ships), so this is an optimization gap, not a
+  regression; "bounded memory" precisely means the *parse/transport* working set for logs, and the non-held
+  HTML string for the progressive kinds.
+- **Re-mount re-streams from the top** (the render is never snapshotted). A tab-switch away/back or a
+  live-refresh loses the precise scroll position *transiently*; Phase 4's re-anchor saves the scrollTop and
+  restores it once the re-stream settles (`scheduler/when-settled`).
+- **A second render path exists** (streaming + batch). Byte-parity gates (the electron smoke's byte-identical
+  streamed-vs-batch comparison for Markdown and PDF-reflow; the exact-count log assertions) keep them from
+  diverging.
 
-**Verification (Phase 1).** DOM-free unit tests cover the log WPDA grammar, `StreamParser` feed/finish
-segmentation, the **bounded-memory property** (after 500+ batches the frontier is a single config and only the
-open record is retained), the leaf-vs-element lowering trap, and HTML-escaping of log content. The electron
-smoke (dev **and** release) streams a 5.6 MiB / 7005-record log to completion with progressive growth, keeps
-JSON/stack records whole (exact count), populates + navigates the Contents, finds text inside streamed braced
-records, keeps small logs on the batch path, and asserts the main-process session registry drains to `0` on
-teardown (no fd/session leak — `vv:stream-*` is wired to the real content service). Gate: 0 warnings
-(`:main` `:simple` + renderer, dev + release), all node tests green, lint clean.
+**Verification.** DOM-free unit tests cover the log WPDA grammar, `StreamParser` feed/finish segmentation, the
+**bounded-memory property** (after 500+ batches the frontier is a single config and only the open record is
+retained), the leaf-vs-element lowering trap, and HTML-escaping of log content. The electron smoke (dev **and**
+release) covers the whole spine: a 5.6 MiB / 7005-record log streams to completion (progressive growth, JSON/
+stack records kept whole by exact count, Contents populated + navigated, find inside streamed braced records,
+session registry drains to `0` — no fd leak); a >256 KiB Markdown streams **byte-identically** to its batch
+render (slug dedup across 603 repeated headings, a forward reference resolved at EOF, loose lists, highlighted
+code, tables, source positions); PDF-reflow streams byte-identically to the batch reflow; the Preferences
+toggle is present + default-on + persists; and a streamed doc re-anchors its scroll (3000 → 3000) across a
+live-refresh. Gate at every phase: 0 warnings (`:main` `:simple` + renderer, dev + release), all node tests
+green, lint clean.
 
 ## Related
 
