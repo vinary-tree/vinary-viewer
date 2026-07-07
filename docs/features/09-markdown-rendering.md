@@ -79,7 +79,10 @@ If a diagram cannot parse, the preview shows an inline error block with the orig
 
 Badge rows follow GitHub's paragraph behavior. A paragraph containing several linked or unlinked
 badge images keeps them inline; a paragraph containing one standalone image still centers it as a
-figure.
+figure. Standalone (block) figures — including embedded SVG diagrams (svgbob / PlantUML / D2) and
+raw-HTML block `<img>`s — are **framed** with the same themed `1px solid var(--vv-border)` outline that
+tables and code blocks use, on a `fit-content`, centered box with 16px vertical margins so consecutive
+figures are spaced. Inline badge images and emoji stay unframed.
 
 > **Raw embedded HTML is rendered — sanitized.** The pipeline runs `rehype-raw` + `rehype-sanitize`
 > (GitHub's `hast-util-sanitize` allowlist), so literal HTML in a Markdown file renders like GitHub —

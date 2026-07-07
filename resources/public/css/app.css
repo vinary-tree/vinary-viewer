@@ -513,6 +513,25 @@ mjx-container mjx-assistive-mml[display="block"] { width: 100% !important; }
 .vv-math-error, .vv-mermaid-error { color: var(--vv-error); background: var(--vv-bg2);
   border: 1px solid var(--vv-error); border-radius: 4px; padding: 12px; overflow: auto; }
 .markdown-body .vv-plain { white-space: pre-wrap; color: var(--vv-fg); }
+/* Frame block pictures & diagrams like tables: the same themed outline (var(--vv-border)) around a
+   fit-content, centered box that scrolls internally when wide, plus 16px vertical margins so consecutive
+   figures/diagrams don't touch. Placed after the figure/mermaid rules above so it wins on source order.
+   Scope: sole-child Markdown figures (incl. embedded .svg diagrams), raw-HTML block <img> figures, and
+   mermaid diagrams. Inline badge-run images and emoji (:not([src^="emoji"])) are left unframed. */
+.markdown-body p > a.vv-figure-link:only-child,
+.markdown-body > a.vv-figure-link,
+.markdown-body .vv-mermaid {
+  display: block; box-sizing: border-box;
+  width: fit-content; max-width: 100%;
+  margin: 16px auto;
+  border: 1px solid var(--vv-border);
+  overflow: auto; }
+/* The wrapper's border blocks margin-collapse and would otherwise trap the inner element's residual
+   margin / inline baseline gap inside the frame — zero it so the outline sits flush against the picture. */
+.markdown-body p > a.vv-figure-link:only-child > img:not([src^="emoji"]),
+.markdown-body > a.vv-figure-link > img:not([src^="emoji"]),
+.markdown-body .vv-mermaid svg {
+  display: block; margin: 0; }
 
 /* ----- highlight.js classes (rehype-highlight), Spacemacs palette ----- */
 .hljs { color: var(--vv-code); background: transparent; }

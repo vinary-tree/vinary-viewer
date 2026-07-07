@@ -11,6 +11,13 @@ Mermaid diagrams render inline from Markdown fences and from direct `.mmd` /
 Graphviz still open as source previews; generated SVGs from those tools can be
 embedded in Markdown and are sized by the figure pipeline.
 
+In a Markdown document, both mermaid diagrams and embedded SVG diagrams are
+**framed** with the same themed `1px solid var(--vv-border)` outline that tables
+use, on a `fit-content`, centered box with 16px vertical margins so consecutive
+diagrams are spaced. A diagram opened as a **standalone file** (`.mmd` / `.d2` /
+… in its own tab) is *not* framed — there the diagram is the whole content pane,
+so an outline would add nothing.
+
 ---
 
 ## 1 · What it is

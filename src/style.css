@@ -210,12 +210,14 @@ hr {
     padding: 45px !important;     /* keep vmd's standard 45px gutter on all sides */
 }
 
-/* 11. Center figures horizontally at their natural size (do NOT resize them).
+/* 11. Frame & center figures at their natural size (do NOT resize them).
    All committed figures are vector SVG embedded via Markdown image syntax
    `![alt](figures/foo.svg)` → <img src="…svg">. vmd's github-markdown-css already
    caps oversized images at max-width:100%, so we only center; we never stretch.
    Emoji images (src "emoji://…", sized 20×20 inline by vmd) are excluded via
-   :not([src^="emoji"]) so inline emoji stay inline. */
+   :not([src^="emoji"]) so inline emoji stay inline. The figure wrapper carries the
+   same themed 1px outline tables use (parity with resources/public/css/app.css) plus
+   16px vertical margins so consecutive figures are spaced. */
 .markdown-body img:not([src^="emoji"]) {
     display: block !important;
     margin-left: auto !important;
@@ -227,12 +229,17 @@ hr {
 
 .markdown-body a.vv-figure-link {
     display: block !important;
+    box-sizing: border-box;
     width: -webkit-fit-content;
     width: fit-content;
     max-width: 100%;
     margin-left: auto !important;
     margin-right: auto !important;
-    line-height: 0;
+    margin-top: 16px !important;      /* vertical rhythm so consecutive figures don't touch */
+    margin-bottom: 16px !important;
+    border: 1px solid var(--vv-border) !important;   /* themed outline, matching tables */
+    overflow: auto;                   /* wide figure scrolls inside; outline stays put */
+    line-height: 0;                   /* kills the inline baseline gap so the outline sits flush */
     text-decoration: none !important;
 }
 
