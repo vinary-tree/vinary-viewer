@@ -572,7 +572,9 @@ async function main() {
   // span's center must resolve into .vv-pdf-text, NOT .vv-pdf-anno / the canvas.
   // close any menu left open by an earlier step — its full-screen .vv-menu-overlay (z-index 49) would sit
   // over the page and defeat the hit-test (the find/copy tests above don't care: no pointer events needed).
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("menu","close"))); true`);
+  // Click the overlay (its own on-click closes the menu) — a DOM action that works in the dev AND release
+  // (:simple) builds, unlike a re-frame-global dispatch which only the dev build exposes.
+  await evalIn(win, `(() => { const o = document.querySelector('.vv-menu-overlay'); if (o) o.click(); return true; })()`);
   await waitFor(() => evalIn(win, `!document.querySelector('.vv-menu-overlay')`), 'no menu overlay before the PDF hit-test');
   const hitTest = await evalIn(win, `(() => {
     // a real, laid-out glyph span: non-empty, not the zero-height marked-content marker, real box
