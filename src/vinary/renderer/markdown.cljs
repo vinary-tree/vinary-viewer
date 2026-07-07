@@ -14,9 +14,9 @@
             ["rehype-highlight$default" :as rehype-highlight]
             ["rehype-raw$default"       :as rehype-raw]
             ["rehype-sanitize$default"  :as rehype-sanitize]
-            ["rehype-sanitize$defaultSchema" :as default-schema]
             ["rehype-stringify$default" :as rehype-stringify]
             [clojure.string :as str]
+            [vinary.ir.backend.sanitize :as sanitize]
             [vinary.renderer.media :as media]
             [vinary.renderer.math :as math]
             [vinary.renderer.mermaid :as mermaid]
@@ -213,20 +213,9 @@
       (collect-metadata! state tree)
       tree)))
 
-;; GitHub's HTML sanitize allowlist — hast-util-sanitize's defaultSchema IS the policy GitHub uses — plus
-;; two minimal, safe extensions: (1) keep `code.math-inline`/`code.math-display` so render-html-math still
-;; distinguishes inline vs display math (defaultSchema only keeps /^language-./); (2) allow `data:` image
-;; URIs so `![](data:image/svg+xml,…)` still renders. structuredClone so the shared defaultSchema isn't
-;; mutated. Everything dangerous (script/style/iframe/on*-handlers/javascript:/vbscript:/file:/<base>/<meta>)
-;; stays blocked by the default schema — the desired GitHub posture.
-(def ^:private sanitize-schema
-  ;; aget with string literals (not .-prop) so the :advanced release build can't mangle these accesses on
-  ;; the external defaultSchema object.
-  (let [s     (js/structuredClone default-schema)
-        attrs (aget s "attributes")]
-    (.push (aget (aget attrs "code") 0) "math-inline" "math-display")
-    (.push (aget (aget s "protocols") "src") "data")
-    s))
+;; The HTML sanitize allowlist (GitHub's hast-util-sanitize defaultSchema + math-inline/math-display + data:
+;; images) now lives in vinary.ir.backend.sanitize as the single schema shared by this pipeline and the IR
+;; back-end. See that namespace for the policy rationale.
 
 (defn render
   "Render a Markdown string. base-dir (the source doc's absolute directory, or nil) is used to resolve
@@ -246,7 +235,7 @@
          ;; every app-generated file:// image src and break all local images.
          (.use remark-rehype #js {:allowDangerousHtml true})
          (.use rehype-raw)
-         (.use rehype-sanitize sanitize-schema)
+         (.use rehype-sanitize sanitize/schema)
          (.use rehype-slug)
          (.use rehype-highlight)
          (.use (rewrite-urls base-dir cache-token))
