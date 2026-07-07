@@ -92,6 +92,11 @@ invariants — independent of any one file. Read it in order:
    without touching the DOM.
 7. [`theory/07-command-history-model.md`](theory/07-command-history-model.md) —
    navigation as reified **Commands** on a `{:stack :idx}` history.
+8. [`theory/08-common-document-ir.md`](theory/08-common-document-ir.md) — one
+   **weighted-transducer IR** every format parses into; semiring/WPDA/transducer core.
+9. [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md)
+   — treating a document as a **bounded-memory stream**; the WPDA log grammar; the
+   bounded-memory property.
 
 Then read the **architecture pillar** for the concrete realisation:
 
@@ -111,9 +116,10 @@ Then read the **architecture pillar** for the concrete realisation:
   [`css-variables.md`](reference/css-variables.md),
   [`namespaces.md`](reference/namespaces.md).
 - [`design-decisions/`](design-decisions/README.md) — the numbered ADR-style log
-  (`0001`…`0010`) recording *why* each pivotal choice was made: rendering in the
+  (`0001`…`0018`) recording *why* each pivotal choice was made: rendering in the
   renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative
-  `innerHTML` over VDOM, the IPC mediator, and bounded content retention.
+  `innerHTML` over VDOM, the IPC mediator, bounded content retention, the common
+  document IR, and the bounded-memory streaming pipeline.
 - [`security/threat-model.md`](security/threat-model.md) — the Electron security
   posture and recommended hardenings.
 
@@ -134,13 +140,15 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`theory/05-strategy-renderer-registry.md`](theory/05-strategy-renderer-registry.md) | theory | Strategy-by-`:doc/kind`; content-view precedence; future registry-as-data |
 | [`theory/06-find-css-custom-highlight.md`](theory/06-find-css-custom-highlight.md) | theory | Painting Ranges without DOM mutation; `collect-ranges`/`paint!`/`cycle!` |
 | [`theory/07-command-history-model.md`](theory/07-command-history-model.md) | theory | Navigation as Commands; `{:stack :idx}`; truncate-on-new-path |
+| [`theory/08-common-document-ir.md`](theory/08-common-document-ir.md) | theory | One tagged IR per format; semiring/WPDA/tree-transducer; single sanitizer; byte-parity |
+| [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md) | theory | Document as a bounded-memory stream; WPDA log grammar; StreamParser; append sink |
 | [`architecture/01-overview.md`](architecture/01-overview.md) | architecture | System-level component map |
 | [`architecture/02-process-and-build-topology.md`](architecture/02-process-and-build-topology.md) | architecture | Two Electron processes; the two shadow-cljs builds |
 | [`architecture/03-ipc-protocol.md`](architecture/03-ipc-protocol.md) | architecture | The `vv:*` channels and payload shapes |
 | [`architecture/04-state-schema-reference.md`](architecture/04-state-schema-reference.md) | architecture | DataScript schema + full `app-db` shape |
 | [`architecture/05-data-flows.md`](architecture/05-data-flows.md) | architecture | Open / refresh / find / history flows end-to-end |
 | [`architecture/06-renderer-runtime.md`](architecture/06-renderer-runtime.md) | architecture | Renderer boot order, reagent mount, dev hooks |
-| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0010` | design | Why each pivotal choice was made |
+| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0018` | design | Why each pivotal choice was made |
 | [`usage/01..06`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting |
 | [`features/README.md`](features/README.md) + `01`…`15` | features | One page per feature (live refresh … custom keybindings) |
 | [`reference/events-effects-subs.md`](reference/events-effects-subs.md) | reference | Every re-frame event, effect, subscription |

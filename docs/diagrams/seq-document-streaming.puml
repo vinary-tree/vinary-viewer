@@ -1,0 +1,64 @@
+@startuml seq-document-streaming
+'' PlantUML over Mermaid because this view emphasises the CREDIT-1 pull cadence (a loop fragment with an
+'' explicit backpressure pause/resume across the IPC seam) and the bounded-memory working-set notes on each
+'' participant — a sequence diagram with a `loop` fragment and per-lifeline notes expresses this far more
+'' precisely than a Mermaid flowchart. Participant colours are literal palette hexes from _vv-theme.iuml so a
+'' colour always means one concept (tan FS, slate Main, teal Renderer, purple Stores).
+!include _vv-theme.iuml
+
+title Document streaming — one batch's lifecycle (bounded memory end-to-end)
+
+box "Disk" #EFEAD9
+  participant "File\n(large log)" as FS #9F8766
+end box
+box "Main (Node)" #E4EAF4
+  participant "content_service\nstream session" as CS #3A5BA0
+end box
+box "Renderer" #E1F0EA
+  participant "transport\n(pull client)" as TR #2D9574
+  participant "scheduler\n(parser + sink)" as SC #2D9574
+end box
+box "Stores / DOM" #F0E6F2
+  participant "DataScript\n+ re-frame" as DS #A45BAD
+  participant ".vv-content\nDOM" as DOM #7590DB
+end box
+
+== open ==
+SC -> TR : start!(node, path, kind)
+TR -> CS : invoke vv:stream-open {path, mode}
+activate CS
+CS -> FS : createReadStream (+ gunzip)\nreadline
+CS --> TR : {sessionId, size, mode}
+deactivate CS
+note over CS: session held in a Map\n(idle-GC after 30 s)
+
+== pull loop (credit ~1) ==
+loop until :done
+  SC -> SC : requestIdleCallback tick\n(≤ 8 ms budget, {timeout 100})
+  SC -> TR : pull!(session)
+  TR -> CS : invoke vv:stream-pull {sessionId}
+  activate CS
+  CS -> FS : resume → read ≤ 1000 lines
+  CS -> CS : **pause** at the batch cap\n(readline.pause — backpressure)
+  CS --> TR : {seq, lines, done, progress}
+  deactivate CS
+  TR -> TR : prefetch NEXT batch\n(double-buffer: overlap main latency)
+  TR --> SC : batch
+  note right of SC #FFF6D6: parser.feed(lines) → newly-completed\n:record blocks; a depth-0 header commits\nthe previous record. WPDA brace stack\nkeeps a JSON entry whole. Retains ONLY\nthe open record + one config.
+  SC -> DOM : lower each block → apply-posts →\ninsertAdjacentHTML "beforeend" + "\\n"
+  SC -> DS : :stream/toc-append (error/warn records, capped)\n:stream/progress
+  DS -> DOM : scroll-spy re-measures the new records
+end
+
+== done ==
+SC -> SC : parser.finish → flush the open record
+SC -> DS : :stream/done (progress = 1)
+note over SC, DOM #D8F0E6: The render is **never snapshotted** to :doc/html —\na re-mount (tab switch / live-refresh) re-streams from\nthe top, so the working set stays bounded for any file size.
+
+== teardown ==
+SC -> TR : stop! (unmount / tab switch)
+TR -> CS : invoke vv:stream-close {sessionId}
+CS -> FS : destroy stream (release fd)
+CS -> CS : streams.delete(sessionId)\n(streamCount → 0)
+
+@enduml

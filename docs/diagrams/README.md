@@ -167,11 +167,13 @@ from a doc are always relative, e.g. `../diagrams/<name>.puml`.
 | `flow-unidirectional-dataflow.puml`    | activity / data-flow             | `theory/01-reactive-architecture.md`, `architecture/05-data-flows.md`              |
 | `activity-content-strategy.puml`       | activity (content Strategy)      | `theory/05-strategy-renderer-registry.md`, `features/09-markdown-rendering.md`     |
 | `activity-live-refresh-spine.puml`     | activity (live-refresh spine)    | `theory/03-live-refresh-spine.md`, `features/01-live-refresh.md`                   |
+| `activity-log-segmentation.puml`       | activity (per-line log segmentation) | `theory/09-document-streaming-and-the-wpda.md`                                 |
 | `usecase-features.puml`                | use-case                         | `features/README.md`                                                              |
 | `seq-open-file.puml`                   | sequence (full round trip)       | `usage/01-getting-started.md`, `features/02-multi-tab-previews.md`                 |
 | `seq-markdown-render.puml`             | sequence (render round trip)     | `features/09-markdown-rendering.md`, `theory/01-reactive-architecture.md`          |
 | `seq-live-refresh.puml`                | sequence (watcher → re-render)   | `features/01-live-refresh.md`, `theory/03-live-refresh-spine.md`                   |
 | `seq-content-page-streaming.puml`       | sequence (bounded content pages)   | `architecture/03-ipc-protocol.md`                                                  |
+| `seq-document-streaming.puml`           | sequence (one streamed batch, bounded memory) | `theory/09-document-streaming-and-the-wpda.md`, `design-decisions/0018-document-streaming-pipeline.md` |
 | `seq-theme-switch.puml`                | sequence                         | `usage/05-configuration.md`, `features/06-themes-and-live-switching.md`            |
 | `seq-find.puml`                        | sequence (find highlight)        | `features/05-in-page-find.md`, `theory/06-find-css-custom-highlight.md`            |
 | `seq-history.puml`                     | sequence (back / forward)        | `features/07-navigation-history.md`                                               |

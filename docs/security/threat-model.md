@@ -273,6 +273,20 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
 > the electron smoke (a synthetic office document containing `<script>` / `on*` / `javascript:` is asserted
 > stripped, in both the dev and release builds).
 
+> **Streamed documents (v0.3.0, streaming pipeline — [ADR-0018](../design-decisions/0018-document-streaming-pipeline.md)).**
+> A large document may render as a bounded-memory **stream** — per-record IR blocks appended to `.markdown-body`
+> via `insertAdjacentHTML` — rather than one innerHTML write. This does **not** weaken the XSS posture: each
+> block is lowered through the **same** `ir/backend/html` producer and the **same** GitHub-allowlist sanitizer
+> as the batch path. The allowlist is **context-free** — a node is safe or unsafe independent of its siblings —
+> so sanitizing block-by-block is provably identical to sanitizing the whole document at once; no cross-block
+> construct can smuggle unsafe markup past a per-block pass. The Phase-1 log front-end emits only
+> `div.vv-log-record`/`div.vv-log-line` elements whose text is a **`:text` leaf** (HTML-escaped on
+> serialization, exactly like the plain-text kind), so log content such as `<script>` renders as inert escaped
+> text — asserted by `log-stream-test/lowers-to-nonempty-html` and the electron smoke's streamed-log find test.
+> On the main side the stream is a **bounded session registry** (`content_service.js`): one `createReadStream`
+> fd per active stream, capped by credit-1 backpressure, swept by an idle-GC and closed on renderer unmount —
+> the electron smoke asserts the registry drains to `0` after teardown (no fd/session leak).
+
 ---
 
 ## 6. Hardenings

@@ -1,0 +1,27 @@
+@startuml activity-log-segmentation
+'' PlantUML over Mermaid because this view is a decision-centric control flow with a three-clause branch
+'' guard and a coloured pushdown note — an activity diagram expresses the regular-classify / context-free-depth
+'' interplay and the loop-until-batch-drained cadence far more precisely than a Mermaid flowchart. Step colours:
+'' teal (#2D9574/#C9E8DA) = renderer parser steps, amber note (#FFF6D6) = the WPDA pushdown (IPC/seam palette).
+!include _vv-theme.iuml
+
+title Log segmentation — the per-line boundary decision (regular classify + context-free depth)
+
+start
+repeat
+  :read the next line L from the batch;
+  #E1F0EA:classify L (REGULAR):\ncontinuation?(L) via the continuation regex;
+  #E1F0EA:read brace depth = depth(F)\n**before** applying L's braces;
+  if (depth = 0  and  not continuation(L)  and  a record is open?) then (boundary: new record)
+    #C9E8DA:emit the open record\n(one :record IR block, stable anchor-id);
+    :start a fresh open record with L;
+  else (same record)
+    :append L to the open record;
+  endif
+  #FFF6D6:advance the pushdown by net-brace(L)\n(|net-brace| ob/cb tokens through advance-step);
+  note right #FFF6D6: the brace STACK is what keeps a multi-line\nJSON entry ONE record — a header-looking\nline at depth > 0 can never trigger a boundary
+repeat while (more lines in this batch?) is (yes) not (no / batch drained)
+:on finish, flush the still-open record;
+stop
+
+@enduml
