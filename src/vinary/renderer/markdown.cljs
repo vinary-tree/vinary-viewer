@@ -271,9 +271,10 @@
       (.use (source-positions))
       (.use (collect-metadata metadata))))
 
-(defn- apply-posts
+(defn apply-posts
   "The shared string post-passes applied to serialized HTML: MathJax SVG (synchronous), then Mermaid SVG
-   (async), then tree-sitter fenced-code highlighting (async). Returns Promise<html>."
+   (async), then tree-sitter fenced-code highlighting (async). Returns Promise<html>. Public so the streaming
+   sink can run the identical passes per appended block."
   [html]
   (-> (js/Promise.resolve (math/render-html-math html))
       (.then mermaid/render-html-diagrams)

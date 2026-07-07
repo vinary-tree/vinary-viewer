@@ -9,6 +9,7 @@
             [cljs.reader :as reader]
             [vinary.app.db :as db]
             [vinary.app.ds :as ds]
+            [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -84,10 +85,13 @@
          cur-err (and eid (ds/doc-attr snap path :doc/error))
          stamp   (if (some? stamp) stamp (js/Date.now))
          ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
+         ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
+         ;; (ir-stream-body drives it from the file path). Small docs stay on the batch path (byte-identical).
+         stream? (stream-flag/enabled? kind (:size meta) (get-in db [:ui :settings :stream?]))
          ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
          ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
          ;; directory carries its :doc/entries listing instead.
-         attrs   (cond-> {:doc/kind kind :doc/stamp stamp}
+         attrs   (cond-> {:doc/kind kind :doc/stamp stamp :doc/streaming? (boolean stream?)}
                    text                  (assoc :doc/text text)
                    (and html (not ir-office?)) (assoc :doc/html html)   ; office-IR fills :doc/html via :office/render
                    (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
@@ -113,8 +117,10 @@
      (with-retention
        {:db db'
         :fx (cond-> [[:ds/transact tx]]
-              (= kind "markdown") (conj [:markdown/render {:text text :path path :stamp stamp
-                                                            :on-done [:content/rendered path stamp]}])
+              ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx
+              (and (= kind "markdown") (not stream?))
+              (conj [:markdown/render {:text text :path path :stamp stamp
+                                       :on-done [:content/rendered path stamp]}])
               ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
               ir-office?          (conj [:office/render {:html html :path path
                                                          :on-done [:content/rendered path stamp]}])
@@ -133,6 +139,26 @@
                                [:db/add eid :doc/toc (vec (or toc []))]
                                [:db/add eid :doc/assets (vec (or assets []))]]]
                [:vv/watch-assets {:doc-path path :paths assets}]]})))))
+
+;; ---- document streaming (bounded-memory incremental render; vinary.stream.*) --------------------------------
+(rf/reg-event-fx
+ :stream/progress
+ (fn [_ [_ path progress]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/stream-progress progress]]]]})))
+
+(rf/reg-event-fx
+ :stream/toc-append
+ (fn [_ [_ path entries]]
+   (let [snap (ds/snapshot)]
+     (when-let [eid (ds/eid-for-path snap path)]
+       {:fx [[:ds/transact [[:db/add eid :doc/toc (into (vec (or (ds/doc-attr snap path :doc/toc) [])) entries)]]]]}))))
+
+(rf/reg-event-fx
+ :stream/done
+ (fn [_ [_ path]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/stream-progress 1]]]]})))
 
 ;; (The :vv/ir migration flag + :ir/set-enabled toggle are RETIRED — the common IR is now the unconditional
 ;;  render path for Markdown and office; see ADR-0017 and vinary.ir.flag.)

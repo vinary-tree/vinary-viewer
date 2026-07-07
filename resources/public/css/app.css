@@ -142,6 +142,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-log-error .vv-log-text, .vv-log-fatal .vv-log-text, .vv-log-critical .vv-log-text {
   color: var(--vv-error); font-weight: 600; }
 
+/* streamed log records (vinary.stream — ir-stream-body appends div.vv-log-record > div.vv-log-line under
+   .markdown-body). Distinct from the paged .vv-log-doc view above: each line is a plain monospace row (no
+   gutter grid) and a record groups its lines. Scoped under .markdown-body so it never inherits that grid. */
+.markdown-body .vv-log-record { font-family: var(--vv-font-fixed); font-size: var(--vv-code-font-size);
+  line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.markdown-body .vv-log-line { display: block; min-width: 0; }
+.markdown-body .vv-log-record:target { background: var(--vv-bg-code); border-radius: 4px; }
+
+/* streaming progress: a thin sticky top strip that fills as the document streams, hidden once complete */
+.vv-stream-progress { position: sticky; top: 0; z-index: 5; height: 3px; width: 100%;
+  background: var(--vv-border); overflow: hidden; }
+.vv-stream-progress-bar { height: 100%; background: var(--vv-head1); transition: width 120ms linear; }
+.vv-stream-progress-done { display: none; }
+
 .markdown-body .cm-keyword     { color: var(--vv-head1); }
 .markdown-body .cm-operator    { color: var(--vv-head1); }
 .markdown-body .cm-variable    { color: var(--vv-var); }

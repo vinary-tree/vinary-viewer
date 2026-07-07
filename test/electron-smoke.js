@@ -11,6 +11,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, ipcMain } = require('electron');
+// the REAL main-process content service — the streaming smoke wires vv:stream-* to it (exactly as service.cljs
+// does) so the test drives genuine createReadStream/readline batching + the session registry, and can assert
+// streamCount() returns to 0 (no fd/session leak) after teardown.
+const contentService = require(path.join(__dirname, '..', 'src', 'vinary', 'main', 'content_service.js'));
 
 const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'resources', 'public', 'index.html');
@@ -119,6 +123,54 @@ function createLocalRasterScrollFixture() {
   const docPath = path.join(dir, 'local-raster-scroll.md');
   fs.writeFileSync(docPath, text);
   return { docPath, text };
+}
+
+// A log comfortably larger than SMALL_LOG_BYTES (5 MiB) — the streaming threshold — with a KNOWN record count.
+// Mostly single-line INFO/ERROR records (ERROR ones become Contents entries), plus a few multi-line records:
+// stack traces (continuation lines must NOT split the record) and JSON objects whose inner line LOOKS like a
+// header (the WPDA brace pushdown must keep each object whole). Exact counts let the smoke assert progressive
+// growth converges to the whole file with braced/continuation records intact.
+function createLargeLogFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-log-stream-'));
+  tempDirs.push(dir);
+  const pad = 'x'.repeat(800);               // widen each line so ~7k records clear 5 MiB (few batches → fast)
+  const N = 7000;
+  const lines = [];
+  let records = 0;
+  let errorHeaders = 0;
+  for (let i = 0; i < N; i++) {
+    if (i % 200 === 0) { lines.push(`2026-07-07T00:00:00Z ERROR event ${i} failed ${pad}`); errorHeaders++; }
+    else               { lines.push(`2026-07-07T00:00:00Z INFO  event ${i} ok ${pad}`); }
+    records++;
+  }
+  for (let k = 0; k < 3; k++) {              // multi-line ERROR-with-stack records (header + 2 continuations)
+    lines.push(`2026-07-07T01:00:0${k}Z ERROR boom ${k}`);
+    lines.push(`    at com.example.Foo.bar(Foo.java:${k})`);
+    lines.push(`    at com.example.Baz.qux(Baz.java:${k})`);
+    records++; errorHeaders++;
+  }
+  for (let k = 0; k < 2; k++) {              // JSON braced records with a header-LOOKING inner line (pushdown)
+    lines.push('{');
+    lines.push(`2026-07-07T02:00:0${k}Z ERROR inner-looks-like-a-header ${k}`);   // header first line is '{' → NOT a Contents entry
+    lines.push('}');
+    records++;
+  }
+  const docPath = path.join(dir, 'huge.log');
+  fs.writeFileSync(docPath, lines.join('\n') + '\n');
+  return { docPath, records, errorHeaders, size: fs.statSync(docPath).size };
+}
+
+// A log well under the streaming threshold — must stay on the batch path (the paged .vv-log-doc view), never
+// streamed. Proves the size gate: small docs render exactly as before (byte-identical), streaming is opt-in.
+function createSmallLogFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-log-small-'));
+  tempDirs.push(dir);
+  const lines = [];
+  for (let i = 0; i < 40; i++) lines.push(`2026-07-07T00:00:00Z INFO small event ${i}`);
+  lines.push('2026-07-07T00:00:01Z ERROR small boom UNIQUEMARKER');
+  const docPath = path.join(dir, 'small.log');
+  fs.writeFileSync(docPath, lines.join('\n') + '\n');
+  return { docPath, size: fs.statSync(docPath).size };
 }
 
 function makeOutlinePdf() {
@@ -295,6 +347,11 @@ function installIpc(state) {
     state.httpVisible = false;
   });
   ipcMain.handle('vv:http-snapshot', () => state.snapshotDataUrl);
+  // document streaming — wired to the REAL content service exactly as service.cljs does (createReadStream +
+  // readline session registry); streamCount() then tells us whether a session leaked after teardown.
+  ipcMain.handle('vv:stream-open',  (_event, req) => contentService.streamOpen(req));
+  ipcMain.handle('vv:stream-pull',  (_event, req) => contentService.streamPull(req));
+  ipcMain.handle('vv:stream-close', (_event, req) => contentService.streamClose(req));
   ipcMain.on('vv:watch-assets', () => {});
   ipcMain.handle('vv:complete-path', (_event, input) => ({
     input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
@@ -1904,6 +1961,95 @@ async function main() {
     'Ctrl+PageUp returns to the previous (left) tab');
   console.log('[ok] Ctrl+PageDown / Ctrl+PageUp cycle tabs right / left');
 
+  // ========================================================================================================
+  // ── Document streaming (vinary.stream.*) — a large log renders as a BOUNDED-MEMORY incremental stream ──
+  // The WPDA log grammar segments records (continuation lines + JSON braces stay whole); the scheduler appends
+  // them across idle frames; Contents + find work on the growing document; a small log stays on the batch
+  // path; and the main-process session registry drains to 0 on teardown (no fd/session leak). vv:stream-* is
+  // wired to the REAL content service, so this drives genuine createReadStream/readline batching end-to-end.
+  // ========================================================================================================
+  win.webContents.send('vv:settings', '{:stream? true}');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming flag enabled via settings');
+
+  const bigLog = createLargeLogFixture();
+  assert.ok(bigLog.size > 5 * 1024 * 1024, `large log fixture (${bigLog.size} B) must exceed the 5 MiB stream threshold`);
+  state.contentByPath.set(bigLog.docPath, {
+    path: bigLog.docPath, kind: 'log', paged: true,
+    page: { index: 0, lines: [], hasPrev: false, hasNext: true },
+    stamp: Date.now(), sourceable: true, meta: { size: bigLog.size, pageSize: 2000 }
+  });
+  const streamCount0 = contentService.streamCount();
+  win.webContents.send('vv:open-files', { paths: [bigLog.docPath], 'focus-first': true });
+
+  // streaming engages: the stream body (its progress strip) mounts and the FIRST records paint incrementally —
+  // div.vv-log-record under .markdown-body, a shape the batch .vv-log-doc view never produces.
+  await waitFor(() => evalIn(win, `(() => {
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
+    const recs = document.querySelectorAll('.vv-content .markdown-body .vv-log-record').length;
+    return streaming && recs > 0;
+  })()`), 'large log streams — progress strip mounts + first records paint', 20000);
+  const earlyRecords = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body .vv-log-record').length`);
+  assert.ok(earlyRecords > 0, 'at least one record paints before the whole file is parsed (incremental first paint)');
+  assert.strictEqual(contentService.streamCount(), streamCount0 + 1, 'exactly one main-process stream session is open while streaming');
+
+  // the stream converges to the WHOLE file: every record present, with continuation/braced records kept whole
+  // (an exact count — a split JSON/stack record would inflate it).
+  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body .vv-log-record').length === ${bigLog.records}`,
+    `streamed record count converges to the whole file (${bigLog.records})`, 30000);
+  const finalRecords = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body .vv-log-record').length`);
+  assert.strictEqual(finalRecords, bigLog.records, 'the full document streamed in, records intact (no split braces/continuations)');
+  if (earlyRecords < finalRecords) console.log(`[ok] progressive growth observed (${earlyRecords} → ${finalRecords} records)`);
+  await waitFor(() => evalIn(win, `(() => { const p = document.querySelector('.vv-content .vv-stream-progress');
+    return p && p.classList.contains('vv-stream-progress-done'); })()`), 'progress strip hides once complete');
+  console.log(`[ok] large log streams to completion (${finalRecords} records, ${(bigLog.size / 1048576).toFixed(1)} MiB, bounded memory)`);
+
+  // Contents populates from the ERROR records (grows via :stream/toc-append) AND is navigable — clicking an
+  // entry scrolls to that record (its stable anchor id is a real element id in the streamed DOM).
+  await evalIn(win, `(() => { const t = Array.from(document.querySelectorAll('.vv-sidebar-tab')).find((n) => n.textContent.trim() === 'Contents'); if (t) t.click(); return true; })()`);
+  await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= 35`, 'the streamed log Contents lists the error records', 10000);
+  const tocInfo = await evalIn(win, `(() => { const items = Array.from(document.querySelectorAll('.vv-toc-item'));
+    return { n: items.length, anyError: items.some((i) => /ERROR/.test(i.textContent)) }; })()`);
+  assert.ok(tocInfo.n >= 35, `the streamed Contents must list the error records (got ${tocInfo.n})`);
+  assert.ok(tocInfo.anyError, 'a Contents entry names an ERROR record');
+  await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); if (c) c.scrollTop = 0;
+    const rows = document.querySelectorAll('.vv-toc-item'); rows[rows.length - 1].click(); return true; })()`);
+  await waitCalm(win, `document.querySelector('.vv-content').scrollTop > 50`, 'clicking a Contents entry scrolls to its streamed record', 10000);
+  console.log(`[ok] streamed log Contents lists ${tocInfo.n} error records + navigates to them`);
+
+  // find works over the streamed document — the JSON braced records' inner line is present AND findable, which
+  // proves those records streamed in WHOLE (the WPDA pushdown never split them).
+  await dispatchWindowKey(win, 'f', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find bar opens over the streamed log');
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    set.call(i, 'inner-looks-like-a-header'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.find.count > 0`), 'find matches text inside the streamed JSON records', 8000);
+  const findCount = await evalIn(win, `window.__vvdb().ui.find.count`);
+  assert.ok(findCount >= 1, "find locates the braced records' inner header-looking line (records streamed whole)");
+  await evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+    i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+  console.log(`[ok] find works on the streamed document (${findCount} match(es) inside braced records)`);
+
+  // a small log stays on the BATCH path (below the threshold) — the paged .vv-log-doc view, never streamed
+  const smallLog = createSmallLogFixture();
+  assert.ok(smallLog.size < 5 * 1024 * 1024, 'small log fixture must be below the streaming threshold');
+  state.contentByPath.set(smallLog.docPath, {
+    path: smallLog.docPath, kind: 'log', text: fs.readFileSync(smallLog.docPath, 'utf8'),
+    stamp: Date.now(), sourceable: true, meta: { size: smallLog.size }
+  });
+  win.webContents.send('vv:open-files', { paths: [smallLog.docPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => {
+    const batch = Boolean(document.querySelector('.vv-content .vv-log-doc'));
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
+    return batch && !streaming;
+  })()`), 'small log renders on the batch path (paged .vv-log-doc, not streamed)', 10000);
+  console.log('[ok] a small log stays on the batch path — streaming is opt-in + size-gated');
+
+  // switching away from the large-log tab unmounted its stream body → the main-process session closed. No leak.
+  await waitFor(() => contentService.streamCount() === 0, 'the streamed log session closed on teardown', 10000);
+  assert.strictEqual(contentService.streamCount(), 0, 'no main-process stream session may leak after teardown');
+  console.log('[ok] stream session drains to 0 on teardown — no fd/session leak');
+
   win.close();
 }
 
@@ -1911,7 +2057,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 75000);
+}, 120000);   // headroom for the document-streaming section (a >5 MiB log streamed to completion)
 
 main()
   .then(() => {

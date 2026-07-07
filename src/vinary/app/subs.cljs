@@ -131,3 +131,8 @@
    (if (uri/http? active-uri)
      (vec (or web-toc []))
      (vec (or (:doc/toc doc) [])))))
+
+;; the active document streams (bounded-memory incremental render) rather than rendering whole
+(rf/reg-sub :doc/streaming? :<- [:doc/active] (fn [doc _] (boolean (:doc/streaming? doc))))
+;; stream completion in [0,1] (nil until the first batch), for the progress affordance
+(rf/reg-sub :doc/stream-progress :<- [:doc/active] (fn [doc _] (:doc/stream-progress doc)))

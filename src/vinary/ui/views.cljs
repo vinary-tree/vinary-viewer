@@ -29,6 +29,7 @@
             [vinary.ui.passwords :as passwords-ui]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
+            [vinary.stream.scheduler :as stream-scheduler]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.media :as media]
             [vinary.renderer.mermaid :as mermaid]
@@ -166,6 +167,63 @@
       {:text term-text
        :pos (+ line-from start)})))
 
+(defn- attach-content-interactions!
+  "Wire the shared preview interactions onto a content `node`: in-pane link navigation (click / middle-click /
+   Ctrl+click, always fail-closed so an unrecognized href can never navigate the privileged frame), the
+   status-bar link-hover indicator, and the themed right-click context menu (link target, else selection/term
+   plus any math). Shared by the batch `markdown-body` and the streaming `ir-stream-body` so a streamed
+   document behaves identically. `source*`/`path*` are atoms the caller keeps pointed at the current doc;
+   `last-link` is a scratch atom for hover de-duping. Returns a 0-arg detach fn."
+  [^js node source* path* last-link]
+  (letfn [(follow [^js a new-tab? ^js e]
+            ;; Fail closed: prevent default navigation for EVERY in-content <a> click, so a link the app
+            ;; doesn't recognize (or a javascript:/data: one the sanitizer somehow missed) can never navigate
+            ;; the privileged app frame. Only recognized safe targets then dispatch an open event.
+            (.preventDefault e)
+            (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
+              (when-let [event (preview-nav/open-event target new-tab?)]
+                (rf/dispatch event))))]
+    (let [on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
+          on-aux   (fn [^js e] (when (= 1 (.-button e))
+                                 (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
+          on-over  (fn [^js e]
+                     (let [^js a (.closest (.-target e) "a")
+                           href  (when a (link/target-for-anchor a))]
+                       (when (not= href @last-link)
+                         (reset! last-link href)
+                         (rf/dispatch [:ui/hover-link (when a (link-display (link/classify href "")))]))))
+          on-leave (fn [_] (reset! last-link nil) (rf/dispatch [:ui/hover-link nil]))
+          on-ctx   (fn [^js e]
+                     (let [source @source*
+                           path @path*
+                           ^js body node
+                           ^js a (.closest (.-target e) "a")
+                           target (or (when a (preview-link-target a source path))
+                                      (let [{:keys [text node offset]} (selection-or-term body e)
+                                            source-node (or node (.-target e))
+                                            ^js math-el (.closest (.-target e) ".vv-math-inline, .vv-math-display")]
+                                        {:kind :preview-body
+                                         :text (or text "")
+                                         :math-tex (when math-el
+                                                     (math/delimit-tex (.contains (.-classList math-el) "vv-math-display")
+                                                                       (.getAttribute math-el "data-tex")))
+                                         :source-location (source-location source path source-node offset text)}))]
+                       (.preventDefault e)
+                       (.stopPropagation e)
+                       (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))]
+      (.addEventListener node "click" on-click)
+      (.addEventListener node "auxclick" on-aux)
+      (.addEventListener node "mouseover" on-over)
+      (.addEventListener node "mouseleave" on-leave)
+      (.addEventListener node "contextmenu" on-ctx)
+      (fn detach! []
+        (.removeEventListener node "click" on-click)
+        (.removeEventListener node "auxclick" on-aux)
+        (.removeEventListener node "mouseover" on-over)
+        (.removeEventListener node "mouseleave" on-leave)
+        (.removeEventListener node "contextmenu" on-ctx)
+        (rf/dispatch [:ui/hover-link nil])))))
+
 (defn markdown-body
   "A .markdown-body whose innerHTML tracks the HTML passed in (content-view holds the subscription).
    Intercepts link clicks (→ in-pane navigation, never replacing the window), shows the hovered link's URI
@@ -180,6 +238,7 @@
         raf  (atom false)
         resize-observer (atom nil)
         last-link (atom nil)
+        detach* (atom nil)
         refresh-toc! (fn []
                        (when-let [^js content (some-> @node (.closest ".vv-content"))]
                          ;; feed the generalized spy this doc's :doc/toc ids (== the rendered heading ids;
@@ -211,43 +270,7 @@
                               (when-let [^js content (.closest @node ".vv-content")]
                                 (.observe o content))
                               (reset! resize-observer o))
-                            (.addEventListener js/window "resize" on-resize)))
-        follow (fn [^js a new-tab? ^js e]
-                 ;; Fail closed: prevent default navigation for EVERY in-content <a> click, so a link the app
-                 ;; doesn't recognize (or a javascript:/data: one the sanitizer somehow missed) can never
-                 ;; navigate the privileged app frame. Only recognized safe targets then dispatch an open event.
-                 (.preventDefault e)
-                 (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
-                   (when-let [event (preview-nav/open-event target new-tab?)]
-                     (rf/dispatch event))))
-        on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
-        on-aux   (fn [^js e] (when (= 1 (.-button e))
-                               (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
-        on-over  (fn [^js e]
-                   (let [^js a (.closest (.-target e) "a")
-                         href  (when a (link/target-for-anchor a))]
-                     (when (not= href @last-link)
-                       (reset! last-link href)
-                       (rf/dispatch [:ui/hover-link (when a (link-display (link/classify href "")))]))))
-        on-leave (fn [_] (reset! last-link nil) (rf/dispatch [:ui/hover-link nil]))
-        on-ctx   (fn [^js e]
-                   (let [source @source*
-                         path @path*
-                         ^js body @node
-                         ^js a (.closest (.-target e) "a")
-                         target (or (when a (preview-link-target a source path))
-                                    (let [{:keys [text node offset] :as current} (selection-or-term body e)
-                                          source-node (or node (.-target e))
-                                          ^js math-el (.closest (.-target e) ".vv-math-inline, .vv-math-display")]
-                                      {:kind :preview-body
-                                       :text (or text "")
-                                       :math-tex (when math-el
-                                                   (math/delimit-tex (.contains (.-classList math-el) "vv-math-display")
-                                                                     (.getAttribute math-el "data-tex")))
-                                       :source-location (source-location source path source-node offset text)}))]
-                     (.preventDefault e)
-                     (.stopPropagation e)
-                     (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))]
+                            (.addEventListener js/window "resize" on-resize)))]
     (r/create-class
      {:display-name "vv-markdown-body"
       :component-did-mount  (fn [this]
@@ -256,11 +279,7 @@
                                 (reset! path* path)
                                 (render-html! html))
                               (observe-resize!)
-                              (.addEventListener @node "click" on-click)
-                              (.addEventListener @node "auxclick" on-aux)
-                              (.addEventListener @node "mouseover" on-over)
-                              (.addEventListener @node "mouseleave" on-leave)
-                              (.addEventListener @node "contextmenu" on-ctx))
+                              (reset! detach* (attach-content-interactions! @node source* path* last-link)))
       :component-did-update (fn [this]
                               (let [[_ html source path] (r/argv this)
                                     doc-changed? (not= path @path*)]
@@ -277,14 +296,60 @@
                                   (let [^js o @resize-observer]
                                     (.disconnect o))
                                   (reset! resize-observer nil))
-                                (when @node
-                                  (.removeEventListener @node "click" on-click)
-                                  (.removeEventListener @node "auxclick" on-aux)
-                                  (.removeEventListener @node "mouseover" on-over)
-                                  (.removeEventListener @node "mouseleave" on-leave)
-                                  (.removeEventListener @node "contextmenu" on-ctx))
-                                (rf/dispatch [:ui/hover-link nil]))
+                                (when @detach* (@detach*) (reset! detach* nil)))
       :reagent-render       (fn [_html _source _path] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
+
+(defn ir-stream-body
+  "Streaming counterpart of markdown-body: a .markdown-body whose content is APPENDED incrementally by the
+   stream scheduler (bounded memory) instead of written whole. Shares markdown-body's link + context-menu
+   interactions and the .vv-content scroll-spy contract, so find / Contents / copy work on the growing
+   document. Mounting starts a stream of `path` (of `kind`); unmounting tears it down. The render is never
+   snapshotted, so a re-mount (tab-switch back / live-refresh) simply re-streams from the top — keeping the
+   working set bounded for arbitrarily large files. A thin top progress bar shows completion while loading."
+  [_path _kind]
+  (let [node        (atom nil)
+        source*     (atom nil)                                 ; logs carry no source-map; kept for the shared ctx menu
+        path*       (atom nil)
+        last-link   (atom nil)
+        detach*     (atom nil)
+        ctrl*       (atom nil)
+        last-toc-n  (atom 0)
+        refresh-raf (atom false)
+        ;; Records append at the END, so an already-measured record's offset never shifts — we only need to
+        ;; (re)measure when the outline GREW. rAF-coalesce bursts of batches into one spy refresh.
+        refresh-spy! (fn []
+                       (when-not @refresh-raf
+                         (reset! refresh-raf true)
+                         (js/requestAnimationFrame
+                          (fn []
+                            (reset! refresh-raf false)
+                            (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                              (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))]
+    (r/create-class
+     {:display-name "vv-ir-stream-body"
+      :component-did-mount  (fn [this]
+                              (let [[_ path kind] (r/argv this)]
+                                (reset! path* path)
+                                (reset! detach* (attach-content-interactions! @node source* path* last-link))
+                                (reset! ctrl* (stream-scheduler/start! @node path kind))))
+      :component-did-update (fn [_]
+                              (let [n (count @(rf/subscribe [:doc/toc]))]
+                                (when (not= n @last-toc-n)
+                                  (reset! last-toc-n n)
+                                  (refresh-spy!))))
+      :component-will-unmount (fn [_]
+                                (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
+                                (when @detach* (@detach*) (reset! detach* nil)))
+      :reagent-render (fn [_path _kind]
+                        ;; deref the streamed outline + progress so the component re-renders as the stream
+                        ;; grows → did-update re-measures the scroll-spy for the newly-appended records
+                        @(rf/subscribe [:doc/toc])
+                        (let [p        @(rf/subscribe [:doc/stream-progress])
+                              loading? (and p (< p 1))]
+                          [:<>
+                           [:div.vv-stream-progress {:class (when-not loading? "vv-stream-progress-done")}
+                            [:div.vv-stream-progress-bar {:style {:width (str (* 100 (or p 0)) "%")}}]]
+                           [:div.markdown-body {:ref (fn [el] (reset! node el))}]]))})))
 
 (defn- pdf-rect [^js node]
   (let [r (.getBoundingClientRect node)]
@@ -763,6 +828,11 @@
        (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [web-host (media/path->file-url (:doc/path doc))]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
+       ;; a large streamable doc renders as a bounded-memory INCREMENTAL stream (ir-stream-body drives it from
+       ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
+       ;; :doc/streaming? (stream-flag/enabled?), so they fall through to the byte-identical batch renderers.
+       (:doc/streaming? doc)       ^{:key (str "stream:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [ir-stream-body (:doc/path doc) (:doc/kind doc)]
        ;; PDF: the fixed-layout canvas by default; when "Reflow Text" is on and the extracted-text HTML is
        ;; ready, show that reflowable prose instead (an additive facet — the canvas render is untouched).
        (= "pdf" (:doc/kind doc))

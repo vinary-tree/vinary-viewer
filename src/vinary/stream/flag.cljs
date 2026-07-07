@@ -20,13 +20,22 @@
 
 (defn streamable? [kind] (contains? streamable-kinds kind))
 
+;; Kinds whose streaming front-end is actually implemented (grows as each phase lands). `enabled?` requires
+;; this so a large doc of an as-yet-unimplemented kind stays on the batch path rather than streaming with the
+;; wrong parser. Phase 1: logs/text.
+(def implemented-kinds #{"log" "text"})
+
+(defn implemented? [kind] (contains? implemented-kinds kind))
+
 (defn flag-on?
   "The effective on/off, independent of size: the persisted setting overrides the compile-time default."
   [setting] (if (some? setting) (boolean setting) stream-default))
 
 (defn enabled?
-  "Should THIS document stream? Flag on AND kind streamable AND size ≥ the kind's threshold."
+  "Should THIS document stream NOW? Flag on AND kind streamable AND its streaming front-end implemented AND
+   size ≥ the kind's threshold."
   [kind size setting]
   (and (flag-on? setting)
        (streamable? kind)
+       (implemented? kind)
        (>= (or size 0) (get thresholds kind js/Infinity))))
