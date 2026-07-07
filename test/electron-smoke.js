@@ -887,17 +887,24 @@ async function main() {
       mermaid: Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))
     };
   })()`;
+  // The flag-toggle parity check dispatches through re-frame as a global, which only the dev (:none) build
+  // exposes; the release (:simple) build encapsulates namespaces. So run the explicit off<->on parity in DEV
+  // only — release still exercises the IR path because it is the DEFAULT (the markdown assertions above and
+  // the office check below both flow through render-ir / render-office-ir). releaseBuild is defined earlier.
+  if (!releaseBuild) {
+  const validRender = `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'
+                       && Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))
+                       && Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`;
+  // IR is the DEFAULT render path now: toggle OFF to capture the legacy render, then back ON for the IR render.
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), false)); true`);
+  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
+  await delay(250);
+  await waitFor(() => evalIn(win, validRender), 'legacy markdown re-render (flag off)');
   const legacyRender = await evalIn(win, captureRender);
-  // toggle the :vv/ir flag ON (dev build ⇒ stable cljs symbol names) and re-render the same document
   await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), true)); true`);
   win.webContents.send('vv:open-files', { paths: [featureDocPath] });
   await delay(250);
-  await waitFor(
-    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'
-                       && Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))
-                       && Boolean(document.querySelector('.markdown-body .vv-mermaid svg'))`),
-    ':vv/ir re-render produces a valid markdown DOM (no render error)'
-  );
+  await waitFor(() => evalIn(win, validRender), ':vv/ir re-render produces a valid markdown DOM (no render error)');
   const irRender = await evalIn(win, captureRender);
   assert.strictEqual(irRender.h1, legacyRender.h1, ':vv/ir render must keep the H1');
   assert.deepStrictEqual(irRender.ids, legacyRender.ids, ':vv/ir render must produce identical heading ids');
@@ -905,9 +912,44 @@ async function main() {
   assert.strictEqual(irRender.inlineTex, legacyRender.inlineTex, ':vv/ir render must preserve inline math LaTeX');
   assert.strictEqual(irRender.displayTex, legacyRender.displayTex, ':vv/ir render must preserve display math LaTeX');
   assert.strictEqual(irRender.mermaid && legacyRender.mermaid, true, ':vv/ir render must keep the Mermaid SVG');
-  // restore the flag OFF for later markdown opens (the current DOM stays IR-rendered — parity-identical)
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("ir", "set-enabled"), false)); true`);
-  console.log('[ok] :vv/ir parity — common-IR render matches the legacy render (text + heading ids + math + mermaid)');
+  console.log('[ok] :vv/ir parity — common-IR render (now default) matches the legacy render (text + ids + math + mermaid)');
+  }
+
+  // --- office via the common IR: a synthetic office document renders through render-office-ir — its headings
+  // gain slug ids (the Contents TOC office lacked) and the shared GitHub-allowlist sanitizer strips dangerous
+  // markup (script / on* / javascript:). IR is the default, so simply opening the office doc exercises it.
+  const officeDocPath = path.join(ROOT, 'test', 'fixtures', 'smoke-report.docx');
+  state.contentByPath.set(officeDocPath, {
+    path: officeDocPath,
+    kind: 'office',
+    html: '<h1>Quarterly Report</h1><p onclick="evil()">Body text.</p><h2>Summary</h2>'
+        + '<script>bad()</script><a href="javascript:hack()">link</a>'
+  });
+  win.webContents.send('vv:open-files', { paths: [officeDocPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Quarterly Report'`),
+    'office document renders via the common IR'
+  );
+  const office = await evalIn(win, `(() => {
+    const b = document.querySelector('.markdown-body');
+    return {
+      h1: b.querySelector('h1') ? b.querySelector('h1').textContent.trim() : null,
+      ids: Array.from(b.querySelectorAll('h1,h2')).map((h) => h.id),
+      hasScript: /<script/i.test(b.innerHTML),
+      hasOnclick: /onclick/i.test(b.innerHTML),
+      hasJsUrl: /javascript:/i.test(b.innerHTML)
+    };
+  })()`);
+  assert.strictEqual(office.h1, 'Quarterly Report', 'office renders its heading via the common IR');
+  assert.deepStrictEqual(office.ids, ['quarterly-report', 'summary'], 'office headings gain slug ids (a Contents TOC) via IR');
+  assert.strictEqual(office.hasScript, false, 'office IR sanitizer strips <script>');
+  assert.strictEqual(office.hasOnclick, false, 'office IR sanitizer strips on* handlers');
+  assert.strictEqual(office.hasJsUrl, false, 'office IR sanitizer strips javascript: URLs');
+  console.log('[ok] office renders via the common IR — heading TOC + shared sanitizer (script/on*/javascript: stripped)');
+  // re-focus the markdown feature doc so the Copy-LaTeX tests below operate on it
+  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
+  await waitFor(() => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'`),
+    'return to the markdown feature document');
 
   // Copy LaTeX (path 1): Ctrl+C over a paragraph containing inline math must substitute the rendered
   // equation with its raw $…$ source — prose preserved, no glyphs, no leaked assistive MathML ("x2").
