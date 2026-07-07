@@ -145,13 +145,25 @@
             (.then (fn [api] (render-browser-tex api source display? k))))
         (js/Promise.resolve (render-node-tex source display? k))))))
 
-(defn normalize-github-math-escapes
-  "GitHub supports dollar-delimited math with backtick-wrapped contents, e.g. $`x^2`$.
+(defn strip-math-fence
+  "Clean the TeX of a math node produced from GitHub's backtick-wrapped inline form.
 
-   remark-math does not parse that escape form directly, so normalize it before parsing."
-  [markdown]
-  (str/replace (or markdown "") #"\$`([^`]+)`\$"
-               (fn [[_ source]] (str "$" source "$"))))
+   GitHub writes inline math as $`x^2`$ (backticks INSIDE the dollars). remark-math DOES parse that as an
+   inlineMath node, but keeps the backticks in the value (`x^2`), so MathJax would see literal backticks.
+   This strips a balanced leading/trailing backtick run → x^2. A math value with no wrapping backticks
+   (ordinary $x$) is returned unchanged. This runs ONLY on math nodes; a code span `$x$` is an inlineCode
+   node — never a math node — so it is untouched and stays literal (GitHub does not render math in code).
+
+   The former string-level normalize (a raw-markdown regex) was replaced by this mdast-level cleanup because
+   a pre-parse regex cannot see code-span boundaries and corrupted documents containing multiple `$…$`
+   inline-code examples."
+  [tex]
+  (let [tex (or tex "")]
+    (if-let [[_ open inner close] (re-matches #"^(`+)([\s\S]*?)(`+)$" tex)]
+      (if (and (= (count open) (count close)) (pos? (count inner)))
+        inner
+        tex)
+      tex)))
 
 (defn- display-code? [^js code]
   (or (.contains (.-classList code) "math-display")

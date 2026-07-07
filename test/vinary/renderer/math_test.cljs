@@ -36,3 +36,24 @@
     (is (nil? (math/delimit-tex false nil)))
     (is (nil? (math/delimit-tex true "")))
     (is (nil? (math/delimit-tex true nil)))))
+
+(deftest strip-math-fence-github-form
+  (testing "GitHub's $`…`$ inline math (parsed by remark-math to a value that KEEPS the backticks) is cleaned"
+    (is (= "x^2" (math/strip-math-fence "`x^2`")))
+    (is (= "\\oplus" (math/strip-math-fence "`\\oplus`")))
+    (is (= "a + b" (math/strip-math-fence "`a + b`")))))
+
+(deftest strip-math-fence-plain-math-untouched
+  (testing "ordinary $x$ math (no wrapping backticks) is returned verbatim"
+    (is (= "x^2" (math/strip-math-fence "x^2")))
+    (is (= "\\frac{a}{b}" (math/strip-math-fence "\\frac{a}{b}")))
+    (is (= "\\oplus" (math/strip-math-fence "\\oplus")))))
+
+(deftest strip-math-fence-edges
+  (testing "only a BALANCED wrapping run is stripped; degenerate inputs are safe"
+    (is (= "" (math/strip-math-fence "")))
+    (is (= "" (math/strip-math-fence nil)))
+    (is (= "`" (math/strip-math-fence "`")) "a lone backtick has no balanced pair → unchanged")
+    (is (= "``" (math/strip-math-fence "``")) "empty inner → not stripped to blank")
+    (is (= "x`y" (math/strip-math-fence "``x`y``")) "double-backtick fence stripped, inner backtick kept")
+    (is (= "a`b" (math/strip-math-fence "`a`b`")) "unbalanced middle backtick is inner content")))

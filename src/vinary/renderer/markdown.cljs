@@ -221,6 +221,31 @@
 ;; images) now lives in vinary.ir.backend.sanitize as the single schema shared by this pipeline and the IR
 ;; back-end. See that namespace for the policy rationale.
 
+(defn- clean-math-nodes!
+  "Depth-first walk of an mdast tree: strip GitHub's backtick fence from inlineMath/math nodes (see
+   math/strip-math-fence). remark-math precomputes the mdast→hast projection at PARSE time in
+   `node.data.hChildren`, and remark-rehype uses THAT (not `node.value`), so strip the fence in BOTH places."
+  [^js node]
+  (when node
+    (let [t (.-type node)]
+      (when (or (= t "inlineMath") (= t "math"))
+        (set! (.-value node) (math/strip-math-fence (.-value node)))
+        (when-let [^js data (.-data node)]
+          (when-let [^js hkids (.-hChildren data)]
+            (dotimes [i (.-length hkids)]
+              (let [^js hk (aget hkids i)]
+                (when (= "text" (.-type hk))
+                  (set! (.-value hk) (math/strip-math-fence (.-value hk))))))))))
+    (when-let [^js kids (.-children node)]
+      (dotimes [i (.-length kids)] (clean-math-nodes! (aget kids i))))))
+
+(defn- github-math
+  "A remark (mdast) transformer: normalize GitHub's $`…`$ inline math to clean TeX at the tree level, where
+   code spans are already distinct inlineCode nodes and so stay literal. Replaces the former raw-string
+   normalize, which could not see code-span boundaries and corrupted `$…$` inline-code examples."
+  []
+  (fn [_opts] (fn [tree _file] (clean-math-nodes! tree) tree)))
+
 (defn- base-pipeline
   "The shared remark → rehype pipeline through collect-metadata (everything BEFORE the stringify/compile
    step). Both the legacy string render and the IR render build on this identical prefix, so they can never
@@ -230,6 +255,7 @@
       (.use remark-parse)
       (.use remark-gfm)
       (.use remark-math)
+      (.use (github-math))   ; strip GitHub $`…`$ backtick fences on the mdast (code spans stay literal)
       ;; allowDangerousHtml keeps raw HTML as `raw` nodes; rehype-raw parses them into real hast elements;
       ;; rehype-sanitize (GitHub allowlist) then strips anything dangerous. This MUST run before the app's
       ;; own trusted hast plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize
@@ -266,7 +292,7 @@
    (let [metadata (atom {:toc [] :assets #{}})]
      (-> (base-pipeline metadata base-dir cache-token)
          (.use rehype-stringify)
-         (.process (math/normalize-github-math-escapes md))
+         (.process md)   ; GitHub $`…`$ handling now lives in the base-pipeline's github-math mdast transformer
          (.then (fn [file] (apply-posts (str file))))
          (.then (fn [html]
                   {:html html
@@ -292,7 +318,7 @@
      (-> (base-pipeline metadata base-dir cache-token)
          (.use (capture-hast captured))
          (.use rehype-stringify)
-         (.process (math/normalize-github-math-escapes md))
+         (.process md)   ; GitHub $`…`$ handling now lives in the base-pipeline's github-math mdast transformer
          (.then (fn [_file]
                   (let [ir (ir-md/hast->ir @captured)]
                     (-> (apply-posts (ir-html/lower ir))

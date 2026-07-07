@@ -846,6 +846,7 @@ async function main() {
       `![One](data:image/svg+xml,${badgeSvg}) ![Two](data:image/svg+xml,${badgeSvg})\n\n` +
       'Copyable preview text lives here.\n\n' +
       'Inline math $`x^2`$ and display math:\n\n$$\n\\frac{a}{b}\n$$\n\n' +
+      'A code span `$x^2$` stays literal.\n\n' +
       '```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n',
     stamp: Date.now()
   });
@@ -869,6 +870,20 @@ async function main() {
   }))()`);
   assert.strictEqual(mathTex.inline, 'x^2', 'inline math must carry its raw LaTeX in data-tex');
   assert.strictEqual(mathTex.display, '\\frac{a}{b}', 'display math must carry its raw LaTeX in data-tex');
+  // GFM precedence: `$x^2$` (backticks OUTSIDE) is a CODE SPAN → literal `$x^2$`, NOT math (whereas bare
+  // $x^2$ and $`x^2`$ ARE math). Regression guard for the pre-parse-regex bug that leaked math into code spans.
+  const codeSpanMath = await evalIn(win, `(() => {
+    const lit = Array.from(document.querySelectorAll('.markdown-body code')).find(c => c.textContent.trim() === '$x^2$');
+    return {
+      found: Boolean(lit),
+      isMath: lit ? (lit.classList.contains('language-math') || lit.classList.contains('math-inline')) : null,
+      hasMjx: lit ? Boolean(lit.querySelector('mjx-container')) : null
+    };
+  })()`);
+  assert.strictEqual(codeSpanMath.found, true, '`$x^2$` renders as a literal <code> span (code outranks $…$ math in GFM)');
+  assert.strictEqual(codeSpanMath.isMath, false, 'the code span must NOT be a math node');
+  assert.strictEqual(codeSpanMath.hasMjx, false, 'the code span must contain no MathJax rendering');
+  console.log('[ok] `$x^2$` inline code stays literal (no math leak); $`x^2`$ + bare $…$ still render as math');
   // Regression guard for the double-render bug: MathJax's <mjx-assistive-mml> must stay in the DOM (a11y)
   // but be clipped + unselectable by our re-added rule, so Chromium can't paint it as a text-size duplicate.
   const assistive = await evalIn(win, `(() => {

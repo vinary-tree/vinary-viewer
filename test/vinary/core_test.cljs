@@ -474,8 +474,10 @@
       (is (str/includes? svg "MathJax"))
       (is (str/includes? svg "<svg"))
       (is (= svg (math/render-tex "x^2" false)))))
-  (testing "GitHub backtick-dollar math escapes normalize for remark-math"
-    (is (= "Inline $x^2$." (math/normalize-github-math-escapes "Inline $`x^2`$.")))))
+  (testing "GitHub backtick-dollar inline math ($`x^2`$) has its fence stripped to clean TeX"
+    ;; the former raw-string normalize was replaced by an mdast-level fence strip (math/strip-math-fence),
+    ;; so a code span `$x$` stays literal; full-pipeline behavior is covered by markdown-code-span-vs-math
+    (is (= "x^2" (math/strip-math-fence "`x^2`")))))
 
 (deftest menu-access-keys
   (testing "top-level Alt access keys resolve to menus"
@@ -1012,5 +1014,33 @@
         (.catch (fn [e]
                   (is false (str "Markdown render failed: " (.-message e)))
                   (done))))))
+
+(deftest markdown-code-span-vs-math
+  ;; GFM precedence: an inline code span outranks $…$ math, so `$\oplus$` (backticks OUTSIDE) is LITERAL code,
+  ;; while bare $\oplus$ and GitHub's $`x^2`$ (backticks inside) are math. In :node-test there is no DOMParser,
+  ;; so render-html-math is a no-op and a math node stays as its <code class="language-math"> placeholder —
+  ;; a convenient "is it math?" oracle. A literal code span must have NO language-math class.
+  (async done
+    (-> (js/Promise.all
+         #js [(markdown/render-ir "A `$\\oplus$` span.\n" nil 1)
+              (markdown/render-ir "Bare $\\oplus$ math.\n" nil 1)
+              (markdown/render-ir "GH $`x^2`$ math.\n" nil 1)])
+        (.then (fn [results]
+                 (let [code (:html (aget results 0))
+                       bare (:html (aget results 1))
+                       gh   (:html (aget results 2))]
+                   ;; the literal $\oplus$ text is preserved inside a <code> element (source-positions wraps
+                   ;; the text in a <span>, so match leniently), and it is NOT rendered as math
+                   (is (str/includes? code "$\\oplus$") "literal $\\oplus$ text is preserved")
+                   (is (re-find #"<code[\s\S]*?\$\\oplus\$[\s\S]*?</code>" code) "the literal is inside a <code> element")
+                   (is (not (str/includes? code "language-math")) "a code span is NOT rendered as math")
+                   (is (not (str/includes? code "math-inline")))
+                   (is (str/includes? bare "language-math") "bare $…$ IS inline math")
+                   (is (str/includes? bare "\\oplus"))
+                   (is (str/includes? gh "language-math") "$`x^2`$ IS inline math")
+                   (is (str/includes? gh "x^2"))
+                   (is (not (str/includes? gh "`x^2`")) "the GitHub backtick fence is stripped from the TeX"))
+                 (done)))
+        (.catch (fn [e] (is false (str "render failed: " (.-message e))) (done))))))
 
 (defn -main [& _] (run-tests))
