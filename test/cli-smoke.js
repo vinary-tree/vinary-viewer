@@ -111,6 +111,14 @@ ok(srcOut.includes(ESC + '['), 'source is syntax-highlighted (tree-sitter → SG
 // plain source: gutter + text, no escapes
 ok(!run(['--plain', src]).includes(ESC), '--plain source contains ZERO escape bytes');
 
+// ── 4c. PDF → headless pdf.js text extraction → reflowed prose (not raw bytes / a delimited table) ────────
+const pdf = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
+if (fs.existsSync(pdf)) {
+  const pout = run(['--no-color', '--width', '60', pdf]);
+  ok(pout.includes('Vinary PDF Smoke'), 'PDF renders its extracted text (pdf.js reflow)');
+  ok(!pout.startsWith('%PDF') && !pout.includes('┌'), 'PDF is NOT dumped as raw bytes or a box-drawing table');
+}
+
 // ── 5. bounded-memory streaming: peak RSS must NOT scale with file size ───────────────────────────
 // Distinct event numbers per line maximise a would-be per-record accumulation (each line a unique slug),
 // so a regression of the O(1) record-counter back to a growing seen-map is maximally exposed.

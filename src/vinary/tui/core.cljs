@@ -88,6 +88,8 @@
       (load-batch {:kind kind :path file :text (.readFileSync fs file "utf8")} aopts base-dir)
       (= "image" kind)
       (load-batch {:kind "image" :path file} aopts base-dir)
+      (= "pdf" kind)
+      (load-batch {:kind "pdf" :path file :bytes (.readFileSync fs file)} aopts base-dir)
       :else
       (-> (.openUri cs file) (.then (fn [p] (load-batch (js->clj p :keywordize-keys true) aopts base-dir)))))))
 

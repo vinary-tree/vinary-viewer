@@ -123,7 +123,9 @@
                      ;; image branch (it's the GUI's file:// <img> path), so it would mis-return the raw bytes as
                      ;; text — go direct, mirroring the text-kinds bypass.
                      (= "image" kind) (emit-doc {:kind "image" :path file} aopts opts)
-                     ;; office/table/pdf/archive/directory → content_service parses them
+                     ;; pdf → read the raw bytes (a Buffer; js->clj would mangle it) for headless pdf.js extraction
+                     (= "pdf" kind) (emit-doc {:kind "pdf" :path file :bytes (.readFileSync fs file)} aopts opts)
+                     ;; office/table/archive/directory → content_service parses them
                      :else (-> (.openUri cs file)
                                (.then (fn [payload] (emit-doc (js->clj payload :keywordize-keys true) aopts opts))))))))
         (.catch (fn [e] (ewrite (str "vv-cli: " file ": " (.-message e))) (set! (.-exitCode js/process) 1))))))

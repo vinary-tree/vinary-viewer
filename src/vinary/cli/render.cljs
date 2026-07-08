@@ -22,6 +22,7 @@
             [vinary.ir.backend.ansi :as ansi]
             [vinary.terminal.syntax :as tsyntax]
             [vinary.terminal.graphics :as gfx]
+            [vinary.terminal.pdf :as tpdf]
             [vinary.grammar-catalog :as gc]
             [vinary.stream.protocol :as proto]))
 
@@ -61,10 +62,13 @@
 (defn payload->ir
   "content_service payload → Promise<{:ir :toc :block-sep}>. `opts` may carry :source-ir (a fn text→Promise<IR>
    for the source kind, injected by the CLI since it needs on-disk tree-sitter grammars)."
-  [{:keys [kind text html path entries] :as payload} opts]
+  [{:keys [kind text html path entries bytes] :as payload} opts]
   (letfn [(done [ir sep] (js/Promise.resolve {:ir ir :toc (ir-toc/toc-of ir) :block-sep sep}))]
     (case kind
       "markdown" (-> (markdown->ir text (pipeline/dir-of path))
+                     (.then (fn [ir] {:ir ir :toc (ir-toc/toc-of ir) :block-sep "\n\n"})))
+      ;; pdf → headless pdf.js text extraction → reflowable prose IR (paragraphs + anchored headings)
+      "pdf"      (-> (tpdf/pdf->ir bytes)
                      (.then (fn [ir] {:ir ir :toc (ir-toc/toc-of ir) :block-sep "\n\n"})))
       "log"      (done (log->ir text) "\n")
       "text"     (done (ir-log/text->ir text) "\n")

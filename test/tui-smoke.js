@@ -75,6 +75,13 @@ const streamed = strip(drive('G', biglog, ['--no-color', '--width', '50']));
 ok(streamed.includes('event 129999'), 'streamed log: G reaches the final record');
 ok(/\(\+\d+ earlier\)/.test(streamed), 'the bounded ring dropped older lines (a "+N earlier" indicator is shown)');
 
+// ── 5b. PDF: headless pdf.js reflow renders in the TUI ─────────────────────────
+const pdf = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
+if (fs.existsSync(pdf)) {
+  ok(strip(drive('', pdf, ['--no-color', '--width', '50'])).includes('Vinary PDF Smoke'),
+     'a PDF opens in the TUI (pdf.js text extraction + reflow)');
+}
+
 // ── 6. pseudo-tty teardown check (skippable: needs python3 + a Linux pty) ───────
 (function ptyTeardown() {
   const py = `

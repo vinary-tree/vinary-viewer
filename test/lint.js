@@ -16,6 +16,7 @@ const log = (ok, msg) => { console.log((ok ? '✓ ' : '✗ ') + msg); if (!ok) f
 const jsFiles = [
   'src/sidebar.js', 'src/patch-create-window.js', 'src/patch-renderer-main.js',
   'src/vinary/main/content_service.js',
+  'resources/public/js/pdf-loader.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
   'test/git-tree-smoke.js', 'test/cli-smoke.js', 'test/graphics-smoke.js', 'test/tui-smoke.js',
