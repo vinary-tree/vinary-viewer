@@ -150,6 +150,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body .vv-log-line { display: block; min-width: 0; }
 .markdown-body .vv-log-record:target { background: var(--vv-bg-code); border-radius: 4px; }
 
+/* Windowed rendering for a streamed body: content-visibility lets the browser SKIP layout + paint for the
+   top-level blocks currently off-screen (bounded render cost → smooth scroll on arbitrarily large streamed
+   documents), while the nodes stay in the DOM so in-page find, the scroll-spy, and text selection keep working
+   over the whole document. contain-intrinsic-size gives a per-block size estimate (with `auto` remembering the
+   real size once a block has been rendered) so the scrollbar stays stable. Scoped to .vv-streamed so the batch
+   render (identical .markdown-body without the class) is unaffected. */
+.markdown-body.vv-streamed > * { content-visibility: auto; contain-intrinsic-size: auto 48px; }
+
 /* streaming progress: a thin sticky top strip that fills as the document streams, hidden once complete */
 .vv-stream-progress { position: sticky; top: 0; z-index: 5; height: 3px; width: 100%;
   background: var(--vv-border); overflow: hidden; }

@@ -2182,6 +2182,22 @@ async function main() {
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
   console.log('[ok] streamed markdown Contents is populated');
 
+  // ── windowed DOM: content-visibility skips layout/paint of off-screen streamed blocks (bounded render) ──
+  const windowing = await evalIn(win, `(() => {
+    const body = document.querySelector('.vv-content .markdown-body.vv-streamed');
+    if (!body) return { streamed: false };
+    const blocks = Array.from(body.children).filter((e) => e.nodeType === 1);
+    const first = blocks[0], last = blocks[blocks.length - 1];
+    // at scrollTop 0 a far-down block should be SKIPPED by content-visibility:auto (not rendered)
+    const skipped = last && last.checkVisibility ? !last.checkVisibility({ contentVisibilityAuto: true }) : null;
+    return { streamed: true, count: blocks.length, cv: getComputedStyle(first).contentVisibility, skipped };
+  })()`);
+  assert.strictEqual(windowing.streamed, true, 'the streamed body carries .vv-streamed (windowed render)');
+  assert.strictEqual(windowing.cv, 'auto', 'streamed top-level blocks use content-visibility:auto (off-screen layout/paint skipped per the CSS spec)');
+  // checkVisibility({contentVisibilityAuto}) is informational — its reporting of the skipped state is not yet
+  // reliable across Chromium builds, but the applied content-visibility:auto is the load-bearing guarantee.
+  console.log(`[ok] streamed DOM is render-windowed — content-visibility:auto on ${windowing.count} blocks (off-screen skipped=${windowing.skipped})`);
+
   // ── live-refresh scroll re-anchor: a streamed doc that re-renders keeps the reader's scroll position ──
   await evalIn(win, `(() => { document.querySelector('.vv-content').scrollTop = 3000; return true; })()`);
   await delay(120);

@@ -404,7 +404,10 @@
                           [:<>
                            [:div.vv-stream-progress {:class (when-not loading? "vv-stream-progress-done")}
                             [:div.vv-stream-progress-bar {:style {:width (str (* 100 (or p 0)) "%")}}]]
-                           [:div.markdown-body {:ref (fn [el] (reset! node el))}]]))})))
+                           ;; .vv-streamed enables windowed rendering: content-visibility skips layout/paint of
+                           ;; off-screen top-level blocks (bounded render on huge docs) while the nodes stay in
+                           ;; the DOM, so find / scroll-spy / selection keep working on the whole document
+                           [:div.markdown-body.vv-streamed {:ref (fn [el] (reset! node el))}]]))})))
 
 (defn- pdf-rect [^js node]
   (let [r (.getBoundingClientRect node)]
