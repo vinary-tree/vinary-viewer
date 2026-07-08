@@ -38,14 +38,28 @@ Added
     - Full AMS LaTeX family for MathJax: amscd commutative diagrams (\begin{CD}) and
       boldsymbol (\boldsymbol), in addition to the existing amsmath/amssymb + AMS
       fonts.
+    - Terminal document previews -- a second renderer over the shared IR / streaming
+      spine: `vv --cli <file>` renders once to stdout (pipe-friendly; ANSI text with
+      Sixel graphics), and `vv --tui <file>` opens an interactive full-screen pager
+      (in-page find, Contents outline, scrolling). The `vv` launcher is now a mode
+      dispatcher -- `vv [files…]` opens the desktop GUI (the default; `--gui` is an
+      accepted no-op), `vv --cli` / `vv --tui` open the terminal renderers, and
+      `vv --help` / `vv --version` print and exit without launching a window.
+      install.sh builds and installs all three modes from the one launcher.
 
 Changed
-    - MathJax is now built from source (mathjax-full/js/*, bundled by shadow-cljs) as
-      one engine shared by the renderer and the Node tests, importing only the safe
-      TeX packages -- replacing the separately-loaded es5 tex-svg.js script. The
+    - MathJax upgraded to v4 and built from source (@mathjax/src 4.1.3, bundled by
+      shadow-cljs) as one engine shared by the renderer and the Node tests, importing
+      only the safe TeX packages -- replacing the separately-loaded es5 tex-svg.js
+      script. Math typesets in the Latin Modern ("MathJax Modern") font
+      (@mathjax/mathjax-modern-font), matching the Latin Modern Roman prose body. The
       dangerous html/require/autoload packages are never imported (absent from the
       bundle), so \href{javascript:...} is unreachable by construction. Assistive
       MathML (a11y) is preserved; math now renders synchronously (no async load).
+    - The prose / Markdown body font is now Latin Modern Roman (the GUST e-foundry
+      successor to Computer Modern -- the LaTeX look), self-hosted as WOFF2 under
+      assets/fonts/lm-roman/ (GUST Font License), replacing Noto Sans so body text
+      matches the Latin Modern math. Code / logs / tables stay Fira Code.
     - Markdown and office render through the common IR unconditionally; output is
       byte-identical to the retired legacy path (guaranteed by the lossless HAST
       round-trip, ir.parity-test).

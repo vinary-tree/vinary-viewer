@@ -74,13 +74,18 @@ usual Linux desktop runtime dependencies.
 
 ```bash
 ./install.sh
-vv README.md
+
+vv README.md                 # open in the desktop GUI (one tab per file/URL) — the default
+vv --cli README.md | less    # render to the terminal (one-shot, pipe-friendly)
+vv --tui README.md           # page interactively in the terminal (/ find · t contents · q quit)
+vv --help
 ```
 
-`./install.sh` runs `npm install`, builds the app, and installs `vinary-viewer`
-plus the shorter `vv` launcher into `~/.local/bin` by default. Override the
-launcher directory with `BIN=/path/to/bin ./install.sh`. Remove launchers with
-`./uninstall.sh`.
+`vv` is **one command with three modes**: the desktop GUI (default; `--gui` is an accepted no-op),
+`--cli` for a one-shot terminal render, and `--tui` for an interactive terminal viewer.
+`./install.sh` runs `npm install`, builds the GUI **and the terminal tools**, and installs the single
+`vinary-viewer`/`vv` launcher into `~/.local/bin` by default. Override the launcher directory with
+`BIN=/path/to/bin ./install.sh`. Remove the launcher with `./uninstall.sh`.
 
 For development without installing launchers:
 

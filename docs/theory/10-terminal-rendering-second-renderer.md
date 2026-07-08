@@ -94,7 +94,7 @@ for a misdetected terminal and to make graphics testable headlessly). **Math** r
 
 ## 4. The TUI: a pure core behind a thin raw-ANSI driver
 
-`vv-tui` is a full-screen interactive viewer built on **raw ANSI** — no ncurses/blessed. The design isolates all
+`vv --tui` is a full-screen interactive viewer built on **raw ANSI** — no ncurses/blessed. The design isolates all
 policy in a **pure, terminal-free core** and confines side effects to a **thin driver**, so the interesting logic
 is unit-tested without a pseudo-tty.
 
@@ -143,7 +143,7 @@ are uncatchable — the acknowledged residual.
 
 ### 4.3 The `--drive` test seam
 
-Raw mode needs a TTY, which a piped test lacks. `vv-tui --drive <keyfile>` replays key bytes through the *same*
+Raw mode needs a TTY, which a piped test lacks. `vv --tui --drive <keyfile>` replays key bytes through the *same*
 `keys → state → frame` pipeline and dumps the final frame deterministically (forced width), so scroll/find/toc/
 streaming are asserted with no pseudo-tty; a small Linux/python-`pty` check covers only the teardown invariants
 (`ESC[?1049h` on start, `ESC[?1049l` + cursor restore on `q`) that `--drive` cannot observe.
@@ -152,7 +152,7 @@ streaming are asserted with no pseudo-tty; a small Linux/python-`pty` check cove
 
 `terminal.stream/stream-records!` is the sink-agnostic, cancellable open → pull → feed → emit → finish → close loop
 over `content_service`'s pull-cursor + the `log-stream` `StreamParser` — the same WPDA core [chapter 09] describes,
-now in a terminal. `vv-cli` supplies a stdout sink (`vv-cli huge.log | less` never holds the whole file); the TUI
+now in a terminal. `vv --cli` supplies a stdout sink (`vv --cli huge.log | less` never holds the whole file); the TUI
 appends to the viewport ring, paced by `setImmediate`. This is where the bounded-memory guarantee pays off: a
 multi-GB log streams to either surface with a working set of the open record + one WPDA config.
 

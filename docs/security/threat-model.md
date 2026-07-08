@@ -228,7 +228,7 @@ runs immediately after `rehype-raw` and *before* the app's own trusted hast plug
   (not in the allowlist). `rehype-slug` ids, `rehype-highlight` `hljs` spans, and the app's `file://`
   srcs / `data-vv-source-*` / `vv-figure-link` are all added *after* sanitize and are trusted.
 - Math (MathJax) and Mermaid (`securityLevel:"strict"`) run as post-stringify SVG generators over local
-  document text. MathJax is built **from source** (`mathjax-full/js/…`, bundled by shadow-cljs — one engine for
+  document text. MathJax is built **from source** (MathJax 4, `@mathjax/src/cjs/…`, bundled by shadow-cljs — one engine for
   the renderer and the Node tests; see `vinary.renderer.math`) importing **only** the safe TeX packages
   `[base ams amscd boldsymbol newcommand configmacros noerrors noundefined]`. The dangerous `html` (`\href`),
   `require`, and `autoload` packages are **never imported**, so they are absent from the module graph entirely

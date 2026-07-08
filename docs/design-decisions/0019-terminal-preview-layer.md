@@ -14,8 +14,8 @@ segments records in bounded memory. Until now only the **Electron GUI** consumed
 HTML, `stream.sink` writes it into the DOM, `stream.scheduler` paces on `requestIdleCallback`, and
 `stream.transport` pulls bytes over Electron IPC.
 
-We wanted to **preview documents from the command line** — a one-shot `vv-cli file` (pipe-friendly, `| less`) and
-an interactive full-screen `vv-tui file` — reusing that same spine rather than forking a second document engine.
+We wanted to **preview documents from the command line** — a one-shot `vv --cli file` (pipe-friendly, `| less`) and
+an interactive full-screen `vv --tui file` — reusing that same spine rather than forking a second document engine.
 The question was *how* to add a terminal front-end without (a) duplicating the front-ends/decoder, (b) dragging in
 Electron or a browser, or (c) pulling in a heavy TUI toolkit.
 
@@ -55,8 +55,8 @@ package "GUI renderer (Electron)" #E6F4EA {
 package "Terminal renderer (new)" #FCE8E6 {
   [ir.backend.ansi] as ANSI
   [terminal.{caps,syntax,graphics,pdf,stream}] as TERM
-  [vv-cli\ncli.core] as CLI
-  [vv-tui\ntui.*] as TUI
+  [vv --cli\ncli.core] as CLI
+  [vv --tui\ntui.*] as TUI
 }
 
 CS --> FE
@@ -104,7 +104,7 @@ The layer decomposes into sub-decisions, each embodied in code:
 
 4. **One cancellable streaming engine, shared with the CLI.** `terminal.stream/stream-records!` is the
    sink-agnostic open → pull → feed → emit → finish → close loop over `content_service`'s pull-cursor + the
-   `log-stream` `StreamParser`; `vv-cli` supplies a stdout sink, the TUI a viewport-append sink. A huge log streams
+   `log-stream` `StreamParser`; `vv --cli` supplies a stdout sink, the TUI a viewport-append sink. A huge log streams
    into a **bounded viewport ring** (`tui.viewport` `:cap`) so RSS stays flat regardless of log length.
 
 5. **Headless PDF text extraction.** `terminal.pdf` runs pdf.js's legacy build (pure JS, no canvas) to extract
@@ -113,7 +113,7 @@ The layer decomposes into sub-decisions, each embodied in code:
    `resources/public/js/pdf-loader.js` (a plain CommonJS file, required at runtime via a computed path so shadow
    neither bundles nor Closure-analyses it) performs the `import()`.
 
-6. **A `--drive <keyfile>` test seam.** `vv-tui --drive` replays key bytes through the same
+6. **A `--drive <keyfile>` test seam.** `vv --tui --drive` replays key bytes through the same
    keys → state → frame pipeline and dumps the final frame deterministically, so the interactive behaviour is
    testable **without a pseudo-tty**; a small Linux/python-pty check covers only the teardown invariants `--drive`
    cannot see.
@@ -125,14 +125,14 @@ requires the terminal layer, so the GUI is untouched.
 ## Consequences
 
 - **Positive.** One document engine serves three surfaces (GUI, CLI, TUI). Bounded-memory streaming (the hard
-  part) carries straight over: `vv-cli huge.log | less` and a TUI streaming a growing log both fall out of the
+  part) carries straight over: `vv --cli huge.log | less` and a TUI streaming a growing log both fall out of the
   existing WPDA core. The pure ANSI backend + pure TUI core are fully unit-tested; the CLI/TUI wiring is
   smoke-tested end-to-end (`test/{cli,graphics,tui}-smoke.js`). A latent unbounded-memory bug in the shared
   log-stream parser (an accumulating slug map) was found and fixed while proving the CLI streaming path headless,
   benefiting the GUI too.
 - **Negative / limits.** The terminal has no canvas: fixed-layout PDF figures degrade to their extracted text,
   mermaid to its source, and math to LaTeX source. The TUI forces graphics **off** (images → placeholders) so the
-  scrolling viewport is line-exact; `vv-cli` in the same terminal *does* draw images. A streamed log's viewport is
+  scrolling viewport is line-exact; `vv --cli` in the same terminal *does* draw images. A streamed log's viewport is
   a bounded ring — the absolute top of a multi-GB log is not retained (a `less`-with-scrollback-limit model). The
   pdf.js runtime-require depends on `resources/public/` shipping alongside the compiled script.
 
