@@ -9,5 +9,5 @@
     "path": "resources/grammars-src/tree-sitter-d2",
     "query": "queries/highlights.scm"
   },
-  "sourceRev": "45c8ee8e96fda4745705dd8232f8435131ec1cd0"
+  "sourceRev": "dbf45fc41d968695e2cd62214974b8baf7911c88"
 }
