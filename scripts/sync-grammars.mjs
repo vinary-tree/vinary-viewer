@@ -144,7 +144,16 @@ function copyIfDifferent(from, to) {
 }
 
 function sourceRev(srcDir) {
+  // A meaningful rev exists only when srcDir belongs to a DIFFERENT git repo than this one: an upstream
+  // grammar cloned into .cache/…, or a grammar sourced from a sibling project (e.g. metta ←
+  // ../MeTTa-Compiler/tree-sitter-metta), where HEAD is that repo's real, stable rev. When srcDir is a plain
+  // subdirectory of THIS (vinary-viewer) repo (tree-sitter-bnfc / tree-sitter-d2), `git rev-parse HEAD` just
+  // echoes vinary-viewer's own HEAD — a self-referential value that re-pins on every commit (a churn
+  // treadmill). Those grammars' versions are already tracked by this repo's history, so record null (as for
+  // `existing` grammars), keeping source.json stable.
   try {
+    const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: srcDir, capture: true }).trim();
+    if (fs.realpathSync(top) === fs.realpathSync(root)) return null;
     return run('git', ['rev-parse', 'HEAD'], { cwd: srcDir, capture: true }).trim();
   } catch (_) {
     return null;

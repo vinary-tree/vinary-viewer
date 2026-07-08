@@ -10,5 +10,5 @@
     "path": "resources/grammars-src/tree-sitter-bnfc",
     "query": "queries/highlights.scm"
   },
-  "sourceRev": "06632ecdd0bf459fb86b28a74cd5b90d432af45c"
+  "sourceRev": null
 }
