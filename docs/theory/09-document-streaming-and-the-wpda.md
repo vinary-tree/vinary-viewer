@@ -230,6 +230,29 @@ hidden. On `:done` the parser is flushed (`finish`) and `:stream/done` fires; on
 the controller is marked destroyed (in-flight appends bail) and the main-process session is closed, releasing
 its fd. The electron smoke asserts the session registry returns to `0` — no fd/session leak.
 
+### 7.1 · Windowed rendering — bounded render cost, intact DOM
+
+Streaming bounds the *parse* (logs) and never holds the whole HTML string (progressive kinds), but the appended
+**node count** still grows with the streamed prefix — and rendering (layout + paint) of a very large DOM is the
+scroll-jank / dropped-frame risk. The streamed body (`.markdown-body.vv-streamed`) therefore windows its
+render with CSS: each top-level block carries
+
+```css
+content-visibility: auto;
+contain-intrinsic-size: auto 48px;
+```
+
+so the browser **skips layout and paint for the blocks that are off-screen** (bounded render work, whatever the
+document size — including the off-screen appends *during* streaming), while `contain-intrinsic-size` supplies a
+placeholder height (`auto` remembering each block's real size once it has been rendered) to keep the scrollbar
+stable. This is the browser-native form of the windowing the plan sketched as `release-canvas!`-style node
+*removal* — but it is strictly better here: because every node **stays in the DOM**, the whole-document
+capabilities (in-page find, the content-agnostic scroll-spy, and text selection — all of which walk the live
+DOM) keep working over the entire document. Node *removal* would break all three and, for logs (whose bytes are
+not retained), would additionally force re-streaming dropped byte ranges. Bounding the node *count* is thus a
+deliberately-unclaimed further optimization; the load-bearing win — bounded *render* — is captured with two
+declarations and no capability loss.
+
 ---
 
 ## 8 · Complexity
@@ -256,7 +279,7 @@ Streaming trades a higher constant on total time for an **asymptotically smaller
 | **1** | **Logs/text — bounded WPDA byte-stream (this document's model)** | ✅ >5 MiB log streams progressively; find + Contents mid-stream; small logs unchanged; no fd leak |
 | 2 | Markdown — **progressive block-commit** (§6.1), not micromark-incremental | ✅ streamed `innerHTML` **byte-identical** to batch over a 300 KiB corpus |
 | 3 | PDF-reflow — progressive block-commit; canvas already page-windowed | ✅ streamed reflow byte-identical to batch reflow |
-| 4 | Capabilities hardened + **default-on** | ✅ find-materialize, live-refresh re-anchor, Preferences toggle, `stream-default true`. *Windowed DOM: scoped optional, not implemented (streamed DOM = batch DOM → no regression).* |
+| 4 | Capabilities hardened + **default-on** + **windowed DOM** | ✅ find-materialize, live-refresh re-anchor, Preferences toggle, `stream-default true`, and a `content-visibility:auto` **render-window** (off-screen blocks skip layout/paint; nodes stay in the DOM so find/spy/selection keep working — chosen over node removal, which would break all three). |
 | 5 | Source — spike-gated | ✅ **stays batch**: CodeMirror 6 already viewport-virtualizes; async outline parse. No beneficial streaming path. |
 
 ---

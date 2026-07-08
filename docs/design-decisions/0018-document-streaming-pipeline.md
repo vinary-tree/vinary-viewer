@@ -118,12 +118,15 @@ Rollout was **phased, each phase green behind the flag**, and is now complete:
   document-global median line-height). The fixed-layout **canvas view is untouched** — it already windows pages
   via `IntersectionObserver` + `release-canvas!`, the PDF's genuine bounded-memory stream.
 - **Phase 4** — capabilities hardened + **default-on**: find-materialize (drain-before-search, the PDF
-  `ensure-all-text!` analog), live-refresh scroll re-anchor, a **Preferences ▸ Documents** toggle, and
-  `stream-default` flipped **true** (large docs stream by default; the setting overrides). *Windowed DOM* (drop
-  off-screen streamed blocks) was scoped **optional** in the plan and is **not** implemented: the streamed DOM
-  is byte-identical to — and thus no larger than — the batch DOM, so its absence is an optimization gap, not a
-  regression; the parse/transport working set is already bounded for logs, and Markdown/PDF text is inherently
-  in memory. It remains a clean future optimization (the `release-canvas!` pattern generalized to blocks).
+  `ensure-all-text!` analog), live-refresh scroll re-anchor, a **Preferences ▸ Documents** toggle,
+  `stream-default` flipped **true** (large docs stream by default; the setting overrides), and a **windowed
+  DOM**. The window is done with `content-visibility: auto` (+ `contain-intrinsic-size: auto 48px`) on the
+  streamed body's top-level blocks (`.markdown-body.vv-streamed > *`): the browser **skips layout + paint for
+  off-screen blocks** — bounding the render cost so scrolling and off-screen appends stay smooth on arbitrarily
+  large documents — while every node **stays in the DOM**, so find, the scroll-spy, and text selection keep
+  working over the whole document. This was chosen over `release-canvas!`-style node *removal* deliberately:
+  removal would break those three capabilities (they walk the live DOM) and, for logs, force re-streaming
+  dropped byte ranges; `content-visibility` bounds the *expensive* part (render) without that cost.
 - **Phase 5** — **source stays batch** (spike outcome): CodeMirror 6 already **viewport-virtualizes** its
   rendering (bounded DOM for arbitrarily large files) and the tree-sitter outline parse is already async, so
   block-streaming a live editor would only fight its own virtualization — there is no clean, beneficial path.
@@ -153,10 +156,12 @@ parser. (PDF-reflow streaming is gated by the reflow toggle + the flag in `conte
 **Negative / accepted trade-offs.**
 
 - **Total CPU is not lower.** Deliberate — see Context. Mitigated by never streaming small/medium docs.
-- **The rendered DOM still grows with the streamed prefix** (no windowing — the optional Phase 4 item, above).
-  It is never *larger* than the batch DOM (which the app already ships), so this is an optimization gap, not a
-  regression; "bounded memory" precisely means the *parse/transport* working set for logs, and the non-held
-  HTML string for the progressive kinds.
+- **The rendered DOM's node *count* still grows with the streamed prefix**, even though its *render cost* is
+  now windowed (`content-visibility`, Phase 4 above) and it is never *larger* than the batch DOM. Bounding the
+  node count too would need node removal + re-streaming (logs) and would break find/spy/selection — a poor
+  trade for the render win already captured. "Bounded memory" precisely means the *parse/transport* working
+  set for logs, the non-held HTML string for the progressive kinds, and the *bounded render* (not node count)
+  for the windowed DOM.
 - **Re-mount re-streams from the top** (the render is never snapshotted). A tab-switch away/back or a
   live-refresh loses the precise scroll position *transiently*; Phase 4's re-anchor saves the scrollTop and
   restores it once the re-stream settles (`scheduler/when-settled`).
@@ -172,9 +177,10 @@ stack records kept whole by exact count, Contents populated + navigated, find in
 session registry drains to `0` — no fd leak); a >256 KiB Markdown streams **byte-identically** to its batch
 render (slug dedup across 603 repeated headings, a forward reference resolved at EOF, loose lists, highlighted
 code, tables, source positions); PDF-reflow streams byte-identically to the batch reflow; the Preferences
-toggle is present + default-on + persists; and a streamed doc re-anchors its scroll (3000 → 3000) across a
-live-refresh. Gate at every phase: 0 warnings (`:main` `:simple` + renderer, dev + release), all node tests
-green, lint clean.
+toggle is present + default-on + persists; the streamed body is **render-windowed** (`content-visibility:auto`
+asserted on its blocks, with find/spy/parity/re-anchor all still passing *with* windowing active — proving it
+is capability-preserving); and a streamed doc re-anchors its scroll (3000 → 3000) across a live-refresh. Gate
+at every phase: 0 warnings (`:main` `:simple` + renderer, dev + release), all node tests green, lint clean.
 
 ## Related
 
