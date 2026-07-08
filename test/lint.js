@@ -18,7 +18,7 @@ const jsFiles = [
   'src/vinary/main/content_service.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
-  'test/git-tree-smoke.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
+  'test/git-tree-smoke.js', 'test/cli-smoke.js', 'test/graphics-smoke.js', 'test/tui-smoke.js',
   'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
   'scripts/sync-graphics-wasm.mjs',
   'scripts/sync-pdfjs.mjs', 'scripts/check-pdfjs.mjs',

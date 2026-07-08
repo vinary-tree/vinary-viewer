@@ -93,3 +93,15 @@
                                               (el "strong" {} (txt "bold")) (txt " ")
                                               (el "em" {} (txt "italic")) (txt " ")
                                               (el "code" {} (txt "code")))))))))
+
+(deftest render-lines-and-anchors
+  (testing "render-lines: :lines equals the flat render split, and anchors map heading ids → line index (the TUI's
+            TOC jump source — no fragile text matching)"
+    (let [ir   (fe/hast->ir (root (el "h1" {:id "title"} (txt "Title"))
+                                  (el "p" {} (txt "Body text here"))
+                                  (el "h2" {:id "sec"} (txt "Section"))))
+          opts {:color? false :width 40}
+          {:keys [lines anchors]} (ansi/render-lines ir opts)]
+      (is (= (clojure.string/split (ansi/render ir opts) #"\n" -1) lines) ":lines is the flat render, split")
+      (is (= 0 (get anchors "title")) "the h1 anchor is line 0")
+      (is (clojure.string/includes? (nth lines (get anchors "sec")) "Section") "the h2 anchor points at its line"))))

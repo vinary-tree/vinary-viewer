@@ -22,7 +22,8 @@
   },
   "main": "dist/main/main.js",
   "bin": {
-    "vv-cli": "dist/cli/vv-cli.js"
+    "vv-cli": "dist/cli/vv-cli.js",
+    "vv-tui": "dist/tui/vv-tui.js"
   },
   "scripts": {
     "compile": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile main renderer",
@@ -30,6 +31,8 @@
     "release": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs release main renderer",
     "compile:cli": "npm run grammars:sync && npm run graphics:sync && shadow-cljs compile cli",
     "release:cli": "npm run grammars:sync && npm run graphics:sync && shadow-cljs release cli",
+    "compile:tui": "npm run grammars:sync && npm run graphics:sync && shadow-cljs compile tui",
+    "release:tui": "npm run grammars:sync && npm run graphics:sync && shadow-cljs release tui",
     "graphics:sync": "node scripts/sync-graphics-wasm.mjs",
     "start": "electron .",
     "dev": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile main renderer && electron .",
@@ -41,8 +44,9 @@
     "grammars:check": "node scripts/check-grammars.mjs",
     "screenshots": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && xvfb-run -a -s \"-screen 0 1280x1024x24\" electron --no-sandbox scripts/screenshots.cjs",
     "screenshots:display": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && electron --no-sandbox scripts/screenshots.cjs",
-    "test": "shadow-cljs compile test && node dist/test/test.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && npm run test:cli",
+    "test": "shadow-cljs compile test && node dist/test/test.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && npm run test:cli && npm run test:tui",
     "test:cli": "npm run compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js",
+    "test:tui": "npm run compile:tui && node test/tui-smoke.js",
     "test:electron": "electron --no-sandbox test/electron-smoke.js",
     "test:electron:release": "npm run release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js",
     "test:extensions": "electron --no-sandbox test/extensions-smoke.js",

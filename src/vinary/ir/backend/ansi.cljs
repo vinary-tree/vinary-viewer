@@ -356,6 +356,31 @@
           (map #(str/join "\n" %))
           (str/join (:block-sep opts))))))
 
+(defn render-lines
+  "Like `render`, but returns {:lines [str …] :anchors {id line-index …}} — the flat vector of visual content lines
+   (`:lines` equals `(str/split (render ir opts) #\"\\n\")`) plus a map from each id-bearing top-level block's anchor
+   id to the 0-based line index where it starts. This is the TUI's source for TOC jump (toc entry id → line) and the
+   find/scroll line model — the backend, not fragile text-matching, tells you where each heading/record landed."
+  ([ir] (render-lines ir {}))
+  ([ir opts]
+   (let [opts       (merge defaults opts)
+         width      (:width opts)
+         sep-blanks (max 0 (dec (count (re-seq #"\n" (:block-sep opts)))))   ; "\n\n"→1 blank between blocks, "\n"→0
+         blocks     (->> (filter block? (if (= :document (node/kind ir)) (node/children ir) [ir]))
+                         (map (fn [b] [b (vec (mapcat #(str/split % #"\n" -1) (block->lines b opts "" width)))]))
+                         (remove (fn [[_ bl]] (empty? bl))))]
+     (loop [bs blocks, lines [], anchors {}, first? true]
+       (if (empty? bs)
+         {:lines lines :anchors anchors}
+         (let [[b bl]   (first bs)
+               pre      (if first? [] (vec (repeat sep-blanks "")))
+               start    (+ (count lines) (count pre))
+               ;; the anchor id the SAME way ir.capability.toc/toc-of reads it: the hast `id` property (markdown)
+               ;; or a pure front-end's node-meta :id (log records) — so anchors are keyed by the toc entries' ids
+               id       (or (attr b "id") (:id (node/node-meta b)))
+               anchors' (if (and id (not (str/blank? (str id)))) (assoc anchors (str id) start) anchors)]
+           (recur (rest bs) (into (into lines pre) bl) anchors' false)))))))
+
 (defn lower
   "IR → ANSI string (the ir.backend.html/lower analog). Convenience 1-arg over `render` with defaults."
   [ir] (render ir {}))

@@ -164,6 +164,27 @@
                                     (if (and (:graphics opts) (has-image? ir)) (gfx/ensure-ready!) (js/Promise.resolve nil))])]
                  (.then preload (fn [_] {:body (ansi/render ir opts') :toc toc})))))))
 
+(defn render-doc
+  "The TUI's document entry: content_service payload + ANSI opts → Promise<{:ir :toc :block-sep :lines :anchors}>.
+   Pre-loads the code grammars, renders the IR to LINES + a heading-id→line-index anchor map (ansi/render-lines), and
+   RETAINS the :ir so the driver can re-render at a new width on resize WITHOUT re-reading/re-parsing the file. The
+   scrolling viewport forces graphics off (images → placeholder lines), so `opts` should carry :graphics nil."
+  [payload opts]
+  (-> (payload->ir payload opts)
+      (.then (fn [{:keys [ir toc block-sep]}]
+               (-> (tsyntax/ensure-grammars! (ansi/code-languages ir))
+                   (.then (fn [_]
+                            (let [base-dir (some->> (:path payload) (.dirname path))
+                                  opts'    (assoc opts :block-sep block-sep :image (image-port opts base-dir))
+                                  {:keys [lines anchors]} (ansi/render-lines ir opts')]
+                              {:ir ir :toc toc :block-sep block-sep :lines lines :anchors anchors}))))))))
+
+(defn render-ir-lines
+  "Re-render an ALREADY-parsed IR to {:lines :anchors} at (possibly new) ANSI opts — the resize path. Synchronous:
+   grammars are already loaded from the initial render-doc, so a SIGWINCH re-wrap needs no async work."
+  [ir opts base-dir]
+  (ansi/render-lines ir (assoc opts :image (image-port opts base-dir))))
+
 ;; a single streamed batch of log lines → an ANSI chunk (for the streaming CLI/TUI path)
 (defn render-record-blocks
   "Lower a vector of streamed :record IR blocks to an ANSI string (single-newline separated), for the

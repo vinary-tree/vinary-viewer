@@ -11,9 +11,8 @@
             [vinary.cli.render :as render]
             [vinary.terminal.caps :as caps]
             [vinary.terminal.syntax :as tsyntax]
-            [vinary.grammar-catalog :as gc]
-            [vinary.ir.frontend.log-stream :as log-stream]
-            [vinary.stream.protocol :as proto]))
+            [vinary.terminal.stream :as tstream]
+            [vinary.grammar-catalog :as gc]))
 
 (def ^:private version "vv-cli 0.3.0")
 (def ^:private usage
@@ -79,34 +78,20 @@
          "\n\n")))
 
 (defn- stream-log!
-  "Stream a large log/text file to stdout bounded-memory: pull line batches, feed the WPDA log-stream parser,
-   render each completed record block to ANSI, write incrementally. Returns Promise<nil>. (content_service's
-   streamOpen/streamClose are SYNC when called in-process; only streamPull is async.)"
+  "Stream a large log/text file to stdout bounded-memory via the shared terminal.stream engine: completed record
+   blocks are rendered to ANSI and written incrementally (blank-line separated), so `vv-cli huge.log | less` never
+   holds the whole file. Returns Promise<nil>."
   [file aopts]
   (js/Promise.
    (fn [resolve reject]
-     (let [^js session (.streamOpen cs #js {:path file :mode "lines"})
-           sid     (.-sessionId session)
-           parser  (atom (log-stream/parser))
-           started (atom false)
-           emit    (fn [blocks]
-                     (when (seq blocks)
-                       (write (str (when @started "\n") (render/render-record-blocks blocks aopts)))
-                       (reset! started true)))]
-       (letfn [(pump []
-                 (-> (.streamPull cs #js {:sessionId sid})
-                     (.then (fn [^js batch]
-                              (let [{p :parser blocks :blocks} (proto/feed @parser (vec (.-lines batch)))]
-                                (reset! parser p)
-                                (emit blocks)
-                                (if (.-done batch)
-                                  (do (emit (:blocks (proto/finish @parser)))
-                                      (write "\n")
-                                      (.streamClose cs #js {:sessionId sid})
-                                      (resolve nil))
-                                  (pump)))))
-                     (.catch reject)))]
-         (pump))))))
+     (let [started (atom false)]
+       (tstream/stream-records!
+        file
+        {:on-blocks (fn [blocks]
+                      (write (str (when @started "\n") (render/render-record-blocks blocks aopts)))
+                      (reset! started true))
+         :on-done   (fn [] (write "\n") (resolve nil))
+         :on-error  reject})))))
 
 ;; text-backed kinds we read directly (classifyName's extension result is authoritative — content_service's
 ;; openLocal content-sniffs, mis-classifying e.g. a Markdown doc that contains a pipe table as a delimited table)

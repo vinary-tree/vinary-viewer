@@ -36,4 +36,9 @@
   :cli {:target    :node-script
         :main      vinary.cli.core/main
         :output-to "dist/cli/vv-cli.js"
+        :release   {:compiler-options {:optimizations :simple}}}
+  ;; vv-tui — interactive raw-ANSI terminal viewer (Node); streams huge docs via the same WPDA core.
+  :tui {:target    :node-script
+        :main      vinary.tui.core/main
+        :output-to "dist/tui/vv-tui.js"
         :release   {:compiler-options {:optimizations :simple}}}}}
