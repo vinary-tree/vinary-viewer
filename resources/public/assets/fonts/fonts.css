@@ -46,3 +46,24 @@
   src: url("./fira-code/fira-code-latin-ext-wght-normal.woff2") format("woff2-variations");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
+
+/* ---------- Latin Modern Roman (10pt, 4 static styles) — prose / body / Markdown ----------
+   The GUST e-foundry successor to Computer Modern (the LaTeX look). Vendored directly from TeX Live
+   (converted OTF→WOFF2), NOT via @fontsource, so these are NOT listed in scripts/sync-assets.mjs; see
+   ./lm-roman/LICENSE.txt (GUST Font License). Static weights/styles (unlike the variable UI fonts above). */
+@font-face {
+  font-family: "Latin Modern Roman"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("./lm-roman/lmroman10-regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman"; font-style: italic; font-weight: 400; font-display: swap;
+  src: url("./lm-roman/lmroman10-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("./lm-roman/lmroman10-bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Latin Modern Roman"; font-style: italic; font-weight: 700; font-display: swap;
+  src: url("./lm-roman/lmroman10-bolditalic.woff2") format("woff2");
+}

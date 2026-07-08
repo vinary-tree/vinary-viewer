@@ -2150,6 +2150,22 @@ async function main() {
   assert.ok(batchH2 >= md.sections, 'batch reference rendered every section');
   console.log(`[ok] batch markdown reference rendered (${batchH2} sections, ${(md.size / 1024).toFixed(0)} KiB)`);
 
+  // Latin Modern Roman prose font: the self-hosted @font-face loads, and the app.css DEFAULT --vv-font-variable is
+  // Latin Modern Roman. (An earlier settings test set a runtime font-variable override on :root via fx.cljs; remove
+  // it to expose the app.css default, read the computed prose font, then restore it so the smoke state is intact.)
+  await evalIn(win, `document.fonts.load('16px "Latin Modern Roman"').then(() => document.fonts.load('italic 16px "Latin Modern Roman"'))`);
+  const lmLoaded = await evalIn(win, `document.fonts.check('16px "Latin Modern Roman"')`);
+  const bodyFont = await evalIn(win, `(() => {
+    const s = document.documentElement.style, prior = s.getPropertyValue('--vv-font-variable');
+    s.removeProperty('--vv-font-variable');
+    const f = getComputedStyle(document.querySelector('.vv-content .markdown-body')).fontFamily;
+    if (prior) s.setProperty('--vv-font-variable', prior);
+    return f;
+  })()`);
+  assert.ok(lmLoaded, 'Latin Modern Roman @font-face loaded from resources/public/assets/fonts/lm-roman/');
+  assert.ok(/Latin Modern Roman/i.test(bodyFont), `default prose font is Latin Modern Roman (got: ${bodyFont})`);
+  console.log('[ok] prose renders in the self-hosted Latin Modern Roman web font (app.css default)');
+
   // streamed render (flag ON) → progressive block-commit
   win.webContents.send('vv:settings', '{:stream? true}');
   await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming re-enabled for the streamed render');

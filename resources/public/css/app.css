@@ -2,7 +2,7 @@
    (resources/public/css/themes/<name>.css); this file references var(--vv-*) only. */
 
 /* font preferences (Settings ▸ Preferences overrides these on :root via JS) */
-:root { --vv-font-variable: "Noto Sans", system-ui, sans-serif;
+:root { --vv-font-variable: "Latin Modern Roman", Georgia, serif;
   --vv-font-fixed: "Fira Code", "JetBrains Mono", monospace;
   --vv-font-size: 15px; --vv-code-font-size: 13px; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1); color: var(--vv-fg);
