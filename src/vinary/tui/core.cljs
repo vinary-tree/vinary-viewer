@@ -22,11 +22,11 @@
             [vinary.tui.find :as find]
             [vinary.tui.toc :as toc]))
 
-(def ^:private version "vv-tui 0.3.0")
+(def ^:private version "vv --tui 0.3.0")
 (def ^:private usage
   (str/join "\n"
-    ["vv-tui — interactively page a document in the terminal"
-     "" "Usage: vv-tui [options] <file>" ""
+    ["vv --tui — interactively page a document in the terminal"
+     "" "Usage: vv --tui [options] <file>" ""
      "Keys:  ↑/k ↓/j scroll · Space/b page · g/G top/bottom · / find (n/N next/prev) · t contents · q quit" ""
      "Options:"
      "      --width N       wrap column (default: terminal width)"

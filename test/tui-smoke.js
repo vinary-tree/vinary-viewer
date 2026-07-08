@@ -39,7 +39,7 @@ const doc = path.join(tmp, 'doc.md');
 { let s = '# TUI Doc\n\n## Section Two\n\n'; for (let i = 1; i <= 30; i++) s += 'Line ' + i + ' content\n\n'; fs.writeFileSync(doc, s); }
 
 // ── 1. --version / --help ──────────────────────────────────────────────────────
-ok(execFileSync('node', [TUI, '--version'], { encoding: 'utf8' }).includes('vv-tui'), '--version prints the version');
+ok(execFileSync('node', [TUI, '--version'], { encoding: 'utf8' }).includes('vv --tui'), '--version prints the version');
 ok(execFileSync('node', [TUI, '--help'], { encoding: 'utf8' }).includes('scroll'), '--help documents the keys');
 
 // ── 2. scroll: j/k and g/G move the window ─────────────────────────────────────

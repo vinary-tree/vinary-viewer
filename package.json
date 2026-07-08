@@ -21,10 +21,6 @@
     "url": "git+https://github.com/vinary-tree/vinary-viewer.git"
   },
   "main": "dist/main/main.js",
-  "bin": {
-    "vv-cli": "dist/cli/vv-cli.js",
-    "vv-tui": "dist/tui/vv-tui.js"
-  },
   "scripts": {
     "compile": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile main renderer",
     "watch": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs watch main renderer",

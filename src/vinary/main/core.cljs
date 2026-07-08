@@ -5,6 +5,7 @@
    Original code (Apache-2.0); a new application inspired by vmd (MIT)."
   (:require ["electron" :as electron]
             ["path" :as path]
+            ["fs" :as fs]
             [vinary.main.service :as service]
             [vinary.main.startup :as startup]
             [vinary.main.config :as config]
@@ -110,7 +111,17 @@
        (fn [reason _] (js/console.error "[vinary] unhandled promise rejection:"
                                         (or (some-> ^js reason .-stack) reason)))))
 
+(defn- app-version []
+  (try (-> (.readFileSync fs (path/join js/__dirname ".." ".." "package.json") "utf8") (js/JSON.parse) (.-version))
+       (catch :default _ "unknown")))
+
 (defn ^:export main []
+  ;; `electron . --help`/`--version` (and `vv --gui --help`) print usage/version and exit BEFORE any window —
+  ;; the primary `vv --help` path is the install.sh dispatcher; this covers direct/`--gui` invocation.
+  (case (startup/help-request? (js->clj js/process.argv))
+    :help    (do (js/console.log startup/usage-text) (.exit js/process 0))
+    :version (do (js/console.log (startup/version-text (app-version))) (.exit js/process 0))
+    nil)
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
   ;; Chromium switches the app always needs — see vinary.main.startup/chromium-switches: disable-gpu-sandbox

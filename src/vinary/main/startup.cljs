@@ -62,6 +62,33 @@
   [{:keys [VV_SOFTWARE_GL]}]
   (boolean VV_SOFTWARE_GL))
 
+(def usage-text
+  "Top-level `vv` usage, printed by `electron . --help` / `vv --gui --help` — mirrors the install.sh dispatcher
+   launcher's own --help (the primary path for `vv --help`)."
+  (str/join "\n"
+    ["vinary-viewer — preview Markdown, PDFs, images, diagrams & source"
+     ""
+     "Usage:"
+     "  vv [--gui] [files…]   open in the desktop GUI (default), one tab per file/URL"
+     "  vv --cli  <file>      render a document to the terminal  (pipe-friendly:  vv --cli x.md | less)"
+     "  vv --tui  <file>      interactively page a document       (scroll · / find · t contents · q quit)"
+     "  vv --help | --version"
+     ""
+     "Mode options:  vv --cli --help   ·   vv --tui --help"]))
+
+(defn version-text [version] (str "vinary-viewer " version))
+
+(defn help-request?
+  "Which top-level help the command line asks for, if any: :help | :version | nil — recognising -h/--help and
+   -V/--version among the user's arguments (argv from index 2, matching doc-uris' `electron <app> <args…>` shape).
+   Lets the main process print and exit before opening a window."
+  [argv]
+  (let [args (set (drop 2 argv))]
+    (cond
+      (some args ["-h" "--help"])    :help
+      (some args ["-V" "--version"]) :version
+      :else                          nil)))
+
 (defn doc-uris
   "Ordered, normalized tab uris for the non-flag document arguments in `argv` — supporting any number of
    files/URIs named on the command line (`vv a.md b.pdf https://example.com`), each opened in its own tab.

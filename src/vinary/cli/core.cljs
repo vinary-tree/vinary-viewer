@@ -14,12 +14,12 @@
             [vinary.terminal.stream :as tstream]
             [vinary.grammar-catalog :as gc]))
 
-(def ^:private version "vv-cli 0.3.0")
+(def ^:private version "vv --cli 0.3.0")
 (def ^:private usage
   (str/join "\n"
-    ["vv-cli — preview documents in the terminal"
+    ["vv --cli — preview documents in the terminal"
      ""
-     "Usage: vv-cli [options] <file> [file …]"
+     "Usage: vv --cli [options] <file> [file …]"
      ""
      "Options:"
      "  -t, --toc          print the document outline (Contents) first"
