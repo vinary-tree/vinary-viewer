@@ -18,6 +18,25 @@
       (is (str/includes? display "<svg") "display math renders too")
       (is (= "MathJaxModern" (math/engine-font-name)) "SVG output uses the Latin-Modern-derived Modern font"))))
 
+(deftest render-tex-dynamic-glyphs
+  (testing "glyphs in MathJax 4's dynamically-loaded font chunks render synchronously — no async 'retry' throw"
+    ;; MathJax 4 splits the SVG font into a base set + dynamic chunks; \mathtt (monospace), \mathbb (double-struck),
+    ;; \mathfrak, \mathscr, \mathsf all live in chunks. Before the dynamic-font preload, the SYNCHRONOUS .convert
+    ;; threw MathJax's 'retry -- an asynchronous action is required' error on the first such glyph. This renders it.
+    (let [out (math/render-tex "\\mathtt{for}\\;\\mathbb{R}\\;\\mathfrak{g}\\;\\mathscr{L}\\;\\mathsf{X}" false)]
+      (is (str/includes? out "<svg") "dynamic-chunk variant glyphs render to an <svg> (no retry throw)")
+      (is (not (str/includes? out "fill=\"red\"")) "and are real glyphs, not error text"))))
+
+(deftest render-tex-stmaryrd-brackets
+  (testing "\\llbracket / \\rrbracket render as real ⟦ ⟧ container delimiters, not red undefined-macro text"
+    ;; stmaryrd isn't bundled by MathJax, so these are bound (in mj-engine!) to the bare U+27E6/7 chars, which are
+    ;; MO.OPEN/MO.CLOSE in the operator dictionary and stretchy in the font.
+    (let [bare    (math/render-tex "\\llbracket x \\rrbracket" false)
+          stretch (math/render-tex "\\left\\llbracket \\frac{a}{b} \\right\\rrbracket" true)]
+      (is (str/includes? bare "<svg") "bare brackets render")
+      (is (not (str/includes? bare "fill=\"red\"")) "not red noundefined text — the macros are defined")
+      (is (str/includes? stretch "<svg") "stretchy \\left\\llbracket…\\right\\rrbracket renders (⟦ accepted as a delimiter)"))))
+
 (deftest delimit-tex-inline
   (testing "inline math is wrapped in single $…$"
     (is (= "$x^2$" (math/delimit-tex false "x^2")))

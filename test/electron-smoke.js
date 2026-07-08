@@ -971,6 +971,8 @@ async function main() {
       'Inline math $`x^2`$ and display math:\n\n$$\n\\frac{a}{b}\n$$\n\n' +
       'A code span `$x^2$` stays literal.\n\n' +
       'AMS family: bold $\\boldsymbol{v}$ and a commutative diagram:\n\n$$\n\\begin{CD} A @>f>> B \\end{CD}\n$$\n\n' +
+      'Denotation brackets + monospace (MathJax 4 dynamic-font glyphs):\n\n' +
+      '$$\n\\llbracket L \\Rightarrow R \\rrbracket \\;=\\; \\mathtt{for}\\;\\mathbb{R}\n$$\n\n' +
       '```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n',
     stamp: Date.now()
   });
@@ -987,6 +989,23 @@ async function main() {
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-display mjx-container svg'))`),
     'display MathJax SVG'
   );
+  // MathJax 4 loads font glyph data in dynamic chunks; \mathtt/\mathbb live in chunks and \llbracket/\rrbracket are
+  // stmaryrd macros we bind to ⟦/⟧. Under the SYNCHRONOUS render this crashed ("retry -- an asynchronous action is
+  // required") until the dynamic-font preload; the brackets were also undefined red text. Guard both here.
+  const extendedMath = await evalIn(win, `(() => {
+    const nodes = Array.from(document.querySelectorAll('.markdown-body .vv-math-display'));
+    const brk = nodes.find(n => (n.getAttribute('data-tex') || '').includes('llbracket'));
+    return {
+      found: Boolean(brk),
+      hasSvg: brk ? Boolean(brk.querySelector('mjx-container svg')) : null,
+      isError: brk ? brk.classList.contains('vv-math-error') : null,
+      anyError: document.querySelectorAll('.markdown-body .vv-math-error').length
+    };
+  })()`);
+  assert.strictEqual(extendedMath.found, true, 'the \\llbracket…\\mathtt display equation is present');
+  assert.strictEqual(extendedMath.hasSvg, true, 'dynamic-font glyphs + \\llbracket render to a MathJax SVG (no async retry crash)');
+  assert.strictEqual(extendedMath.isError, false, 'the equation is not a MathJax error node');
+  assert.strictEqual(extendedMath.anyError, 0, 'no .vv-math-error anywhere (no retry throw, no undefined-macro brackets)');
   // Each equation must stash its raw LaTeX so the copy paths can recover the source the SVG can't carry.
   const mathTex = await evalIn(win, `(() => ({
     inline: document.querySelector('.markdown-body .vv-math-inline')?.getAttribute('data-tex') ?? null,

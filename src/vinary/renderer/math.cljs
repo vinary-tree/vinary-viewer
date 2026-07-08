@@ -7,7 +7,8 @@
 
    ONE engine, built from MathJax 4's `@mathjax/src` source (shadow-cljs bundles it), rendering in the
    Latin-Modern-derived MathJax Modern font, used for BOTH the browser renderer and :node-test — no separate es5
-   `tex-svg.js` script, no async load. Only the SAFE TeX package configurations are imported: base ams amscd
+   `tex-svg.js` script, no async load — MathJax 4's dynamic font chunks are preloaded synchronously at engine
+   build (see mj-engine!). Only the SAFE TeX package configurations are imported: base ams amscd
    boldsymbol newcommand configmacros noerrors noundefined. The
    dangerous html(\\href)/require/autoload packages are NEVER imported, so they are not in the module graph at
    all — author TeX cannot emit active markup (\\href{javascript:…}) into the SVG, which is injected
@@ -23,9 +24,43 @@
             ["@mathjax/src/cjs/adaptors/liteAdaptor.js" :as adaptor-mod]
             ["@mathjax/src/cjs/handlers/html.js" :as html-mod]
             ["@mathjax/src/cjs/a11y/assistive-mml.js" :as a11y-mod]
+            ;; the shared `mathjax` singleton — its asyncLoad / asyncIsSynchronous flags gate synchronous vs
+            ;; retry-throwing dynamic font loading (flipped to synchronous in mj-engine!).
+            ["@mathjax/src/cjs/mathjax.js" :as mathjax-core]
             ;; the Latin-Modern-derived "MathJax Modern" SVG font, passed as :fontData — MathJax 4's built-in default
             ;; is Newcm (New Computer Modern), so the Modern font must be supplied explicitly.
             ["@mathjax/mathjax-modern-font/cjs/svg.js" :as modern-font]
+            ;; MathJax 4 ships the SVG font as a small base set + 26 dynamically-loaded glyph chunks. Import every
+            ;; chunk for its registration side effect (MathJaxModernFont.dynamicSetup) so mj-engine! can install
+            ;; them synchronously — otherwise any glyph in a chunk (\mathtt/\mathbb/\mathfrak/\mathscr/\mathsf/…,
+            ;; extended symbols/arrows/accents/shapes/PUA) makes the synchronous .convert throw MathJax's async
+            ;; "retry" error. Retained in loaded-dynamic-font-modules so shadow-cljs cannot elide them.
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/accents.js" :as mm-accents]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/accents-b-i.js" :as mm-accents-b-i]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/arrows.js" :as mm-arrows]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/calligraphic.js" :as mm-calligraphic]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/double-struck.js" :as mm-double-struck]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/fraktur.js" :as mm-fraktur]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/latin.js" :as mm-latin]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/latin-b.js" :as mm-latin-b]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/latin-bi.js" :as mm-latin-bi]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/latin-i.js" :as mm-latin-i]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/math.js" :as mm-math]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/monospace.js" :as mm-monospace]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/monospace-ex.js" :as mm-monospace-ex]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/monospace-l.js" :as mm-monospace-l]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/PUA.js" :as mm-pua]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif.js" :as mm-sans-serif]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif-b.js" :as mm-sans-serif-b]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif-bi.js" :as mm-sans-serif-bi]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif-ex.js" :as mm-sans-serif-ex]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif-i.js" :as mm-sans-serif-i]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/sans-serif-r.js" :as mm-sans-serif-r]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/script.js" :as mm-script]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/shapes.js" :as mm-shapes]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/symbols.js" :as mm-symbols]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/symbols-b-i.js" :as mm-symbols-b-i]
+            ["@mathjax/mathjax-modern-font/cjs/svg/dynamic/variants.js" :as mm-variants]
             ;; TeX package configurations — imported for their registration side effects (see safe-packages).
             ["@mathjax/src/cjs/input/tex/base/BaseConfiguration.js" :as base-config]
             ["@mathjax/src/cjs/input/tex/ams/AmsConfiguration.js" :as ams-config]
@@ -61,18 +96,46 @@
   #js [base-config ams-config amscd-config boldsymbol-config
        newcommand-config configmacros-config noerrors-config noundefined-config])
 
+;; Reference each dynamic-font module so its dynamicSetup side effect is retained (shadow-cljs would otherwise
+;; elide these side-effect-only imports). The glyph data is installed into the font instance in mj-engine!.
+(def ^:private loaded-dynamic-font-modules
+  #js [mm-accents mm-accents-b-i mm-arrows mm-calligraphic mm-double-struck mm-fraktur
+       mm-latin mm-latin-b mm-latin-bi mm-latin-i mm-math mm-monospace mm-monospace-ex mm-monospace-l
+       mm-pua mm-sans-serif mm-sans-serif-b mm-sans-serif-bi mm-sans-serif-ex mm-sans-serif-i mm-sans-serif-r
+       mm-script mm-shapes mm-symbols mm-symbols-b-i mm-variants])
+
 (defn- mj-engine!
-  "Build the engine once (memoized). The package configs are registered by their ns imports (loaded-configs);
-   output/svg.js pulls in the TeXFont so glyphs render; AssistiveMmlHandler adds screen-reader MathML (kept out
-   of the copied text + visually hidden via CSS). liteAdaptor makes .convert return an outerHTML string."
+  "Build the engine once (memoized). The package configs are registered by their ns imports (loaded-configs); the
+   26 MathJaxModern dynamic-font chunks by loaded-dynamic-font-modules. output/svg.js pulls in the font so glyphs
+   render; AssistiveMmlHandler adds screen-reader MathML (kept out of the copied text + visually hidden via CSS).
+   liteAdaptor makes .convert return an outerHTML string.
+
+   MathJax 4 loads font glyph data in dynamic chunks; under our SYNCHRONOUS .convert, a glyph in an unloaded chunk
+   would throw MathJax's async \"retry\" error. So we flip the shared `mathjax` singleton to synchronous font
+   loading (a no-op asyncLoad suffices — every chunk is already bundled + registered by loaded-dynamic-font-modules)
+   and eagerly install every range via loadDynamicFilesSync. Because mj-engine! is memoized (defonce engine),
+   exactly one MathJaxModernFont exists per JS context; a SECOND one built in the same context after
+   loadDynamicFilesSync would recurse on the static FontData.dynamicFiles registry, so this must stay the sole engine."
   []
   (or @engine
-      (let [_          loaded-configs                          ; ensure the package configs are registered
+      (let [_          loaded-configs                          ; register the SAFE TeX package configs
+            _          loaded-dynamic-font-modules             ; register all 26 dynamic-font glyph chunks
+            _          (set! (.. mathjax-core -mathjax -asyncLoad) (fn [_name] nil)) ; no-op: chunks already bundled
+            _          (set! (.. mathjax-core -mathjax -asyncIsSynchronous) true)    ; take the sync path, not retryAfter
             adaptor    ((.-liteAdaptor adaptor-mod))
             handler    ((.-RegisterHTMLHandler html-mod) adaptor)
             _          ((.-AssistiveMmlHandler a11y-mod) handler)   ; augments handler.documentClass in place
-            tex-input  (new (.-TeX tex-mod) #js {:packages safe-packages})
+            tex-input  (new (.-TeX tex-mod)
+                            #js {:packages safe-packages
+                                 ;; \llbracket / \rrbracket are stmaryrd macros MathJax doesn't bundle. Bind them to
+                                 ;; the bare U+27E6/U+27E7 chars — already MO.OPEN / MO.CLOSE in MathJax's operator
+                                 ;; dictionary and stretchy in the font — so they act as standard container
+                                 ;; delimiters (correct spacing bare; stretch under \left…\right). No \mathopen
+                                 ;; wrapper: that would break \left\llbracket, which needs a bare delimiter token.
+                                 :macros #js {"llbracket" "⟦"    ; ⟦
+                                              "rrbracket" "⟧"}}) ; ⟧
             svg-output (new (.-SVG svg-mod) #js {:fontCache "none" :fontData (new (.-MathJaxModernFont modern-font))})
+            _          (.loadDynamicFilesSync ^js (.-font svg-output)) ; install all 26 ranges up front (needs the sync flag)
             ;; handler.create(document, options) builds the MathDocument (what mathjax.document would do), with
             ;; no dependency on the singleton in js/mathjax.js.
             math-doc   (.create handler ""
