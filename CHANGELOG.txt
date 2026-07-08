@@ -55,7 +55,11 @@ Changed
       (@mathjax/mathjax-modern-font), matching the Latin Modern Roman prose body. The
       dangerous html/require/autoload packages are never imported (absent from the
       bundle), so \href{javascript:...} is unreachable by construction. Assistive
-      MathML (a11y) is preserved; math now renders synchronously (no async load).
+      MathML (a11y) is preserved; math renders synchronously -- MathJax 4's dynamic
+      font chunks are preloaded at engine build, so every glyph range renders with no
+      async "retry" (variant alphabets \mathbb/\mathfrak/\mathscr/\mathtt/\mathsf,
+      extended symbols, arrows, accents, shapes). \llbracket / \rrbracket render as the
+      container delimiters ⟦ ⟧ (bound to U+27E6/7 -- MathJax bundles no stmaryrd).
     - The prose / Markdown body font is now Latin Modern Roman (the GUST e-foundry
       successor to Computer Modern -- the LaTeX look), self-hosted as WOFF2 under
       assets/fonts/lm-roman/ (GUST Font License), replacing Noto Sans so body text
