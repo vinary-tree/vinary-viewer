@@ -6,6 +6,7 @@
   (:require [cljs.test :refer [deftest is testing]]
             [vinary.ir.node :as node]
             [vinary.ir.frontend.markdown :as fe]
+            [vinary.ir.frontend.log :as log-fe]
             [vinary.ir.backend.ansi :as ansi]))
 
 (defn- el [tag props & children] #js {:type "element" :tagName tag :properties (clj->js props) :children (into-array children)})
@@ -79,6 +80,12 @@
           out (ansi/render rec {:color? true :width 40})]
       (is (clojure.string/includes? out "boom"))
       (is (clojure.string/includes? out "[") "styled"))))
+
+(deftest log-lines-single-spaced
+  (testing "a :document of :line leaves (log front-end) renders single-spaced under :block-sep \"\\n\""
+    (is (= "line one\nline two\nline three"
+           (ansi/render (log-fe/text->ir "line one\nline two\nline three")
+                        {:color? false :width 40 :block-sep "\n"})))))
 
 (deftest emphasis-and-code
   (testing "strong/em/inline-code fold styling; plain output keeps the text"

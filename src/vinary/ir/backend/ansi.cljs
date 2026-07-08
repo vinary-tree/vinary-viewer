@@ -96,8 +96,12 @@
   (let [tag  (:tag (node/node-meta n))
         kind (node/kind n)]
     (cond
-      (= :text kind)    (when (seq (or (node/text n) "")) [{:text (node/text n) :style style}])
+      ;; a soft line break (a literal \n in inline text) collapses to a space, matching HTML whitespace handling
+      (= :text kind)    (when (seq (or (node/text n) "")) [{:text (str/replace (node/text n) #"[ \t]*\r?\n[ \t]*" " ") :style style}])
       (= :comment kind) nil
+      ;; a text-carrying LEAF (:line/:run/:plain from the pure log/table/pdf front-ends — text lives in :text,
+      ;; not a :text child); the markdown log-stream :line is instead an element wrapping a :text child (below).
+      (and (node/leaf? n) (seq (or (node/text n) ""))) [{:text (node/text n) :style style}]
       (= "br" tag)      [BR]
       ;; inline code / math → the literal source, styled (math shows its TeX; terminals can't render MathJax)
       (or (= :code kind) (= "code" tag))
@@ -159,7 +163,21 @@
 ;; ─────────────────────────────── block layout ────────────────────────────────
 (declare block->lines)
 
-(defn- render-line [spans opts] (apply str (map #(emit-span % opts) spans)))
+(defn- coalesce-spans
+  "Merge adjacent spans that share the same style + link into one. Word-wrap (wrap-spans/split-words) fragments a
+   run of same-styled text into per-word/-space tokens; re-joining them here makes a single-style line emit ONE
+   SGR pair (and ONE OSC-8 hyperlink) instead of one per word — correct output, but ~5× fewer bytes on coloured
+   logs/prose (material over a streamed million-line log)."
+  [spans]
+  (reduce (fn [acc s]
+            (let [prev (peek acc)]
+              (if (and prev (not (:br prev)) (not (:br s))
+                       (= (:style prev) (:style s)) (= (:link prev) (:link s)))
+                (conj (pop acc) (update prev :text str (:text s)))
+                (conj acc s))))
+          [] spans))
+
+(defn- render-line [spans opts] (apply str (map #(emit-span % opts) (coalesce-spans spans))))
 
 (defn- wrapped
   "Render inline IR `n` to indented, wrapped, styled lines."
@@ -214,20 +232,28 @@
 (defn- record->lines [n opts indent width]
   (let [lines (map node/text-content (node/children n))
         color (some level-color lines)]
-    (mapcat (fn [ln] (map #(str indent (emit-span {:text % :style (when color {:fg color})} opts))
-                          (wrap-spans [{:text ln :style {}}] (max 1 (- width (count indent))))))
+    ;; wrap each source line (as a colour-styled span) then render each wrapped sub-line via render-line
+    (mapcat (fn [ln] (map #(str indent (render-line % opts))
+                          (wrap-spans [{:text ln :style (when color {:fg color})}] (max 1 (- width (count indent))))))
             lines)))
 
+(defn- code-block-lang [n]
+  (some #(when (str/starts-with? (str %) "language-") (subs (str %) 9)) (classes (or (first (node/children n)) n))))
+
 (defn- code->lines [n opts indent width]
-  (let [code (str/replace (node/text-content n) #"\n$" "")
-        lang (some #(when (str/starts-with? (str %) "language-") (subs (str %) 9))
-                   (classes (or (first (node/children n)) n)))
-        hl   (:highlight opts)
-        raw  (str/split code #"\n" -1)
-        gutter (str indent (emit-span {:text "▏" :style {:fg :gray}} opts) " ")]
-    (map (fn [line]
-           (str gutter (emit-span {:text (or line "") :style {:fg :bright-green}} opts)))
-         (if (and hl lang) (map #(render-line % opts) (hl lang code)) raw))))
+  (let [code    (str/replace (node/text-content n) #"\n$" "")
+        lang    (code-block-lang n)
+        hlspans (when (and (:highlight opts) lang) ((:highlight opts) lang code))    ; nil → plain code
+        gutter  (str indent (emit-span {:text "▏" :style {:fg :gray}} opts) " ")
+        strs    (if hlspans
+                  (map #(render-line % opts) hlspans)                                ; per-token styled lines
+                  (map #(emit-span {:text % :style {:fg :bright-green}} opts) (str/split code #"\n" -1)))]
+    (map #(str gutter %) strs)))
+
+(defn code-languages
+  "Distinct code-block languages present in `ir` (from `language-X` classNames), for pre-loading a highlighter."
+  [ir]
+  (->> (node/preorder ir) (filter #(= :code-block (node/kind %))) (keep code-block-lang) distinct vec))
 
 (defn- list->lines [n opts indent width]
   (let [ordered? (= "ol" (:tag (node/node-meta n)))
@@ -235,22 +261,14 @@
     (mapcat (fn [idx item]
               (let [marker (if ordered? (str (inc idx) ". ") "• ")
                     m-ind  (str indent (emit-span {:text marker :style {:fg :gray}} opts))
-                    cont   (str indent (apply str (repeat (count marker) " ")))
-                    kids   (node/children item)]
-                ;; first inline run gets the marker prefix; nested blocks get the continuation indent
-                (loop [ks kids out [] first? true]
-                  (if (empty? ks)
-                    out
-                    (let [k (first ks)]
-                      (if (#{:paragraph :heading} (node/kind k))
-                        (let [ls (wrapped k {} (if first? m-ind cont) width opts)]
-                          (recur (rest ks) (into out ls) false))
-                        (if (= :text (node/kind k))
-                          (if (str/blank? (node/text k)) (recur (rest ks) out first?)
-                              (let [ls (mapv #(str (if first? m-ind cont) (render-line % opts))
-                                             (wrap-spans (vec (inline->spans k {} opts)) (max 1 (- width (count cont)))))]
-                                (recur (rest ks) (into out ls) false)))
-                          (recur (rest ks) (into out (block->lines k opts cont width)) false))))))))
+                    mw     (display-width marker)
+                    cont   (str indent (apply str (repeat mw " ")))
+                    inner  (max 4 (- width mw (count indent)))
+                    ;; render the item's content unprefixed (inline runs, nested lists, etc.), then prefix line 0
+                    ;; with the marker and every continuation line with the aligned indent — robust to the
+                    ;; source-positions <span> wrapper and to nested blocks / loose <p> items alike
+                    body   (remove str/blank? (mapcat #(block->lines % opts "" inner) (node/children item)))]
+                (map-indexed (fn [i ln] (str (if (zero? i) m-ind cont) ln)) body)))
             (range) items)))
 
 (defn- blockquote->lines [n opts indent width]
@@ -264,8 +282,7 @@
   [n opts indent width]
   (case (node/kind n)
     :document      (mapcat #(block->lines % opts indent width) (node/children n))
-    :heading       (let [lvl (:level (node/node-meta n))]
-                     (wrapped n (heading-style lvl) (str indent (apply str (repeat (dec (int (or lvl 1))) " "))) width opts))
+    :heading       (wrapped n (heading-style (:level (node/node-meta n))) indent width opts)
     :paragraph     (wrapped n {} indent width opts)
     :list          (list->lines n opts indent width)
     :list-item     (mapcat #(block->lines % opts indent width) (node/children n))
@@ -283,7 +300,7 @@
       (mapcat #(block->lines % opts indent width) (node/children n)))))
 
 ;; ─────────────────────────────── public API ──────────────────────────────────
-(def ^:private defaults {:width 80 :color? true :truecolor? false :hyperlinks? false})
+(def ^:private defaults {:width 80 :color? true :truecolor? false :hyperlinks? false :block-sep "\n\n"})
 
 (defn- block? [c] (not (and (= :text (node/kind c)) (str/blank? (node/text c)))))
 
@@ -299,7 +316,7 @@
           (map #(block->lines % opts "" width))
           (remove empty?)
           (map #(str/join "\n" %))
-          (str/join "\n\n")))))
+          (str/join (:block-sep opts))))))
 
 (defn lower
   "IR → ANSI string (the ir.backend.html/lower analog). Convenience 1-arg over `render` with defaults."

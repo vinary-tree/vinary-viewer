@@ -29,4 +29,11 @@
   ;; Unit tests for the pure, DOM-free logic (node). Run: npx shadow-cljs compile test && node dist/test/test.js
   :test {:target    :node-test
          :output-to "dist/test/test.js"
-         :ns-regexp "-test$"}}}
+         :ns-regexp "-test$"}
+  ;; vv-cli — headless terminal document renderer (Node). Reuses the IR front-ends + WPDA/streaming core +
+  ;; content_service.js file reader (all Electron-free), lowering to ANSI via ir.backend.ansi. :simple release
+  ;; for the same reason as :main (advanced property-renaming breaks the unified/rehype/content-service interop).
+  :cli {:target    :node-script
+        :main      vinary.cli.core/main
+        :output-to "dist/cli/vv-cli.js"
+        :release   {:compiler-options {:optimizations :simple}}}}}
