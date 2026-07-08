@@ -6,8 +6,11 @@
    placeholder). Each kind returns {:ir :toc :block-sep} — logs/text use a single-newline block separator (a
    line-structured document), prose kinds a blank line."
   (:require ["rehype-stringify$default" :as rehype-stringify]
+            ["path" :as path]
+            ["fs" :as fs]
             [clojure.string :as str]
             [vinary.renderer.markdown-pipeline :as pipeline]
+            [vinary.renderer.media :as media]
             [vinary.ir.frontend.markdown :as ir-md]
             [vinary.ir.frontend.office :as ir-office]
             [vinary.ir.frontend.table :as ir-table]
@@ -18,6 +21,7 @@
             [vinary.ir.node :as node]
             [vinary.ir.backend.ansi :as ansi]
             [vinary.terminal.syntax :as tsyntax]
+            [vinary.terminal.graphics :as gfx]
             [vinary.grammar-catalog :as gc]
             [vinary.stream.protocol :as proto]))
 
@@ -75,15 +79,90 @@
       ;; pdf and anything unrecognised: fall back to any :text as plain lines (pdf gets its own path in vv-cli)
       (done (ir-log/text->ir (or text (str "[" kind " — no terminal renderer]"))) "\n"))))
 
+;; ── image port (terminal graphics) ───────────────────────────────────────────
+(defn- data-uri->bytes
+  "Decode a data: URI → {:bytes Buffer :ext \".png\"} (or nil). Handles base64 and URL-encoded (inline SVG) data."
+  [src]
+  (when-let [[_ mime b64 data] (re-find #"(?i)^data:([^;,]*);?(base64)?,([\s\S]*)$" src)]
+    (let [bytes (if (seq b64) (js/Buffer.from data "base64") (js/Buffer.from (js/decodeURIComponent data) "utf8"))
+          m     (str/lower-case (or mime ""))
+          ext   (cond (str/includes? m "svg")  ".svg" (str/includes? m "png")  ".png"
+                      (str/includes? m "jpeg") ".jpg" (str/includes? m "jpg")  ".jpg"
+                      (str/includes? m "gif")  ".gif" (str/includes? m "webp") ".webp"
+                      (str/includes? m "avif") ".avif" (str/includes? m "bmp") ".bmp" :else "")]
+      {:bytes bytes :ext ext})))
+
+(defn- read-file-image [p]
+  (when (and (string? p) (.existsSync fs p) (.isFile (.statSync fs p)))
+    {:bytes (.readFileSync fs p) :ext (.extname path p)}))
+
+(defn- resolve-image
+  "Resolve an <img> src to {:bytes :ext} | :remote | nil. The shared markdown pipeline rewrites relative media
+   URLs to `file://<dir>/<name>` (optionally `?vv-cache=…`) BEFORE the IR is built, so the common `![](pic.png)`
+   case arrives as a file: URL — decoded via media/local-media-path (which strips the cache query). data: URIs are
+   decoded inline; office/HTML images may still be relative → resolved against `base-dir`; http(s) is NOT fetched."
+  [src base-dir]
+  (cond
+    (str/blank? src)                nil
+    (str/starts-with? src "data:")  (data-uri->bytes src)
+    (re-find #"(?i)^https?://" src) :remote
+    (str/starts-with? src "file:")  (read-file-image (media/local-media-path src))
+    :else
+    (read-file-image (if (.isAbsolute path src) src (.join path (or base-dir ".") src)))))
+
+(defn- img-name [src] (or (last (str/split (str src) #"[\\/]")) "image"))
+
+(defn- placeholder-text
+  "A labelled `🖼 name — reason` fallback shown where the image can't be drawn (piped, unsupported format, etc.)."
+  [src reason]
+  (str "🖼 " (img-name src)
+       (case reason
+         :remote          " — remote image not fetched"
+         :not-found       " — not found"
+         :unknown-format  " — unrecognised image"
+         :too-large       " — too large to display"
+         :decode-failed   " — could not decode"
+         :svg-unavailable " — SVG renderer unavailable"
+         (:no-graphics nil) ""
+         (if (and (keyword? reason) (str/starts-with? (name reason) "undecodable-"))
+           (str " — " (subs (name reason) 12) " not supported")
+           ""))))
+
+(defn image-port
+  "The ANSI `:image` port for the CLI: resolve a node's src (data URI / file path; http(s) not fetched) to bytes,
+   then encode a kitty/sixel escape sized to the available `width`, appended with its row footprint so following
+   content flows below it. Degrades to a labelled placeholder. `opts` carries :graphics (nil → placeholder only,
+   without even reading the file)."
+  [opts base-dir]
+  (fn [img-node width]
+    (let [src (ansi/attr img-node "src")]
+      (if (nil? (:graphics opts))
+        (placeholder-text src :no-graphics)
+        (let [r (resolve-image src base-dir)]
+          (cond
+            (nil? r)      (placeholder-text src :not-found)
+            (= :remote r) (placeholder-text src :remote)
+            :else
+            (let [enc (gfx/encode (:bytes r) (:ext r) {:graphics (:graphics opts) :max-cols width})]
+              (if-let [esc (:escape enc)]
+                (str esc (apply str (repeat (max 0 (dec (:rows enc))) "\n")))   ; reserve the image's vertical footprint
+                (placeholder-text src (:placeholder enc))))))))))
+
+(defn- has-image? [ir] (boolean (some #(= :image (node/kind %)) (node/preorder ir))))
+
 (defn render-payload
   "content_service payload + ANSI opts → Promise<{:body :toc}> (the rendered terminal document + its outline).
-   Pre-loads the tree-sitter grammars the document's code blocks need, then renders synchronously with the
-   already-configured :highlight port."
+   Pre-loads the tree-sitter grammars the document's code blocks need AND (when graphics are on and the document
+   has images) the resvg WASM, then renders synchronously with the :highlight + :image ports configured."
   [payload opts]
   (-> (payload->ir payload opts)
       (.then (fn [{:keys [ir toc block-sep]}]
-               (-> (tsyntax/ensure-grammars! (ansi/code-languages ir))
-                   (.then (fn [_] {:body (ansi/render ir (assoc opts :block-sep block-sep)) :toc toc})))))))
+               (let [base-dir (some->> (:path payload) (.dirname path))
+                     opts'    (assoc opts :block-sep block-sep :image (image-port opts base-dir))
+                     preload  (js/Promise.all
+                               #js [(tsyntax/ensure-grammars! (ansi/code-languages ir))
+                                    (if (and (:graphics opts) (has-image? ir)) (gfx/ensure-ready!) (js/Promise.resolve nil))])]
+                 (.then preload (fn [_] {:body (ansi/render ir opts') :toc toc})))))))
 
 ;; a single streamed batch of log lines → an ANSI chunk (for the streaming CLI/TUI path)
 (defn render-record-blocks

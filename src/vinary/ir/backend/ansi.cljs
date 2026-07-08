@@ -77,9 +77,10 @@
 ;; breaks) is flattened to spans carrying the accumulated style; a :br yields a hard-break marker span.
 (def ^:private BR {:br true})
 
-(defn- attr
+(defn attr
   "Read HAST attribute `k` off IR node `n`. `:attrs` is a raw JS `properties` object for the markdown/office
-   front-ends but a cljs map for the pure front-ends (logs/table) — handle both."
+   front-ends but a cljs map for the pure front-ends (logs/table) — handle both. (Public: the CLI's :image port
+   reads a node's src/alt through it.)"
   [n k]
   (let [a (:attrs (node/node-meta n))]
     (cond (nil? a) nil, (map? a) (get a k), :else (aget a k))))
@@ -276,6 +277,39 @@
         body  (mapcat #(block->lines % opts "" width) (node/children n))]
     (map (fn [ln] (str inner ln)) (remove str/blank? body))))
 
+;; -- images (terminal graphics) --
+(defn- sole-image
+  "If block `n` presents a single image on its own — a bare :image, or a chain of single-meaningful-child wrappers
+   (the markdown front-end's `:paragraph → a.vv-figure-link → :image`, including the source-positions <span>)
+   ending in exactly one :image — return that :image node; else nil. Wrapper-agnostic: unwraps ANY single
+   non-blank-child container (not specific tags), so it survives the figure-link + source-position wrapping and an
+   office <figure><img>. Mixed content (image + text) → nil → the image renders inline as its placeholder span."
+  [n]
+  (loop [n n depth 0]
+    (cond
+      (nil? n)                 nil
+      (= :image (node/kind n)) n
+      (> depth 8)              nil
+      :else
+      (let [kids (remove #(and (= :text (node/kind %)) (str/blank? (or (node/text %) ""))) (node/children n))]
+        (if (= 1 (count kids)) (recur (first kids) (inc depth)) nil)))))
+
+(defn- placeholder-line [img opts indent]
+  (str indent (emit-span {:text (str "🖼 " (or (attr img "alt") "image")) :style {:fg :cyan :italic? true}} opts)))
+
+(defn- image-lines
+  "Render a block-level :image. Calls the injected `:image` port — a `(fn [img-node width] → str|nil)` that resolves
+   the src to bytes and encodes a kitty/sixel escape WITH its own row footprint (or a labelled text placeholder).
+   With no port (or a blank result) falls back to a `🖼 alt` placeholder line. A graphics escape must start at
+   column 0 (indent would shift the raster), so the port's string is emitted un-indented; only the fallback
+   placeholder is indented."
+  [img opts indent width]
+  (let [port (:image opts)
+        s    (when port (port img (max 1 (- width (count indent)))))]
+    (if (and (string? s) (seq s))
+      [s]
+      [(placeholder-line img opts indent)])))
+
 (defn block->lines
   "Render a block IR node `n` to a vector of terminal lines (already indented + styled). `indent` is the
    left-margin prefix string; `width` the terminal columns."
@@ -283,7 +317,9 @@
   (case (node/kind n)
     :document      (mapcat #(block->lines % opts indent width) (node/children n))
     :heading       (wrapped n (heading-style (:level (node/node-meta n))) indent width opts)
-    :paragraph     (wrapped n {} indent width opts)
+    ;; a paragraph that is JUST an image (`![](x)` → figure-link → img) is a block image, not wrapped prose
+    :paragraph     (if-let [img (sole-image n)] (image-lines img opts indent width) (wrapped n {} indent width opts))
+    :image         (image-lines n opts indent width)
     :list          (list->lines n opts indent width)
     :list-item     (mapcat #(block->lines % opts indent width) (node/children n))
     :blockquote    (blockquote->lines n opts indent width)
@@ -294,10 +330,12 @@
     (:comment :raw-node :doctype) []
     ;; a bare :text block leaf (whitespace between blocks / plain-text kind) or a generic element container
     :text          (if (str/blank? (node/text n)) [] (wrapped n {} indent width opts))
-    ;; generic element (div/details/section/…): inline content → wrap; block content → recurse
-    (if (inline-container? n)
-      (wrapped n {} indent width opts)
-      (mapcat #(block->lines % opts indent width) (node/children n)))))
+    ;; generic element (div/details/section/figure/…): a lone image → block image; inline content → wrap; else recurse
+    (if-let [img (sole-image n)]
+      (image-lines img opts indent width)
+      (if (inline-container? n)
+        (wrapped n {} indent width opts)
+        (mapcat #(block->lines % opts indent width) (node/children n))))))
 
 ;; ─────────────────────────────── public API ──────────────────────────────────
 (def ^:private defaults {:width 80 :color? true :truecolor? false :hyperlinks? false :block-sep "\n\n"})

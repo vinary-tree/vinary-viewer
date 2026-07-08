@@ -28,6 +28,7 @@
      "      --no-color      disable ANSI colour (also auto-off when piped / NO_COLOR)"
      "      --color         force colour even when not a TTY"
      "      --no-graphics   disable terminal image graphics (sixel/kitty)"
+     "      --graphics P    force the image protocol P (kitty|sixel), bypassing terminal detection"
      "  -p, --plain         plain text: no colour, no graphics, no hyperlinks"
      "  -h, --help          show this help"
      "  -V, --version       show the version"]))
@@ -44,6 +45,10 @@
           (= "--no-color" a)       (recur (rest as) files (assoc opts :no-color true))
           (= "--color" a)          (recur (rest as) files (assoc opts :force-color true))
           (= "--no-graphics" a)    (recur (rest as) files (assoc opts :no-graphics true))
+          (= "--graphics" a)       (let [v (keyword (or (second as) ""))]
+                                     (recur (drop 2 as) files (cond-> opts (#{:kitty :sixel} v) (assoc :force-graphics v))))
+          (str/starts-with? a "--graphics=") (let [v (keyword (subs a 11))]
+                                              (recur (rest as) files (cond-> opts (#{:kitty :sixel} v) (assoc :force-graphics v))))
           (= "--no-hyperlinks" a)  (recur (rest as) files (assoc opts :no-hyperlinks true))
           (#{"-t" "--toc"} a)      (recur (rest as) files (assoc opts :toc true))
           (= "--width" a)          (recur (drop 2 as) files (assoc opts :width (js/parseInt (or (second as) "80"))))
@@ -62,7 +67,8 @@
      :hyperlinks? (:hyperlinks? c)
      :graphics    (:graphics c)
      :highlight   (when (:color? c) (tsyntax/highlighter))   ; tree-sitter → ANSI spans; nil → plain code
-     :image       nil}))                                     ; Phase D wires the sixel/kitty encoder
+     :image       nil}))                                     ; the :image port is injected per-document by
+                                                             ; cli.render/render-payload (it needs the doc dir)
 
 (defn- toc-lines [toc opts]
   (when (and (:toc opts) (seq toc))
@@ -128,7 +134,11 @@
                      (and (#{"log" "text"} kind) (big? file)) (stream-log! file aopts)
                      ;; text kinds: read directly (bypass content_service content-sniffing)
                      (contains? text-kinds kind) (emit-doc {:kind kind :path file :text (.readFileSync fs file "utf8")} aopts opts)
-                     ;; office/table/pdf/image/archive/directory → content_service parses them
+                     ;; a standalone image: the :image port reads + encodes it. content_service's openLocal has NO
+                     ;; image branch (it's the GUI's file:// <img> path), so it would mis-return the raw bytes as
+                     ;; text — go direct, mirroring the text-kinds bypass.
+                     (= "image" kind) (emit-doc {:kind "image" :path file} aopts opts)
+                     ;; office/table/pdf/archive/directory → content_service parses them
                      :else (-> (.openUri cs file)
                                (.then (fn [payload] (emit-doc (js->clj payload :keywordize-keys true) aopts opts))))))))
         (.catch (fn [e] (ewrite (str "vv-cli: " file ": " (.-message e))) (set! (.-exitCode js/process) 1))))))
