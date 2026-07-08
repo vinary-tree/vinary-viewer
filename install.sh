@@ -21,12 +21,20 @@ command -v npx >/dev/null 2>&1 || { echo "error: node/npx not found on PATH" >&2
 echo "==> npm install"
 ( cd "$REPO" && npm install --no-fund --no-audit )
 
+echo "==> syncing terminal-renderer assets (tree-sitter grammars + graphics wasm)"
+# grammars/graphics wasm are runtime assets shared by the GUI source-preview and the cli/tui renderers, so
+# sync them ONCE here — not once per :cli and again per :tui (the release:cli / release:tui npm scripts each
+# prepend grammars:sync + graphics:sync, which is why a plain install re-fetched every grammar twice).
+# --skip-existing leaves already-built grammars untouched (fast, idempotent re-installs; no source.json churn);
+# the sync is quiet by default (pass --verbose to grammars:sync to see the per-repo git/tree-sitter output).
+( cd "$REPO" && npm run grammars:sync -- --skip-existing && npm run graphics:sync )
+
 echo "==> building GUI ($VV_BUILD)"
 ( cd "$REPO" && npx shadow-cljs "$VV_BUILD" main renderer )
 
-echo "==> building terminal tools ($VV_BUILD:cli, $VV_BUILD:tui)"
-# the :cli/:tui npm scripts also sync the tree-sitter grammars + graphics wasm the terminal renderer needs
-( cd "$REPO" && npm run "${VV_BUILD}:cli" && npm run "${VV_BUILD}:tui" )
+echo "==> building terminal tools ($VV_BUILD cli, $VV_BUILD tui)"
+# build the :cli/:tui targets directly (one shadow-cljs run, no redundant re-sync — the assets are ready above)
+( cd "$REPO" && npx shadow-cljs "$VV_BUILD" cli tui )
 
 echo "==> installing launcher into $BIN"
 mkdir -p "$BIN"

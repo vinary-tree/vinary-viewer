@@ -20,6 +20,17 @@ const only = new Set((process.argv.find(arg => arg.startsWith('--only=')) || '')
   .map(s => s.trim())
   .filter(Boolean));
 
+// Flags:
+//   --verbose        print the per-command `$ …` echo and the child git/tree-sitter stdout. OFF by default —
+//                    sync is quiet: one concise line per built grammar + a final summary. (Failures are ALWAYS
+//                    surfaced; in quiet mode the captured child stderr is appended to the error message.)
+//   --skip-existing  leave already-built grammars (grammar.wasm + highlights.scm both present) untouched: no
+//                    network fetch, no wasm rebuild, no source.json re-pin. Makes re-installs fast + idempotent.
+// Also settable via GRAMMARS_VERBOSE=1 / GRAMMARS_SKIP_EXISTING=1.
+const cliFlags = new Set(process.argv.slice(2).filter(arg => arg.startsWith('--') && !arg.startsWith('--only=')));
+const VERBOSE = cliFlags.has('--verbose') || process.env.GRAMMARS_VERBOSE === '1';
+const SKIP_EXISTING = cliFlags.has('--skip-existing') || process.env.GRAMMARS_SKIP_EXISTING === '1';
+
 const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
 const entries = (only.size ? lock.entries.filter(entry => only.has(entry.id)) : lock.entries)
   .filter(entry => entry.enabled !== false);
@@ -33,14 +44,23 @@ function repoPath(...parts) {
 }
 
 function run(cmd, args, opts = {}) {
-  console.log(`$ ${[cmd, ...args].join(' ')}`);
-  return execFileSync(cmd, args, {
-    cwd: opts.cwd || root,
-    env: opts.env || process.env,
-    timeout: opts.timeout,
-    stdio: opts.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
-    encoding: opts.capture ? 'utf8' : undefined
-  });
+  if (VERBOSE) console.log(`$ ${[cmd, ...args].join(' ')}`);
+  // Quiet (default) captures the child's stdout/stderr instead of inheriting the terminal, so git's
+  // "From github.com/…" / "HEAD is now at …" chatter and tree-sitter's build log stay hidden. On failure the
+  // captured stderr is re-attached to the thrown error (below) so a broken grammar is never silent.
+  const capture = opts.capture || !VERBOSE;
+  try {
+    return execFileSync(cmd, args, {
+      cwd: opts.cwd || root,
+      env: opts.env || process.env,
+      timeout: opts.timeout,
+      stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      encoding: capture ? 'utf8' : undefined
+    });
+  } catch (err) {
+    if (capture && err.stderr) err.message = `${err.message}\n${String(err.stderr).trim()}`;
+    throw err;
+  }
 }
 
 function safeId(value) {
@@ -216,6 +236,18 @@ function mergeCatalog(existing, updates) {
   return ordered;
 }
 
+function catalogEntry(entry) {
+  return {
+    id: entry.id,
+    language: entry.language,
+    extensions: entry.extensions,
+    'wasm-url': `grammars/${entry.id}/grammar.wasm`,
+    'scm-url': `grammars/${entry.id}/highlights.scm`,
+    'source-kind': entry.source.type,
+    source: entry.source.url || entry.source.path || entry.source.wasm
+  };
+}
+
 ensureDir(grammarOutRoot);
 ensureDir(path.dirname(catalogPath));
 ensureDir(path.join(publicRoot, 'js'));
@@ -226,11 +258,24 @@ copyIfDifferent(
 
 const catalog = [];
 const failures = [];
+let built = 0;
+let cached = 0;
 for (const entry of entries) {
-  console.log(`\n== ${entry.id} ==`);
   const outDir = path.join(grammarOutRoot, entry.id);
   const wasmOut = path.join(outDir, 'grammar.wasm');
   const scmOut = path.join(outDir, 'highlights.scm');
+
+  // --skip-existing: an already-built grammar (wasm + query both present) is left untouched — no fetch, no
+  // rebuild, no source.json re-pin. Its catalog entry is still emitted so the catalog stays complete.
+  if (SKIP_EXISTING && fs.existsSync(wasmOut) && fs.existsSync(scmOut)) {
+    catalog.push(catalogEntry(entry));
+    cached += 1;
+    if (VERBOSE) console.log(`\n== ${entry.id} == (present — skipped)`);
+    continue;
+  }
+
+  if (VERBOSE) console.log(`\n== ${entry.id} ==`);
+  else console.log(`  building ${entry.id}…`);
   try {
     ensureDir(outDir);
 
@@ -247,15 +292,8 @@ for (const entry of entries) {
       copyLicense(entry, srcDir, outDir);
     }
 
-    catalog.push({
-      id: entry.id,
-      language: entry.language,
-      extensions: entry.extensions,
-      'wasm-url': `grammars/${entry.id}/grammar.wasm`,
-      'scm-url': `grammars/${entry.id}/highlights.scm`,
-      'source-kind': entry.source.type,
-      source: entry.source.url || entry.source.path || entry.source.wasm
-    });
+    catalog.push(catalogEntry(entry));
+    built += 1;
   } catch (error) {
     failures.push({ id: entry.id, error });
     console.error(`!! ${entry.id} failed: ${error.message || error}`);
@@ -264,7 +302,7 @@ for (const entry of entries) {
 
 const finalCatalog = only.size ? mergeCatalog(readExistingCatalog(), catalog) : catalog;
 fs.writeFileSync(catalogPath, catalogEdn(finalCatalog));
-console.log(`\nwrote ${path.relative(root, catalogPath)} (${finalCatalog.length} grammar${finalCatalog.length === 1 ? '' : 's'})`);
+console.log(`\nwrote ${path.relative(root, catalogPath)} (${finalCatalog.length} grammar${finalCatalog.length === 1 ? '' : 's'}; ${built} built, ${cached} cached, ${failures.length} failed)`);
 if (failures.length) {
   console.error('\nfailed grammars:');
   for (const failure of failures) console.error(`- ${failure.id}: ${failure.error.message || failure.error}`);
