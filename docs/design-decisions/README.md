@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0019**.
+The next free number is **0020**.
 
 ---
 
@@ -76,6 +76,7 @@ The next free number is **0019**.
 | [0016](0016-main-process-simple-optimization.md) | Compile the Electron main process with `:simple`, not `:advanced` | Accepted |
 | [0017](0017-common-document-ir.md) | A common document IR with a weighted-transducer pipeline (all formats → one IR → HTML) | Accepted |
 | [0018](0018-document-streaming-pipeline.md) | A document-streaming pipeline (bounded-memory, WPDA-segmented) — large docs stream, small stay batch | Accepted |
+| [0019](0019-terminal-preview-layer.md) | A terminal preview layer (CLI + TUI) as a second renderer over the shared IR/streaming spine | Accepted |
 
 ---
 
