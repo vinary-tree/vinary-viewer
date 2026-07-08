@@ -25,7 +25,14 @@
              ;; :simple (not :advanced) for release — advanced property-renaming breaks the re-frame /
              ;; DataScript / unified-remark interop; :simple still minifies + strips devtools.
              :release {:compiler-options {:optimizations :simple}}
-             :js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false}}}
+             ;; MathJax 4's SVG output statically imports its DEFAULT font via Node's `#default-font/*` subpath
+             ;; import (package.json `imports` → newcm), which shadow's bundler can't resolve. Point it at the
+             ;; Modern (Latin Modern) font we render with, so the browser bundle resolves AND the default matches
+             ;; the :fontData we pass. (The :node-test build leaves it a runtime require, which Node's imports field
+             ;; resolves on its own.)
+             :js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false
+                                    "#default-font/svg/default.js"
+                                    {:target :npm :require "@mathjax/mathjax-modern-font/cjs/svg/default.js"}}}}
   ;; Unit tests for the pure, DOM-free logic (node). Run: npx shadow-cljs compile test && node dist/test/test.js
   :test {:target    :node-test
          :output-to "dist/test/test.js"

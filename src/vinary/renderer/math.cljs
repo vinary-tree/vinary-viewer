@@ -5,38 +5,36 @@
    synchronous and cached, which avoids the visible post-insert typesetting pass that makes large documents
    feel sluggish.
 
-   ONE engine, built from MathJax's `js/` source (shadow-cljs bundles it), used for BOTH the browser renderer
-   and :node-test — no separate es5 `tex-svg.js` script, no async load. Only the SAFE TeX package
-   configurations are imported: base ams amscd boldsymbol newcommand configmacros noerrors noundefined. The
+   ONE engine, built from MathJax 4's `@mathjax/src` source (shadow-cljs bundles it), rendering in the
+   Latin-Modern-derived MathJax Modern font, used for BOTH the browser renderer and :node-test — no separate es5
+   `tex-svg.js` script, no async load. Only the SAFE TeX package configurations are imported: base ams amscd
+   boldsymbol newcommand configmacros noerrors noundefined. The
    dangerous html(\\href)/require/autoload packages are NEVER imported, so they are not in the module graph at
    all — author TeX cannot emit active markup (\\href{javascript:…}) into the SVG, which is injected
    post-sanitize (the one MathJax vector the HTML sanitizer can't see)."
-  (:require ;; MUST load before any mathjax-full/js module: defines PACKAGE_VERSION so version.js skips its
-            ;; Node-only eval('require') branch and the js/ source bundles for :browser (see the shim ns).
-            [vinary.renderer.mathjax-version-shim]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [goog.string :as gstr]
-            ;; MathJax composed from source — shadow-cljs bundles these for BOTH :browser and :node-script
-            ;; (a runtime (js/require …) only works under Node, so it must be an ns :require to reach the browser).
-            ;; NB: js/mathjax.js is deliberately NOT imported — it pulls in components/version.js, which reads
-            ;; package.json via eval('require')/__dirname (Node-only, unbundleable). We build the MathDocument
-            ;; directly with handler.create instead, which needs none of that.
-            ["mathjax-full/js/input/tex.js" :as tex-mod]
-            ["mathjax-full/js/output/svg.js" :as svg-mod]
-            ["mathjax-full/js/adaptors/liteAdaptor.js" :as adaptor-mod]
-            ["mathjax-full/js/handlers/html.js" :as html-mod]
-            ["mathjax-full/js/a11y/assistive-mml.js" :as a11y-mod]
+            ;; MathJax 4 composed from source — @mathjax/src/cjs (CommonJS; shadow-cljs bundles it for BOTH :browser
+            ;; and :node-script). As in v3 we build the MathDocument directly with handler.create (NOT js/mathjax.js)
+            ;; and import only the SAFE TeX package configs — the dangerous html(\\href)/require/autoload configs are
+            ;; never in the module graph, so author TeX cannot emit active markup into the post-sanitize-injected SVG.
+            ["@mathjax/src/cjs/input/tex.js" :as tex-mod]
+            ["@mathjax/src/cjs/output/svg.js" :as svg-mod]
+            ["@mathjax/src/cjs/adaptors/liteAdaptor.js" :as adaptor-mod]
+            ["@mathjax/src/cjs/handlers/html.js" :as html-mod]
+            ["@mathjax/src/cjs/a11y/assistive-mml.js" :as a11y-mod]
+            ;; the Latin-Modern-derived "MathJax Modern" SVG font, passed as :fontData — MathJax 4's built-in default
+            ;; is Newcm (New Computer Modern), so the Modern font must be supplied explicitly.
+            ["@mathjax/mathjax-modern-font/cjs/svg.js" :as modern-font]
             ;; TeX package configurations — imported for their registration side effects (see safe-packages).
-            ;; The dangerous html/require/autoload configs are deliberately NOT imported, so they are absent
-            ;; from the module graph entirely.
-            ["mathjax-full/js/input/tex/base/BaseConfiguration.js" :as base-config]
-            ["mathjax-full/js/input/tex/ams/AmsConfiguration.js" :as ams-config]
-            ["mathjax-full/js/input/tex/amscd/AmsCdConfiguration.js" :as amscd-config]
-            ["mathjax-full/js/input/tex/boldsymbol/BoldsymbolConfiguration.js" :as boldsymbol-config]
-            ["mathjax-full/js/input/tex/newcommand/NewcommandConfiguration.js" :as newcommand-config]
-            ["mathjax-full/js/input/tex/configmacros/ConfigMacrosConfiguration.js" :as configmacros-config]
-            ["mathjax-full/js/input/tex/noerrors/NoErrorsConfiguration.js" :as noerrors-config]
-            ["mathjax-full/js/input/tex/noundefined/NoUndefinedConfiguration.js" :as noundefined-config]))
+            ["@mathjax/src/cjs/input/tex/base/BaseConfiguration.js" :as base-config]
+            ["@mathjax/src/cjs/input/tex/ams/AmsConfiguration.js" :as ams-config]
+            ["@mathjax/src/cjs/input/tex/amscd/AmsCdConfiguration.js" :as amscd-config]
+            ["@mathjax/src/cjs/input/tex/boldsymbol/BoldsymbolConfiguration.js" :as boldsymbol-config]
+            ["@mathjax/src/cjs/input/tex/newcommand/NewcommandConfiguration.js" :as newcommand-config]
+            ["@mathjax/src/cjs/input/tex/configmacros/ConfigMacrosConfiguration.js" :as configmacros-config]
+            ["@mathjax/src/cjs/input/tex/noerrors/NoErrorsConfiguration.js" :as noerrors-config]
+            ["@mathjax/src/cjs/input/tex/noundefined/NoUndefinedConfiguration.js" :as noundefined-config]))
 
 (def ^:private max-cache-entries 512)
 
@@ -74,7 +72,7 @@
             handler    ((.-RegisterHTMLHandler html-mod) adaptor)
             _          ((.-AssistiveMmlHandler a11y-mod) handler)   ; augments handler.documentClass in place
             tex-input  (new (.-TeX tex-mod) #js {:packages safe-packages})
-            svg-output (new (.-SVG svg-mod) #js {:fontCache "none"})
+            svg-output (new (.-SVG svg-mod) #js {:fontCache "none" :fontData (new (.-MathJaxModernFont modern-font))})
             ;; handler.create(document, options) builds the MathDocument (what mathjax.document would do), with
             ;; no dependency on the singleton in js/mathjax.js.
             math-doc   (.create handler ""
@@ -100,6 +98,12 @@
       (let [{:keys [^js adaptor ^js math-doc]} (mj-engine!)
             node (.convert math-doc source #js {:display (boolean display?)})]
         (remember-render! k (.outerHTML adaptor node))))))
+
+(defn engine-font-name
+  "The SVG output font's NAME (e.g. \"MathJaxModern\" — the Latin-Modern-derived font). For tests + diagnostics;
+   building the engine is memoised, so this is cheap after the first call."
+  []
+  (.. ^js (:math-doc (mj-engine!)) -outputJax -font -constructor -NAME))
 
 (defn strip-math-fence
   "Clean the TeX of a math node produced from GitHub's backtick-wrapped inline form.

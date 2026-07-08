@@ -6,7 +6,17 @@
    guarded here means the delimiter contract can't silently drift out from under either caller. The DOM-bound
    `render-html-math` (needs js/DOMParser, absent under :node-test) is exercised by the electron smoke test."
   (:require [cljs.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [vinary.renderer.math :as math]))
+
+(deftest render-tex-modern-font
+  (testing "TeX renders (DOM-free via liteAdaptor) to a MathJax SVG container in the Latin-Modern MathJax Modern font"
+    (let [inline  (math/render-tex "x^2 + \\alpha" false)
+          display (math/render-tex "\\begin{cases} a & b \\\\ c & d \\end{cases}" true)]
+      (is (str/includes? inline "mjx-container") "produces a MathJax SVG container")
+      (is (str/includes? inline "<svg") "with an <svg> element")
+      (is (str/includes? display "<svg") "display math renders too")
+      (is (= "MathJaxModern" (math/engine-font-name)) "SVG output uses the Latin-Modern-derived Modern font"))))
 
 (deftest delimit-tex-inline
   (testing "inline math is wrapped in single $…$"
