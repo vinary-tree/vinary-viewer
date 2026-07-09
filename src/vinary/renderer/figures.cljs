@@ -147,83 +147,187 @@
   (when (not= (.getPropertyValue style prop) value)
     (.setProperty style prop value)))
 
-(defn- set-style-important! [^js style prop value]
-  (when (or (not= (.getPropertyValue style prop) value)
-            (not= (.getPropertyPriority style prop) "important"))
-    (.setProperty style prop value "important")))
+;; Only the superseded apply-svg-size! stamped an !important px height; the pre-DOM path uses aspect-ratio
+;; instead (see svg-style), so this helper is #_-disabled (not deleted) per the comment-don't-delete rule.
+#_(defn- set-style-important! [^js style prop value]
+    (when (or (not= (.getPropertyValue style prop) value)
+              (not= (.getPropertyPriority style prop) "important"))
+      (.setProperty style prop value "important")))
 
-(defn- target-width [v f avail doc-font]
-  (if (and (positive-number? f) (positive-number? avail))
-    (let [matched (* doc-font (/ v f))]
-      (if (<= matched avail) matched (js/Math.min v avail)))
-    (if (positive-number? avail) (js/Math.min v avail) v)))
+(defn target-width
+  "Font-matched display width (px) for an SVG figure of viewBox width `v` and dominant font-size `f`, so its
+   internal text renders at the document font `doc-font`: width = doc-font · v / f. Falls back to the natural
+   viewBox width `v` when there is no font to match. The COLUMN CAP is owned by CSS (max-width:100%), NOT this
+   function — so the width is resize-independent and identical whether computed pre-DOM (off-DOM string) or on
+   a live node. Public so the pre-DOM pass, the Mermaid sizer, and the DOM-free tests can call it."
+  [v f doc-font]
+  (if (and (positive-number? f) (positive-number? doc-font))
+    (* doc-font (/ v f))
+    v))
 
-(defn- apply-svg-size! [^js body ^js img avail doc-font {:keys [v h f]}]
-  (when (and (.-isConnected img)
-             (identical? body (.closest img ".markdown-body")))
-    (if (positive-number? v)
-      (let [width (target-width v f avail doc-font)
-            style (.-style img)]
-        (set-style! style "width" (str (js/Math.round width) "px"))
-        (if (positive-number? h)
-          (let [height (* width (/ h v))]
-            (set-style-important! style "height" (str (js/Math.round height) "px"))
-            (set-style! style "aspect-ratio" (str v " / " h)))
-          (do
-            (.removeProperty style "height")
-            (.removeProperty style "aspect-ratio"))))
+(defn svg-style
+  "Pure inline sizing for a font-matched SVG figure from its parsed {:v :h :f} metadata and the document font:
+   {:width \"Npx\" :aspect-ratio \"v / h\"} (aspect-ratio omitted when the height is unknown), or nil when the SVG
+   has no usable viewBox width. Only width + aspect-ratio are emitted — NO explicit px height: CSS (max-width:
+   100%; height:auto) owns the column cap and the proportional height, and a fixed px height would break the
+   ratio once a wide figure is capped to a narrow column."
+  [{:keys [v h f]} doc-font]
+  (when (positive-number? v)
+    (cond-> {:width (str (js/Math.round (target-width v f doc-font)) "px")}
+      (positive-number? h) (assoc :aspect-ratio (str v " / " h)))))
+
+(defn doc-font-px
+  "The document body font size in px, read from the --vv-font-size CSS custom property on :root (the value
+   .markdown-body resolves to). Defaults to 15 (app.css's --vv-font-size default) when unset/unreadable.
+   Browser-only — callers guard on js/document / js/DOMParser."
+  []
+  (let [v (some-> (js/getComputedStyle js/document.documentElement)
+                  (.getPropertyValue "--vv-font-size")
+                  js/parseFloat)]
+    (if (positive-number? v) v 15)))
+
+(defn- stamp-svg!
+  "Stamp font-matched width + aspect-ratio onto an <img>'s inline style (NO isConnected/ancestor guard — for
+   the off-DOM pre-render pass). Idempotent: set-style! writes only on change."
+  [^js img meta doc-font]
+  (let [style (.-style img)]
+    (if-let [{:keys [width aspect-ratio]} (svg-style meta doc-font)]
+      (do (set-style! style "width" width)
+          (if aspect-ratio
+            (set-style! style "aspect-ratio" aspect-ratio)
+            (.removeProperty style "aspect-ratio")))
       (clear-size! img))))
 
-(defn- apply-intrinsic-size!
-  "Reserve a raster/remote <img>'s layout box from intrinsic {:w :h} by stamping width/height ATTRIBUTES: the
-   browser derives aspect-ratio from them, and the existing CSS (.markdown-body img { max-width:100%;
-   height:auto }) then reserves the correctly-proportioned box BEFORE the bytes decode — eliminating the
-   scroll reflow — while staying responsive (no forced px, unlike the SVG path). Author-specified width/height
-   are respected; unknown dims fall back to clear-size! (CSS owns), today's behavior."
-  [^js body ^js img {:keys [w h]}]
+(defn- stamp-raster!
+  "Reserve a raster/remote <img>'s layout box by stamping width/height ATTRIBUTES (the browser derives
+   aspect-ratio; CSS max-width:100%; height:auto reserves the proportioned box before the bytes decode, so the
+   image does not pop from ~0 to full height while scrolling). Author-specified dims are respected; unknown
+   dims clear inline sizing (CSS owns). Guard-free — for the off-DOM pre-render pass."
+  [^js img {:keys [w h]}]
+  (if (and (positive-number? w) (positive-number? h))
+    (when-not (and (.hasAttribute img "width") (.hasAttribute img "height"))
+      (.setAttribute img "width"  (str (js/Math.round w)))
+      (.setAttribute img "height" (str (js/Math.round h))))
+    (clear-size! img)))
+
+(defn scale-figures-html
+  "Pre-DOM figure-sizing post-pass — the twin of mermaid/render-html-diagrams and math/render-html-math. Bakes
+   font-matched width (local .svg) or an intrinsic layout box (raster/remote) into every <img> of an off-DOM
+   DOMParser document, so figures render at FINAL SIZE on first paint with no post-insert style mutation (no
+   flash), and re-renders/streaming reuse the memoized geometry (no re-scale). Pass-through when DOMParser is
+   absent (:node-test) or the fragment carries no <img> (returns the original bytes → zero serialization churn
+   on the vast majority of blocks). Runs inside apply-posts, so office + PDF-reflow + streaming inherit it.
+   Returns Promise<html>."
+  [html]
+  (if-not (exists? js/DOMParser)
+    (js/Promise.resolve html)
+    (let [doc  (.parseFromString (js/DOMParser.) (or html "") "text/html")
+          imgs (.querySelectorAll doc "img")]
+      (if (zero? (.-length imgs))
+        (js/Promise.resolve html)
+        (let [doc-font (doc-font-px)
+              jobs     #js []]
+          (dotimes [i (.-length imgs)]
+            (let [^js img (aget imgs i)
+                  ;; srcs are already absolute (file://, http(s), data:) by apply-posts time via wrap-images /
+                  ;; rewrite-urls, so read the ATTRIBUTE — .-src resolves against the DOMParser doc's about:blank
+                  ;; base URL and would be wrong here.
+                  src    (or (.getAttribute img "src") "")
+                  path   (str/replace src #"[?#].*$" "")
+                  local? (boolean (re-find #"(?i)^file://" src))]
+              (.setAttribute img "draggable" "false")
+              (cond
+                (re-find #"(?i)^emoji" src) nil            ; emoji: CSS sizes them
+                (and local? (re-find #"(?i)\.svg$" path))
+                (.push jobs (-> (fetch-meta src)
+                                (.then (fn [meta] (stamp-svg! img meta doc-font)))
+                                (.catch (fn [_] nil))))
+                :else
+                (.push jobs (-> (fetch-raster-dims src local?)
+                                (.then (fn [dims] (stamp-raster! img dims)))
+                                (.catch (fn [_] nil)))))))
+          (-> (js/Promise.all jobs)
+              (.then (fn [_] (.-innerHTML (.-body doc))))))))))
+
+(defn- refit-svg-live!
+  "Guarded live re-fit of one SVG <img> on a mounted .markdown-body (keeps the isConnected/ancestor guards)."
+  [^js body ^js img meta doc-font]
   (when (and (.-isConnected img)
              (identical? body (.closest img ".markdown-body")))
-    (if (and (positive-number? w) (positive-number? h))
-      (when-not (and (.hasAttribute img "width") (.hasAttribute img "height"))
-        (.setAttribute img "width"  (str (js/Math.round w)))
-        (.setAttribute img "height" (str (js/Math.round h))))
-      (clear-size! img))))
+    (stamp-svg! img meta doc-font)))
 
-(defn scale-figures!
-  "Size each embedded SVG <img> in `body` (a .markdown-body element) so its text == the doc font. Async
-   per <img> (fetch); applies width + height from metadata when the fetch resolves. No-op inside the
-   diagram view and for emoji / non-file / non-svg images (those clear inline sizing -> CSS owns them)."
-  [^js body]
-  (if (and body (not (.closest body ".vv-diagram")))
-    (let [cs       (js/getComputedStyle body)
-          avail    (- (.-clientWidth body)
-                      (js/parseFloat (or (.-paddingLeft cs) "0"))
-                      (js/parseFloat (or (.-paddingRight cs) "0")))
-          doc-font (or (js/parseFloat (.-fontSize cs)) 16)
-          imgs     (.querySelectorAll body "img")
-          jobs     #js []]
-      (dotimes [i (.-length imgs)]
-        (let [^js img (aget imgs i)
-              src     (or (.getAttribute img "src") "")
-              url     (.-src img)                          ; resolved absolute URL
-              path    (str/replace url #"[?#].*$" "")
-              local?  (boolean (re-find #"(?i)^file://" url))]
-          (set! (.-draggable img) false)
-          (.setAttribute img "draggable" "false")
-          (cond
-            (re-find #"(?i)^emoji" src)               nil   ; emoji: CSS sizes them
-            ;; local SVG: font-match the figure's text to the document (unchanged)
-            (and local? (re-find #"(?i)\.svg$" path))
-            (.push jobs
-                   (-> (fetch-meta url)
-                       (.then (fn [meta] (apply-svg-size! body img avail doc-font meta)))
-                       (.catch (fn [_] nil))))
-            ;; raster (local/remote) + remote SVG: reserve the layout box from intrinsic dims so the image
-            ;; does not reflow (pop from ~0 height to full height) as it decodes while scrolling
-            :else
-            (.push jobs
-                   (-> (fetch-raster-dims url local?)
-                       (.then (fn [dims] (apply-intrinsic-size! body img dims)))
-                       (.catch (fn [_] nil)))))))
-      (js/Promise.all jobs))
-    (js/Promise.resolve nil)))
+(defn refit-all!
+  "Re-fit live SVG figures to the CURRENT document font across every mounted .markdown-body. The font-size
+   preference mutates --vv-font-size with NO re-render (see :fonts/apply), so figures sized for the previous
+   font are re-stamped here — the one place figure sizing runs post-DOM. Idempotent when the font is unchanged
+   (set-style! writes only on change). No-op without a document (:node-test). Geometry is served from the warm
+   meta-cache, so it is synchronous in practice."
+  []
+  (when (exists? js/document)
+    (let [doc-font (doc-font-px)
+          bodies   (.querySelectorAll js/document ".markdown-body")]
+      (dotimes [i (.-length bodies)]
+        (let [^js body (aget bodies i)
+              imgs     (.querySelectorAll body "img")]
+          (dotimes [j (.-length imgs)]
+            (let [^js img (aget imgs j)
+                  url    (.-src img)                        ; live node: resolved absolute URL (matches cache key)
+                  path   (str/replace url #"[?#].*$" "")
+                  local? (boolean (re-find #"(?i)^file://" url))]
+              (when (and local? (re-find #"(?i)\.svg$" path))
+                (-> (fetch-meta url)
+                    (.then (fn [meta] (refit-svg-live! body img meta doc-font)))
+                    (.catch (fn [_] nil)))))))))))
+
+;; SUPERSEDED by scale-figures-html + refit-all! (pre-DOM figure sizing, ADR-0022). The functions below sized
+;; figures on the LIVE DOM after insertion (reading clientWidth for `avail`, stamping an !important px height),
+;; which produced a visible post-insert re-scale and re-ran on every resize / live-refresh / streamed block.
+;; Kept #_-disabled (not deleted) per the comment-don't-delete rule, for reference / recovery.
+#_(defn- apply-svg-size! [^js body ^js img avail doc-font {:keys [v h f]}]
+    (when (and (.-isConnected img)
+               (identical? body (.closest img ".markdown-body")))
+      (if (positive-number? v)
+        (let [width (* doc-font (/ v f))
+              style (.-style img)]
+          (set-style! style "width" (str (js/Math.round width) "px"))
+          (if (positive-number? h)
+            (let [height (* width (/ h v))]
+              (set-style-important! style "height" (str (js/Math.round height) "px"))
+              (set-style! style "aspect-ratio" (str v " / " h)))
+            (do
+              (.removeProperty style "height")
+              (.removeProperty style "aspect-ratio"))))
+        (clear-size! img))))
+#_(defn- apply-intrinsic-size! [^js body ^js img {:keys [w h]}]
+    (when (and (.-isConnected img)
+               (identical? body (.closest img ".markdown-body")))
+      (if (and (positive-number? w) (positive-number? h))
+        (when-not (and (.hasAttribute img "width") (.hasAttribute img "height"))
+          (.setAttribute img "width"  (str (js/Math.round w)))
+          (.setAttribute img "height" (str (js/Math.round h))))
+        (clear-size! img))))
+#_(defn scale-figures! [^js body]
+    (if (and body (not (.closest body ".vv-diagram")))
+      (let [cs       (js/getComputedStyle body)
+            avail    (- (.-clientWidth body)
+                        (js/parseFloat (or (.-paddingLeft cs) "0"))
+                        (js/parseFloat (or (.-paddingRight cs) "0")))
+            doc-font (or (js/parseFloat (.-fontSize cs)) 16)
+            imgs     (.querySelectorAll body "img")
+            jobs     #js []]
+        (dotimes [i (.-length imgs)]
+          (let [^js img (aget imgs i)
+                src     (or (.getAttribute img "src") "")
+                url     (.-src img)
+                path    (str/replace url #"[?#].*$" "")
+                local?  (boolean (re-find #"(?i)^file://" url))]
+            (set! (.-draggable img) false)
+            (.setAttribute img "draggable" "false")
+            (cond
+              (re-find #"(?i)^emoji" src)               nil
+              (and local? (re-find #"(?i)\.svg$" path))
+              (.push jobs (-> (fetch-meta url) (.catch (fn [_] nil))))
+              :else
+              (.push jobs (-> (fetch-raster-dims url local?) (.catch (fn [_] nil)))))))
+        (js/Promise.all jobs))
+      (js/Promise.resolve nil)))

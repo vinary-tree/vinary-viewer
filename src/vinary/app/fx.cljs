@@ -8,6 +8,8 @@
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.syntax :as syntax]
+            [vinary.renderer.figures :as figures]
+            [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.find :as finder]))
@@ -227,5 +229,10 @@
    (let [^js root (.. js/document -documentElement -style)]
      (when (seq font-variable) (.setProperty root "--vv-font-variable" font-variable))
      (when (seq font-fixed)    (.setProperty root "--vv-font-fixed" font-fixed))
-     (when font-size           (.setProperty root "--vv-font-size" (str font-size "px")))
+     (when font-size
+       (.setProperty root "--vv-font-size" (str font-size "px"))
+       ;; the document font changed with NO re-render (the CSS var is applied live), so re-fit any figures /
+       ;; mermaid already on screen to the new size — the one place figure sizing runs post-DOM (idempotent).
+       (figures/refit-all!)
+       (mermaid/refit-all!))
      (when code-font-size      (.setProperty root "--vv-code-font-size" (str code-font-size "px"))))))

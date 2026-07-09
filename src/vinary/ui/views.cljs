@@ -32,7 +32,6 @@
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
             [vinary.stream.scheduler :as stream-scheduler]
-            [vinary.renderer.figures :as figures]
             [vinary.renderer.media :as media]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.syntax :as syntax]
@@ -255,22 +254,26 @@
                          ;; feed the generalized spy this doc's :doc/toc ids (== the rendered heading ids;
                          ;; collect-metadata! runs after rehype-slug) so spy ids match the sidebar exactly.
                          (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc])))))
-        after-figures! (fn [token f]
-                         (-> (figures/scale-figures! @node)
-                             (.then (fn [_]
-                                      (when (and @node (or (nil? token) (= token @render-token)))
-                                        (refresh-toc!)
-                                        (when f (f))
-                                        ;; consume a pending source→preview jump (deferred across the toggle
-                                        ;; remount); a jump is not a nav, so scroll/apply! (f) no-ops and the
-                                        ;; jump wins
-                                        (when-let [l (source-nav/take-preview-line!)]
-                                          (source-nav/scroll-preview-to-line! l)))))))
+        after-render! (fn [token f]
+                        ;; Figures / MathJax / Mermaid are pre-sized in the HTML string (apply-posts →
+                        ;; scale-figures-html etc.), so layout is FINAL at set-inner! time — no post-insert
+                        ;; re-scale. We only re-measure the scroll-spy and run the continuation on the next
+                        ;; frame (one frame lets the browser flush layout so a scroll restore targets the
+                        ;; final document height).
+                        (js/requestAnimationFrame
+                         (fn [_]
+                           (when (and @node (or (nil? token) (= token @render-token)))
+                             (refresh-toc!)
+                             (when f (f))
+                             ;; consume a pending source→preview jump (deferred across the toggle remount); a
+                             ;; jump is not a nav, so scroll/apply! (f) no-ops and the jump wins
+                             (when-let [l (source-nav/take-preview-line!)]
+                               (source-nav/scroll-preview-to-line! l))))))
         render-html! (fn [html]
                        (let [token (swap! render-token inc)]
                          (reset! html* html)
                          (set-inner! @node html)
-                         (after-figures! token #(scroll/apply! @node))))
+                         (after-render! token #(scroll/apply! @node))))
         on-resize (fn []
                     (when (and @node (not @raf))
                       (reset! raf true)
@@ -278,7 +281,9 @@
                        (fn []
                          (reset! raf false)
                          (when @node
-                           (after-figures! nil nil))))))
+                           ;; Figure widths are resize-independent now (font-matched, CSS-capped), so only the
+                           ;; scroll-spy offsets need re-measuring when prose reflows at a new column width.
+                           (refresh-toc!))))))
         observe-resize! (fn []
                           (if (exists? js/ResizeObserver)
                             (let [o (js/ResizeObserver. (fn [_] (on-resize)))]
@@ -340,8 +345,9 @@
         restore-to* (atom nil)                                 ; scrollTop to re-anchor after a live-refresh remount
         last-toc-n  (atom 0)
         refresh-raf (atom false)
-        ;; As blocks append: font-match embedded SVG/image figures (parity with markdown-body), THEN re-measure
-        ;; the scroll-spy (figure sizing changes offsets). rAF-coalesce bursts of appends into one refresh.
+        ;; As blocks append they already carry final figure/math/mermaid geometry (pre-sized in apply-posts), so a
+        ;; burst only needs the scroll-spy re-measured (block commits move heading offsets).
+        ;; rAF-coalesce bursts of appends into one refresh.
         refresh-view! (fn []
                         (when-not @refresh-raf
                           (reset! refresh-raf true)
@@ -349,10 +355,8 @@
                            (fn []
                              (reset! refresh-raf false)
                              (when @node
-                               (-> (figures/scale-figures! @node)
-                                   (.then (fn [_]
-                                            (when-let [^js content (some-> @node (.closest ".vv-content"))]
-                                              (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))))))]
+                               (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                                 (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))) ]
     (r/create-class
      {:display-name "vv-ir-stream-body"
       :component-did-mount  (fn [this]
@@ -608,7 +612,8 @@
                 (-> (mermaid/render-source source)
                     (.then (fn [svg]
                              (when (and @node (= t @token))
-                               (set-inner! @node (str "<div class=\"vv-mermaid\">" svg "</div>"))
+                               ;; size the SVG string BEFORE insertion (font-matched) → no post-insert flash
+                               (set-inner! @node (str "<div class=\"vv-mermaid\">" (mermaid/size-mermaid-svg-string svg) "</div>"))
                                (scroll/apply! @node))))
                     (.catch (fn [e]
                               (when (and @node (= t @token))

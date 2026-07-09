@@ -177,9 +177,11 @@ function createSmallLogFixture() {
 // streaming threshold, exercising the parity-critical base-pipeline features: heading-slug DEDUP across repeated
 // headings, a FORWARD reference definition (used in the intro, defined at the very end — proves whole-document
 // context), tight + loose lists, a highlighted fenced code block, a table, a blockquote, inline raw HTML, and a
-// thematic break. Deliberately NO math/images: MathJax uses a shared, monotonic ID counter (so even two batch
-// renders differ) and figure sizing is measured at layout time — both are covered by separate feature
-// assertions, not byte-comparison. `batch.md` renders whole (flag off), `stream.md` streams (flag on); their
+// thematic break. Deliberately NO math/images: MathJax uses a shared monotonic ID counter AND local image URLs
+// carry a per-render cache-buster (?vv-cache=<timestamp>, regenerated each render) — both differ between two
+// independent renders, so they are covered by separate feature assertions, not byte-comparison. (Figure SIZING
+// itself is deterministic + pre-DOM now — ADR-0022 — proven by the local-SVG/raster sizing + no-flash
+// assertions.) `batch.md` renders whole (flag off), `stream.md` streams (flag on); their
 // .markdown-body innerHTML must be byte-identical.
 function createLargeMarkdownFixtures() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-md-stream-'));
@@ -1095,13 +1097,24 @@ async function main() {
       badgeCount: badges.length,
       sameRow: rects.length === 2 && Math.abs(rects[0].top - rects[1].top) < 2,
       secondAfterFirst: rects.length === 2 && rects[1].left > rects[0].left,
-      mermaidText: document.querySelector('.vv-mermaid')?.textContent || ''
+      mermaidText: document.querySelector('.vv-mermaid')?.textContent || '',
+      mermaidSvg: (() => {
+        const svg = document.querySelector('.markdown-body .vv-mermaid svg');
+        if (!svg) return null;
+        return { width: svg.style.width, aspectRatio: svg.style.aspectRatio, maxWidth: svg.style.maxWidth };
+      })()
     };
   })()`);
   assert.strictEqual(markdownFeatureLayout.badgeCount, 2, 'badge fixture must render two images');
   assert.strictEqual(markdownFeatureLayout.sameRow, true, 'badge images must stay on one row');
   assert.strictEqual(markdownFeatureLayout.secondAfterFirst, true, 'badge images must flow horizontally');
   assert.ok(markdownFeatureLayout.mermaidText.includes('Start'), 'Mermaid output should contain diagram labels');
+  // inline Mermaid is font-matched PRE-DOM (ADR-0022): its own inline max-width is stripped and a font-matched
+  // width + aspect-ratio are baked into the SVG string before insertion (so it auto-scales like the figures).
+  assert.ok(markdownFeatureLayout.mermaidSvg, 'inline Mermaid must render an <svg>');
+  assert.strictEqual(markdownFeatureLayout.mermaidSvg.maxWidth, '', 'inline Mermaid max-width must be stripped so font-match can up-scale');
+  assert.ok(/px$/.test(markdownFeatureLayout.mermaidSvg.width), `inline Mermaid must carry a font-matched px width (got: ${markdownFeatureLayout.mermaidSvg.width})`);
+  assert.ok(markdownFeatureLayout.mermaidSvg.aspectRatio, 'inline Mermaid must carry an aspect-ratio');
   state.lastCopiedText = null;
   await evalIn(win, `(() => {
     const walker = document.createTreeWalker(document.querySelector('.markdown-body'), NodeFilter.SHOW_TEXT);
@@ -1412,9 +1425,23 @@ async function main() {
   );
   await waitFor(
     () => evalIn(win, `Array.from(document.querySelectorAll('.markdown-body img'))
-      .every((img) => img.style.width && img.style.height && img.style.aspectRatio && img.getAttribute('draggable') === 'false')`),
-    'local SVG figure sizing'
+      .every((img) => img.style.width && img.style.aspectRatio && !img.style.height && img.getAttribute('draggable') === 'false')`),
+    'local SVG figure sizing (width + aspect-ratio, no explicit px height)'
   );
+  // NO-FLASH proof (ADR-0022): figures are sized in the HTML string (pre-DOM, apply-posts → scale-figures-html),
+  // so nothing mutates <img> geometry after first paint. Observe style/dimension attributes across the body
+  // subtree and assert zero mutations settle in — i.e. no visible post-insert re-scale.
+  const noFlash = await evalIn(win, `(() => new Promise((resolve) => {
+    const body = document.querySelector('.markdown-body');
+    let attrMutations = 0;
+    const obs = new MutationObserver((records) => {
+      attrMutations += records.filter((r) => r.type === 'attributes').length;
+    });
+    obs.observe(body, { attributes: true, subtree: true, attributeFilter: ['style', 'width', 'height', 'draggable'] });
+    setTimeout(() => { obs.disconnect(); resolve({ attrMutations }); }, 400);
+  }))()`);
+  assert.strictEqual(noFlash.attrMutations, 0, 'figures must be pre-sized in the HTML — no post-insert style/dimension mutation (no flash)');
+  console.log('[ok] local SVG figures are pre-sized — no post-insert re-scale (no flash)');
   const localSvgStart = await evalIn(win, `(() => {
     const body = document.querySelector('.markdown-body');
     const imgs = Array.from(body.querySelectorAll('img'));

@@ -14,6 +14,7 @@
             [vinary.renderer.markdown-pipeline :as pipeline]
             [vinary.renderer.math :as math]
             [vinary.renderer.mermaid :as mermaid]
+            [vinary.renderer.figures :as figures]
             [vinary.renderer.syntax :as syntax]))
 
 ;; re-exported so existing callers (app.fx, stream.scheduler, ui.views) keep using `md/dir-of` unchanged
@@ -21,11 +22,15 @@
 
 (defn apply-posts
   "The shared string post-passes applied to serialized HTML: MathJax SVG (synchronous), then Mermaid SVG
-   (async), then tree-sitter fenced-code highlighting (async). Returns Promise<html>. Public so the streaming
-   sink can run the identical passes per appended block."
+   (async, font-matched), then figure geometry (async — bakes font-matched SVG width / raster box reservation
+   into <img> tags so they render at final size with no post-insert re-scale), then tree-sitter fenced-code
+   highlighting (async). All operate on self-contained elements, so they distribute over block concatenation
+   → byte-identical whether run whole (render-ir) or per streamed block (sink). Returns Promise<html>. Public
+   so the streaming sink can run the identical passes per appended block."
   [html]
   (-> (js/Promise.resolve (math/render-html-math html))
       (.then mermaid/render-html-diagrams)
+      (.then figures/scale-figures-html)
       (.then syntax/highlight-html-code-blocks)))
 
 ;; The legacy string render (direct rehype-stringify) is RETIRED (ADR-0017): the common IR is now the
