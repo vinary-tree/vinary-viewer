@@ -51,6 +51,9 @@ Added
       a heading Contents outline, in-document syntax highlighting for nested
       #+begin_src <lang> blocks, and a tree-sitter-org-highlighted View Source. See
       docs/design-decisions/0020-org-mode-via-uniorg.md and docs/features/26-org-mode.md.
+    - "Go to source" / "Go to preview": bidirectional jump navigation between the
+      preview and source panes (right-click menu + command palette), reusing the
+      per-node source positions. See docs/design-decisions/0021-bidirectional-source-preview-jump.md.
 
 Changed
     - MathJax upgraded to v4 and built from source (@mathjax/src 4.1.3, bundled by

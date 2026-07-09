@@ -1626,6 +1626,43 @@ async function main() {
   assert.deepStrictEqual(rasterResult.dims, rasterStart.dims, 'raster image dimensions must stay stable while scrolling over them (no layout jump)');
   console.log('[ok] local raster markdown images reserve a box + scroll without layout jump');
 
+  // ── Feature: bidirectional "Go to source" / "Go to preview" jumps ──────────────────────────────────────
+  // The "Local Raster Scroll" markdown doc is still open (in preview). The preview/source right-click menus
+  // dispatch these events with a source line; here we drive them directly and observe the pane toggle + the
+  // deferred scroll that lands after the toggled view remounts.
+  const dispatchJump = (nsName, evName, line) =>
+    evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword(${JSON.stringify(nsName)}, ${JSON.stringify(evName)}), ${line})); true`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+    'jump precondition: the raster markdown doc is showing its preview');
+  // preview → source: switches the pane to the source view (deferred scroll consumed on create-source-view mount)
+  await dispatchJump('source', 'goto-line', 12);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor')) && !document.querySelector('.vv-content .markdown-body')`),
+    '"Go to source" switches the pane to the source view', 8000);
+  console.log('[ok] Go to source: preview → source view (deferred line scroll)');
+  // source → preview: switches back and lands near the TOP for line 1
+  await dispatchJump('preview', 'goto-line', 1);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+    '"Go to preview" switches the pane back to the preview', 8000);
+  await delay(250);
+  const jumpTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+  // "near the top" — the first heading region (allowing for .vv-content padding + the h1 margin); the deep-jump
+  // check below (deepTop > jumpTop) is what proves the target line actually steers the scroll position.
+  assert.ok(jumpTop < 200, `jumping to line 1 lands near the top of the preview (scrollTop=${jumpTop})`);
+  // preview → a deep line: confine-scrolls the preview down to the nearest element (no toggle, already preview)
+  await dispatchJump('preview', 'goto-line', 60);
+  await delay(300);
+  const deepTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+  assert.ok(deepTop > jumpTop, `jumping to a deep line scrolls the preview down (scrollTop ${jumpTop} → ${deepTop})`);
+  console.log('[ok] Go to preview: pane follows the target source line (top vs deep)');
+  // keyboard / command-palette commands self-gate and jump in the meaningful direction (no click target)
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-source"))); true`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor'))`),
+    'keyboard "Go to source" command switches to source', 8000);
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-preview"))); true`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+    'keyboard "Go to preview" command switches to preview', 8000);
+  console.log('[ok] keyboard Go to source / Go to preview commands self-gate and jump');
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();

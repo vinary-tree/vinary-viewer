@@ -119,6 +119,9 @@
  :<- [:ds/rev] :<- [:ui/active-path]
  (fn [[_rev path] _] (when path (ds/active-doc (ds/snapshot) path))))
 
+;; the active document's kind ("markdown" / "org" / "source" / "pdf" / …) — gates the "Go to preview" jump item
+(rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
+
 (rf/reg-sub :ui/web-toc (fn [db _] (get-in db [:ui :web-toc])))
 (rf/reg-sub :pdf/reflow? (fn [db _] (boolean (get-in db [:ui :pdf :reflow?]))))
 

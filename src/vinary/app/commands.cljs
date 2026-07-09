@@ -52,6 +52,10 @@
    :tree/open {:id :tree/open :title "Open tree selection" :category "Navigation" :dispatch [:tree/activate]}
    :nav/parent      {:id :nav/parent :title "Parent directory" :category "Navigation" :dispatch [:nav/parent]}
    :nav/open-target {:id :nav/open-target :title "Open highlighted target" :category "Navigation" :dispatch [:nav/open-target]}
+   ;; bidirectional source⇄preview jump (also on the preview/source right-click menus). Self-gating: each no-ops
+   ;; unless it's the meaningful direction for a previewable (markdown/org) doc.
+   :jump/to-source  {:id :jump/to-source :title "Go to source" :category "Navigation" :dispatch [:jump/goto-source]}
+   :jump/to-preview {:id :jump/to-preview :title "Go to preview" :category "Navigation" :dispatch [:jump/goto-preview]}
    ;; ---- Search ----
    :search/start {:id :search/start :title "Find" :category "Search" :dispatch [:find/toggle]}
    :search/next  {:id :search/next :title "Find next" :category "Search" :dispatch [:find/cycle 1] :when :find-visible?}

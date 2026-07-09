@@ -27,7 +27,7 @@
    (when path {:label "Copy file path" :event [:clipboard/copy path]})
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
-(defn items-for [{:keys [kind path uri text source-location math-tex] :as target} vs?]
+(defn items-for [{:keys [kind path uri text source-location source-line math-tex] :as target} vs? previewable?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -54,16 +54,23 @@
      {:label "Copy link location"   :event [:clipboard/copy uri]}
      {:label "Copy link text"       :event [:clipboard/copy (or text "")]}
      (when source-location
-       {:label "Copy source location" :event [:clipboard/copy source-location]})]
+       {:label "Copy source location" :event [:clipboard/copy source-location]})
+     (when source-line
+       {:label "Go to source"       :event [:source/goto-line source-line]})]
     :preview-body
     [(when (seq math-tex) {:label "Copy LaTeX" :event [:clipboard/copy math-tex]})
      {:label "Copy"                 :event [:clipboard/copy (or text "")]}
      (when source-location
-       {:label "Copy source location" :event [:clipboard/copy source-location]})]
+       {:label "Copy source location" :event [:clipboard/copy source-location]})
+     (when source-line
+       {:label "Go to source"       :event [:source/goto-line source-line]})]
     :source-body
     [{:label "Copy"                 :event [:clipboard/copy (or text "")]}
      (when source-location
        {:label "Copy source location" :event [:clipboard/copy source-location]})
+     ;; jump to the rendered object for this source line — only when the doc has a preview (markdown/org)
+     (when (and source-line previewable?)
+       {:label "Go to preview"      :event [:preview/goto-line source-line]})
      :sep
      {:label "Copy file path"       :event [:clipboard/copy path]}
      {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
@@ -98,7 +105,8 @@
                last-menu (r/atom nil)]
     (let [{:keys [x y target] :as m} @(rf/subscribe [:ui/context-menu])
           vs? @(rf/subscribe [:ui/active-view-source?])
-          items (vec (remove nil? (items-for target vs?)))
+          previewable? (contains? #{"markdown" "org"} @(rf/subscribe [:doc/kind]))
+          items (vec (remove nil? (items-for target vs? previewable?)))
           focused @focus]
       (when (not= @last-menu m)
         (reset! last-menu m)

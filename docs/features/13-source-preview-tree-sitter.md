@@ -37,6 +37,17 @@ Selections copy through the application clipboard path. `Ctrl+C` and
 offers `Copy`, `Copy source location`, `Copy file path`, and `Copy file name`.
 The source location uses compiler-style `path:line:column` formatting.
 
+**Go to source / Go to preview** — the same per-node source positions also drive
+bidirectional *jump* navigation (not just copy). Right-click an object in the
+preview → **Go to source** opens the source view and scrolls to that line;
+right-click a line in the source → **Go to preview** opens the preview and scrolls
+to the matching object. Both are also command-palette commands ("Go to source" /
+"Go to preview") that derive the current line with no click target. Because the two
+views toggle within one pane, a jump that switches views defers its scroll until the
+destination view remounts. This is Markdown-only for now (Org preview nodes carry no
+source positions — see [feature 26](26-org-mode.md)). Full design:
+[ADR-0021](../design-decisions/0021-bidirectional-source-preview-jump.md).
+
 ## 3 · How it works internally
 
 Main classifies source files with `vinary.main.file-kind/kind-of`, using

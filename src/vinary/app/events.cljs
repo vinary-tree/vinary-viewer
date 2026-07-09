@@ -312,6 +312,40 @@
 (rf/reg-event-db :tab/toggle-source
                  (fn [db [_ id]] (if id (nav/toggle-source db id) (nav/toggle-source db))))
 
+;; ── bidirectional source⇄preview jump ("Go to source" / "Go to preview" context-menu items + keymap) ──
+;; The EVENT decides whether the pane must toggle (it knows the current view), and the FX either scrolls the
+;; already-mounted view NOW or stashes the target line for the view that is about to mount (consumed across the
+;; toggle-driven remount — mirrors renderer.scroll want!→apply!).
+(rf/reg-event-fx
+ :source/goto-line                                        ; preview → source
+ (fn [{:keys [db]} [_ line]]
+   (when (number? line)
+     (if (nav/view-source? db)
+       {:fx [[:source/scroll-line line]]}                 ; already source: scroll the live view now
+       {:db  (nav/toggle-source db)                       ; entering source: defer until create-source-view mounts
+        :fx  [[:source/want-line line]]}))))
+(rf/reg-event-fx
+ :preview/goto-line                                       ; source → preview
+ (fn [{:keys [db]} [_ line]]
+   (when (number? line)
+     (if (nav/view-source? db)
+       {:db  (nav/toggle-source db)                       ; leaving source: defer until the preview mounts
+        :fx  [[:preview/want-line line]]}
+       {:fx [[:preview/scroll-line line]]}))))            ; already preview: scroll now
+
+;; keyboard / command-palette entry points (no click target): only fire in the meaningful direction, and only
+;; for a previewable doc (markdown/org — the kinds that stamp data-vv-source-* and have both views).
+(defn- previewable-doc? [db]
+  (contains? #{"markdown" "org"} (:doc/kind (ds/active-doc (ds/snapshot) (nav/active-path db)))))
+(rf/reg-event-fx
+ :jump/goto-source                                        ; from preview → source (derives the viewport line)
+ (fn [{:keys [db]} _]
+   (when (and (not (nav/view-source? db)) (previewable-doc? db)) {:fx [[:jump/to-source-current nil]]})))
+(rf/reg-event-fx
+ :jump/goto-preview                                       ; from source → preview (derives the cursor line)
+ (fn [{:keys [db]} _]
+   (when (and (nav/view-source? db) (previewable-doc? db)) {:fx [[:jump/to-preview-current nil]]})))
+
 ;; drag-reorder: drop tab `from-id` before/after `to-id` (after? = cursor past the target's midpoint)
 (rf/reg-event-db
  :tab/reorder

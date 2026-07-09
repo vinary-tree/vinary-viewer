@@ -35,7 +35,8 @@
             [vinary.renderer.figures :as figures]
             [vinary.renderer.media :as media]
             [vinary.renderer.mermaid :as mermaid]
-            [vinary.renderer.syntax :as syntax]))
+            [vinary.renderer.syntax :as syntax]
+            [vinary.renderer.source-nav :as source-nav]))
 
 (defn- set-inner! [^js node html]
   (when node (set! (.-innerHTML node) (or html ""))))
@@ -126,9 +127,13 @@
    :start-offset (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-start-offset"))
    :end-offset   (preview-ctx/parse-int-or-nil (.getAttribute el "data-vv-source-end-offset"))})
 
-(defn- source-location [source path node offset text]
+(defn- source-lc
+  "The {:line :column} source position for a right-clicked preview `node`, or nil when the node has no
+   data-vv-source-* ancestor. The load-bearing map behind BOTH 'Copy source location' (formatted to a string)
+   and the 'Go to source' jump (which needs the :line integer)."
+  [source node offset text]
   (when-let [el (and node (source-element node))]
-    (let [{:keys [kind start-line start-column start-offset end-offset] :as span} (source-span el)
+    (let [{:keys [kind start-line start-column start-offset end-offset]} (source-span el)
           exact-text? (= "text" kind)
           source-offset (cond
                           (and exact-text? (number? start-offset) (number? offset))
@@ -137,10 +142,12 @@
                           (and (seq text) (number? start-offset))
                           (preview-ctx/best-source-offset source start-offset end-offset text start-offset)
 
-                          :else start-offset)
-          lc (or (preview-ctx/offset->line-column source source-offset)
-                 {:line start-line :column start-column})]
-      (preview-ctx/location-string path lc))))
+                          :else start-offset)]
+      (or (preview-ctx/offset->line-column source source-offset)
+          {:line start-line :column start-column}))))
+
+(defn- source-location [source path node offset text]
+  (preview-ctx/location-string path (source-lc source node offset text)))
 
 (defn- link-text [^js a]
   (or (not-empty (str/trim (.-textContent a)))
@@ -157,7 +164,8 @@
        :path link-path
        :uri href
        :text text
-       :source-location (source-location source path a nil nil)})))
+       :source-location (source-location source path a nil nil)
+       :source-line (:line (source-lc source a nil nil))})))
 
 (defn- source-location-for-pos [path view pos]
   (some->> (syntax/line-info-at view pos)
@@ -209,7 +217,8 @@
                                          :math-tex (when math-el
                                                      (math/delimit-tex (.contains (.-classList math-el) "vv-math-display")
                                                                        (.getAttribute math-el "data-tex")))
-                                         :source-location (source-location source path source-node offset text)}))]
+                                         :source-location (source-location source path source-node offset text)
+                                         :source-line (:line (source-lc source source-node offset text))}))]
                        (.preventDefault e)
                        (.stopPropagation e)
                        (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e) :target target}])))]
@@ -251,7 +260,12 @@
                              (.then (fn [_]
                                       (when (and @node (or (nil? token) (= token @render-token)))
                                         (refresh-toc!)
-                                        (when f (f)))))))
+                                        (when f (f))
+                                        ;; consume a pending source→preview jump (deferred across the toggle
+                                        ;; remount); a jump is not a nav, so scroll/apply! (f) no-ops and the
+                                        ;; jump wins
+                                        (when-let [l (source-nav/take-preview-line!)]
+                                          (source-nav/scroll-preview-to-line! l)))))))
         render-html! (fn [html]
                        (let [token (swap! render-token inc)]
                          (reset! html* html)
@@ -364,17 +378,23 @@
                                 ;; exists; the browser clamps if the doc came back shorter
                                 (reset! restore-to* (get @stream-scroll path))
                                 (swap! stream-scroll dissoc path)
-                                (when @restore-to*
-                                  (let [set-scroll! (fn [] (when-let [^js content (and @node (some-> @node (.closest ".vv-content")))]
-                                                             (set! (.-scrollTop content) @restore-to*)))]
-                                    (-> (stream-scheduler/when-settled @ctrl*)
-                                        ;; re-apply across a few frames: post-passes (syntax highlight) can grow the
-                                        ;; layout height AFTER the appends settle, so one early set would clamp short
-                                        (.then (fn [_]
-                                                 (set-scroll!)
-                                                 (js/requestAnimationFrame
-                                                  (fn [_] (set-scroll!)
-                                                    (js/requestAnimationFrame (fn [_] (set-scroll!)))))))))) ))
+                                (if-let [jump-line (source-nav/take-preview-line!)]
+                                  ;; a source→preview jump into a streamed doc: scroll to the target line once the
+                                  ;; whole doc has drained (its block may be among the last committed); the jump
+                                  ;; wins over any saved scroll restore
+                                  (-> (stream-scheduler/when-settled @ctrl*)
+                                      (.then (fn [_] (source-nav/scroll-preview-to-line! jump-line))))
+                                  (when @restore-to*
+                                    (let [set-scroll! (fn [] (when-let [^js content (and @node (some-> @node (.closest ".vv-content")))]
+                                                               (set! (.-scrollTop content) @restore-to*)))]
+                                      (-> (stream-scheduler/when-settled @ctrl*)
+                                          ;; re-apply across a few frames: post-passes (syntax highlight) can grow the
+                                          ;; layout height AFTER the appends settle, so one early set would clamp short
+                                          (.then (fn [_]
+                                                   (set-scroll!)
+                                                   (js/requestAnimationFrame
+                                                    (fn [_] (set-scroll!)
+                                                      (js/requestAnimationFrame (fn [_] (set-scroll!))))))))))) ))
       :component-did-update (fn [this]
                               ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
                               ;; while markdown is still draining (its whole outline is set upfront, but the
@@ -568,7 +588,8 @@
                                                   :target {:kind :source-body
                                                            :path path
                                                            :text text
-                                                           :source-location (source-location-for-pos path v loc-pos)}}])))]
+                                                           :source-location (source-location-for-pos path v loc-pos)
+                                                           :source-line (:line (syntax/line-info-at v loc-pos))}}])))]
       (r/create-class
        {:display-name           "vv-source-view"
         :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))

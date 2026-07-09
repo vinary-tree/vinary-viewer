@@ -350,6 +350,19 @@
 ;; the currently-mounted source EditorView, so a source Contents-outline click can scroll it to a line
 (defonce ^:private current-view (atom nil))
 
+;; a pending preview→source jump line: set by the :source/want-line fx BEFORE toggling to source remounts the
+;; view, consumed when create-source-view mounts (mirrors renderer.scroll want!→apply!). defonce survives reload.
+(defonce ^:private pending-source-line (atom nil))
+(defn want-source-line! [line] (reset! pending-source-line line))
+
+(defn current-source-line
+  "The 1-based cursor line of the mounted source view (the anchor for a keyboard/palette 'Go to preview' invoked
+   from source with no click target) — the selection start, else the document start. nil when no source view is
+   mounted."
+  []
+  (when-let [^js view @current-view]
+    (:line (line-info-at view (or (selection-start view) 0)))))
+
 (defn parse-outline
   "Load path's grammar (if any), parse `text`, and derive the source-code Contents outline via the common IR
    (source-fe/tree->ir → outline). Returns Promise<[{:level :text :id :line}]> — [] when there is no grammar
@@ -385,6 +398,9 @@
         state (.create EditorState #js {:doc text :extensions exts})
         view  (EditorView. #js {:state state :parent parent})]
     (reset! current-view view)          ; register for source-outline line-scroll
+    (when-let [l @pending-source-line]  ; consume a pending preview→source jump (deferred across the remount)
+      (reset! pending-source-line nil)
+      (scroll-source-to-line! l))
     (when grammar
       (-> (highlight-ranges text grammar)
           (.then (fn [ranges]

@@ -968,21 +968,31 @@
   (let [labels (fn [items] (->> items (remove #{:sep}) (keep :label) set))]
     (testing "each target kind yields its expected items"
       (is (= #{"Open" "Open in new tab" "Copy file path" "Copy file name"}
-             (labels (context-menu/items-for {:kind :file :path "/x/a.md"} false))))
-      (is (contains? (labels (context-menu/items-for {:kind :dir :path "/x/d"} false))
+             (labels (context-menu/items-for {:kind :file :path "/x/a.md"} false false))))
+      (is (contains? (labels (context-menu/items-for {:kind :dir :path "/x/d"} false false))
                      "Open in file manager"))
-      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false))
+      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false false))
                      "Open in system browser"))
-      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false))
+      (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false false))
                      "Copy link text"))
       (is (= #{"Copy" "Copy source location"}
-             (labels (context-menu/items-for {:kind :preview-body :text "hi" :source-location "f:1"} false))))
-      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} false)) "View Source"))
-      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} true)) "View Preview"))
-      (is (= #{} (labels (context-menu/items-for {:kind :unknown} false)))))   ; unknown → nil → no items
+             (labels (context-menu/items-for {:kind :preview-body :text "hi" :source-location "f:1"} false false))))
+      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} false false)) "View Source"))
+      (is (contains? (labels (context-menu/items-for {:kind :doc :path "/x/a.md"} true false)) "View Preview"))
+      (is (= #{} (labels (context-menu/items-for {:kind :unknown} false false)))))   ; unknown → nil → no items
     (testing "an http link without text omits Copy link text"
-      (is (not (contains? (labels (context-menu/items-for {:kind :http :path "https://x"} false))
-                          "Copy link text"))))))
+      (is (not (contains? (labels (context-menu/items-for {:kind :http :path "https://x"} false false))
+                          "Copy link text"))))
+    (testing "the bidirectional jump items appear only with a source line (Go to preview also needs a previewable doc)"
+      (is (contains? (labels (context-menu/items-for {:kind :preview-body :text "hi" :source-line 12} false false))
+                     "Go to source"))
+      (is (not (contains? (labels (context-menu/items-for {:kind :preview-body :text "hi"} false false))
+                          "Go to source")))
+      (is (contains? (labels (context-menu/items-for {:kind :source-body :path "/x/a.md" :source-line 7} true true))
+                     "Go to preview"))
+      ;; a non-previewable source (e.g. a .rs file with no preview) hides "Go to preview" even with a line
+      (is (not (contains? (labels (context-menu/items-for {:kind :source-body :path "/x/a.rs" :source-line 7} true false))
+                          "Go to preview"))))))
 
 ;; ---- keybindings editor: chord humanization (drives the editor's binding chips) ----
 (deftest kbedit-chord-format
