@@ -77,6 +77,33 @@ computed with no live layout — off an off-DOM `DOMParser` document — and sta
   place figure sizing still runs post-DOM is `figures/refit-all!` + `mermaid/refit-all!`, invoked **only** from
   the font-size preference effect (`:fonts/apply`), because that changes the document font with no re-render.
 
+### Which `font-size` declarations count
+
+The font-matched width $D = f_{doc} \cdot w_{vb} / f_{svg}$ is only as good as $f_{svg}$, the figure's
+**dominant font size**. `parse-svg-meta` derives it by counting `font-size` occurrences across the SVG source
+and taking the most frequent — but a size is a candidate **only when it is absolute**.
+
+A relative unit (`em`, `rem`, `%`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax`) scales an *inherited* size: it is a
+multiplier, not a size, and it carries no information about how large the glyphs actually are. Absolute units
+are normalised to px through the CSS Values 4 §6.2 table
+(`px 1 · pt 96/72 · pc 16 · in 96 · cm 96/2.54 · mm 96/25.4 · Q 96/101.6`).
+
+One asymmetry matters, because SVG spells `font-size` two ways and the two disagree about bare numbers:
+
+| Form | Syntax | Bare number means | Counted? |
+|------|--------|-------------------|----------|
+| SVG presentation attribute | `<text font-size="14">` | 14 **user units** | yes |
+| CSS declaration | `style="font-size:14"` or a `<style>` rule | *invalid* — the browser drops it | no |
+
+`parse-svg-meta` therefore captures the separator (`=` vs `:`) and applies the unitless rule accordingly.
+Two further guards: candidates below `2` px-equivalent are ignored (a sub-2-unit "font" cannot draw a glyph,
+and it is the direction that explodes the figure, since $f_{svg} \to 0 \Rightarrow D \to \infty$), and ties
+break toward the **smaller** size, which is both deterministic — ClojureScript map order is unspecified above
+eight keys — and the right default, since body labels are smaller and more numerous than titles.
+
+When no absolute size survives, $f_{svg} = 0$ and `target-width` falls back to the natural viewBox width,
+CSS-capped to the column.
+
 ### Byte-parity
 
 Every `apply-posts` pass operates on **self-contained elements**, so it distributes over block concatenation:
@@ -93,6 +120,13 @@ across renders and **zero style/attribute mutations after first paint** (the dir
 - Office and PDF-reflow inherit pre-sizing for free (they share `apply-posts`).
 - The one behavioral delta: for a narrow column + small-natural-width + small-native-font SVG, the old code fell
   back to natural width while the new scheme fills the column (CSS-capped). Acceptable / arguably better.
+- **The column cap hides sizing bugs.** Because `max-width:100%` silently clamps any over-wide figure, a bad
+  $f_{svg}$ does not overflow — it renders as "full column, magnified text", which reads as intentional. The
+  first instance: `parse-svg-meta` originally counted `font-size` values unit-blind, so d2's markdown-label
+  stylesheet (`1em`, `1.25em`, `0.875em`, `0.85em` — all rounding to `1`) outvoted the real `16px` text labels
+  and drove $D = 15 \cdot 671 / 1 = 10065\text{px}$ on a 671-unit viewBox. Sizing must be validated against the
+  *pre-clamp* width, which is what `figures_test`'s `svg-style` assertions do. A sweep of 173 project SVGs
+  showed exactly one file affected.
 - **Files:** `src/vinary/renderer/figures.cljs` (`target-width`, `svg-style`, `doc-font-px`, `stamp-svg!`,
   `stamp-raster!`, `scale-figures-html`, `refit-all!`), `renderer/markdown.cljs` (`apply-posts`),
   `renderer/mermaid.cljs` (`size-mermaid-svg!`, `size-mermaid-svg-string`, `refit-all!`), `ui/views.cljs`

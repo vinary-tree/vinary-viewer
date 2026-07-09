@@ -87,6 +87,19 @@ Changed
       byte-identical to the retired legacy path (guaranteed by the lossless HAST
       round-trip, ir.parity-test).
 
+Fixed
+    - Embedded .svg figures whose source carries relative CSS font sizes no longer
+      render at column width with magnified text. parse-svg-meta picked the figure's
+      dominant font size by counting every font-size value unit-blind, so a d2 diagram
+      with a markdown label -- d2 embeds a stylesheet whose 1em / 1.25em / 0.875em /
+      0.85em declarations all round to 1 -- outvoted the real 16px text labels, driving
+      the font-matched width to docFont x viewBox / 1 (10065px for a 671-unit viewBox),
+      which CSS max-width:100% then clamped to the full column. Only absolute font sizes
+      (px/pt/pc/in/cm/mm/Q, plus the unitless SVG presentation attribute, which means
+      user units) are now candidates; relative units are skipped, implausibly small sizes
+      are ignored, and ties break deterministically toward the smaller size. Inline
+      Mermaid shares the parser and is unaffected (Mermaid emits px only).
+
 Removed
     - The legacy Markdown string renderer, the main-process office regex sanitizer,
       and the :vv/ir migration flag / :ir/set-enabled toggle are retired (kept

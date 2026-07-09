@@ -475,11 +475,26 @@
       const vb = txt.match(/viewBox\s*=\s*["']\s*[-\d.eE]+\s+[-\d.eE]+\s+([-\d.eE]+)\s+([-\d.eE]+)/);
       if (vb) meta.v = parseFloat(vb[1]);                            // viewBox width = the SVG's user-unit width
       else { const w = txt.match(/<svg[^>]*\swidth\s*=\s*["']([\d.]+)(?:px)?["']/); if (w) meta.v = parseFloat(w[1]); }  // px/unitless only (not %, not stroke-width)
-      const counts = {}; let m; const re = /font-size\s*[:=]\s*["']?\s*([\d.]+)/g;
-      while ((m = re.exec(txt))) { const k = Math.round(parseFloat(m[1])); if (k > 0) counts[k] = (counts[k] || 0) + 1; }
+      // Only ABSOLUTE font sizes vote for the dominant font. A relative unit (em/rem/%/ex/ch/vw/vh) scales an
+      // INHERITED size, so it is a multiplier, not a size: d2 embeds a `.md` stylesheet for markdown labels
+      // whose 1em/1.25em/0.875em/0.85em declarations all round to 1 and outvote the real 16px text labels,
+      // driving the font-matched width to docFont × viewBox / 1 — an unbounded blow-up the column cap hides.
+      // A bare number is user units as an SVG attribute (font-size="14") but invalid CSS as a declaration
+      // (font-size:14), hence the separator capture. Sizes under 2px cannot be real text (and f→0 ⇒ width→∞).
+      // null-prototype: an unmatched unit must read as undefined, never as an inherited Object.prototype key
+      const ABS_PX = Object.assign(Object.create(null),
+        { px: 1, pt: 96 / 72, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6 });
+      const counts = {}; let m; const re = /font-size\s*([:=])\s*["']?\s*([\d.]+)\s*([a-z%]*)/gi;
+      while ((m = re.exec(txt))) {
+        const unit = m[3].toLowerCase();
+        const scale = unit === '' ? (m[1] === '=' ? 1 : undefined) : ABS_PX[unit];
+        if (scale === undefined) continue;                           // relative unit → not a size → skip
+        const k = Math.round(parseFloat(m[2]) * scale);
+        if (k >= 2) counts[k] = (counts[k] || 0) + 1;                // <2px cannot be real text (f→0 ⇒ width→∞)
+      }
       let best = 0, bestCount = 0;                                   // dominant (most-frequent) font size
       for (const k in counts) if (counts[k] > bestCount) { bestCount = counts[k]; best = parseFloat(k); }
-      meta.f = best;
+      meta.f = best;                                                 // ties → smaller size (integer keys iterate ascending)
     } catch (e) { /* unreadable → zeros → fall through to natural sizing */ }
     svgMeta.set(absPath, meta);
     return meta;

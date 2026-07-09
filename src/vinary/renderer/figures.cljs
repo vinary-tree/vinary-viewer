@@ -2,7 +2,8 @@
   "Embedded-image sizing for markdown figures. Two jobs:
      1. local .svg figures: font-match — size each <img> so its internal text matches the document font
         (width = docFont · viewBoxWidth / svgDominantFontSize, scaling down as well as up; an oversized
-        figure falls back to its natural viewBox width capped to the column).
+        figure falls back to its natural viewBox width capped to the column). Only ABSOLUTE font sizes
+        are candidates for the dominant font (see absolute-font-units).
      2. raster (png/jpg/gif/webp/…) + remote images: RESERVE their layout box from intrinsic dimensions —
         stamp width/height ATTRIBUTES (from a header-parse for local files, else an off-DOM Image decode),
         so the browser reserves the correctly-proportioned box (via CSS max-width:100%; height:auto) BEFORE
@@ -24,10 +25,51 @@
 (defn- positive-number? [n]
   (and (number? n) (not (js/isNaN n)) (pos? n)))
 
+(def ^:private absolute-font-units
+  "CSS absolute length units → their px equivalent (CSS Values 4 §6.2, https://www.w3.org/TR/css-values-4/).
+   The relative units (em rem % ex ch vw vh vmin vmax) are deliberately ABSENT: each scales an INHERITED size,
+   so it is a multiplier, not a size, and must never be a candidate for a figure's dominant font. Counting them
+   is what broke d2 diagrams that carry markdown labels — d2 embeds a `.md` stylesheet whose `1em`/`1.25em`/
+   `0.875em`/`0.85em` declarations all round to `1`, outvoting the real `16px` text labels and driving the
+   font-matched width to docFont · viewBox / 1 (≈10065px), which CSS max-width:100% then silently clamped to
+   the full column — a figure at 15× its intended size with its text magnified to match."
+  {"px" 1.0
+   "pt" (/ 96.0 72.0)                                        ; 1pt = 1/72in
+   "pc" 16.0                                                 ; 1pc = 12pt
+   "in" 96.0
+   "cm" (/ 96.0 2.54)
+   "mm" (/ 96.0 25.4)
+   "q"  (/ 96.0 101.6)})                                     ; 1Q = 1/40cm
+
+(def ^:private min-font-px
+  "Smallest px-equivalent accepted as real diagram text. A sub-2-unit `font-size` cannot draw a legible glyph,
+   and it is the DANGEROUS direction: the font-matched width is docFont · viewBox / f, so f → 0 sends the width
+   → ∞ (clamped by CSS to the full column, i.e. an unbounded blow-up that looks intentional)."
+  2)
+
+(defn- font-size-px
+  "Px-equivalent of one `font-size` occurrence, or nil when it is not an absolute size we can trust.
+   `sep` is the character that introduced the value and disambiguates the two syntaxes sharing the token:
+     `=` — an SVG presentation attribute (`<text font-size=\"14\">`), where a bare number means USER UNITS;
+     `:` — a CSS declaration (`style=\"font-size:16px\"` or a rule in <style>), where a bare number is invalid
+           CSS that the browser drops, so it must not vote either.
+   Relative units and implausibly small sizes yield nil (skipped, not counted)."
+  [sep n unit]
+  (let [u (str/lower-case unit)]
+    (when-let [scale (if (= "" u)
+                       (when (= "=" sep) 1.0)
+                       (get absolute-font-units u))]
+      (let [px (js/Math.round (* n scale))]
+        (when (and (not (js/isNaN px)) (>= px min-font-px)) px)))))
+
 (defn parse-svg-meta
   "Extract {:v viewBox-width :h viewBox-height :f dominant-font-size} from SVG source text. viewBox
-   dimensions fall back to `<svg width=\"Npx\" height=\"Npx\">`; dominant font is the most-frequent
-   rounded `font-size:` value across the file. Missing dimensions may be 0 -> natural sizing."
+   dimensions fall back to `<svg width=\"Npx\" height=\"Npx\">`; the dominant font is the most-frequent
+   rounded px-equivalent `font-size` across the file, counting ONLY absolute sizes (see font-size-px).
+   Ties break toward the SMALLER size: body labels — the text that must stay legible — are smaller and more
+   numerous than titles, and CLJS map order is otherwise unspecified above 8 keys. With no absolute size the
+   dominant font is 0 and target-width falls back to the natural viewBox width. Missing dimensions may be
+   0 -> natural sizing."
   [txt]
   ;; Read dimensions from the ROOT <svg> opening tag ONLY. svgbob output has no root viewBox but embeds
   ;; nested <marker>/<symbol> viewBoxes (e.g. 8×8 arrow-heads); a whole-text viewBox scan would grab one of
@@ -39,13 +81,16 @@
         h  (when-not vb (re-find #"\sheight\s*=\s*[\"']([\d.]+)(?:px)?[\"']" root))
         v  (cond vb (parse-positive-float (nth vb 1)) w (parse-positive-float (nth w 1)) :else 0)
         vh (cond vb (parse-positive-float (nth vb 2)) h (parse-positive-float (nth h 1)) :else 0)
-        counts (let [re (js/RegExp. "font-size\\s*[:=]\\s*[\"']?\\s*([\\d.]+)" "g")]
+        ;; `font-size` is followed by `:` (CSS declaration) or `=` (SVG presentation attribute) — captured so
+        ;; font-size-px can apply the right unitless rule. `font-size-adjust:` never matches (`-` is neither).
+        counts (let [re (js/RegExp. "font-size\\s*([:=])\\s*[\"']?\\s*([\\d.]+)\\s*([a-z%]*)" "gi")]
                  (loop [acc {}]
                    (if-let [m (.exec re txt)]
-                     (let [k (js/Math.round (js/parseFloat (aget m 1)))]
-                       (recur (if (pos? k) (update acc k (fnil inc 0)) acc)))
+                     (let [px (font-size-px (aget m 1) (js/parseFloat (aget m 2)) (aget m 3))]
+                       (recur (if px (update acc px (fnil inc 0)) acc)))
                      acc)))
-        f  (->> counts (sort-by val >) ffirst (#(or % 0)))]
+        ;; most frequent first; on a tie the smaller size wins (deterministic, and favours body text)
+        f  (->> counts (sort-by (juxt (comp - val) key)) ffirst (#(or % 0)))]
     {:v v :h vh :f f}))
 
 (defn- read-dims-from-header

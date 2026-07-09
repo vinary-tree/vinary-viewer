@@ -68,6 +68,55 @@ function createLocalSvgScrollFixture() {
   return { docPath, text };
 }
 
+// A d2-shaped figure whose embedded markdown-label stylesheet carries RELATIVE font sizes. d2 emits this `.md`
+// block for any shape with a markdown label; its 1em / 1.25em / 0.875em / 0.85em declarations (six of them)
+// used to outvote the five real 16px <text> labels in figures.cljs's dominant-font count, because the count was
+// unit-blind and every one of them rounds to 1. The font-matched width then became docFont × 671 / 1 ≈ 10065px,
+// which CSS max-width:100% silently clamped to the full column — the figure rendered enormous with magnified
+// text. Only ABSOLUTE sizes may vote, so the dominant font must be 16 and the width docFont × 671 / 16.
+// Mirrors libdictenstein's docs/diagrams/kernel-substrate.svg (viewBox 671×723), incl. its `width="80%"` author
+// attribute, which font-matching deliberately overrides (ADR-0022). The viewBox is scaled to the same 0.928
+// aspect so the font-matched width (docFont × 400/16 = 375px at the default 15px font) sits well inside this
+// window's ~614px column: if the figure were clamped by max-width:100% the assertion could not tell a correct
+// width from the 6000px blow-up, since both render as "full column".
+const RELATIVE_FONT_VIEWBOX = { width: 400, height: 431, textFontPx: 16 };
+
+function createRelativeFontSvgFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-relfont-svg-'));
+  tempDirs.push(dir);
+  fs.mkdirSync(path.join(dir, 'diagrams'));
+
+  const { width, height, textFontPx } = RELATIVE_FONT_VIEWBOX;
+  const relativeCss = [
+    '.md { font-size: 1em; }',
+    '.md p { font-size: 1em; }',
+    '.md li { font-size: 1em; }',
+    '.md h1 { font-size: 1.25em; }',
+    '.md code { font-size: 0.875em; }',
+    '.md small { font-size: 0.85em; }'
+  ].join('');
+  const labels = ['alpha', 'beta', 'gamma', 'delta', 'epsilon'].map((label, i) =>
+    `<text x="40" y="${40 + i * 40}" class="text-bold" ` +
+    `style="text-anchor:middle;font-size:${textFontPx}px" fill="#0D47A1">${label}</text>`
+  ).join('');
+  const svg =
+    '<?xml version="1.0" encoding="utf-8"?>' +
+    `<svg xmlns="http://www.w3.org/2000/svg" data-d2-version="0.7.1" viewBox="0 0 ${width} ${height}">` +
+    `<svg class="d2-svg" width="${width}" height="${height}" viewBox="-6 -126 ${width} ${height}">` +
+    `<rect width="${width}" height="${height}" fill="#FFFFFF"/>` +
+    `<style type="text/css"><![CDATA[${relativeCss}]]></style>${labels}</svg></svg>`;
+  fs.writeFileSync(path.join(dir, 'diagrams', 'relative-font.svg'), svg);
+
+  const text = [
+    '# Relative Font SVG', '',
+    'The figure below embeds a d2 markdown-label stylesheet with relative font sizes.', '',
+    '<img src="diagrams/relative-font.svg" alt="relative-font d2 figure" width="80%"/>', ''
+  ].join('\n');
+  const docPath = path.join(dir, 'relative-font.md');
+  fs.writeFileSync(docPath, text);
+  return { docPath, text };
+}
+
 // standard PNG CRC-32 (poly 0xEDB88320), for building valid chunks below
 function crc32(buf) {
   let c = 0xFFFFFFFF;
@@ -1534,6 +1583,56 @@ async function main() {
   assert.strictEqual(localSvgResult.dedicatedImageView, false, 'wheel scrolling local SVGs must not open the dedicated image view');
   assert.deepStrictEqual(localSvgResult.dims, localSvgStart.dims, 'local SVG dimensions must stay stable while scrolling over images');
   console.log('[ok] local SVG markdown images scroll without layout churn');
+
+  // A figure whose SVG carries RELATIVE font sizes must still be font-matched, not blown up to the column.
+  // The column cap (max-width:100%) HIDES this class of bug — an over-wide figure renders as "full column with
+  // magnified text", which reads as intentional — so the load-bearing assertion is on the PRE-CLAMP inline
+  // width that figures.cljs stamps, not on the rendered rect.
+  const relFontFixture = createRelativeFontSvgFixture();
+  state.contentByPath.set(relFontFixture.docPath, {
+    path: relFontFixture.docPath, kind: 'markdown', text: relFontFixture.text, stamp: Date.now()
+  });
+  win.webContents.send('vv:open-files', { paths: [relFontFixture.docPath] });
+  await waitFor(
+    () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Relative Font SVG'`),
+    'relative-font SVG markdown document'
+  );
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.markdown-body img[alt="relative-font d2 figure"]')?.style.width)`),
+    'relative-font SVG figure sized'
+  );
+  const relFont = await evalIn(win, `(() => {
+    const img = document.querySelector('.markdown-body img[alt="relative-font d2 figure"]');
+    const body = document.querySelector('.markdown-body');
+    const docFont = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--vv-font-size')) || 15;
+    const bs = getComputedStyle(body);
+    const column = body.getBoundingClientRect().width
+      - (parseFloat(bs.paddingLeft) || 0) - (parseFloat(bs.paddingRight) || 0);
+    return {
+      docFont,
+      styleWidth: img.style.width,
+      aspectRatio: img.style.aspectRatio,
+      authorWidthAttr: img.getAttribute('width'),
+      renderedWidth: Math.round(img.getBoundingClientRect().width),
+      column: Math.round(column),
+      fontMatched: Math.round(docFont * ${RELATIVE_FONT_VIEWBOX.width} / ${RELATIVE_FONT_VIEWBOX.textFontPx}) + 'px',
+      unitBlind: Math.round(docFont * ${RELATIVE_FONT_VIEWBOX.width} / 1) + 'px'
+    };
+  })()`);
+  assert.strictEqual(relFont.styleWidth, relFont.fontMatched,
+    `dominant font must be the 16px text labels, not the rounded 1em CSS: width ${relFont.styleWidth} (expected ${relFont.fontMatched})`);
+  assert.notStrictEqual(relFont.styleWidth, relFont.unitBlind,
+    'relative CSS font sizes must never vote for the dominant font (the unit-blind blow-up)');
+  assert.strictEqual(relFont.aspectRatio, `${RELATIVE_FONT_VIEWBOX.width} / ${RELATIVE_FONT_VIEWBOX.height}`,
+    'font-matched figure keeps its viewBox aspect-ratio');
+  assert.strictEqual(relFont.authorWidthAttr, '80%', 'author width attribute survives the sanitizer');
+  assert.ok(relFont.column > parseFloat(relFont.fontMatched) + 8,
+    `the test column (${relFont.column}px) must be wider than the font-matched figure, else clamping masks the bug`);
+  assert.ok(relFont.renderedWidth < relFont.column,
+    `font-matched figure must not fill the column: ${relFont.renderedWidth}px of ${relFont.column}px`);
+  assert.strictEqual(relFont.renderedWidth, parseFloat(relFont.fontMatched),
+    'font-matched width wins over the author width="80%" attribute (ADR-0022)');
+  console.log(`[ok] SVG with relative CSS font sizes is font-matched (${relFont.styleWidth}, not ${relFont.unitBlind})`);
 
   // RASTER images "jumpy when scrolling" fix: PNG/JPG/etc. now reserve their layout box from intrinsic dims
   // (width/height attributes, header-parsed) so they don't reflow (pop from ~0 → full height) as they decode
