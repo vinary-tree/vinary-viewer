@@ -35,7 +35,8 @@
             [vinary.renderer.media :as media]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.syntax :as syntax]
-            [vinary.renderer.source-nav :as source-nav]))
+            [vinary.renderer.source-nav :as source-nav]
+            [vinary.renderer.virtual-layout :as virtual-layout]))
 
 (defn- set-inner! [^js node html]
   (when node (set! (.-innerHTML node) (or html ""))))
@@ -345,8 +346,23 @@
         restore-to* (atom nil)                                 ; scrollTop to re-anchor after a live-refresh remount
         last-toc-n  (atom 0)
         refresh-raf (atom false)
+        spacer      (atom nil)                                 ; trailing SIBLING spacer (outside .markdown-body)
+        stream-ro   (atom nil)                                 ; ResizeObserver on the body → keeps the spacer honest
+        ;; Pre-estimated trailing spacer: makes the .vv-content scrollHeight ≈ the WHOLE document from the first
+        ;; batch, so the scrollbar reflects true position + size (no growing/jittering thumb; scroll-to-end works
+        ;; mid-stream). estimatedTotal = renderedH / progress — ≈ invariant across batches (both grow together),
+        ;; so the height stays STABLE and only refines. The spacer is a sibling of .markdown-body, so the
+        ;; byte-parity innerHTML capture is untouched.
+        size-spacer! (fn []
+                       (when-let [^js sp @spacer]
+                         (when-let [^js body @node]
+                           (let [rendered  (.-offsetHeight body)
+                                 progress  @(rf/subscribe [:doc/stream-progress])
+                                 estimated (virtual-layout/extrapolate-total rendered progress rendered)]
+                             (set! (.. sp -style -height)
+                                   (str (js/Math.round (virtual-layout/spacer-height estimated rendered)) "px"))))))
         ;; As blocks append they already carry final figure/math/mermaid geometry (pre-sized in apply-posts), so a
-        ;; burst only needs the scroll-spy re-measured (block commits move heading offsets).
+        ;; burst only needs the scroll-spy re-measured (block commits move heading offsets) + the spacer resized.
         ;; rAF-coalesce bursts of appends into one refresh.
         refresh-view! (fn []
                         (when-not @refresh-raf
@@ -355,6 +371,7 @@
                            (fn []
                              (reset! refresh-raf false)
                              (when @node
+                               (size-spacer!)
                                (when-let [^js content (some-> @node (.closest ".vv-content"))]
                                  (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))) ]
     (r/create-class
@@ -369,6 +386,13 @@
                                                 nil)]
                                 (reset! path* path)
                                 (reset! detach* (attach-content-interactions! @node source* path* last-link))
+                                ;; keep the pre-estimated spacer honest as the body height settles (late web
+                                ;; fonts, mermaid/syntax post-passes, pre-sized figures) — the robust,
+                                ;; engine-agnostic height signal
+                                (when (exists? js/ResizeObserver)
+                                  (let [ro (js/ResizeObserver. (fn [_] (size-spacer!)))]
+                                    (.observe ro @node)
+                                    (reset! stream-ro ro)))
                                 (reset! ctrl* (stream-scheduler/start! @node path kind
                                                                        (cond-> {:text text :stamp stamp}
                                                                          blocks-fn (assoc :blocks-fn blocks-fn))))
@@ -400,22 +424,20 @@
                                                     (fn [_] (set-scroll!)
                                                       (js/requestAnimationFrame (fn [_] (set-scroll!))))))))))) ))
       :component-did-update (fn [this]
-                              ;; re-measure the scroll-spy when the outline GREW (logs' incremental Contents) OR
-                              ;; while markdown is still draining (its whole outline is set upfront, but the
-                              ;; heading elements only appear as blocks commit — the rAF guard coalesces bursts).
-                              (let [kind  (nth (r/argv this) 2)
-                                    n     (count @(rf/subscribe [:doc/toc]))
+                              ;; re-measure on every batch that reports progress (ALL streaming kinds) OR when the
+                              ;; outline grew (logs' incremental Contents), so the scroll-spy AND the pre-estimated
+                              ;; spacer track the growing document. The rAF guard coalesces bursts.
+                              (let [n     (count @(rf/subscribe [:doc/toc]))
                                     grew? (not= n @last-toc-n)
                                     p     @(rf/subscribe [:doc/stream-progress])]
                                 (reset! last-toc-n n)
-                                ;; markdown re-measures on every drain tick AND the final one (p reaches 1), since
-                                ;; its outline is set upfront but the headings/figures appear as blocks commit.
-                                (when (or grew? (and (= kind "markdown") (some? p)))
+                                (when (or grew? (some? p))
                                   (refresh-view!))))
       :component-will-unmount (fn [_]
                                 ;; save scroll so a live-refresh / tab-switch remount re-anchors instead of jumping to top
                                 (when-let [^js content (some-> @node (.closest ".vv-content"))]
                                   (when (pos? (.-scrollTop content)) (swap! stream-scroll assoc @path* (.-scrollTop content))))
+                                (when @stream-ro (.disconnect ^js @stream-ro) (reset! stream-ro nil))
                                 (when @ensurer* (pdf-cache/clear-ensurer! @ensurer*) (reset! ensurer* nil))
                                 (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))
@@ -431,7 +453,11 @@
                            ;; .vv-streamed enables windowed rendering: content-visibility skips layout/paint of
                            ;; off-screen top-level blocks (bounded render on huge docs) while the nodes stay in
                            ;; the DOM, so find / scroll-spy / selection keep working on the whole document
-                           [:div.markdown-body.vv-streamed {:ref (fn [el] (reset! node el))}]]))})))
+                           [:div.markdown-body.vv-streamed {:ref (fn [el] (reset! node el))}]
+                           ;; trailing spacer (SIBLING of .markdown-body — never a child, so the byte-parity
+                           ;; innerHTML capture is untouched): height set imperatively to pad the rendered body up
+                           ;; to the estimated whole-document height, so the scrollbar matches the whole doc
+                           [:div.vv-stream-spacer {:ref (fn [el] (reset! spacer el))}]]))})))
 
 (defn- pdf-rect [^js node]
   (let [r (.getBoundingClientRect node)]

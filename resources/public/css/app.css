@@ -158,6 +158,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    render (identical .markdown-body without the class) is unaffected. */
 .markdown-body.vv-streamed > * { content-visibility: auto; contain-intrinsic-size: auto 48px; }
 
+/* Streaming height spacer: a zero-width, non-interactive SIBLING of .markdown-body (never a child — keeps the
+   byte-parity innerHTML capture clean) whose height is set imperatively so the .vv-content scrollHeight ≈ the
+   estimated WHOLE-document height from the first batch. This makes the scrollbar reflect true position + size
+   (no growing/jittering thumb; scroll-to-end reachable mid-stream). */
+.vv-stream-spacer { flex: 0 0 auto; width: 1px; margin: 0; padding: 0; pointer-events: none; visibility: hidden; }
+
 /* streaming progress: a thin sticky top strip that fills as the document streams, hidden once complete */
 .vv-stream-progress { position: sticky; top: 0; z-index: 5; height: 3px; width: 100%;
   background: var(--vv-border); overflow: hidden; }

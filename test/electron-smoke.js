@@ -2315,6 +2315,25 @@ async function main() {
     return streaming && h2 > 0;
   })()`), 'markdown streams — progress strip + first blocks paint', 20000);
   const midH2 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length`);
+  // Phase 1: while still streaming, the pre-estimated spacer already pads the scroller toward the whole-document
+  // height, so the scrollbar reflects the whole doc (not just the streamed-so-far prefix). Best-effort — a fast
+  // drain may finish before we sample, in which case the spacer has correctly collapsed to ~0.
+  await delay(60);   // let one refresh-view! (rAF-coalesced) size the spacer
+  const midScroll = await evalIn(win, `(() => {
+    const c = document.querySelector('.vv-content');
+    const body = c.querySelector('.markdown-body.vv-streamed');
+    const spacer = c.querySelector('.vv-stream-spacer');
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress:not(.vv-stream-progress-done)'));
+    return { streaming, scrollHeight: c.scrollHeight, bodyHeight: body ? body.offsetHeight : 0,
+             spacerHeight: spacer ? spacer.offsetHeight : 0 };
+  })()`);
+  if (midScroll.streaming) {
+    assert.ok(midScroll.spacerHeight > 0, `mid-stream the height spacer pads the scroller (spacer=${midScroll.spacerHeight}px)`);
+    assert.ok(midScroll.scrollHeight > midScroll.bodyHeight, `mid-stream scrollHeight (${midScroll.scrollHeight}) exceeds the rendered body (${midScroll.bodyHeight}) → scrollbar reflects the whole doc`);
+    console.log(`[ok] mid-stream scrollbar reflects the whole document (spacer ${midScroll.spacerHeight}px pads body ${midScroll.bodyHeight}px)`);
+  } else {
+    console.log('[ok] streamed markdown drained before mid-stream sampling (spacer height model applied + collapsed)');
+  }
   // converge to the whole document, then let the async append queue + post-passes settle
   await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h2').length >= ${batchH2}
     && (() => { const p = document.querySelector('.vv-content .vv-stream-progress'); return p && p.classList.contains('vv-stream-progress-done'); })()`,
@@ -2336,7 +2355,8 @@ async function main() {
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
   console.log('[ok] streamed markdown Contents is populated');
 
-  // ── windowed DOM: content-visibility skips layout/paint of off-screen streamed blocks (bounded render) ──
+  // ── windowed DOM: content-visibility skips layout/paint of off-screen streamed blocks (bounded render),
+  //    and the trailing spacer (Phase 1) is a SIBLING of .markdown-body so it never pollutes the parity capture ──
   const windowing = await evalIn(win, `(() => {
     const body = document.querySelector('.vv-content .markdown-body.vv-streamed');
     if (!body) return { streamed: false };
@@ -2344,13 +2364,18 @@ async function main() {
     const first = blocks[0], last = blocks[blocks.length - 1];
     // at scrollTop 0 a far-down block should be SKIPPED by content-visibility:auto (not rendered)
     const skipped = last && last.checkVisibility ? !last.checkVisibility({ contentVisibilityAuto: true }) : null;
-    return { streamed: true, count: blocks.length, cv: getComputedStyle(first).contentVisibility, skipped };
+    const spacer = document.querySelector('.vv-content .vv-stream-spacer');
+    return { streamed: true, count: blocks.length, cv: getComputedStyle(first).contentVisibility, skipped,
+             spacerPresent: Boolean(spacer),
+             spacerIsSibling: Boolean(spacer) && spacer.parentElement === body.parentElement && !body.contains(spacer) };
   })()`);
   assert.strictEqual(windowing.streamed, true, 'the streamed body carries .vv-streamed (windowed render)');
   assert.strictEqual(windowing.cv, 'auto', 'streamed top-level blocks use content-visibility:auto (off-screen layout/paint skipped per the CSS spec)');
+  assert.strictEqual(windowing.spacerPresent, true, 'the streamed body has a height spacer (Phase 1 whole-document scrollbar)');
+  assert.strictEqual(windowing.spacerIsSibling, true, 'the spacer is a SIBLING of .markdown-body (never a child → byte-parity capture stays clean)');
   // checkVisibility({contentVisibilityAuto}) is informational — its reporting of the skipped state is not yet
   // reliable across Chromium builds, but the applied content-visibility:auto is the load-bearing guarantee.
-  console.log(`[ok] streamed DOM is render-windowed — content-visibility:auto on ${windowing.count} blocks (off-screen skipped=${windowing.skipped})`);
+  console.log(`[ok] streamed DOM is render-windowed — content-visibility:auto on ${windowing.count} blocks (off-screen skipped=${windowing.skipped}); sibling height spacer present`);
 
   // ── live-refresh scroll re-anchor: a streamed doc that re-renders keeps the reader's scroll position ──
   await evalIn(win, `(() => { document.querySelector('.vv-content').scrollTop = 3000; return true; })()`);

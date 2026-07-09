@@ -46,12 +46,19 @@
                               :id    (:id (node/node-meta rec))})))
         blocks))
 
-(defn- ric [f]
-  (if (exists? js/requestIdleCallback)
-    ;; :timeout bounds idle starvation — the batch still fires within 100 ms even under sustained main-thread
-    ;; load (or when the window is backgrounded and idle periods never arrive), so the stream always progresses.
-    (js/requestIdleCallback f #js {:timeout 100})
-    (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)})))))
+(defn- ric
+  "Schedule the next commit tick. When the window is VISIBLE, pump on animation frames — a steady ~60fps cadence
+   that eliminates the idle-starvation gaps (requestIdleCallback could drip batches up to 100 ms apart under
+   main-thread load, which read as the 'slow/clunky' stutter). When HIDDEN (rAF is paused by the browser) or
+   without rAF, fall back to requestIdleCallback with a :timeout so a backgrounded stream still progresses."
+  [f]
+  (if (and (exists? js/document)
+           (= "visible" (.-visibilityState js/document))
+           (exists? js/requestAnimationFrame))
+    (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)})))
+    (if (exists? js/requestIdleCallback)
+      (js/requestIdleCallback f #js {:timeout 100})
+      (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)}))))))
 
 (defn start!
   "Begin streaming `path` (of `kind`) into DOM `node`; returns a controller atom → pass to stop!. Two engines:

@@ -24,6 +24,7 @@
             [vinary.main.password-adapters :as pw-adapters]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.pdf-layout :as pdf-layout]
+            [vinary.renderer.virtual-layout :as vl]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
             [vinary.renderer.math :as math]
@@ -789,6 +790,38 @@
       (is (= [{:level 1 :text "A"  :id "vv-pdf-page-1"}
               {:level 2 :text "A1" :id "vv-pdf-page-2"}]
              (pdf-layout/outline->toc outline d->p))))))
+
+(deftest virtual-layout-helpers
+  (testing "stack: cumulative tops with gaps, extra keys preserved; total = last bottom"
+    (let [rects (vl/stack [{:height 200 :width 100} {:height 100 :width 100}] 10)]
+      (is (= [{:height 200 :width 100 :top 0} {:height 100 :width 100 :top 210}] rects))
+      (is (= 310 (vl/total rects))))
+    (is (= 0 (vl/total []))))
+  (testing "visible-range: window + overscan; [-1 -1] when none"
+    (let [rects (vl/stack [{:height 100} {:height 100} {:height 100}] 0)]   ; tops 0,100,200
+      (is (= [0 0]   (vl/visible-range rects 0 50 0)))
+      (is (= [0 1]   (vl/visible-range rects 50 100 0)))
+      (is (= [0 2]   (vl/visible-range rects 100 100 50)))                  ; overscan pulls in 0 & 2
+      (is (= [-1 -1] (vl/visible-range rects 1000 50 0)))))
+  (testing "est-heights: measured index overrides the default estimate"
+    (is (= [48 120 48 90 48] (vl/est-heights 5 48 {1 120, 3 90})))
+    (is (= [] (vl/est-heights 0 48 {}))))
+  (testing "extrapolate-total: rendered/progress floored at the rendered height; floor when progress ≤ 0"
+    (is (= 400 (vl/extrapolate-total 100 0.25 100)))
+    (is (= 500 (vl/extrapolate-total 100 0 500)))                            ; no progress yet → floor
+    (is (= 100 (vl/extrapolate-total 100 1 0)))
+    (is (= 200 (vl/extrapolate-total 100 0.9 200))))                         ; 111 < floor 200 → floor
+  (testing "spacer-height: pad up to the estimate, never negative"
+    (is (= 300 (vl/spacer-height 400 100)))
+    (is (= 0 (vl/spacer-height 100 400))))
+  (testing "pads: top/bottom offsets for a windowed band; zeros for an empty band"
+    (let [rects (vl/stack [{:height 100} {:height 100} {:height 100} {:height 100}] 0)]  ; tops 0,100,200,300; total 400
+      (is (= {:top 100 :bottom 100} (vl/pads rects 1 2 400)))
+      (is (= {:top 0 :bottom 0} (vl/pads rects -1 -1 400)))))
+  (testing "band-range: a px budget becomes symmetric overscan"
+    (let [rects (vl/stack [{:height 100} {:height 100} {:height 100} {:height 100} {:height 100}] 0)]  ; tops 0..400
+      (is (= [0 1] (vl/band-range rects 0 100 200)))                         ; viewport top ±100 → idx 0,1
+      (is (= [1 3] (vl/band-range rects 200 100 200))))))                    ; mid-doc ±100 → idx 1..3
 
 (deftest number-outline
   (let [entry (fn [level text] {:level level :text text :id (str "vv-pdf-page-" level)})]

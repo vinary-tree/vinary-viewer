@@ -61,6 +61,12 @@ Changed
       no post-insert re-scale (no "scaling effect") and no re-scale on resize /
       live-refresh / streamed block; inline Mermaid is font-matched like the SVG
       figures. See docs/design-decisions/0022-pre-dom-figure-sizing.md.
+    - Streaming previews: the scrollbar now reflects the whole document from the first
+      batch (a pre-estimated trailing spacer sizes the scroller to the estimated total
+      height -- no growing/jittering thumb, scroll-to-end works mid-stream), and commit
+      pacing is steady (requestAnimationFrame when visible, requestIdleCallback only
+      when hidden) instead of dripping up to 100 ms apart. See
+      docs/design-decisions/0023-streaming-scrollbar-and-pacing.md.
     - MathJax upgraded to v4 and built from source (@mathjax/src 4.1.3, bundled by
       shadow-cljs) as one engine shared by the renderer and the Node tests, importing
       only the safe TeX packages -- replacing the separately-loaded es5 tex-svg.js

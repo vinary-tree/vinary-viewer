@@ -1,8 +1,12 @@
 (ns vinary.renderer.pdf-layout
   "Pure, DOM-free geometry + zoom + outline helpers for the in-renderer PDF view. Kept separate from
    vinary.renderer.pdf so the node :test build can cover them without transitively requiring pdfjs-dist
-   (which touches DOMMatrix/Worker). All functions are referentially transparent and unit-tested."
-  (:require [clojure.string :as str]))
+   (which touches DOMMatrix/Worker). All functions are referentially transparent and unit-tested. The generic
+   stack/total/visible-range geometry now lives in vinary.renderer.virtual-layout (shared with the streaming
+   preview body); this namespace keeps the PDF-specific pieces (scale mapping, zoom, outline numbering) and
+   delegates the raw geometry there."
+  (:require [clojure.string :as str]
+            [vinary.renderer.virtual-layout :as vl]))
 
 (def ^:const min-zoom 0.25)
 (def ^:const max-zoom 8.0)
@@ -36,38 +40,21 @@
 
 (defn page-rects
   "Cumulative vertical layout for pages of intrinsic sizes [[w h]…] at `scale`, with `gap` px between
-   pages. Returns [{:top :height :width}…]; :top is each page's offset from the top of the document."
+   pages. Returns [{:top :height :width}…]; :top is each page's offset from the top of the document.
+   Delegates the raw stacking to virtual-layout/stack after applying the PDF scale to each page."
   [sizes scale gap]
-  (loop [sizes sizes, top 0, acc []]
-    (if-let [s (first sizes)]
-      (let [[w h]  s
-            height (* h scale)
-            width  (* w scale)]
-        (recur (rest sizes) (+ top height gap) (conj acc {:top top :height height :width width})))
-      acc)))
+  (vl/stack (map (fn [[w h]] {:height (* h scale) :width (* w scale)}) sizes) gap))
 
 (defn total-height
   "Total document height (px) for a page-rects vector — the last page's bottom (gaps are interior)."
   [rects]
-  (if-let [{:keys [top height]} (peek rects)]
-    (+ top height)
-    0))
+  (vl/total rects))
 
 (defn visible-range
   "Indices [first last] of pages in `rects` whose [top,bottom] intersects the viewport
    [scroll-top, scroll-top+viewport-h] expanded by `overscan` px each side. Returns [-1 -1] when none."
   [rects scroll-top viewport-h overscan]
-  (let [lo (- scroll-top overscan)
-        hi (+ scroll-top viewport-h overscan)
-        n  (count rects)]
-    (loop [i 0, first-idx -1, last-idx -1]
-      (if (< i n)
-        (let [{:keys [top height]} (nth rects i)
-              bottom (+ top height)]
-          (if (and (< top hi) (> bottom lo))
-            (recur (inc i) (if (neg? first-idx) i first-idx) i)
-            (recur (inc i) first-idx last-idx)))
-        [first-idx last-idx]))))
+  (vl/visible-range rects scroll-top viewport-h overscan))
 
 (defn outline->toc
   "Flatten a pdf.js getOutline() tree [{:title :dest :items [...]}…] into the app's :doc/toc shape
