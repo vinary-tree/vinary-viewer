@@ -28,6 +28,7 @@
    "bnfc" "bnfc" "lbnf" "bnfc" "cf" "bnfc"
    "markdown" "markdown" "md" "markdown" "mdx" "markdown" "gfm" "markdown"
    "py" "python" "rb" "ruby" "rs" "rust"
+   "emacs-lisp" "elisp" "el" "elisp"   ; Org #+begin_src emacs-lisp/el → the bundled elisp grammar
    "yml" "yaml" "jsonc" "json"})
 
 (def built-in-filetypes

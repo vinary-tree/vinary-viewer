@@ -68,6 +68,15 @@
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "office render error: " (.-message e))}]))))))
 
+;; Org (.org) render through the common IR via uniorg (HTML + heading TOC + assets), modeled on :markdown/render
+;; — base-dir resolves relative Org image URLs to file://, and nested #+begin_src blocks highlight via apply-posts.
+(rf/reg-fx
+ :org/render
+ (fn [{:keys [text path stamp on-done]}]
+   (-> (md/render-org-ir text (md/dir-of path) stamp)
+       (.then (fn [result] (rf/dispatch (conj on-done result))))
+       (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "org render error: " (.-message e))}]))))))
+
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
 (rf/reg-fx
  :theme/apply

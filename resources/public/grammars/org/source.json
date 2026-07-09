@@ -1,0 +1,13 @@
+{
+  "id": "org",
+  "language": "org",
+  "extensions": [
+    ".org"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/nvim-orgmode/tree-sitter-org",
+    "queryFile": "resources/public/grammars/org/highlights.scm"
+  },
+  "sourceRev": "219c0b27fdb2c0aeb43841f23f03d6f54657f288"
+}

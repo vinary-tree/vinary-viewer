@@ -35,6 +35,7 @@
 {:id "bnfc" :language "bnfc" :extensions [".cf" ".bnfc"] :wasm-url "grammars/bnfc/grammar.wasm" :scm-url "grammars/bnfc/highlights.scm" :source-kind "local" :source "resources/grammars-src/tree-sitter-bnfc"}
 {:id "markdown" :language "markdown" :extensions [".md" ".markdown" ".mdx"] :wasm-url "grammars/markdown/grammar.wasm" :scm-url "grammars/markdown/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-markdown"}
 {:id "markdown-inline" :language "markdown_inline" :extensions [] :wasm-url "grammars/markdown-inline/grammar.wasm" :scm-url "grammars/markdown-inline/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-markdown"}
+{:id "org" :language "org" :extensions [".org"] :wasm-url "grammars/org/grammar.wasm" :scm-url "grammars/org/highlights.scm" :source-kind "git" :source "https://github.com/nvim-orgmode/tree-sitter-org"}
 {:id "html" :language "html" :extensions [".html" ".htm"] :wasm-url "grammars/html/grammar.wasm" :scm-url "grammars/html/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter/tree-sitter-html"}
 {:id "css" :language "css" :extensions [".css"] :wasm-url "grammars/css/grammar.wasm" :scm-url "grammars/css/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter/tree-sitter-css"}
 {:id "scss" :language "scss" :extensions [".scss"] :wasm-url "grammars/scss/grammar.wasm" :scm-url "grammars/scss/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-scss"}

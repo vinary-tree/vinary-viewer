@@ -19,6 +19,8 @@
             ["rehype-highlight$default" :as rehype-highlight]
             ["rehype-raw$default"       :as rehype-raw]
             ["rehype-sanitize$default"  :as rehype-sanitize]
+            ["uniorg-parse$default"     :as uniorg-parse]
+            ["uniorg-rehype$default"    :as uniorg-rehype]
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
             [vinary.renderer.media :as media]
@@ -240,6 +242,25 @@
   []
   (fn [_opts] (fn [tree _file] (clean-math-nodes! tree) tree)))
 
+(defn- app-hast-suffix
+  "The shared hast post-parse chain applied to EVERY tree-producing format after its own parse → hast projection:
+   rehype-raw (parse embedded raw HTML) → rehype-sanitize (GitHub allowlist) → rehype-slug → rehype-highlight →
+   rewrite-urls → wrap-images → source-positions → collect-metadata. Sanitize MUST run before the app's own
+   trusted plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize additions (file://
+   srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip every app-generated file://
+   image src and break all local images. Factored out so Markdown (`base-pipeline`) and Org (`org-pipeline`)
+   inherit an IDENTICAL sanitizing/slugging/highlighting/positions policy."
+  [processor metadata base-dir cache-token]
+  (-> processor
+      (.use rehype-raw)
+      (.use rehype-sanitize sanitize/schema)
+      (.use rehype-slug)
+      (.use rehype-highlight)
+      (.use (rewrite-urls base-dir cache-token))
+      (.use (wrap-images))
+      (.use (source-positions))
+      (.use (collect-metadata metadata))))
+
 (defn base-pipeline
   "The shared remark → rehype pipeline through collect-metadata (everything BEFORE the stringify/compile
    step). Both the GUI IR render and the terminal front-end build on this identical prefix, so they can never
@@ -252,20 +273,23 @@
       (.use remark-gfm)
       (.use remark-math)
       (.use (github-math))   ; strip GitHub $`…`$ backtick fences on the mdast (code spans stay literal)
-      ;; allowDangerousHtml keeps raw HTML as `raw` nodes; rehype-raw parses them into real hast elements;
-      ;; rehype-sanitize (GitHub allowlist) then strips anything dangerous. This MUST run before the app's
-      ;; own trusted hast plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize
-      ;; additions (file:// srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip
-      ;; every app-generated file:// image src and break all local images.
       (.use remark-rehype #js {:allowDangerousHtml true})
-      (.use rehype-raw)
-      (.use rehype-sanitize sanitize/schema)
-      (.use rehype-slug)
-      (.use rehype-highlight)
-      (.use (rewrite-urls base-dir cache-token))
-      (.use (wrap-images))
-      (.use (source-positions))
-      (.use (collect-metadata metadata))))
+      (app-hast-suffix metadata base-dir cache-token)))
+
+(defn org-pipeline
+  "The Org (.org) counterpart of `base-pipeline`: uniorg-parse (Emacs Org → uniorg AST) → uniorg-rehype (→ hast,
+   emitting <pre><code class=\"language-X\"> for #+begin_src X and raw-HTML nodes for #+begin_export html) → the
+   SAME `app-hast-suffix`. So Org inherits the common IR, the heading TOC (ir-toc/toc-of), figure pre-sizing,
+   scroll-spy, and nested-language src-block highlighting for FREE — exactly as the office frontend reuses the
+   Markdown hast→IR. (uniorg-rehype does not project source positions onto the hast, so Org preview nodes carry
+   no data-vv-source-* and the fine-grained right-click source⇄preview jump is Markdown-only; Org still gets
+   heading-level navigation through the Contents outline. If uniorg gains hast-position support, adding it here
+   makes the jump work for Org with no other change.)"
+  [metadata base-dir cache-token]
+  (-> (unified)
+      (.use uniorg-parse)
+      (.use uniorg-rehype)
+      (app-hast-suffix metadata base-dir cache-token)))
 
 (defn capture-hast
   "A rehype transformer that captures the final HAST tree into `store` (for the IR back-end) and passes it

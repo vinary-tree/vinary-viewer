@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]))
 
 (def ^:private markdown-exts #{".md" ".markdown" ".mdx"})
+(def ^:private org-exts #{".org"})   ; Emacs Org-mode → rendered via uniorg through the common IR (like markdown)
 (def ^:private image-exts #{".png" ".jpg" ".jpeg" ".gif" ".svg" ".webp" ".bmp" ".ico" ".avif"})
 (def ^:private mermaid-exts #{".mmd" ".mermaid"})
 (def ^:private html-exts #{".html" ".htm" ".xhtml"})   ; rendered live in the web view, not shown as source
@@ -39,6 +40,7 @@
     (cond
       (archive-uri? file-path) "archive"
       (contains? markdown-exts ext) "markdown"
+      (contains? org-exts ext) "org"
       (contains? image-exts ext) "image"
       (= ".pdf" ext) "pdf"
       (contains? html-exts ext) "html"

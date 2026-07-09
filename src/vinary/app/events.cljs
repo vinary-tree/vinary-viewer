@@ -102,8 +102,9 @@
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
-                   ;; office-IR gets its :doc/toc from :office/render; every other non-markdown kind resets it
-                   (and (not= kind "markdown") (not ir-office?)) (assoc :doc/toc [] :doc/assets []))
+                   ;; markdown/office/org derive their :doc/toc + :doc/assets from the IR render (arriving async
+                   ;; via :content/rendered), so DON'T reset those here; every other kind clears them.
+                   (and (not= kind "markdown") (not ir-office?) (not= kind "org")) (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
@@ -124,6 +125,9 @@
               ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
               ir-office?          (conj [:office/render {:html html :path path
                                                          :on-done [:content/rendered path stamp]}])
+              ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown
+              (= kind "org")      (conj [:org/render {:text text :path path :stamp stamp
+                                                      :on-done [:content/rendered path stamp]}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}

@@ -2145,6 +2145,61 @@ async function main() {
   assert.strictEqual(contentService.streamCount(), 0, 'no main-process stream session may leak after teardown');
   console.log('[ok] stream session drains to 0 on teardown — no fd/session leak');
 
+  // ── Feature: Org-mode (.org) — GitHub-style render via uniorg through the common IR, nested-language src
+  //    highlighting, and a tree-sitter-org-highlighted View Source ──────────────────────────────────────────
+  const orgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-org-'));
+  tempDirs.push(orgDir);
+  const orgText = [
+    '#+TITLE: Org Demo',
+    '* First Heading',
+    'Some *bold* text and a [[https://example.com][link]].',
+    '** Nested Heading',
+    '#+begin_src python',
+    'def add(a, b):',
+    '    return a + b',
+    '#+end_src',
+    '#+begin_src emacs-lisp',
+    '(message "hi")',
+    '#+end_src',
+    '| a | b |',
+    '|---+---|',
+    '| 1 | 2 |',
+    ''
+  ].join('\n');
+  const orgPath = path.join(orgDir, 'demo.org');
+  fs.writeFileSync(orgPath, orgText);
+  state.contentByPath.set(orgPath, { path: orgPath, kind: 'org', text: orgText, stamp: Date.now(), sourceable: true });
+  win.webContents.send('vv:open-files', { paths: [orgPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-content .markdown-body h1')?.textContent.includes('First Heading')`),
+    'org preview renders headings', 10000);
+  const orgPreview = await evalIn(win, `(() => {
+    const body = document.querySelector('.vv-content .markdown-body');
+    return {
+      h1: body.querySelectorAll('h1').length,
+      h2: body.querySelectorAll('h2').length,
+      python: Boolean(body.querySelector('pre code[class*="language-python"]')),
+      elisp: Boolean(body.querySelector('pre code[class*="language-emacs-lisp"]')),
+      table: Boolean(body.querySelector('table')),
+      bold: Boolean(body.querySelector('strong'))
+    };
+  })()`);
+  assert.ok(orgPreview.h1 >= 1, 'org first heading renders as h1');
+  assert.ok(orgPreview.h2 >= 1, 'org nested heading renders as h2');
+  assert.ok(orgPreview.python, 'org #+begin_src python → a language-python code block (nested-language highlighting)');
+  assert.ok(orgPreview.elisp, 'org #+begin_src emacs-lisp → a language-emacs-lisp code block');
+  assert.ok(orgPreview.table, 'org table renders');
+  assert.ok(orgPreview.bold, 'org *bold* renders as <strong>');
+  console.log('[ok] org (.org) preview renders GitHub-style with nested-language code blocks');
+  // View Source on org → a CodeMirror source view highlighted by the bundled tree-sitter-org grammar
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("tab","toggle-source"))); true`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-source .cm-editor'))`),
+    'org View Source mounts the CodeMirror source view', 8000);
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-content .vv-source .cm-keyword, .vv-content .vv-source .cm-md-heading, .vv-content .vv-source .cm-comment').length > 0`),
+    'org source view is highlighted by the tree-sitter-org grammar', 12000);
+  console.log('[ok] org View Source is highlighted by the bundled tree-sitter-org grammar');
+  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("tab","toggle-source"))); true`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body h1'))`), 'org toggles back to preview', 8000);
+
   // ========================================================================================================
   // ── Phase 2 — MARKDOWN streaming parity: streamed HTML == batch HTML (the load-bearing gate) ──
   // A >256 KiB Markdown doc rendered whole (flag off) vs streamed as progressive block-commits (flag on) must

@@ -46,6 +46,11 @@ Added
       accepted no-op), `vv --cli` / `vv --tui` open the terminal renderers, and
       `vv --help` / `vv --version` print and exit without launching a window.
       install.sh builds and installs all three modes from the one launcher.
+    - Emacs Org-mode (.org) support: rendered GitHub-style through the common IR via
+      uniorg (uniorg-parse -> uniorg-rehype -> the shared Markdown hast suffix), with
+      a heading Contents outline, in-document syntax highlighting for nested
+      #+begin_src <lang> blocks, and a tree-sitter-org-highlighted View Source. See
+      docs/design-decisions/0020-org-mode-via-uniorg.md and docs/features/26-org-mode.md.
 
 Changed
     - MathJax upgraded to v4 and built from source (@mathjax/src 4.1.3, bundled by

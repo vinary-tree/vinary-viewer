@@ -72,6 +72,7 @@
     {"id": "bnfc", "language": "bnfc", "extensions": [".cf", ".bnfc"], "source": {"type": "local", "path": "resources/grammars-src/tree-sitter-bnfc", "query": "queries/highlights.scm"}},
     {"id": "markdown", "language": "markdown", "extensions": [".md", ".markdown", ".mdx"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "subdir": "tree-sitter-markdown", "queryFile": "resources/public/grammars/markdown/highlights.scm"}},
     {"id": "markdown-inline", "language": "markdown_inline", "extensions": [], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "subdir": "tree-sitter-markdown-inline", "queryFile": "resources/public/grammars/markdown-inline/highlights.scm"}},
+    {"id": "org", "language": "org", "extensions": [".org"], "source": {"type": "git", "url": "https://github.com/nvim-orgmode/tree-sitter-org", "queryFile": "resources/public/grammars/org/highlights.scm"}},
     {"id": "html", "language": "html", "extensions": [".html", ".htm"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-html"}},
     {"id": "css", "language": "css", "extensions": [".css"], "source": {"type": "git", "url": "https://github.com/tree-sitter/tree-sitter-css"}},
     {"id": "scss", "language": "scss", "extensions": [".scss"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-scss"}},

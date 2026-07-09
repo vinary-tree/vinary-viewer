@@ -107,3 +107,27 @@
   (let [ir (ir-office/html->ir html)]
     (-> (apply-posts (ir-html/lower ir))
         (.then (fn [h] {:html h :toc (ir-toc/toc-of ir)})))))
+
+(defn render-org-ir
+  "Render an Org (.org) document through the common IR: the shared org-pipeline (uniorg → hast → the same app
+   suffix as Markdown) → capture HAST → hast->IR → lower back to HTML → the SAME post-passes (MathJax, Mermaid,
+   figure pre-sizing, tree-sitter fenced-code highlighting — so nested #+begin_src blocks highlight). :toc comes
+   from the IR heading roles (ir-toc/toc-of); :assets from collect-metadata (relative Org images resolved
+   against base-dir). Modeled on render-ir (async — uniorg-parse is a real Parser). Returns
+   Promise<{:html :ir :toc :assets}>."
+  ([^String text base-dir] (render-org-ir text base-dir nil))
+  ([^String text base-dir cache-token]
+   (let [metadata (atom {:toc [] :assets #{}})
+         captured (atom nil)]
+     (-> (pipeline/org-pipeline metadata base-dir cache-token)
+         (.use (pipeline/capture-hast captured))
+         (.use rehype-stringify)
+         (.process text)
+         (.then (fn [_file]
+                  (let [ir (ir-md/hast->ir @captured)]
+                    (-> (apply-posts (ir-html/lower ir))
+                        (.then (fn [html]
+                                 {:html html
+                                  :ir ir
+                                  :toc (ir-toc/toc-of ir)
+                                  :assets (vec (:assets @metadata))}))))))))))

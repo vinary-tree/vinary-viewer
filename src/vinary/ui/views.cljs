@@ -911,7 +911,7 @@
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
        (and vs?
             (:doc/text doc)
-            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source"} (:doc/kind doc))))
+            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org"} (:doc/kind doc))))
        ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
        [source-view (:doc/text doc) (:doc/path doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]

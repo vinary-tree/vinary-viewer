@@ -83,6 +83,8 @@
     "sixel": "^0.16.0",
     "tar-stream": "^3.2.0",
     "unified": "^11.0.5",
+    "uniorg-parse": "^3.2.2",
+    "uniorg-rehype": "^2.2.0",
     "web-tree-sitter": "0.25.9",
     "yauzl": "^3.4.0"
   },
