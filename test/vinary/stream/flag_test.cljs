@@ -14,9 +14,22 @@
 (deftest streamable-kinds
   (is (flag/streamable? "log"))
   (is (flag/streamable? "markdown"))
+  (is (flag/streamable? "org") "org shares markdown's progressive engine")
+  (is (flag/streamable? "latex") "latex shares markdown's progressive engine")
   (is (flag/streamable? "pdf"))
   (is (not (flag/streamable? "image")))
   (is (not (flag/streamable? "office"))))
+
+(deftest enabled-requires-a-known-size
+  (testing "a nil :size never streams — the main-process :text route once omitted :meta entirely, so NO
+            markdown or org document ever streamed even though the flag defaulted ON"
+    (is (not (flag/enabled? "markdown" nil true)) "unknown size → batch, never streamed")
+    (is (not (flag/enabled? "org" nil true))      "unknown size → batch, never streamed")
+    (is (not (flag/enabled? "latex" nil true))    "unknown size → batch, never streamed")
+    (is (flag/enabled? "markdown" 300000 true)    "with :size supplied, a large markdown streams")
+    (is (flag/enabled? "org" 300000 true)         "with :size supplied, a large org streams")
+    (is (flag/enabled? "latex" 300000 true)       "with :size supplied, a large latex streams")
+    (is (not (flag/enabled? "latex" 1024 true))   "a small latex stays batch (below the 256 KiB threshold)")))
 
 (deftest enabled-requires-flag-kind-and-size
   (testing "off unless flag on AND streamable AND size ≥ threshold"
@@ -27,7 +40,10 @@
     (is (flag/enabled? "log" 6000000 true) "a large log streams")
     (is (flag/enabled? "markdown" 300000 true) "a large markdown streams (Phase 2 — progressive block-commit)")
     (is (not (flag/enabled? "markdown" 1024 true)) "a small markdown stays batch (below the 256 KiB threshold)")
+    (is (flag/enabled? "org" 300000 true) "a large org streams (Phase 3 — the same progressive engine)")
+    (is (not (flag/enabled? "org" 1024 true)) "a small org stays batch (below the 256 KiB threshold)")
     (is (not (flag/enabled? "pdf" 0 true)) "pdf not yet implemented (Phase 3) → batch")
     (is (flag/implemented? "log"))
     (is (flag/implemented? "markdown"))
+    (is (flag/implemented? "org"))
     (is (not (flag/implemented? "pdf")))))

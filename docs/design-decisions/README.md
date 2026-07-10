@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0020**.
+The next free number is **0026**.
 
 ---
 
@@ -77,6 +77,12 @@ The next free number is **0020**.
 | [0017](0017-common-document-ir.md) | A common document IR with a weighted-transducer pipeline (all formats → one IR → HTML) | Accepted |
 | [0018](0018-document-streaming-pipeline.md) | A document-streaming pipeline (bounded-memory, WPDA-segmented) — large docs stream, small stay batch | Accepted |
 | [0019](0019-terminal-preview-layer.md) | A terminal preview layer (CLI + TUI) as a second renderer over the shared IR/streaming spine | Accepted |
+| [0020](0020-org-mode-via-uniorg.md) | Org-mode (.org) support via uniorg, reusing the common IR | Accepted |
+| [0021](0021-bidirectional-source-preview-jump.md) | Bidirectional "Go to source" / "Go to preview" jump | Accepted |
+| [0022](0022-pre-dom-figure-sizing.md) | Pre-DOM figure & inline-Mermaid sizing (no post-insert re-scale) | Accepted |
+| [0023](0023-streaming-scrollbar-and-pacing.md) | Pre-estimated streaming scrollbar + rAF pacing | Accepted |
+| [0024](0024-org-export-blocks-front-matter-and-math.md) | Org export blocks, front matter, and math: rendering what uniorg drops | Accepted |
+| [0025](0025-latex-rendering-via-unified-latex.md) | LaTeX (.tex) rendering via unified-latex, and the Document↔PDF switch | Accepted |
 
 ---
 

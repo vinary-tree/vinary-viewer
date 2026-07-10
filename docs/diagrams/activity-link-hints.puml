@@ -15,16 +15,16 @@ skinparam activity {
 }
 
 start
-#2D9574:press f (resolver, Vim normal) then dispatch hint/start;
-#BC6EC5:hints/collect — every visible link in the content pane,\nclassify (file / http / dir / anchor) + viewport position;
-#BC6EC5:hints/with-labels — uniform-length unique labels\nfrom a home-row alphabet (SADFJKLEWCMPGH);
-#7590DB:ui-hints state becomes active; overlay drawn;
-#2D9574:overlay draws a label badge over each link;
-#7590DB:type a label character; typed grows;\nmatches = targets whose label starts-with typed;
+:press f (resolver, Vim normal) then dispatch hint/start; <<RENDERER_TINT>>
+:hints/collect — every visible link in the content pane,\nclassify (file / http / dir / anchor) + viewport position; <<KEYMAP_TINT>>
+:hints/with-labels — uniform-length unique labels\nfrom a home-row alphabet (SADFJKLEWCMPGH); <<KEYMAP_TINT>>
+:ui-hints state becomes active; overlay drawn; <<APPDB_TINT>>
+:overlay draws a label badge over each link; <<RENDERER_TINT>>
+:type a label character; typed grows;\nmatches = targets whose label starts-with typed; <<APPDB_TINT>>
 if (how many labels still match?) then (exactly 1)
-  #B1951D:follow — file to doc/open · http to web view\n· dir to open-path · anchor to scroll-into-view;
+  :follow — file to doc/open · http to web view\n· dir to open-path · anchor to scroll-into-view; <<IPC_TINT>>
 else (zero, or Esc)
-  #7590DB:clear the hints (cancel);
+  :clear the hints (cancel); <<APPDB_TINT>>
 endif
 stop
 
@@ -38,9 +38,9 @@ end note
 
 legend right
   |= Colour |= Concept |
-  |<#2D9574>| renderer UI (resolver, overlay) |
-  |<#BC6EC5>| hints engine (collect + labels) |
-  |<#7590DB>| app-db [:ui :hints] |
-  |<#B1951D>| follow the link (navigation fx) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer UI (resolver, overlay) |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| hints engine (collect + labels) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db [:ui :hints] |
+  |<#B1951D>&#160;&#160;&#160;&#160;| follow the link (navigation fx) |
 endlegend
 @enduml

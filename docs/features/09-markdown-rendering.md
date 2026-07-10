@@ -65,6 +65,27 @@ $$
 The renderer converts each expression to an SVG `<mjx-container>` through MathJax and keeps a bounded
 cache keyed by display mode and TeX source. This avoids a post-DOM "typeset after insertion" pass.
 
+Two consequences of typesetting **off-DOM** (MathJax runs on a `liteAdaptor` and we inject the serialized SVG)
+are worth knowing, because both bit us:
+
+- **MathJax never inserts its own stylesheet**, so `vinary.renderer.math/install-stylesheet!` does it at startup
+  (`<style id="vv-mathjax-style">`). Two of its rules are load-bearing: `mjx-container[jax="SVG"] > svg
+  { overflow: visible }`, without which the UA rule `svg:not(:root){overflow:hidden}` clips the 3-unit glyph
+  stroke and any accent or stretchy delimiter reaching past the viewBox; and `path[data-c] { stroke-width: 3 }`,
+  which overrides the `stroke-width="0"` presentation attribute MathJax emits on the root `<g>`. The same sheet
+  hides the `<mjx-assistive-mml>` screen-reader MathML that Chromium would otherwise paint as a text-size
+  duplicate. **Never hand-copy these rules into `app.css`** — they drift when `@mathjax/src` is bumped.
+- **Inline line-breaking is disabled** (`linebreaks: {inline: false}`). MathJax 4 turned it on by default, and
+  its break opportunities are exactly `mo` (operators) and `mspace` (spacing). With no DOM there is no container
+  to measure, so MathJax took *every* break and emitted one `<svg>` per "line": `\implies` (= `\;\Longrightarrow\;`)
+  came out as three siblings, the first a 16-unit-wide box holding the entire ⟹ path, which the browser then
+  clipped to an invisible blank gap. Breaking is meaningless here anyway — each expression is rendered once,
+  cached, and injected as a static SVG into a column it can neither measure nor reflow into.
+
+`test/vinary/renderer/math_test.cljs` guards both with geometric, font-independent invariants (one `<svg>`, no
+`<mjx-break>`, and relational widths such as `width(\implies) > width(\Longrightarrow)`); the electron smoke adds
+the browser-only half (`getComputedStyle(svg).overflow === 'visible'`, and `getBBox()` inside the `viewBox`).
+
 Mermaid diagrams render from Markdown fences:
 
 ````markdown

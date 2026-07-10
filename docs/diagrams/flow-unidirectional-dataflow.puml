@@ -4,30 +4,30 @@
 '' draws partitions + the loop-closing arrow cleanly, and lets each lane carry its concept colour.
 !include _vv-theme.iuml
 
-title re-frame's six dominoes — the closed unidirectional loop\n(view ≔ f(state); state only changes by dispatching events)
+title re-frame's six dominoes — the closed unidirectional loop\n<latex>\mathrm{view} := f(\mathrm{state})</latex>\nstate only changes by dispatching events
 
-|#9F8766|World / DOM|
+|#EEEBE8|World / DOM|
 start
 :User acts\n(Ctrl+F, click tab, edit+save file);
 :Browser event fires\n→ rf/dispatch [:event ...];
 note right: ① EVENT — a reified Command (data, not a call)
 
-|#4F97D7|re-frame loop|
+|#E2EBF3|re-frame loop|
 :② Coeffects gathered\n(:db = current app-db snapshot);
-:③ Event handler runs (PURE)\n(db, fx)  ≔  handler(coeffects, event);
+:③ Event handler runs (PURE)\n<latex>(db, fx) := \mathrm{handler}(\mathit{coeffects}, \mathit{event})</latex>;
 note right
   Handlers return *data*: a new :db and/or
   a vector of effects. No IO happens here —
   that is what makes replay/time-travel possible.
 end note
 
-|#7590DB|app-db (ephemeral UI)|
+|#E3E7F2|app-db (ephemeral UI)|
 :④a New app-db committed\n(:ui/find, :ui/history, :ui/theme, :ds/rev);
 
-|#4F97D7|re-frame loop|
+|#E2EBF3|re-frame loop|
 :④b Effects handed to fx handlers;
 
-|#A45BAD|effect world (edge)|
+|#EEE6EF|effect world (edge)|
 :⑤ Effects execute (IMPURE)\n:ds/transact, :markdown/render,\n:find/run, :theme/apply, :vv/open;
 note right
   Some effects dispatch a NEW event when their
@@ -36,7 +36,7 @@ note right
   back-edge that closes the loop.
 end note
 
-|#4F97D7|re-frame loop|
+|#E2EBF3|re-frame loop|
 :⑥ Subscriptions recompute (memoised)\nthe Observer signal graph;
 note right
   Only subs whose inputs changed re-run.
@@ -45,11 +45,11 @@ note right
   invalidates exactly them.
 end note
 
-|#2D9574|view (reagent)|
-:Components re-render from subscriptions\n(view ≔ f(state));
+|#E3F2ED|view (reagent)|
+:Components re-render from subscriptions\n<latex>\mathrm{view} := f(\mathrm{state})</latex>;
 :DOM reflects new state;
 
-|#9F8766|World / DOM|
+|#EEEBE8|World / DOM|
 if (effect dispatched a follow-up event?) then (yes — back-edge)
   -[#B1951D]-> closes the loop;
   :next [:event ...];
@@ -60,12 +60,12 @@ endif
 
 legend right
   |= Colour |= Lane / concept |
-  |<#9F8766>| World / DOM / filesystem (user + browser events) |
-  |<#4F97D7>| re-frame machinery (dominoes ①②③④b⑥) |
-  |<#7590DB>| app-db — ephemeral UI state (domino ④a) |
-  |<#A45BAD>| DataScript content-cache effect (:ds/transact) |
-  |<#2D9574>| reagent view (the f in view ≔ f(state)) |
-  |<#B1951D>| async fx → follow-up event (the back-edge) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| World / DOM / filesystem (user + browser events) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame machinery (dominoes ①②③④b⑥) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db — ephemeral UI state (domino ④a) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content-cache effect (:ds/transact) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| reagent view — the f in the loop equation above |
+  |<#B1951D>&#160;&#160;&#160;&#160;| async fx → follow-up event (the back-edge) |
   Data flows ONE way: event → handler → effect → state → sub → view → (event).
 endlegend
 @enduml

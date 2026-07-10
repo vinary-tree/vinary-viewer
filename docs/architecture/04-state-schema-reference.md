@@ -152,3 +152,11 @@ for content-cache ordering but are no longer the tab model.
 | `:ds/rev` is a signal only. | It triggers subscription recomputation without duplicating content into app-db. |
 
 See [../design-decisions/0010-bounded-content-retention-and-render-metadata.md](../design-decisions/0010-bounded-content-retention-and-render-metadata.md).
+
+## 8. The two stores at a glance
+
+The DataScript `:doc` entity (the single source of truth) and the ephemeral `app-db` map, joined by the amber `:ds/rev` bridge field.
+
+![State model — the DataScript :doc entity and app-db, linked by the :ds/rev bridge](../diagrams/class-state-model.svg)
+
+*Diagram source: [`../diagrams/class-state-model.puml`](../diagrams/class-state-model.puml).*

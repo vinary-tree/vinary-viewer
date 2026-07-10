@@ -25,6 +25,8 @@
    "C-p"     :palette/files
    "C-S-p"   :palette/open
    "C-b"     :sidebar/toggle
+   "C-S-s"   :view/toggle-source           ; Preview ↔ Source (self-gates: no-op for non-previewable docs)
+   "C-S-d"   :view/toggle-representation    ; Document ↔ PDF (self-gates: no-op without a collocated PDF)
    "C-t"     :tab/new-blank
    "C-0"     :view/zoom-reset
    "C-="     :view/zoom-in

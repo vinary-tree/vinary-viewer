@@ -11,15 +11,15 @@ title Live refresh — editor save -> painted DOM (one full round trip)\nINVARIA
 
 autonumber "<b>[0]"
 
-actor "User /\neditor" as ED #9F8766
-participant "chokidar\nwatcher" as CK #9F8766
-participant "main service\n(Node)" as SVC #3A5BA0
-participant "preload\nwindow.vv" as PL #B1951D
-participant "renderer.core\n bridge!" as BR #2D9574
-participant "re-frame\nevents/fx" as RF #4F97D7
-participant "unified\nremark/rehype" as MD #67B11D
-database "DataScript\nconn" as DS #A45BAD
-participant "views\nmarkdown-body" as V #2D9574
+actor "User /\neditor" as ED FS_TINT
+participant "chokidar\nwatcher" as CK FS_TINT
+participant "main service\n(Node)" as SVC MAIN_TINT
+participant "preload\nwindow.vv" as PL IPC_TINT
+participant "renderer.core\n bridge!" as BR RENDERER_TINT
+participant "re-frame\nevents/fx" as RF REFRAME_TINT
+participant "unified\nremark/rehype" as MD MARKDOWN_TINT
+database "DataScript\nconn" as DS DATASCRIPT_TINT
+participant "views\nmarkdown-body" as V RENDERER_TINT
 
 == detect (filesystem) ==
 ED -> ED : save README.md
@@ -72,12 +72,12 @@ deactivate V
 
 legend right
   |= Colour |= Participant / concept |
-  |<#9F8766>| filesystem / editor / chokidar |
-  |<#3A5BA0>| main process (Node IO service) |
-  |<#B1951D>| IPC seam (preload, contextBridge) — all amber arrows |
-  |<#2D9574>| renderer / reagent view |
-  |<#4F97D7>| re-frame events + effects |
-  |<#67B11D>| Markdown (unified/remark/rehype) |
-  |<#A45BAD>| DataScript content cache |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem / editor / chokidar |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main process (Node IO service) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (preload, contextBridge) — all amber arrows |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer / reagent view |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events + effects |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown (unified/remark/rehype) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
 endlegend
 @enduml

@@ -9,6 +9,107 @@
             [clojure.string :as str]
             [vinary.renderer.math :as math]))
 
+;; ── Inline math geometry: one <svg>, no line breaks, a box that encloses the expression ─────────────────────
+;;
+;; MathJax 4 turned on automatic INLINE line-breaking by default (SVG.OPTIONS.linebreaks.inline = true), whose
+;; break opportunities are exactly `mo` (operators) and `mspace` (spacing). We typeset off-DOM through
+;; liteAdaptor, so MathJax has no container to measure and takes EVERY break opportunity: it emits one <svg> per
+;; "line", the FIRST of which holds all the ink inside a degenerate viewBox. `\implies` came out as three
+;; siblings — a 16-unit-wide box containing the whole ⟹ path, plus two empty spacers — so the browser's
+;; `svg:not(:root){overflow:hidden}` clipped it to an invisible blank gap of roughly the right width.
+;;
+;; Structural assertions ("does it contain <svg>") cannot see this; these are geometric. They are also
+;; font- and version-independent: every check is RELATIONAL, so a font bump cannot make them lie.
+
+(defn- svg-count [html] (count (re-seq #"<svg" (or html ""))))
+(defn- break-count [html] (count (re-seq #"<mjx-break" (or html ""))))
+
+(defn- viewbox-width
+  "Width (3rd number) of the FIRST viewBox in a rendered container. When line-breaking fires there is more than
+   one <svg>, and this sees only the first — which is precisely the trap the original bug report fell into."
+  [html]
+  (some-> (re-find #"viewBox=\"([^\"]+)\"" html)
+          second
+          (str/split #"\s+")
+          (nth 2)
+          js/parseFloat))
+
+(def ^:private inline-cases
+  ["\\implies" "\\iff" "x \\le y" "a \\in B" "a\\,b" "\\quad" "\\," "x^2" "ab"])
+
+(deftest inline-math-is-a-single-unbroken-svg
+  (testing "inline math never line-breaks: one <svg>, no <mjx-break> (the \\implies regression emitted three)"
+    (doseq [tex inline-cases]
+      (let [html (math/render-tex tex false)]
+        (is (= 1 (svg-count html))
+            (str tex ": expected exactly one <svg>, got " (svg-count html)
+                 " — MathJax line-broke the inline expression"))
+        (is (zero? (break-count html))
+            (str tex ": expected no <mjx-break> element"))))))
+
+(deftest display-math-is-a-single-unbroken-svg
+  (testing "the inline fix must not disturb display math, which was never broken"
+    (doseq [tex ["\\implies" "x \\le y" "\\max\\{\\,L\\,\\}" "\\frac{a}{b}"]]
+      (let [html (math/render-tex tex true)]
+        (is (= 1 (svg-count html)) (str tex " (display): exactly one <svg>"))
+        (is (zero? (break-count html)) (str tex " (display): no <mjx-break>"))))))
+
+(deftest inline-math-viewbox-encloses-the-expression
+  (testing "the container's box grows with the expression. Each of these is FALSE when the row collapses to its
+            first child, and none depends on a specific font metric."
+    (let [w #(viewbox-width (math/render-tex % false))]
+      (is (> (w "\\implies") (w "\\Longrightarrow"))
+          "\\implies is \\;\\Longrightarrow\\; — it must be WIDER than the arrow alone")
+      (is (> (w "\\iff") (w "\\Longleftrightarrow"))
+          "\\iff is \\;\\Longleftrightarrow\\; — wider than the arrow alone")
+      (is (> (w "a\\,b") (w "ab"))
+          "a\\,b inserts a thin space — wider than ab")
+      (is (> (w "\\quad") (w "\\,"))
+          "\\quad (1em) is wider than \\, (3/18 em)")
+      (is (> (w "x \\le y") (+ (w "x") (w "y")))
+          "x \\le y contains both operands plus an operator and its spacing")
+      (is (> (w "a \\in B") (+ (w "a") (w "B")))
+          "a \\in B contains both operands plus an operator and its spacing"))))
+
+;; ── Org `#+BEGIN_EXPORT latex`: the attempt/fallback contract ───────────────────────────────────────────────
+;;
+;; The engine loads the `noerrors` + `noundefined` TeX packages, so MathJax does NOT throw on bad input — it
+;; renders an error node. `tex-error?` (not try/catch) is therefore the fallback signal, and `tex-block-math?`
+;; screens out the case no error check can catch: prose built from math-legal macros, which typesets
+;; "successfully" into garbage.
+
+(deftest tex-error?-detects-mathjax-error-nodes
+  (testing "an unknown environment renders an error node rather than throwing"
+    (let [bad (math/render-tex "\\begin{center}hi\\end{center}" true)]
+      (is (string? bad) "render-tex returns normally — noerrors/noundefined suppress the throw")
+      (is (math/tex-error? bad) "…and the failure is visible as a data-mjx-error node")))
+  (testing "real math carries no error node"
+    (is (not (math/tex-error? (math/render-tex "E = mc^2" true))))
+    (is (not (math/tex-error? (math/render-tex "\\begin{align} a &= b \\end{align}" true)))))
+  (testing "the raw predicate"
+    (is (math/tex-error? "<mjx-container data-mjx-error=\"Unknown environment 'center'\">"))
+    (is (math/tex-error? "<merror>boom</merror>"))
+    (is (not (math/tex-error? "<mjx-container><svg/></mjx-container>")))
+    (is (not (math/tex-error? nil)))))
+
+(deftest tex-block-math?-screens-document-markup
+  (testing "positively math → attempt"
+    (is (math/tex-block-math? "\\begin{align} a &= b \\end{align}"))
+    (is (math/tex-block-math? "\\begin{equation} x \\end{equation}"))
+    (is (math/tex-block-math? "\\[ E = mc^2 \\]"))
+    (is (math/tex-block-math? "\\begin{bmatrix} 1 & 2 \\end{bmatrix}")))
+  (testing "document-structure macros → never attempt (the invoice's shape)"
+    (is (not (math/tex-block-math? "\\begin{center}\n  Billing Period\n\\end{center}")))
+    (is (not (math/tex-block-math? "\\begin{tabular}{ll}a & b\\end{tabular}")))
+    (is (not (math/tex-block-math? "\\begin{itemize}\\item x\\end{itemize}")))
+    (is (not (math/tex-block-math? "\\includegraphics{logo.pdf}")))
+    (is (not (math/tex-block-math? "\\begin{align} a &= b \\end{align}\n\\begin{center}x\\end{center}"))
+        "a math env does not license a block that also carries document markup"))
+  (testing "prose built only from math-legal macros → never attempt (no error node would catch it)"
+    (is (not (math/tex-block-math? "\\textbf{Hello} \\\\ World")))
+    (is (not (math/tex-block-math? "")))
+    (is (not (math/tex-block-math? nil)))))
+
 (deftest render-tex-modern-font
   (testing "TeX renders (DOM-free via liteAdaptor) to a MathJax SVG container in the Latin-Modern MathJax Modern font"
     (let [inline  (math/render-tex "x^2 + \\alpha" false)

@@ -12,10 +12,10 @@
 title Instant overlay compositing over the web view (pre-cached pushed snapshot)
 
 actor User
-participant "main\nweb.cljs (web view)" as WEB #3A5BA0
-participant "preload\nonHttpSnapshotReady" as IPC #B1951D
-participant "web-host\n(.vv-web-host)" as HOST #2D9574
-participant ":ui/overlay-open?\n(app-db)" as DB #7590DB
+participant "main\nweb.cljs (web view)" as WEB MAIN_TINT
+participant "preload\nonHttpSnapshotReady" as IPC IPC_TINT
+participant "web-host\n(.vv-web-host)" as HOST RENDERER_TINT
+participant ":ui/overlay-open?\n(app-db)" as DB APPDB_TINT
 
 == Proactive capture — page live + visible ==
 WEB -> WEB : did-stop-loading / scroll-settle\n→ capture-soon! (debounced 150 ms)

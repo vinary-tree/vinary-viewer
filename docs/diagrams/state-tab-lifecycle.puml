@@ -10,18 +10,18 @@ title Tab / document lifecycle — one :doc entity in DataScript (keyed by :doc/
 
 [*] --> Opening
 
-state "Opening" as Opening #7590DB : [:doc/open path] → :vv/open\nmain reads + sends vv:content
+state "Opening" as Opening APPDB_TINT : [:doc/open path] → :vv/open\nmain reads + sends vv:content
 
-state "Loaded" as Loaded #A45BAD {
-  state "Markdown" as MD #67B11D : :doc/kind "markdown"\n:doc/html = rendered HTML
-  state "Image" as IMG #2D9574 : :doc/kind "image"\n<img file://path> (no :doc/text)
-  state "Text" as TXT #9F8766 : :doc/kind "text"\n:doc/html = <pre vv-plain> (escaped)
+state "Loaded" as Loaded DATASCRIPT_FILL {
+  state "Markdown" as MD MARKDOWN_TINT : :doc/kind "markdown"\n:doc/html = rendered HTML
+  state "Image" as IMG RENDERER_TINT : :doc/kind "image"\n<img file://path> (no :doc/text)
+  state "Text" as TXT FS_TINT : :doc/kind "text"\n:doc/html = <pre vv-plain> (escaped)
 
   [*] --> MD  : kind = markdown
   [*] --> IMG : kind = image
   [*] --> TXT : kind = text
 
-  state "Error" as ERR #E0211D : :doc/error = message\n(content-view shows .vv-error)
+  state "Error" as ERR ERROR_TINT : :doc/error = message\n(content-view shows .vv-error)
   MD  --> ERR : render/read fails → [:content/error]
   TXT --> ERR : read fails
   ERR --> MD  : next good content\nretract stale :doc/error
@@ -54,12 +54,12 @@ end note
 
 legend right
   |= Colour |= State / concept |
-  |<#7590DB>| Opening (request in flight) |
-  |<#A45BAD>| Loaded — the DataScript :doc entity (super-state) |
-  |<#67B11D>| Markdown body |
-  |<#2D9574>| Image view |
-  |<#9F8766>| Plain text view |
-  |<#E0211D>| Error substate (:doc/error) |
-  |<#DDDDDD>| Inactive / Closed |
+  |<#7590DB>&#160;&#160;&#160;&#160;| Opening (request in flight) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| Loaded — the DataScript :doc entity (super-state) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown body |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Image view |
+  |<#9F8766>&#160;&#160;&#160;&#160;| Plain text view |
+  |<#E0211D>&#160;&#160;&#160;&#160;| Error substate (:doc/error) |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| Inactive / Closed |
 endlegend
 @enduml

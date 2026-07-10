@@ -8,11 +8,11 @@
 title PDF render pipeline (in-renderer pdf.js — ADR-0013)
 
 actor User
-participant "main\nservice" as SVC #3A5BA0
-participant "preload\nvv:content" as IPC #B1951D
-participant ":content/received\n+ byte cache" as EV #4F97D7
-participant "pdf-view\n(.vv-pdf-doc)" as VIEW #2D9574
-participant "pdf.js engine\n+ worker" as PDF #67B11D
+participant "main\nservice" as SVC MAIN_TINT
+participant "preload\nvv:content" as IPC IPC_TINT
+participant ":content/received\n+ byte cache" as EV REFRAME_TINT
+participant "pdf-view\n(.vv-pdf-doc)" as VIEW RENDERER_TINT
+participant "pdf.js engine\n+ worker" as PDF MARKDOWN_TINT
 
 User -> SVC : open report.pdf
 activate SVC

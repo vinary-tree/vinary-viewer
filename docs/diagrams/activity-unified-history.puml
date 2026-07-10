@@ -7,7 +7,7 @@
 
 title Unified history spine — every navigation affordance is one interface over one mechanism
 
-|#7590DB|Affordance (input)|
+|#E3E7F2|Affordance (input)|
 start
 :Any navigation affordance —
 toolbar Back/Forward, **Alt+Left / Alt+Right** (all keymaps),
@@ -15,14 +15,14 @@ mouse thumb buttons, web-view back/forward (vv:history-nav),
 **Alt+Up** / **Alt+Down**, breadcrumb-segment click,
 file / link / tree click, URI bar Enter, File ▸ Open Recent;
 
-|#2D9574|Renderer (re-frame events)|
+|#E3F2ED|Renderer (re-frame events)|
 :resolver / command registry / UI dispatches a navigation event;
 if (kind of navigation?) then (back / forward)
   :[:history/back] / [:history/forward];
-  |#7590DB|app-db history (vinary.app.nav)|
+  |#E3E7F2|app-db history (vinary.app.nav)|
   :**nav/step ±1**\nmove [:hist :idx]; restore that entry's scroll;
 else (open / push)
-  |#2D9574|Renderer (re-frame events)|
+  |#E3F2ED|Renderer (re-frame events)|
   :[:tab/navigate] / [:doc/open] /\n[:nav/parent] / [:nav/open-target];
   note right
     A directory opens the same way as a file
@@ -30,7 +30,7 @@ else (open / push)
     navigation is part of history** — Alt+Left
     undoes an Alt+Up.
   end note
-  |#7590DB|app-db history (vinary.app.nav)|
+  |#E3E7F2|app-db history (vinary.app.nav)|
   :**nav/nav-active**\npush {:uri :scroll}; truncate forward entries;
 endif
 
@@ -41,7 +41,7 @@ stop
 
 legend right
   |= Colour |= Concept |
-  |<#7590DB>| app-db — per-tab history (vinary.app.nav) |
-  |<#2D9574>| Renderer — re-frame events |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db — per-tab history (vinary.app.nav) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer — re-frame events |
 endlegend
 @enduml

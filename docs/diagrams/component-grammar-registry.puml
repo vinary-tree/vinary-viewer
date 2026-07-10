@@ -6,31 +6,31 @@ title Bundled and user tree-sitter grammar registry
 
 skinparam componentStyle rectangle
 
-package "Main process" MAIN_COLOR {
-  [bundled grammar catalog\ncompiled resources/public/grammars] as Bundled MAIN_COLOR
-  [user grammar scanner\n~/.config/vinary-viewer/grammars/<lang>] as Scanner FS_COLOR
-  [vv:grammars request handler\npush EDN config vector] as Push IPC_COLOR
+package "Main process" MAIN_FILL {
+  [bundled grammar catalog\ncompiled resources/public/grammars] as Bundled MAIN_TINT
+  [user grammar scanner\n~/.config/vinary-viewer/grammars/<lang>] as Scanner FS_TINT
+  [vv:grammars request handler\npush EDN config vector] as Push IPC_TINT
 }
 
-package "Renderer process" RENDERER_COLOR {
-  [renderer grammar catalog\nbundled + user entries] as Registry DATASCRIPT_COLOR
-  [source preview\nlookup by extension] as SourceView RENDERER_COLOR
-  [Markdown fenced code\nlookup by language id] as Markdown MARKDOWN_COLOR
+package "Renderer process" RENDERER_FILL {
+  [renderer grammar catalog\nbundled + user entries] as Registry DATASCRIPT_TINT
+  [source preview\nlookup by extension] as SourceView RENDERER_TINT
+  [Markdown fenced code\nlookup by language id] as Markdown MARKDOWN_TINT
 }
 
-Bundled -[#3A5BA0,thickness=2]-> Registry : bundled-grammars
-Scanner -[#9F8766,thickness=2]-> Push : valid files found\n(grammar.wasm + highlights.scm)
-Push -[#B1951D,thickness=2]-> Registry : vv:grammars EDN
-Registry -[#4F97D7,thickness=2]-> SourceView : grammar-for(path)
-Registry -[#67B11D,thickness=2]-> Markdown : grammar-for-language(id)
+Bundled -[#27406F,thickness=2]-> Registry : bundled-grammars
+Scanner -[#6F5E47,thickness=2]-> Push : valid files found\n(grammar.wasm + highlights.scm)
+Push -[#7F6B14,thickness=2]-> Registry : vv:grammars EDN
+Registry -[#336699,thickness=2]-> SourceView : grammar-for(path)
+Registry -[#487E12,thickness=2]-> Markdown : grammar-for-language(id)
 
 legend
-  |<#3A5BA0>| bundled grammar metadata ships with the app |
-  |<#9F8766>| user grammar files live under the config directory |
-  |<#B1951D>| IPC mediator transfers user grammar entries |
-  |<#A45BAD>| renderer catalog combines bundled and user entries |
-  |<#2D9574>| source preview consumes grammars by file extension |
-  |<#67B11D>| Markdown fenced code consumes grammars by language id |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| bundled grammar metadata ships with the app |
+  |<#9F8766>&#160;&#160;&#160;&#160;| user grammar files live under the config directory |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC mediator transfers user grammar entries |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| renderer catalog combines bundled and user entries |
+  |<#2D9574>&#160;&#160;&#160;&#160;| source preview consumes grammars by file extension |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown fenced code consumes grammars by language id |
 endlegend
 
 @enduml

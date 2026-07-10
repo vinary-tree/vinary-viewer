@@ -8,12 +8,12 @@
 title Extension install (GPL-free runtime — ADR-0015)
 
 actor User
-participant "Extensions\ndialog" as UI #4F97D7
-participant "preload\nwindow.vv" as IPC #B1951D
-participant "main\nextensions" as EXT #3A5BA0
-participant "electron-chrome\n-web-store (MIT)" as WS #9F8766
-participant "session.extensions\n(built-in, MIT)" as SES #BC6EC5
-participant "ext-toolbar\n(renderer)" as TB #2D9574
+participant "Extensions\ndialog" as UI REFRAME_TINT
+participant "preload\nwindow.vv" as IPC IPC_TINT
+participant "main\nextensions" as EXT MAIN_TINT
+participant "electron-chrome\n-web-store (MIT)" as WS FS_TINT
+participant "session.extensions\n(built-in, MIT)" as SES KEYMAP_TINT
+participant "ext-toolbar\n(renderer)" as TB RENDERER_TINT
 
 User -> UI : paste Web Store URL/ID → Install
 activate UI

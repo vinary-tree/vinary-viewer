@@ -256,11 +256,41 @@
   [ir]
   (->> (node/preorder ir) (filter #(= :code-block (node/kind %))) (keep code-block-lang) distinct vec))
 
+(defn- attr-of
+  "Read one HTML attribute off an IR node's :meta :attrs, which is a verbatim JS `properties` object for the
+   tree front-ends (markdown/org) and a cljs map for the pure ones (tables/logs)."
+  [attrs k]
+  (cond
+    (nil? attrs) nil
+    (map? attrs) (get attrs k)
+    :else        (aget attrs k)))
+
+(defn- checkbox-state
+  "GFM task-list state for a `:list-item`, or nil when it is an ordinary bullet. Both the Markdown and the Org
+   front-ends emit GitHub's shape — `<li class=\"task-list-item\"><input type=\"checkbox\" [checked]>` — so the
+   terminal reads the state for either. Without this the terminal renders a checked and an unchecked item
+   identically, silently dropping the one bit that matters in a TODO list."
+  [item]
+  (some (fn [child]
+          (let [m (node/node-meta child)]
+            (when (= "input" (:tag m))
+              (let [attrs (:attrs m)]
+                (when (= "checkbox" (attr-of attrs "type"))
+                  (if (attr-of attrs "checked") :checked :unchecked))))))
+        (node/preorder item)))
+
 (defn- list->lines [n opts indent width]
   (let [ordered? (= "ol" (:tag (node/node-meta n)))
         items    (filter #(= :list-item (node/kind %)) (node/children n))]
     (mapcat (fn [idx item]
-              (let [marker (if ordered? (str (inc idx) ". ") "• ")
+              (let [state  (checkbox-state item)
+                    box    (case state :checked "☑ " :unchecked "☐ " nil "")
+                    ;; an ordered task list keeps its ordinal AND gains a box; an unordered one swaps the
+                    ;; bullet for the box (a bullet plus a box reads as noise)
+                    marker (str (cond ordered?    (str (inc idx) ". ")
+                                      (some? state) ""
+                                      :else       "• ")
+                                box)
                     m-ind  (str indent (emit-span {:text marker :style {:fg :gray}} opts))
                     mw     (display-width marker)
                     cont   (str indent (apply str (repeat mw " ")))

@@ -27,13 +27,13 @@
     ("log" "text") (log-stream/parser)
     (log-stream/parser)))                                    ; markdown/pdf front-ends land in later phases
 
-;; markdown reuses the batch string post-passes per block; pdf-reflow's batch view (markdown-body reflow-html)
+;; markdown/org reuse the batch string post-passes per block; pdf-reflow's batch view (markdown-body reflow-html)
 ;; runs NONE (reflow-html! is a bare lower), so its stream must skip them too for byte-parity; logs need none.
-(defn- posts-for [kind] (case kind "markdown" md/apply-posts nil))
+(defn- posts-for [kind] (case kind ("markdown" "org" "latex") md/apply-posts nil))
 (defn- input-for [kind batch] (if (= "markdown" kind) (:text batch) (:lines batch)))
 ;; progressive kinds emit pre-rendered IR children whose whitespace/structure already carries every separator →
 ;; concatenate with ""; the transport (log/text) kinds carry no separators → the sink supplies one "\n".
-(defn- sep-for [kind] (if (#{"markdown" "pdf-reflow"} kind) "" "\n"))
+(defn- sep-for [kind] (if (#{"markdown" "org" "latex" "pdf-reflow"} kind) "" "\n"))
 
 (defn- toc-entries
   "Bounded Contents entries for a batch of log records: those whose first line names a warning/error level."

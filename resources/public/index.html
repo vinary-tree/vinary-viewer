@@ -8,13 +8,18 @@
        on*-handlers. Local assets/scripts load via file:; pdf.js needs 'unsafe-eval', tree-sitter needs
        'wasm-unsafe-eval', pdf.js workers need blob:/worker-src. Remote: only https images (per project
        decision); connect-src blocks remote fetch/XHR exfil. localhost:* keeps `shadow-cljs watch` hot-reload
-       working in dev (unused/harmless in the shipped build). object-src/base-uri/form-action/frame-src locked. -->
+       working in dev (unused/harmless in the shipped build). object-src/base-uri/form-action/frame-src locked.
+       font-src allows data: for MathJax's own stylesheet, which is injected at startup (see
+       vinary.renderer.math/install-stylesheet!) and carries an @font-face whose src is a base64 data: URL
+       (MJX-ZERO, MathJax's zero-width line-break font). Chromium fetches it eagerly, so without data: every
+       launch logs a blocked-font CSP violation. A font is passive data — it cannot execute or exfiltrate — and
+       data: cannot reach the network, so this is the narrowest directive that admits it. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'none';
     script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' file: blob: http://localhost:* ws://localhost:*;
     style-src 'self' 'unsafe-inline' file:;
     img-src 'self' file: data: blob: https:;
-    font-src 'self' file:;
+    font-src 'self' file: data:;
     media-src 'self' file: blob:;
     connect-src 'self' file: data: blob: http://localhost:* ws://localhost:*;
     worker-src 'self' file: blob:;

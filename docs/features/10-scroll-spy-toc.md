@@ -102,3 +102,11 @@ the same Contents panel model for both Markdown and web content.
 
 See [ADR-0010](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)
 for the render-metadata and scroll-stability rationale.
+
+## 7. Render metadata to active heading
+
+Headings are collected during the render, their offsets cached once, and the active heading found by binary search on scroll.
+
+![Scroll-spy TOC — render metadata, cached offsets, binary-search spy](../diagrams/seq-toc.svg)
+
+*Diagram source: [`../diagrams/seq-toc.puml`](../diagrams/seq-toc.puml).*

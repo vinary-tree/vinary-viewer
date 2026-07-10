@@ -136,3 +136,11 @@ the debounced `:vv/save-recent` effect. See
   Elements of Reusable Object-Oriented Software.* Addison-Wesley. ISBN
   978-0201633610.
 - ADR-0010: [../design-decisions/0010-bounded-content-retention-and-render-metadata.md](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)
+
+## 8. Truncating the forward branch
+
+Navigating to a new path after going back discards the forward branch — the same rule a browser uses.
+
+![One tab history evolving through A → B → C → back → D, truncating the forward branch](../diagrams/object-history-stack.svg)
+
+*Diagram source: [`../diagrams/object-history-stack.puml`](../diagrams/object-history-stack.puml).*

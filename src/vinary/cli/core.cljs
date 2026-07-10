@@ -95,7 +95,7 @@
 
 ;; text-backed kinds we read directly (classifyName's extension result is authoritative — content_service's
 ;; openLocal content-sniffs, mis-classifying e.g. a Markdown doc that contains a pipe table as a delimited table)
-(def ^:private text-kinds #{"markdown" "text" "log" "mermaid" "html" "source"})
+(def ^:private text-kinds #{"markdown" "org" "latex" "text" "log" "mermaid" "html" "source"})
 (def ^:private stream-threshold (* 5 1024 1024))
 (defn- big? [file] (> (.-size (.statSync fs file)) stream-threshold))
 

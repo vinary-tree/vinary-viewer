@@ -74,7 +74,7 @@ invariants — independent of any one file. Read it in order:
 1. [`theory/01-reactive-architecture.md`](theory/01-reactive-architecture.md) —
    unidirectional data flow; re-frame's six dominoes mapped onto the **Command**
    and **Observer** patterns; the single-source-of-truth equation
-   `view ≔ f(state)`.
+   $`\mathrm{view} := f(\mathrm{state})`$.
 2. [`theory/02-state-model-datascript-app-db.md`](theory/02-state-model-datascript-app-db.md)
    — the **two stores** (`app-db` for tabs/history and UI; DataScript for the
    bounded content cache), the minimal schema, and the **`:ds/rev` bridge** that
@@ -97,6 +97,9 @@ invariants — independent of any one file. Read it in order:
 9. [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md)
    — treating a document as a **bounded-memory stream**; the WPDA log grammar; the
    bounded-memory property.
+10. [`theory/10-terminal-rendering-second-renderer.md`](theory/10-terminal-rendering-second-renderer.md)
+    — the terminal (`vv-cli` / `vv-tui`) as a **second renderer** over the same IR
+    and streaming spine; ANSI back-end, kitty/sixel graphics, headless PDF reflow.
 
 Then read the **architecture pillar** for the concrete realisation:
 
@@ -116,7 +119,7 @@ Then read the **architecture pillar** for the concrete realisation:
   [`css-variables.md`](reference/css-variables.md),
   [`namespaces.md`](reference/namespaces.md).
 - [`design-decisions/`](design-decisions/README.md) — the numbered ADR-style log
-  (`0001`…`0018`) recording *why* each pivotal choice was made: rendering in the
+  (`0001`…`0024`) recording *why* each pivotal choice was made: rendering in the
   renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative
   `innerHTML` over VDOM, the IPC mediator, bounded content retention, the common
   document IR, and the bounded-memory streaming pipeline.
@@ -133,7 +136,7 @@ Every document in the suite, with its pillar and one-line purpose.
 |----------|--------|----------------|
 | [`README.md`](README.md) | entry | This index, status, reading paths, conventions |
 | [`GLOSSARY.md`](GLOSSARY.md) | entry | Every term, acronym, and symbol, defined once |
-| [`theory/01-reactive-architecture.md`](theory/01-reactive-architecture.md) | theory | Unidirectional flow; six dominoes; Command + Observer; `view ≔ f(state)` |
+| [`theory/01-reactive-architecture.md`](theory/01-reactive-architecture.md) | theory | Unidirectional flow; six dominoes; Command + Observer; $`\mathrm{view} := f(\mathrm{state})`$ |
 | [`theory/02-state-model-datascript-app-db.md`](theory/02-state-model-datascript-app-db.md) | theory | Two stores; `app-db` tabs/history; DataScript content cache; `:ds/rev` bridge; nil-as-absence |
 | [`theory/03-live-refresh-spine.md`](theory/03-live-refresh-spine.md) | theory | The save→render→paint spine; the `:doc/*`-only invariant; convergence/LWW |
 | [`theory/04-hexagonal-and-ipc-mediator.md`](theory/04-hexagonal-and-ipc-mediator.md) | theory | Ports/adapters; effects at the edge; the Mediator `contextBridge` seam |
@@ -142,15 +145,16 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`theory/07-command-history-model.md`](theory/07-command-history-model.md) | theory | Navigation as Commands; `{:stack :idx}`; truncate-on-new-path |
 | [`theory/08-common-document-ir.md`](theory/08-common-document-ir.md) | theory | One tagged IR per format; semiring/WPDA/tree-transducer; single sanitizer; byte-parity |
 | [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md) | theory | Document as a bounded-memory stream; WPDA log grammar; StreamParser; append sink |
+| [`theory/10-terminal-rendering-second-renderer.md`](theory/10-terminal-rendering-second-renderer.md) | theory | Terminal as a second renderer over the shared IR/streaming spine; ANSI back-end; kitty/sixel |
 | [`architecture/01-overview.md`](architecture/01-overview.md) | architecture | System-level component map |
 | [`architecture/02-process-and-build-topology.md`](architecture/02-process-and-build-topology.md) | architecture | Two Electron processes; the two shadow-cljs builds |
 | [`architecture/03-ipc-protocol.md`](architecture/03-ipc-protocol.md) | architecture | The `vv:*` channels and payload shapes |
 | [`architecture/04-state-schema-reference.md`](architecture/04-state-schema-reference.md) | architecture | DataScript schema + full `app-db` shape |
 | [`architecture/05-data-flows.md`](architecture/05-data-flows.md) | architecture | Open / refresh / find / history flows end-to-end |
 | [`architecture/06-renderer-runtime.md`](architecture/06-renderer-runtime.md) | architecture | Renderer boot order, reagent mount, dev hooks |
-| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0018` | design | Why each pivotal choice was made |
+| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0024` | design | Why each pivotal choice was made |
 | [`usage/01..06`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting |
-| [`features/README.md`](features/README.md) + `01`…`15` | features | One page per feature (live refresh … custom keybindings) |
+| [`features/README.md`](features/README.md) + `01`…`26` | features | One page per feature (live refresh … Org-mode rendering) |
 | [`reference/events-effects-subs.md`](reference/events-effects-subs.md) | reference | Every re-frame event, effect, subscription |
 | [`reference/ipc-channels.md`](reference/ipc-channels.md) | reference | Every IPC channel, direction, payload |
 | [`reference/css-variables.md`](reference/css-variables.md) | reference | The `--vv-*` design tokens |
@@ -170,11 +174,30 @@ one coherent whole.
    [`GLOSSARY.md`](GLOSSARY.md). When a term is first introduced, the glossary
    records *which document introduced it*.
 
-2. **Mathematics in backticks with Unicode.** Formulae are written inline in
-   backticks using Unicode symbols, e.g. the single-source-of-truth equation
-   `view ≔ f(state)`, the history push
-   `stack′ ≔ (conj (vec (take (inc idx) stack)) path)`, or the find cursor
-   `idx ≔ (idx + dir) mod n`. The symbol `≔` means "is defined as".
+2. **Mathematics is MathJax, delimited for GitHub-flavoured Markdown.** A formula
+   is a *math span*, never an inert code span and never a string of Unicode
+   glyphs. Two forms, and only these two:
+
+   - **Inline** — a backtick span wrapped in dollar signs, e.g. the
+     single-source-of-truth equation $`\mathrm{view} := f(\mathrm{state})`$, or
+     the find cursor $`\mathit{idx}' := (\mathit{idx} + \mathit{dir}) \bmod n`$.
+   - **Display** — a fenced block whose info-string is `math`, e.g. the history
+     push:
+
+     ```math
+     \mathit{stack}' := \mathtt{(conj\ (vec\ (take\ (inc\ idx)\ stack))\ path)}
+     ```
+
+   Never write bare `$…$` or `$$…$$`. GitHub's CommonMark pass strips backslash
+   escapes before MathJax ever sees them, so those delimiters corrupt an
+   expression — sometimes loudly, sometimes silently. Write a literal dollar sign
+   as a code span, and never let an ASCII letter abut the opening delimiter.
+
+   The operator `:=` reads "is defined as"; a prime, as in $`\mathit{stack}'`$,
+   denotes the *next* value of a binding after an update.
+
+   Unicode remains correct for **non-mathematical** text — box-drawing,
+   arrows, enumerations, and separators such as `events · subs · fx`.
 
 3. **Diagrams are PlantUML.** Every diagram lives under
    [`diagrams/`](diagrams/README.md) as a `.puml` file that begins with
@@ -186,9 +209,10 @@ one coherent whole.
 4. **Color legend.** Colours are **per-concept and stable across the whole
    suite** — a colour always means the same thing. The palette is defined once in
    [`diagrams/_vv-theme.iuml`](diagrams/_vv-theme.iuml) and is drawn from the
-   app's own Spacemacs `--vv-*` tokens. The mapping:
+   app's own Spacemacs `--vv-*` tokens. Each concept owns one **hue**; the
+   *accent* below is that hue at full saturation. The mapping:
 
-   | Colour | Hex | Concept |
+   | Colour | Accent hex | Concept |
    |--------|-----|---------|
    | ▮ Slate | `#3A5BA0` | **Main** process (Node IO) |
    | ▮ Teal | `#2D9574` | **Renderer** / Chromium / reagent view |
@@ -198,21 +222,44 @@ one coherent whole.
    | ▮ Blue | `#4F97D7` | **re-frame** machinery (events, fx, subs) |
    | ▮ Tan | `#9F8766` | **Filesystem / editor** (chokidar) |
    | ▮ Green | `#67B11D` | **Markdown** (unified / remark / rehype) |
+   | ▮ Magenta | `#BC6EC5` | **Keymaps** (registry, key-binding editor, link hints) |
+   | ▮ Orange | `#E67E22` | **Common document IR** core (semiring · transducer · WPDA) |
    | ▮ Red | `#E0211D` | **Errors / retractions** |
    | ▯ Dashed grey | `#DDDDDD` | **Forthcoming (planned)** — `«planned»` stereotype |
 
-   Every diagram repeats a `legend` mapping its colours to concepts, so each is
+   **Hue names the concept; lightness names the role.** The accents are
+   *foreground* colours — legible as ink or as a small swatch, overwhelming as a
+   large area fill. So each concept exists at four tiers, and which one you use is
+   decided by role, never by taste:
+
+   | Macro | Tier | Used for |
+   |-------|------|----------|
+   | `<CONCEPT>_FILL` | palest | package / container backgrounds |
+   | `<CONCEPT>_TINT` | mid | component, participant, state and object fills |
+   | `<CONCEPT>_BORDER` | dark | arrow strokes for that concept |
+   | `<CONCEPT>_COLOR` | accent | legend swatches only — **never** an area fill |
+
+   `_FILL` and `_TINT` are derived from `_COLOR` by moving lightness and
+   saturation in HLS space with the hue held fixed, so the whole palette is
+   reconstructible from the eleven accents alone. Every `_FILL` and `_TINT`
+   clears WCAG 2.x AA against the ink `#1A1A1A` by at least `10.8:1`.
+
+   Every diagram repeats a `legend` mapping its accents to concepts, so each is
    self-contained. See [`diagrams/README.md`](diagrams/README.md) for the full
-   diagram catalogue.
+   diagram catalogue, the tier derivation, and the render-time regression gates.
 
 5. **Citations.** Sources are cited inline with a link, and DOIs are used **only
-   when verified** — see [`GLOSSARY.md`](GLOSSARY.md#references) and each
+   when they resolve** — see [`GLOSSARY.md`](GLOSSARY.md#references) and each
    document's *References* section. Foundational design-pattern claims cite
    *Design Patterns* (Gamma, Helm, Johnson & Vlissides, 1994, **ISBN
    978-0201633610** — this book has no DOI). The Model-View-Controller lineage
-   cites Krasner & Pope (1988) via the **ACM Digital Library**
-   (`https://dl.acm.org/doi/10.5555/50757.50759`). Library and platform claims
-   cite the projects' official documentation.
+   cites Krasner & Pope (1988) by its **ACM Digital Library** landing page,
+   [`dl.acm.org/doi/10.5555/50757.50759`](https://dl.acm.org/doi/10.5555/50757.50759).
+   Despite its shape, `10.5555/50757.50759` is **not a registered DOI** —
+   `10.5555` is ACM's placeholder prefix for pre-DOI material, and
+   `doi.org/10.5555/50757.50759` returns HTTP 404. Cite it as a library link, not
+   as a DOI. Library and platform claims cite the projects' official
+   documentation.
 
 ---
 

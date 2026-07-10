@@ -37,7 +37,7 @@
 
 (def ^:private stream-threshold (* 5 1024 1024))
 (def ^:private stream-cap 100000)                          ; bounded viewport ring for a streamed log
-(def ^:private text-kinds #{"markdown" "text" "log" "mermaid" "html" "source"})
+(def ^:private text-kinds #{"markdown" "org" "latex" "text" "log" "mermaid" "html" "source"})
 
 (defn- parse-args [args]
   (loop [as args file nil opts {}]

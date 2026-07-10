@@ -16,12 +16,12 @@ skinparam class {
 '' ---------- DataScript: the single source of truth for documents/tabs ----------
 package "DataScript conn  (vinary.app.ds)" <<Folder>> #line:743F7B {
 
-  class "schema" as Schema << (S,#A45BAD) >> #A45BAD {
+  class "schema" as Schema << (S,#A45BAD) >> DATASCRIPT_TINT {
     :doc/path  →  {:db/unique :db.unique/identity}
     .. that is the ENTIRE schema ..
   }
 
-  class ":doc  (one per open file)" as Doc << (E,#A45BAD) entity >> #A45BAD {
+  class ":doc  (one per open file)" as Doc << (E,#A45BAD) entity >> DATASCRIPT_TINT {
     + :doc/path : string  <<unique identity>>
     --
     :doc/kind  : "markdown" | "image" | "text"  <<schema-less>>
@@ -41,12 +41,12 @@ package "DataScript conn  (vinary.app.ds)" <<Folder>> #line:743F7B {
 '' ---------- app-db: ephemeral UI only ----------
 package "app-db  (re-frame; vinary.app.db/default-db)" <<Folder>> #line:4C66AE {
 
-  class "app-db root" as AppDb << map >> #7590DB {
+  class "app-db root" as AppDb << map >> APPDB_TINT {
     :ds/rev : long = 0   <<bridge>>
     :ui : { … }
   }
 
-  class ":ui" as Ui << map >> #7590DB {
+  class ":ui" as Ui << map >> APPDB_TINT {
     :active-path : string?  (the focused tab)
     :theme : "spacemacs-dark" | "spacemacs-light"
     :active-heading : id?   (scroll-spy)
@@ -54,12 +54,12 @@ package "app-db  (re-frame; vinary.app.db/default-db)" <<Folder>> #line:4C66AE {
     :tree : {:root :files}  / :tree-filter : string?
   }
 
-  class ":ui/history  (Command stack)" as Hist << map >> #7590DB {
+  class ":ui/history  (Command stack)" as Hist << map >> APPDB_TINT {
     :stack : [path …]
     :idx   : long = -1
   }
 
-  class ":ui/find" as Find << map >> #7590DB {
+  class ":ui/find" as Find << map >> APPDB_TINT {
     :visible? : boolean = false
     :query : string = ""
     :count : long = 0
@@ -92,9 +92,9 @@ N1 .. AppDb
 
 legend right
   |= Colour |= Concept |
-  |<#A45BAD>| DataScript — single source of truth (documents/tabs) |
-  |<#7590DB>| app-db — ephemeral UI state (re-frame) |
-  |<#B1951D>| :ds/rev bridge field (DataScript ⇄ re-frame) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript — single source of truth (documents/tabs) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db — ephemeral UI state (re-frame) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| :ds/rev bridge field (DataScript ⇄ re-frame) |
   «schema-less» needs no schema · «unique» = identity key · «now available» = available
 endlegend
 @enduml

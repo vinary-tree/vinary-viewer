@@ -16,12 +16,12 @@ title Render Markdown — `:markdown/render` fx → `:content/rendered`
 
 autonumber "0:"
 
-participant "re-frame fx\n`:markdown/render`" as Fx REFRAME_COLOR
-participant "renderer.markdown\n`render`" as MD MARKDOWN_COLOR
-participant "unified processor" as U MARKDOWN_COLOR
-participant "re-frame\nevents" as Ev REFRAME_COLOR
-participant "DataScript\nconn" as DS DATASCRIPT_COLOR
-participant "ui.views\nmarkdown-body" as UI RENDERER_COLOR
+participant "re-frame fx\n`:markdown/render`" as Fx REFRAME_TINT
+participant "renderer.markdown\n`render`" as MD MARKDOWN_TINT
+participant "unified processor" as U MARKDOWN_TINT
+participant "re-frame\nevents" as Ev REFRAME_TINT
+participant "DataScript\nconn" as DS DATASCRIPT_TINT
+participant "ui.views\nmarkdown-body" as UI RENDERER_TINT
 
 Fx -> MD : `render text`
 activate MD
@@ -66,10 +66,10 @@ end note
 
 legend right
   |= Colour |= Concept |
-  | <#67B11D> | markdown / unified pipeline |
-  | <#4F97D7> | re-frame |
-  | <#A45BAD> | DataScript content cache |
-  | <#2D9574> | Renderer / UI |
-  | <#E0211D> | (error branch text) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| markdown / unified pipeline |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
+  |<#E0211D>&#160;&#160;&#160;&#160;| (error branch text) |
 endlegend
 @enduml

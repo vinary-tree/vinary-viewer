@@ -110,3 +110,11 @@ blocks containing the error message and escaped source text.
 - **Scoped engine support.** This feature implements Mermaid. D2, PlantUML, and
   Graphviz source files remain source previews unless the user embeds generated
   SVGs in Markdown.
+
+## 5 · The planned Strategy entries
+
+The forthcoming design adds `.puml` / `.mmd` / `.d2` / `.dot` entries to the content-view Strategy, rendered by a MAIN-process diagram service.
+
+![Diagram rendering (Forthcoming) — new Strategy entries turning source into SVG](../diagrams/component-diagram-rendering-planned.svg)
+
+*Diagram source: [`../diagrams/component-diagram-rendering-planned.puml`](../diagrams/component-diagram-rendering-planned.puml).*

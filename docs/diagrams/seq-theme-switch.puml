@@ -15,11 +15,11 @@ title Switch theme — `:theme/set` → `:theme/apply` (live, no reload)
 autonumber "0:"
 
 actor User #white
-participant "ui.views\n(<select>)" as Sel RENDERER_COLOR
-participant "re-frame\nevents/fx" as RF REFRAME_COLOR
-participant "app.db\n(:ui :theme)" as Db APPDB_COLOR
-participant "<link id=\n vv-theme-link>" as Link RENDERER_COLOR
-participant "Chromium\nstyle engine" as CSS RENDERER_COLOR
+participant "ui.views\n(<select>)" as Sel RENDERER_TINT
+participant "re-frame\nevents/fx" as RF REFRAME_TINT
+participant "app.db\n(:ui :theme)" as Db APPDB_TINT
+participant "<link id=\n vv-theme-link>" as Link RENDERER_TINT
+participant "Chromium\nstyle engine" as CSS RENDERER_TINT
 
 User -> Sel : choose "Spacemacs Light"
 Sel -> RF : dispatch `[:theme/set "spacemacs-light"]`
@@ -43,8 +43,8 @@ end note
 
 legend right
   |= Colour |= Concept |
-  | <#2D9574> | Renderer / UI / DOM |
-  | <#4F97D7> | re-frame |
-  | <#7590DB> | app-db (selected theme) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI / DOM |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db (selected theme) |
 endlegend
 @enduml

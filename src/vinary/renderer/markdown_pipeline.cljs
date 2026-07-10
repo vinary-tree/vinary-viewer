@@ -23,6 +23,7 @@
             ["uniorg-rehype$default"    :as uniorg-rehype]
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
+            [vinary.renderer.latex :as latex]
             [vinary.renderer.media :as media]
             [vinary.renderer.math :as math]))
 
@@ -249,17 +250,24 @@
    trusted plugins (rewrite-urls/wrap-images/source-positions/slug) so their post-sanitize additions (file://
    srcs, data-vv-source-*, ids, vv-figure-link) survive — sanitize-last would strip every app-generated file://
    image src and break all local images. Factored out so Markdown (`base-pipeline`) and Org (`org-pipeline`)
-   inherit an IDENTICAL sanitizing/slugging/highlighting/positions policy."
-  [processor metadata base-dir cache-token]
-  (-> processor
-      (.use rehype-raw)
-      (.use rehype-sanitize sanitize/schema)
-      (.use rehype-slug)
-      (.use rehype-highlight)
-      (.use (rewrite-urls base-dir cache-token))
-      (.use (wrap-images))
-      (.use (source-positions))
-      (.use (collect-metadata metadata))))
+   inherit an IDENTICAL sanitizing/slugging/highlighting/positions policy.
+
+   `post-raw` (optional) is a rehype transformer inserted BETWEEN rehype-raw and rehype-sanitize — the one place
+   a format can rewrite freshly-parsed raw HTML into the shapes the sanitizer/post-passes expect while it is
+   still trusted (Org and standalone `.tex` pass `tex-normalize` here, to remap unified-latex's math/center
+   markup that only materializes once rehype-raw parses the embedded LaTeX HTML). Markdown passes nil."
+  ([processor metadata base-dir cache-token] (app-hast-suffix processor metadata base-dir cache-token nil))
+  ([processor metadata base-dir cache-token post-raw]
+   (let [raw (.use processor rehype-raw)
+         raw (if post-raw (.use raw post-raw) raw)]
+     (-> raw
+         (.use rehype-sanitize sanitize/schema)
+         (.use rehype-slug)
+         (.use rehype-highlight)
+         (.use (rewrite-urls base-dir cache-token))
+         (.use (wrap-images))
+         (.use (source-positions))
+         (.use (collect-metadata metadata))))))
 
 (defn base-pipeline
   "The shared remark → rehype pipeline through collect-metadata (everything BEFORE the stringify/compile
@@ -276,20 +284,292 @@
       (.use remark-rehype #js {:allowDangerousHtml true})
       (app-hast-suffix metadata base-dir cache-token)))
 
+;; ── Org (.org) frontend normalization ────────────────────────────────────────────────────────────────────────
+;; Org is a SEMANTIC superset of GFM — its node set contains GFM's — so everything downstream of parsing is
+;; shared (app-hast-suffix, hast->ir, ir.backend.html/lower, renderer.markdown/apply-posts). But a shared
+;; pipeline is not a shared SELECTOR: several post-passes match a specific hast shape, and uniorg emits a
+;; different one. These normalizations rewrite Org's hast into the GFM shapes the shared passes already
+;; understand, so Org inherits math, task lists, and footnotes without a single Org-specific renderer.
+
+(defn- el
+  ([tag props]      (el tag props #js []))
+  ([tag props kids] #js {:type "element" :tagName tag :properties props :children kids}))
+
+(defn- txt [v] #js {:type "text" :value (str v)})
+
+(defn- class-set
+  "The className list of a hast element as a set of strings (empty when absent)."
+  [^js node]
+  (let [cn (some-> (.-properties node) (aget "className"))]
+    (if cn (set (array-seq cn)) #{})))
+
+(def ^:private front-matter-keys
+  "The `#+KEYWORD:` lines that carry document front matter. uniorg-rehype drops EVERY keyword, so without this
+   a keywords-only document (an Org file whose body is a `#+BEGIN_EXPORT latex` block, e.g. an invoice) renders
+   to the empty string. Emacs' ox-html renders the title, so rendering it is parity, not invention."
+  #{"TITLE" "SUBTITLE" "AUTHOR" "DATE"})
+
+(defn- org-footnotes-section
+  "uniorg-rehype's `footnotesSection` option. Its default emits a bare <h1>Footnotes:</h1>, which outranks every
+   real heading and pollutes the Contents outline. GFM's footnote section is an <h2>, so match it."
+  [footnotes]
+  (.concat #js [(el "h2" #js {} #js [(txt "Footnotes")])] footnotes))
+
+(def ^:private tex-fragment-text-macro-re
+  "The complete set of standard LaTeX TEXT-mode formatting macros — font series/shape/family (`\\text**`), emphasis,
+   and the ulem underline/strike family. MathJax renders these poorly but unified-latex lowers them to real markup
+   (<b>, <i>, <u>, …). ONLY a latex-fragment matching this is rerouted to the LaTeX renderer; every other fragment —
+   real math ($…$, \\(…\\), bare math macros like \\alpha, and CUSTOM macros (which may expand to MATH, e.g.
+   `\\newcommand{\\R}{\\mathbb{R}}`) — stays on the existing uniorg→MathJax path, so this cannot regress inline math.
+   A custom TEXT macro is inherently undecidable from its name alone and correctly falls through to MathJax."
+  #"^\s*\\(textbf|textit|texttt|textsc|textrm|textsf|textmd|textup|textsl|textnormal|emph|underline|uline|uuline|uwave|sout|xout|dashuline|dotuline)\b")
+
+(defn- org-handlers
+  "uniorg-rehype `handlers`: merged over its defaultHandlers and dispatched on the Org node type. A handler
+   whose return value is falsy falls THROUGH to uniorg's built-in handler, which is how we drop keywords and
+   keep `#+BEGIN_EXPORT html` on its raw-HTML path. `front-matter` is an atom the keyword handler fills; `preamble`
+   is a per-call atom (vector) accumulating #+LATEX_HEADER/#+LATEX lines so LaTeX renderers can expand user macros."
+  [front-matter preamble]
+  (let [preamble-str (fn [] (str/join "\n" @preamble))]
+    #js
+     {;; #+TITLE / #+AUTHOR / #+DATE / #+SUBTITLE — capture (org-front-matter re-injects them as real headings).
+      ;; #+LATEX_HEADER: / #+LATEX: — accumulate into `preamble` so a \newcommand defined there expands in a
+      ;; LaTeX export block/environment/fragment below (the macro preprocessor). Both then fall through (return
+      ;; nil) so uniorg still drops the keyword node.
+      :keyword
+      (fn [^js org]
+        (let [k (str (.-key org))]
+          (cond
+            (contains? front-matter-keys k)          (swap! front-matter assoc k (str (.-value org)))
+            (contains? #{"LATEX_HEADER" "LATEX"} k)   (swap! preamble conj (str (.-value org)))))
+        nil)
+
+    ;; #+BEGIN_EXPORT <backend> — uniorg emits a raw node for `html` and DROPS every other backend, silently
+    ;; swallowing the body. A viewer must not lose content. For `latex`: a math-looking block keeps the
+    ;; MathJax-attempt marker (renderer.math/render-tex-blocks typesets it, else falls back to the code block); a
+    ;; NON-math block (invoice layout: center/flushleft/itemize/tabular) is rendered by unified-latex into a `raw`
+    ;; node of real HTML, which app-hast-suffix's rehype-raw parses, tex-normalize normalizes, and sanitize cleans.
+    ;; Every other backend → a fenced code block in that backend's language.
+    :export-block
+    (fn [^js org]
+      (let [backend (str/lower-case (str (.-backend org)))
+            body    (str (or (.-value org) ""))]
+        (cond
+          (= "html" backend) nil                            ; fall through to uniorg's raw-HTML path
+          (and (= "latex" backend) (not (math/tex-block-math? body)))
+          #js {:type "raw" :value (latex/latex->html body {:preamble (preamble-str)})}
+          :else
+          (let [classes #js []]
+            (when (seq backend) (.push classes (str "language-" backend)))
+            (when (= "latex" backend) (.push classes sanitize/tex-attempt-class))
+            (el "pre" #js {}
+                #js [(el "code" #js {:className classes} #js [(txt body)])])))))
+
+    ;; \begin{env}…\end{env} outside an export block. A math environment (equation/align/…) falls through to
+    ;; uniorg's div.math-display → MathJax (unchanged — no math regression); a NON-math environment (tabular/
+    ;; center/minipage/…) is rendered by unified-latex into a raw HTML node. tex-block-math? screens exactly this.
+    :latex-environment
+    (fn [^js org]
+      (let [value (str (or (.-value org) ""))]
+        (when-not (math/tex-block-math? value)
+          #js {:type "raw" :value (latex/latex->html value {:preamble (preamble-str)})})))
+
+    ;; Inline latex-fragment. Only a text-formatting macro (\textbf{…}, \emph{…}, …) is rerouted to unified-latex
+    ;; (rendered inline, no paragraph wrap); real inline math ($…$, \(…\), bare \alpha) falls through to uniorg's
+    ;; span.math-inline → MathJax, so inline math cannot regress (see tex-fragment-text-macro-re).
+    :latex-fragment
+    (fn [^js org]
+      (let [frag (str (or (.-value org) (.-contents org) ""))]
+        (when (re-find tex-fragment-text-macro-re frag)
+          #js {:type "raw" :value (latex/latex->html frag {:inline? true :preamble (preamble-str)})})))
+
+    ;; `- [ ]` / `- [X]` — uniorg drops the checkbox entirely (`<li>todo</li>`). Emit GFM's task-list shape,
+    ;; which GitHub's sanitize schema already allows verbatim, so the existing CSS styles it.
+    :list-item
+    (fn [^js org]
+      (this-as ^js self
+        (when-let [cb (.-checkbox org)]                     ; nil for a plain list item
+          (let [kids (.toHast self (.-children org) org)
+                kids (if (array? kids) kids #js [kids])
+                box  (el "input" #js {:type "checkbox" :disabled true :checked (= "on" cb)})]
+            (el "li" #js {:className #js ["task-list-item"]}
+                (.concat #js [box (txt " ")] kids))))))
+
+    :plain-list
+    (fn [^js org]
+      (this-as ^js self
+        (let [^js kids (.-children org)
+              task?    (and (= "unordered" (.-listType org))
+                            kids
+                            (boolean (some (fn [i] (let [^js item (aget kids i)] (some? (.-checkbox item))))
+                                           (range (.-length kids)))))]
+          (when task?
+            (el "ul" #js {:className #js ["contains-task-list"]} (.toHast self kids org))))))}))
+
+(defn- org-front-matter
+  "A rehype transformer: prepend the captured `#+TITLE` / `#+SUBTITLE` / `#+AUTHOR` / `#+DATE` to the tree as
+   plain <h1>/<p><em> elements (both in GitHub's allowlist, and the <h1> is slugged by rehype-slug so it joins
+   the Contents outline). Runs BEFORE app-hast-suffix so the author-supplied text is sanitized like any other."
+  [front-matter]
+  (fn [_opts]
+    (fn [^js tree _file]
+      (let [fm   @front-matter
+            head #js []
+            add! (fn [^js node] (.push head node))]
+        (when-let [title (get fm "TITLE")]
+          (when-not (str/blank? title) (add! (el "h1" #js {} #js [(txt title)]))))
+        (when-let [subtitle (get fm "SUBTITLE")]
+          (when-not (str/blank? subtitle) (add! (el "p" #js {} #js [(el "em" #js {} #js [(txt subtitle)])]))))
+        (let [meta (->> [(get fm "AUTHOR") (get fm "DATE")]
+                        (remove str/blank?)
+                        (str/join " · "))]
+          (when (seq meta) (add! (el "p" #js {} #js [(el "em" #js {} #js [(txt meta)])]))))
+        (when (pos? (.-length head))
+          (set! (.-children tree) (.concat head (.-children tree)))))
+      tree)))
+
+(def ^:private org-done-keywords
+  "The TODO keywords that mean *done*. uniorg-parse recognizes exactly the keywords it is CONFIGURED with —
+   `parse-options.js` defaults to [\"TODO\" \"DONE\"] — and, per Emacs, the last keyword of a sequence is the
+   done state. uniorg does NOT read a document's `#+TODO:` / `#+SEQ_TODO:` line, so a custom sequence renders as
+   literal title text; that is an upstream limitation, documented in docs/features/26-org-mode.md."
+  #{"DONE"})
+
+(defn- org-normalized-node
+  "Rewrite ONE uniorg hast element into the shape a shared post-pass already matches, or nil to leave it alone.
+
+   • math — renderer.math/render-html-math selects `code.math-*` ONLY, and GitHub's schema strips className from
+     <span>/<div>, so uniorg's span.math / div.math would render as literal text. Inline → <code
+     class=\"math-inline\">; display → <pre><code class=\"math-display\">…</code></pre> (the pass replaces the
+     code's PARENT for display math, so the <pre> wrapper is required).
+   • TODO keywords — uniorg emits <span class=\"todo-keyword TODO\">, where the second class is the keyword
+     itself and therefore unbounded (it varies with the configured sequence). An allowlist cannot enumerate it,
+     so collapse it to a stable state class the sanitize schema DOES permit: `todo` or `done`."
+  [^js node]
+  (let [classes (class-set node)
+        tag     (.-tagName node)]
+    (cond
+      (and (= "span" tag) (contains? classes "math-inline"))
+      (el "code" #js {:className #js ["math-inline"]} (.-children node))
+
+      (and (= "div" tag) (contains? classes "math-display"))
+      (el "pre" #js {} #js [(el "code" #js {:className #js ["math-display"]} (.-children node))])
+
+      (and (= "span" tag) (contains? classes "todo-keyword"))
+      (let [keyword (str/trim (hast-text node))
+            state   (if (contains? org-done-keywords keyword) "done" "todo")]
+        (el "span" #js {:className #js [state]} (.-children node)))
+
+      :else nil)))
+
+(defn- normalize-org-hast! [^js node]
+  (when-let [^js kids (.-children node)]
+    (dotimes [i (.-length kids)]
+      (let [^js child (aget kids i)]
+        (when (= "element" (.-type child))
+          (if-let [replacement (org-normalized-node child)]
+            (aset kids i replacement)
+            (normalize-org-hast! child)))))))
+
+(defn- org-normalize
+  "A rehype transformer plugin: rewrite uniorg's math and TODO-keyword nodes into the shapes the shared
+   post-passes and the single sanitize schema already understand (see org-normalized-node). One walk."
+  []
+  (fn [_opts] (fn [tree _file] (normalize-org-hast! tree) tree)))
+
+;; ── LaTeX (unified-latex) frontend normalization ─────────────────────────────────────────────────────────────
+;; renderer.latex/latex->html emits unified-latex's HTML: math as span.inline-math / div.display-math (NOTE the
+;; word order is REVERSED from uniorg's math-inline/math-display, so this never collides with org-normalized-node),
+;; and \begin{center} as the deprecated <center> tag (not in GitHub's sanitize allowlist). These rewrites run as
+;; app-hast-suffix's `post-raw` hook — AFTER rehype-raw has parsed the embedded LaTeX HTML into real elements,
+;; BEFORE the sanitizer — so the math markers reach renderer.math/render-html-math (which selects code.math-* ONLY)
+;; and centered content survives as a block. Both the standalone `.tex` pipeline and the Org pipeline (for LaTeX
+;; embedded in invoices) install it; it is a no-op on documents that carry no unified-latex markup.
+
+(defn- tex-normalized-node
+  "Rewrite ONE unified-latex hast element into the shape a shared post-pass / the sanitizer already matches, or
+   nil to leave it alone. Inline math → <code class=\"math-inline\">; display math → <pre><code
+   class=\"math-display\">…</code></pre> (render-html-math replaces the code's PARENT for display, so the <pre>
+   wrapper is required, and MathJax typesets the raw TeX preserved verbatim inside — even \\begin{align}…);
+   <center> → <div> (block, allowlisted)."
+  [^js node]
+  (let [classes (class-set node)
+        tag     (.-tagName node)]
+    (cond
+      (and (= "span" tag) (contains? classes "inline-math"))
+      (el "code" #js {:className #js ["math-inline"]} (.-children node))
+
+      (and (= "div" tag) (contains? classes "display-math"))
+      (el "pre" #js {} #js [(el "code" #js {:className #js ["math-display"]} (.-children node))])
+
+      (= "center" tag)
+      (el "div" #js {} (.-children node))
+
+      :else nil)))
+
+(defn- normalize-tex-hast! [^js node]
+  (when-let [^js kids (.-children node)]
+    (dotimes [i (.-length kids)]
+      (let [^js child (aget kids i)]
+        (when (= "element" (.-type child))
+          (if-let [replacement (tex-normalized-node child)]
+            (aset kids i replacement)
+            (normalize-tex-hast! child)))))))
+
+(defn- tex-normalize
+  "A rehype transformer plugin: rewrite unified-latex's math and <center> nodes into the shapes the shared
+   post-passes and the single sanitize schema understand (see tex-normalized-node). One walk. Installed as
+   app-hast-suffix's post-raw hook by both tex-pipeline and org-pipeline."
+  []
+  (fn [_opts] (fn [tree _file] (normalize-tex-hast! tree) tree)))
+
+(defn latex-raw-tree
+  "Wrap a unified-latex HTML string as a single `raw` hast node under a root, so app-hast-suffix's rehype-raw
+   parses it into real elements — the same string→hast entry the office frontend uses."
+  [html]
+  #js {:type "root" :children #js [#js {:type "raw" :value (or html "")}]})
+
+(defn tex-processor
+  "The standalone LaTeX (.tex) counterpart of `base-pipeline`, as a TRANSFORM-ONLY processor (no Parser/Compiler,
+   like the office frontend's raw-processor): the SAME `app-hast-suffix` as Markdown/Org — with `tex-normalize`
+   as its post-raw hook so unified-latex's math/center markup is remapped after rehype-raw parses it. The caller
+   converts the LaTeX document to an HTML string via renderer.latex/latex->html (unified-latex, its own
+   unified@10), wraps it with `latex-raw-tree`, and runs it through this with `.runSync` (all suffix transforms
+   are synchronous). So `.tex` inherits the common IR, the heading TOC, figure pre-sizing, scroll-spy, MathJax,
+   and fenced-code highlighting for FREE — exactly as the office frontend reuses the Markdown hast→IR from an HTML
+   string. (A custom unified Parser is deliberately avoided: unified's deprecated `this.Parser` mis-detects a
+   ClojureScript fn as a newable class. unified-latex also projects no source positions, so, like Org, `.tex`
+   preview nodes carry no data-vv-source-* and the fine-grained source⇄preview jump is Markdown-only; `.tex`
+   still gets heading-level navigation through the Contents outline.)"
+  [metadata base-dir cache-token]
+  (app-hast-suffix (unified) metadata base-dir cache-token (tex-normalize)))
+
 (defn org-pipeline
   "The Org (.org) counterpart of `base-pipeline`: uniorg-parse (Emacs Org → uniorg AST) → uniorg-rehype (→ hast,
-   emitting <pre><code class=\"language-X\"> for #+begin_src X and raw-HTML nodes for #+begin_export html) → the
-   SAME `app-hast-suffix`. So Org inherits the common IR, the heading TOC (ir-toc/toc-of), figure pre-sizing,
-   scroll-spy, and nested-language src-block highlighting for FREE — exactly as the office frontend reuses the
-   Markdown hast→IR. (uniorg-rehype does not project source positions onto the hast, so Org preview nodes carry
-   no data-vv-source-* and the fine-grained right-click source⇄preview jump is Markdown-only; Org still gets
-   heading-level navigation through the Contents outline. If uniorg gains hast-position support, adding it here
-   makes the jump work for Org with no other change.)"
+   emitting <pre><code class=\"language-X\"> for #+begin_src X and raw-HTML nodes for #+begin_export html) →
+   the Org normalizations above (front matter, export blocks, task lists, footnotes, math) → the SAME
+   `app-hast-suffix`. So Org inherits the common IR, the heading TOC (ir-toc/toc-of), figure pre-sizing,
+   scroll-spy, MathJax, and nested-language src-block highlighting for FREE — exactly as the office frontend
+   reuses the Markdown hast→IR. (uniorg-rehype does not project source positions onto the hast, so Org preview
+   nodes carry no data-vv-source-* and the fine-grained right-click source⇄preview jump is Markdown-only; Org
+   still gets heading-level navigation through the Contents outline. If uniorg gains hast-position support,
+   adding it here makes the jump work for Org with no other change.)
+
+   `front-matter` is per-CALL, not per-namespace: org-pipeline is invoked once per render, and the keyword
+   handler mutates it during `.process`, so two concurrent renders cannot see each other's title."
   [metadata base-dir cache-token]
-  (-> (unified)
-      (.use uniorg-parse)
-      (.use uniorg-rehype)
-      (app-hast-suffix metadata base-dir cache-token)))
+  (let [front-matter (atom {})
+        preamble     (atom [])]   ; per-call, like front-matter: #+LATEX_HEADER lines for the LaTeX macro expander
+    (-> (unified)
+        (.use uniorg-parse)
+        (.use uniorg-rehype #js {:handlers         (org-handlers front-matter preamble)
+                                 :footnotesSection org-footnotes-section})
+        (.use (org-front-matter front-matter))
+        (.use (org-normalize))
+        ;; tex-normalize as post-raw: LaTeX embedded in Org (export blocks / environments / fragments, e.g.
+        ;; invoices) is emitted as a `raw` node of unified-latex HTML, so its math/center markup only
+        ;; materializes once app-hast-suffix's rehype-raw parses it — normalize it there. No-op for pure Org.
+        (app-hast-suffix metadata base-dir cache-token (tex-normalize)))))
 
 (defn capture-hast
   "A rehype transformer that captures the final HAST tree into `store` (for the IR back-end) and passes it

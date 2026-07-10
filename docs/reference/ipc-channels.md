@@ -21,6 +21,7 @@ All renderer code talks to main through `window.vv`. The renderer never imports
 | `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `vinary.main.service/sync-retained!` | Replace main's retained local-file set and release unretained watchers/assets. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service/watch-assets!` | Watch local media assets referenced by a retained Markdown document. |
 | `vv:content-page` | `contentPage(request)` ⮐ | `{path, kind, stamp, page, meta?}` | `vinary.main.service` → `content_service.contentPage` | *(invoke)* Fetch one bounded page for a large log or delimited-table preview, including `hasPrev`/`hasNext` flags. |
+| `vv:load-pdf-bytes` | `loadPdfBytes(path)` ⮐ | `path` string | `vinary.main.service/init!` | *(invoke)* Read a collocated sibling PDF's bytes into the renderer's pdf-cache for the Document↔PDF switch — **no** new tab. Returns the Buffer, or nil if unreadable. |
 | `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config/push!` | Request persisted `keybindings.edn`. |
 | `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config/save!` | Persist keybinding registry EDN. |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars/push!` | Request user grammar registry and filetype mappings. |

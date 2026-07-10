@@ -68,10 +68,29 @@ IR --> OUT
   ([ADR-0021](0021-bidirectional-source-preview-jump.md)) is **Markdown-only**; Org degrades gracefully to
   heading-level navigation via the Contents outline. Documented, not hidden — if uniorg gains hast positions,
   the jump works for Org with a one-line pipeline change.
-- **Streaming:** Org renders batch-only initially (`stream/flag` `implemented-kinds` excludes `"org"`) — Org
+- **Streaming:** Org rendered batch-only initially (`stream/flag` `implemented-kinds` excluded `"org"`) — Org
   documents are typically small and CommonMark-style document-global constructs make a byte-parity bounded parse
-  a separate effort. Additive when wanted.
+  a separate effort. Additive when wanted. **Superseded by [ADR-0024](0024-org-export-blocks-front-matter-and-math.md):**
+  Org now shares the progressive block-commit engine at the same 256 KiB threshold as Markdown. The engine commits
+  IR *children*, so it was already format-agnostic; Org needed only its own block provider.
 - **Files:** `package.json` (uniorg-parse/uniorg-rehype), `renderer/markdown_pipeline.cljs`,
   `renderer/markdown.cljs`, `main/file_kind.cljs`, `app/events.cljs`, `app/fx.cljs`, `ui/views.cljs`,
   `grammar_catalog.cljs`, `resources/public/grammars/org/`, `scripts/grammars.lock.json`. Tests:
   `test/vinary/main/file_kind_test.cljs`, `test/vinary/ir/frontend/org_test.cljs`, `test/electron-smoke.js`.
+
+## Amendment (2026-07-09) — "inherits the spine" was true of the pipeline, not of its selectors
+
+This ADR's central claim — Org is a semantic superset of GFM, so everything downstream of parsing is shared — is
+correct, and the diagram above is the right architecture. But *reusing a pipeline is not reusing its selectors*.
+Several shared post-passes match a specific hast shape, and uniorg emits a different one, so they silently did
+nothing: **math** (the pass selects `code.math-*`; uniorg emits `span.math`/`div.math`), **task lists** (the
+checkbox was discarded), **footnotes** (a bare `<h1>`), and **TODO keywords** (an unbounded class the sanitizer
+stripped). Worse, uniorg drops every `#+KEYWORD` *and* every non-`html` `#+BEGIN_EXPORT` block, so a document
+made only of those lowered to `""` — which is **truthy** in ClojureScript — and rendered as a silent blank pane.
+
+Two omissions also survived: `content_service.js`'s `classifyName` (the JavaScript twin of `file_kind/kind-of`)
+never got an `org` arm, so `vv --cli`/`vv --tui` printed Org as highlighted *source*; and the electron smoke
+stubbed `{kind:'org'}` straight into its fake content service, so no test ever exercised the real classifier.
+
+[ADR-0024](0024-org-export-blocks-front-matter-and-math.md) fixes all of it by **normalizing Org's hast into the
+GFM shapes upstream of the shared passes** — the same principle this ADR set out, applied one layer lower.

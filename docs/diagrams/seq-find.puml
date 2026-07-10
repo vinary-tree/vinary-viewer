@@ -9,13 +9,13 @@ title In-page find — Ctrl+F ⟶ highlighted matches (CSS Custom Highlight API)
 
 autonumber "<b>[0]"
 
-actor User #9F8766
-participant "find-bar /\nkeybindings" as UI #2D9574
-participant "re-frame\nevents" as RF #4F97D7
-collections "app-db\n:ui/find" as DB #7590DB
-participant "re-frame\nfx" as FX #4F97D7
-participant "finder\n(renderer.find)" as F #67B11D
-participant "CSS.highlights\n+ DOM Ranges" as H #67B11D
+actor User FS_TINT
+participant "find-bar /\nkeybindings" as UI RENDERER_TINT
+participant "re-frame\nevents" as RF REFRAME_TINT
+collections "app-db\n:ui/find" as DB APPDB_TINT
+participant "re-frame\nfx" as FX REFRAME_TINT
+participant "finder\n(renderer.find)" as F MARKDOWN_TINT
+participant "CSS.highlights\n+ DOM Ranges" as H MARKDOWN_TINT
 
 == open the find bar ==
 User -> UI : Ctrl+F
@@ -36,7 +36,7 @@ activate FX
 FX -> F : **finder/search! "needle"**
 activate F
 F -> F : collect-ranges:\nTreeWalker(SHOW_TEXT) over .vv-content\ncase-insensitive indexOf in each text node
-F -> H : Highlight.add(range) ∀ matches\nCSS.highlights.set "vv-find" / "vv-find-current"
+F -> H : Highlight.add(range) <latex>\forall</latex> matches\nCSS.highlights.set "vv-find" / "vv-find-current"
 F -> H : scrollIntoView {block:center} first match
 F --> FX : return count = n
 deactivate F
@@ -54,7 +54,7 @@ RF -> FX : fx :find/cycle dir
 activate FX
 FX -> F : **finder/cycle! dir**
 activate F
-F -> F : idx ≔ (idx + dir) mod n
+F -> F : <latex>\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n</latex>
 F -> H : repaint "vv-find-current"\n+ scrollIntoView
 F --> FX : return (inc idx)  [1-based]
 deactivate F
@@ -77,10 +77,10 @@ end note
 
 legend right
   |= Colour |= Participant / concept |
-  |<#9F8766>| User |
-  |<#2D9574>| view (find-bar, keybindings) |
-  |<#4F97D7>| re-frame events + effects |
-  |<#7590DB>| app-db :ui/find slice |
-  |<#67B11D>| finder + CSS.highlights painting (DOM) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| User |
+  |<#2D9574>&#160;&#160;&#160;&#160;| view (find-bar, keybindings) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events + effects |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db :ui/find slice |
+  |<#67B11D>&#160;&#160;&#160;&#160;| finder + CSS.highlights painting (DOM) |
 endlegend
 @enduml

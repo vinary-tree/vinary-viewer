@@ -7,12 +7,12 @@
 title Native PDF / web view yields to a DOM overlay
 
 actor User
-participant "menubar /\nmodal dialog" as UI #7590DB
-participant "app-db [:ui]" as DB #7590DB
-participant ":ui/overlay-open?\nsubscription" as SUB #4F97D7
-participant "pdf-host /\nweb-host" as HOST #2D9574
-participant "preload\nwindow.vv" as IPC #B1951D
-participant "main pdf / web\nWebContentsView" as MAIN #3A5BA0
+participant "menubar /\nmodal dialog" as UI APPDB_TINT
+participant "app-db [:ui]" as DB APPDB_TINT
+participant ":ui/overlay-open?\nsubscription" as SUB REFRAME_TINT
+participant "pdf-host /\nweb-host" as HOST RENDERER_TINT
+participant "preload\nwindow.vv" as IPC IPC_TINT
+participant "main pdf / web\nWebContentsView" as MAIN MAIN_TINT
 
 == a DOM overlay opens ==
 User -> UI : open a menu / Preferences

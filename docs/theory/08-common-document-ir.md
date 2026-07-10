@@ -146,6 +146,8 @@ The dataflow (see the diagram above) is **front-end -> IR core -> back-end/capab
 | Format | Front-end (`ir/frontend/*`) | What the IR adds |
 |--------|-----------------------------|------------------|
 | Markdown | `hast->ir` (mirrors the rehype HAST) | canonical tree; the lowering + TOC now run through it |
+| Org (.org) | uniorg → HAST → **reuses Markdown's `hast->ir`** (ADR-0020/0024) | the same TOC / math / task-lists / streaming, no Org-specific renderer |
+| LaTeX (.tex) | unified-latex → HTML string → `raw` node → **reuses Markdown's `hast->ir`** (ADR-0025) | the same TOC / MathJax / figures / highlighting; a macro preprocessor; no LaTeX compiler |
 | Office (docx/ODF) | `html->ir` (rehype-raw + shared sanitizer + slug) | a **heading TOC** and the **GitHub-allowlist sanitizer** it previously lacked |
 | Source code | `tree->ir` (web-tree-sitter) | the SyntaxNode analogue + a line-anchored **code outline** |
 | PDF | `doc->ir` (pdf.js text runs) | a **reflowable** page/block/line/run facet (find/copy/reflow) *augmenting* the faithful canvas |

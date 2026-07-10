@@ -6,30 +6,30 @@ title Native PDF preview with a main-owned WebContentsView
 
 skinparam componentStyle rectangle
 
-package "Renderer process" RENDERER_COLOR {
-  [content-view Strategy\n:doc/kind = "pdf"] as Strategy RENDERER_COLOR
-  [pdf-host placeholder\nmeasures DOM bounds] as Placeholder REFRAME_COLOR
-  [window.vv mediator\npdfShow / pdfBounds / pdfHide] as VV IPC_COLOR
+package "Renderer process" RENDERER_FILL {
+  [content-view Strategy\n:doc/kind = "pdf"] as Strategy RENDERER_TINT
+  [pdf-host placeholder\nmeasures DOM bounds] as Placeholder REFRAME_TINT
+  [window.vv mediator\npdfShow / pdfBounds / pdfHide] as VV IPC_TINT
 }
 
-package "Main process" MAIN_COLOR {
-  [vinary.main.pdf\nPDF service] as Pdf MAIN_COLOR
-  [WebContentsView\nChromium PDF viewer] as View MAIN_COLOR
-  [retained file watcher\nreload on change] as Watcher FS_COLOR
+package "Main process" MAIN_FILL {
+  [vinary.main.pdf\nPDF service] as Pdf MAIN_TINT
+  [WebContentsView\nChromium PDF viewer] as View MAIN_TINT
+  [retained file watcher\nreload on change] as Watcher FS_TINT
 }
 
-Strategy -[#4F97D7,thickness=2]-> Placeholder : render placeholder
-Placeholder -[#B1951D,thickness=2]-> VV : path + bounds
-VV -[#B1951D,thickness=2]-> Pdf : vv:pdf-show / vv:pdf-bounds / vv:pdf-hide
-Pdf -[#3A5BA0,thickness=2]-> View : load file:// PDF\nsetBounds(...)
-Watcher -[#9F8766,thickness=2]-> Pdf : reload!(path)
+Strategy -[#336699,thickness=2]-> Placeholder : render placeholder
+Placeholder -[#7F6B14,thickness=2]-> VV : path + bounds
+VV -[#7F6B14,thickness=2]-> Pdf : vv:pdf-show / vv:pdf-bounds / vv:pdf-hide
+Pdf -[#27406F,thickness=2]-> View : load file:// PDF\nsetBounds(...)
+Watcher -[#6F5E47,thickness=2]-> Pdf : reload!(path)
 
 legend
-  |<#2D9574>| renderer owns DOM strategy selection |
-  |<#4F97D7>| re-frame/Reagent view measures placeholder geometry |
-  |<#B1951D>| IPC mediator carries only path and bounds data |
-  |<#3A5BA0>| main owns the native WebContentsView |
-  |<#9F8766>| retained-path watcher drives live reload |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer owns DOM strategy selection |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame/Reagent view measures placeholder geometry |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC mediator carries only path and bounds data |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main owns the native WebContentsView |
+  |<#9F8766>&#160;&#160;&#160;&#160;| retained-path watcher drives live reload |
 endlegend
 
 @enduml

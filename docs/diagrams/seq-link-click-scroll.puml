@@ -9,12 +9,12 @@ title In-document link click — open in the pane + per-tab scroll restore
 
 autonumber "<b>[0]"
 
-actor User #9F8766
-participant "markdown-body\nclick listener" as V #2D9574
-participant ":doc/open (reg-event-fx)\n[+ :content-scroll cofx]" as RF #4F97D7
-collections "app-db active tab\n:hist [{:uri :scroll}…]" as DB #7590DB
-participant "load + render\n(:vv/open → content)" as LOAD #B1951D
-participant "scroll restore\n(renderer.scroll)" as SC #4F97D7
+actor User FS_TINT
+participant "markdown-body\nclick listener" as V RENDERER_TINT
+participant ":doc/open (reg-event-fx)\n[+ :content-scroll cofx]" as RF REFRAME_TINT
+collections "app-db active tab\n:hist [{:uri :scroll}…]" as DB APPDB_TINT
+participant "load + render\n(:vv/open → content)" as LOAD IPC_TINT
+participant "scroll restore\n(renderer.scroll)" as SC REFRAME_TINT
 
 == click (the bug fix: open IN the pane) ==
 User -> V : click <a href> (a relative .md link)
@@ -54,10 +54,10 @@ end note
 
 legend right
   |= Colour |= Participant / concept |
-  |<#9F8766>| User |
-  |<#2D9574>| markdown-body (view) |
-  |<#4F97D7>| re-frame event + scroll fx |
-  |<#7590DB>| app-db per-tab history {:uri :scroll} |
-  |<#B1951D>| load / render the document |
+  |<#9F8766>&#160;&#160;&#160;&#160;| User |
+  |<#2D9574>&#160;&#160;&#160;&#160;| markdown-body (view) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame event + scroll fx |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db per-tab history {:uri :scroll} |
+  |<#B1951D>&#160;&#160;&#160;&#160;| load / render the document |
 endlegend
 @enduml

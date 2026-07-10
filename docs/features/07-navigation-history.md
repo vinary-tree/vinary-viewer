@@ -124,3 +124,11 @@ watcher or reintroducing stale cache state.
 ![Link click scroll restoration sequence](../diagrams/seq-link-click-scroll.svg)
 
 *Diagram source: [`../diagrams/seq-link-click-scroll.puml`](../diagrams/seq-link-click-scroll.puml).*
+
+## 7. Back as a Command replay
+
+Back and Forward move `:idx` within `:ui/history` and replay the Command at that position.
+
+![Navigation history — Alt+Left (Back) through to a body swap](../diagrams/seq-history.svg)
+
+*Diagram source: [`../diagrams/seq-history.puml`](../diagrams/seq-history.puml).*

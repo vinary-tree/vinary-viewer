@@ -282,6 +282,88 @@ Body under the repeated heading (slug dedup must number these across the whole d
   return { dir, batchPath, streamPath, text: body, size: Buffer.byteLength(body, 'utf8'), sections: i };
 }
 
+// Org's counterpart. Org rides the SAME progressive engine (it commits IR children, not markdown nodes), so the
+// byte-parity contract is identical: streamed innerHTML must equal the batch render exactly.
+function createLargeOrgFixtures() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-org-stream-'));
+  tempDirs.push(dir);
+  const filler = 'The quick brown fox jumps over the lazy dog while pangrams exercise every glyph. '.repeat(15);
+  // Every parity-critical Org construct appears in EVERY section, so the streamed-vs-batch comparison covers
+  // them per-block: inline math (normalized span.math → code.math-inline, typeset by the MathJax pass) and a
+  // non-math #+BEGIN_EXPORT latex block (ADR-0025: RENDERED by unified-latex into a raw node that rehype-raw
+  // parses → tex-normalize → IR children, identically whether the whole doc renders at once or streams block by
+  // block). If that were not deterministic per block, streamed and batch HTML would diverge exactly here.
+  const section = (i) => `** Section ${i}
+
+Paragraph ${i} with *bold*, /italic/, ~inline code~, inline math $x_{${i}}^2$, and a [[https://example.com/${i}][link]]. ${filler}
+
+- tight one
+- tight two
+- [ ] a task
+- [X] a done task
+
+#+begin_src clojure
+(defn add-${i} [a b] (+ a b ${i}))
+#+end_src
+
+#+BEGIN_EXPORT latex
+\\begin{center}Not math ${i} -- falls back to a highlighted code block\\end{center}
+#+END_EXPORT
+
+| Col A | Col B |
+|-------+-------|
+| ${i}  | ${i + 1} |
+
+*** Repeated Heading
+
+Body under the repeated heading (slug dedup must number these across the whole document).
+
+`;
+  let body = '#+TITLE: Big Org Document\n#+AUTHOR: Ada Lovelace\n\n* Intro\n\nIntro paragraph.\n\n';
+  let i = 0;
+  while (Buffer.byteLength(body, 'utf8') < 300 * 1024) { body += section(i); i += 1; }
+  const batchPath = path.join(dir, 'batch.org');
+  const streamPath = path.join(dir, 'stream.org');
+  fs.writeFileSync(batchPath, body);
+  fs.writeFileSync(streamPath, body);
+  return { dir, batchPath, streamPath, text: body, size: Buffer.byteLength(body, 'utf8'), sections: i };
+}
+
+// A large standalone .tex whose per-section constructs (headings, styling, inline math, lists, a tabular) exercise
+// the per-block post-passes, so a >256 KiB .tex must stream byte-identically to its batch render — the same
+// whole-parse + progressive-paint engine as markdown/org, driven by markdown/latex-stream-blocks (ADR-0025).
+function createLargeLatexFixtures() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tex-stream-'));
+  tempDirs.push(dir);
+  const filler = 'The quick brown fox jumps over the lazy dog while pangrams exercise every glyph. '.repeat(12);
+  const section = (i) => `\\section{Section ${i}}
+Paragraph ${i} with \\textbf{bold ${i}}, \\emph{italic}, and inline math $x_{${i}}^2$. ${filler}
+
+\\begin{itemize}
+\\item First point ${i}
+\\item Second point ${i}
+\\end{itemize}
+
+\\begin{center}
+\\begin{tabular}{@{}ll@{}}
+Item ${i} & Value ${i} \\\\
+\\end{tabular}
+\\end{center}
+
+`;
+  // no leading intro section: every <h3> comes from section(i), so the h3 count equals the number of sections
+  // that carry math + a tabular + \textbf, keeping the per-section coverage assertions exact.
+  let body = '\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\n';
+  let i = 0;
+  while (Buffer.byteLength(body, 'utf8') < 300 * 1024) { body += section(i); i += 1; }
+  body += '\\end{document}\n';
+  const batchPath = path.join(dir, 'batch.tex');
+  const streamPath = path.join(dir, 'stream.tex');
+  fs.writeFileSync(batchPath, body);
+  fs.writeFileSync(streamPath, body);
+  return { dir, batchPath, streamPath, text: body, size: Buffer.byteLength(body, 'utf8'), sections: i };
+}
+
 function firstDiff(a, b) {
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
@@ -504,7 +586,11 @@ async function main() {
     lastCopiedText: null,
     pwSearch: null, pwFill: null, pwSave: null, pwDismiss: null,
     openedPaths: [],
-    contentByPath: new Map()
+    contentByPath: new Map(),
+    // Every renderer console error whose text mentions the CSP. Injecting MathJax's stylesheet (which carries an
+    // @font-face with a data: URL) silently tripped `font-src` on every launch, printed only as noise among the
+    // re-frame warnings. Collect them so a CSP regression fails the run instead of scrolling past.
+    cspViolations: []
   };
 
   installIpc(state);
@@ -528,6 +614,9 @@ async function main() {
   });
   win.webContents.on('console-message', (details) => {
     const level = details.level;
+    if (/Content Security Policy/i.test(details.message || '')) {
+      state.cspViolations.push(details.message.slice(0, 200));
+    }
     if (level >= 2 || level === 'warning' || level === 'error') {
       console.error(
         `[renderer:${level}] ${details.message} (${details.sourceId}:${details.lineNumber || details.line})`
@@ -1021,6 +1110,10 @@ async function main() {
       'Copyable preview text lives here.\n\n' +
       'Inline math $`x^2`$ and display math:\n\n$$\n\\frac{a}{b}\n$$\n\n' +
       'A code span `$x^2$` stays literal.\n\n' +
+      // Operators (`mo`) and spacing (`mspace`) are MathJax 4's inline line-break opportunities. `x^2` has
+      // neither, which is why it rendered fine while $`\implies`$ was an invisible blank gap. Geometry is
+      // asserted on these below; keep at least one `mo` and one `mspace` expression here.
+      'Operators and spacing: $`\\implies`$ then $`x \\le y`$ and $`a\\,b`$.\n\n' +
       'AMS family: bold $\\boldsymbol{v}$ and a commutative diagram:\n\n$$\n\\begin{CD} A @>f>> B \\end{CD}\n$$\n\n' +
       'Denotation brackets + monospace (MathJax 4 dynamic-font glyphs):\n\n' +
       '$$\n\\llbracket L \\Rightarrow R \\rrbracket \\;=\\; \\mathtt{for}\\;\\mathbb{R}\n$$\n\n' +
@@ -1040,6 +1133,89 @@ async function main() {
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-display mjx-container svg'))`),
     'display MathJax SVG'
   );
+  // ── Inline math must PAINT, not merely occupy space ────────────────────────────────────────────────────────
+  // Two composing defects made 15% of a real corpus render as blank gaps, and every structural assertion above
+  // stayed green throughout. Only a real browser can see either one, so assert on geometry here.
+  //
+  //  A. MathJax's own stylesheet was never injected (we typeset off-DOM through liteAdaptor), so the UA rule
+  //     `svg:not(:root){overflow:hidden}` clipped any ink outside the viewBox.
+  //  B. MathJax 4 defaults to automatic INLINE line-breaking, whose break opportunities are `mo` and `mspace`.
+  //     With no measurable container it broke at every one, emitting several sibling <svg>s — the first holding
+  //     ALL the ink inside a 16-unit-wide box. `\implies` (= \;\Longrightarrow\;) lost 99% of its ink.
+  // NB: look the spans up by data-tex CONTENT, never with a CSS attribute selector — the CSS parser would
+  // unescape `[data-tex="\implies"]` to the literal `implies` and silently match nothing.
+  const inlineMathProbe = (tex) => `(() => {
+    const span = Array.from(document.querySelectorAll('.markdown-body .vv-math-inline'))
+      .find(n => n.getAttribute('data-tex') === ${JSON.stringify(tex)});
+    if (!span) return null;
+    const svgs = span.querySelectorAll('mjx-container > svg');
+    const svg = svgs[0];
+    if (!svg) return null;
+    const bb = svg.getBBox();          // ink extents, in the svg's own user units (fill geometry, no stroke)
+    const vb = svg.viewBox.baseVal;    // the layout box the browser clips to
+    const glyph = svg.querySelector('path[data-c]');
+    // Fraction of the expression's ink falling outside the box, on the worst of the four edges. MathJax derives
+    // the viewBox from the font's advance/height/depth, so fill ink TOUCHES the top and bottom edges exactly;
+    // it is the 3-unit glyph stroke, and accents/stretchy delimiters, that need overflow:visible.
+    const span_ = Math.max(bb.width, bb.height, 1);
+    const lost = Math.max(
+      (bb.x + bb.width) - (vb.x + vb.width),   // right
+      (bb.y + bb.height) - (vb.y + vb.height), // bottom
+      vb.x - bb.x,                             // left
+      vb.y - bb.y,                             // top
+      0) / span_;
+    return {
+      svgCount: svgs.length,
+      overflow: getComputedStyle(svg).overflow,
+      strokeWidth: glyph ? parseFloat(getComputedStyle(glyph).strokeWidth) : null,
+      widthPx: span.getBoundingClientRect().width,
+      lost
+    };
+  })()`;
+  await waitFor(() => evalIn(win, inlineMathProbe('\\implies')), 'the \\implies inline equation renders');
+  const mathGeometry = {};
+  for (const tex of ['\\implies', 'x \\le y', 'a\\,b', 'x^2']) {
+    mathGeometry[tex] = await evalIn(win, inlineMathProbe(tex));
+    assert.ok(mathGeometry[tex], `inline math "${tex}" must render an <svg>`);
+  }
+  for (const [tex, m] of Object.entries(mathGeometry)) {
+    // Defect A — MathJax ships `overflow: visible` precisely so that legitimate ink spill paints.
+    assert.strictEqual(m.overflow, 'visible',
+      `${tex}: MathJax's stylesheet is not injected — <svg> overflow is "${m.overflow}", so ink outside the viewBox is clipped`);
+    assert.ok(m.strokeWidth > 0,
+      `${tex}: MathJax's glyph stroke-width rule is missing (got ${m.strokeWidth}); the root <g>'s stroke-width="0" presentation attribute is winning`);
+    // Defect B — one <svg> per expression; several means MathJax line-broke it.
+    assert.strictEqual(m.svgCount, 1,
+      `${tex}: inline math line-broke into ${m.svgCount} <svg> elements (MathJax linebreaks.inline must be off)`);
+    assert.ok(m.widthPx > 2, `${tex}: inline math collapsed to a ${m.widthPx}px box`);
+    // A few percent of spill is CORRECT MathJax output (italic correction, accents) — that is what
+    // `overflow: visible` is for. Defect B lost 50-99%, so 10% separates them by two orders of magnitude.
+    assert.ok(m.lost < 0.10,
+      `${tex}: ${(m.lost * 100).toFixed(0)}% of the glyph ink lies outside the viewBox the browser clips to`);
+  }
+  console.log(`[ok] inline math paints: overflow:visible, stroke-width applied, one <svg>, ink inside the viewBox`
+    + ` (\\implies ${mathGeometry['\\implies'].widthPx.toFixed(1)}px, x^2 spill ${(mathGeometry['x^2'].lost * 100).toFixed(1)}%)`);
+  // The injected stylesheet is now the ONLY thing hiding the screen-reader MathML (app.css no longer hand-copies
+  // that rule), and it must be MathJax's, not ours.
+  assert.ok(await evalIn(win, `Boolean(document.getElementById('vv-mathjax-style'))`),
+    "MathJax's stylesheet must be injected into <head> as #vv-mathjax-style");
+  // Negative control: detach the injected sheet and the UA rule `svg:not(:root){overflow:hidden}` must take over.
+  // Without this, `overflow === 'visible'` above could be vacuously true and we would not know.
+  const withoutSheet = await evalIn(win, `(() => {
+    const style = document.getElementById('vv-mathjax-style');
+    const svg = document.querySelector('.markdown-body .vv-math-inline mjx-container > svg');
+    style.remove();
+    const overflow = getComputedStyle(svg).overflow;
+    const strokeWidth = parseFloat(getComputedStyle(svg.querySelector('path[data-c]')).strokeWidth);
+    document.head.appendChild(style);                       // restore
+    return { overflow, strokeWidth, restored: getComputedStyle(svg).overflow };
+  })()`);
+  assert.strictEqual(withoutSheet.overflow, 'hidden',
+    'sanity: without the injected sheet the UA clips the <svg> — so the overflow assertion above is not vacuous');
+  assert.strictEqual(withoutSheet.strokeWidth, 0,
+    'sanity: without the injected sheet glyph paths inherit the root <g>\'s stroke-width="0"');
+  assert.strictEqual(withoutSheet.restored, 'visible', 'the stylesheet was restored after the negative control');
+
   // MathJax 4 loads font glyph data in dynamic chunks; \mathtt/\mathbb live in chunks and \llbracket/\rrbracket are
   // stmaryrd macros we bind to ⟦/⟧. Under the SYNCHRONOUS render this crashed ("retry -- an asynchronous action is
   // required") until the dynamic-font preload; the brackets were also undefined red text. Guard both here.
@@ -1122,8 +1298,9 @@ async function main() {
   await waitFor(() => evalIn(win, `!document.querySelector('.markdown-body .vv-math-inline.vv-math-selected')`),
     'math highlight clears when the selection is collapsed');
   console.log('[ok] MathJax renditions highlight together with the prose during selection (.vv-math-selected)');
-  // Regression guard for the double-render bug: MathJax's <mjx-assistive-mml> must stay in the DOM (a11y)
-  // but be clipped + unselectable by our re-added rule, so Chromium can't paint it as a text-size duplicate.
+  // Regression guard for the double-render bug: MathJax's <mjx-assistive-mml> must stay in the DOM (a11y) but
+  // be clipped + unselectable, so Chromium can't paint it as a text-size duplicate. app.css used to hand-copy
+  // that rule; it now comes from MathJax's own injected stylesheet, so these assertions guard the injection.
   const assistive = await evalIn(win, `(() => {
     const m = document.querySelector('.markdown-body .vv-math-inline mjx-assistive-mml');
     if (!m) return { present: false };
@@ -1754,40 +1931,45 @@ async function main() {
 
   // ── Feature: bidirectional "Go to source" / "Go to preview" jumps ──────────────────────────────────────
   // The "Local Raster Scroll" markdown doc is still open (in preview). The preview/source right-click menus
-  // dispatch these events with a source line; here we drive them directly and observe the pane toggle + the
-  // deferred scroll that lands after the toggled view remounts.
-  const dispatchJump = (nsName, evName, line) =>
-    evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword(${JSON.stringify(nsName)}, ${JSON.stringify(evName)}), ${line})); true`);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
-    'jump precondition: the raster markdown doc is showing its preview');
-  // preview → source: switches the pane to the source view (deferred scroll consumed on create-source-view mount)
-  await dispatchJump('source', 'goto-line', 12);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor')) && !document.querySelector('.vv-content .markdown-body')`),
-    '"Go to source" switches the pane to the source view', 8000);
-  console.log('[ok] Go to source: preview → source view (deferred line scroll)');
-  // source → preview: switches back and lands near the TOP for line 1
-  await dispatchJump('preview', 'goto-line', 1);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
-    '"Go to preview" switches the pane back to the preview', 8000);
-  await delay(250);
-  const jumpTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
-  // "near the top" — the first heading region (allowing for .vv-content padding + the h1 margin); the deep-jump
-  // check below (deepTop > jumpTop) is what proves the target line actually steers the scroll position.
-  assert.ok(jumpTop < 200, `jumping to line 1 lands near the top of the preview (scrollTop=${jumpTop})`);
-  // preview → a deep line: confine-scrolls the preview down to the nearest element (no toggle, already preview)
-  await dispatchJump('preview', 'goto-line', 60);
-  await delay(300);
-  const deepTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
-  assert.ok(deepTop > jumpTop, `jumping to a deep line scrolls the preview down (scrollTop ${jumpTop} → ${deepTop})`);
-  console.log('[ok] Go to preview: pane follows the target source line (top vs deep)');
-  // keyboard / command-palette commands self-gate and jump in the meaningful direction (no click target)
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-source"))); true`);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor'))`),
-    'keyboard "Go to source" command switches to source', 8000);
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-preview"))); true`);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
-    'keyboard "Go to preview" command switches to preview', 8000);
-  console.log('[ok] keyboard Go to source / Go to preview commands self-gate and jump');
+  // dispatch these events with a source LINE, and no menu/keyboard affordance carries one, so the only way to
+  // drive them is the re-frame global. Dev-only for the same reason as the PDF-reflow block above: the release
+  // `:simple` build encapsulates `re_frame`, so an internal dispatch throws ReferenceError there. Release still
+  // covers the pure jump math (line → nearest anchored element, and back) via the DOM-free
+  // vinary.renderer.source-nav-test unit tests, which run in every build.
+  if (!releaseBuild) {
+    const dispatchJump = (nsName, evName, line) =>
+      evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword(${JSON.stringify(nsName)}, ${JSON.stringify(evName)}), ${line})); true`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+      'jump precondition: the raster markdown doc is showing its preview');
+    // preview → source: switches the pane to the source view (deferred scroll consumed on create-source-view mount)
+    await dispatchJump('source', 'goto-line', 12);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor')) && !document.querySelector('.vv-content .markdown-body')`),
+      '"Go to source" switches the pane to the source view', 8000);
+    console.log('[ok] Go to source: preview → source view (deferred line scroll)');
+    // source → preview: switches back and lands near the TOP for line 1
+    await dispatchJump('preview', 'goto-line', 1);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+      '"Go to preview" switches the pane back to the preview', 8000);
+    await delay(250);
+    const jumpTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+    // "near the top" — the first heading region (allowing for .vv-content padding + the h1 margin); the deep-jump
+    // check below (deepTop > jumpTop) is what proves the target line actually steers the scroll position.
+    assert.ok(jumpTop < 200, `jumping to line 1 lands near the top of the preview (scrollTop=${jumpTop})`);
+    // preview → a deep line: confine-scrolls the preview down to the nearest element (no toggle, already preview)
+    await dispatchJump('preview', 'goto-line', 60);
+    await delay(300);
+    const deepTop = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+    assert.ok(deepTop > jumpTop, `jumping to a deep line scrolls the preview down (scrollTop ${jumpTop} → ${deepTop})`);
+    console.log('[ok] Go to preview: pane follows the target source line (top vs deep)');
+    // keyboard / command-palette commands self-gate and jump in the meaningful direction (no click target)
+    await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-source"))); true`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor'))`),
+      'keyboard "Go to source" command switches to source', 8000);
+    await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("jump","goto-preview"))); true`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
+      'keyboard "Go to preview" command switches to preview', 8000);
+    console.log('[ok] keyboard Go to source / Go to preview commands self-gate and jump');
+  }
 
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
@@ -2331,10 +2513,15 @@ async function main() {
   ].join('\n');
   const orgPath = path.join(orgDir, 'demo.org');
   fs.writeFileSync(orgPath, orgText);
-  state.contentByPath.set(orgPath, { path: orgPath, kind: 'org', text: orgText, stamp: Date.now(), sourceable: true });
+  // Drive Org through the REAL content_service classifier, not a hand-written {kind:'org'} stub. Every other
+  // fixture here stubs the payload, which is exactly why the classifier divergence (.org ∈ textExts, no org arm
+  // in classifyName) survived CI while breaking vv-cli/vv-tui and archive-nested .org files.
+  state.contentByPath.set(orgPath, await contentService.openUri(orgPath));
   win.webContents.send('vv:open-files', { paths: [orgPath], 'focus-first': true });
-  await waitFor(() => evalIn(win, `document.querySelector('.vv-content .markdown-body h1')?.textContent.includes('First Heading')`),
+  await waitFor(() => evalIn(win, `[...document.querySelectorAll('.vv-content .markdown-body h1')].some(h => h.textContent.includes('First Heading'))`),
     'org preview renders headings', 10000);
+  assert.ok(await evalIn(win, `document.querySelector('.vv-content .markdown-body h1')?.textContent.includes('Org Demo')`),
+    'org #+TITLE renders as document front matter ahead of the body');
   const orgPreview = await evalIn(win, `(() => {
     const body = document.querySelector('.vv-content .markdown-body');
     return {
@@ -2353,15 +2540,115 @@ async function main() {
   assert.ok(orgPreview.table, 'org table renders');
   assert.ok(orgPreview.bold, 'org *bold* renders as <strong>');
   console.log('[ok] org (.org) preview renders GitHub-style with nested-language code blocks');
-  // View Source on org → a CodeMirror source view highlighted by the bundled tree-sitter-org grammar
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("tab","toggle-source"))); true`);
+  // View Source on org → a CodeMirror source view highlighted by the bundled tree-sitter-org grammar.
+  // Driven through the REAL View ▸ View Source menu item rather than the re-frame global, so this runs in the
+  // release build too (:simple encapsulates `re_frame`, so an internal dispatch throws ReferenceError there).
+  await openMenuItem('v', 'View Source');
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-source .cm-editor'))`),
     'org View Source mounts the CodeMirror source view', 8000);
   await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-content .vv-source .cm-keyword, .vv-content .vv-source .cm-md-heading, .vv-content .vv-source .cm-comment').length > 0`),
     'org source view is highlighted by the tree-sitter-org grammar', 12000);
   console.log('[ok] org View Source is highlighted by the bundled tree-sitter-org grammar');
-  await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("tab","toggle-source"))); true`);
+  await openMenuItem('v', 'View Source');
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body h1'))`), 'org toggles back to preview', 8000);
+
+  // ── Regression: an Org document whose whole body is a LaTeX export block must not render a BLANK pane ──────
+  // uniorg drops every #+KEYWORD and drops any #+BEGIN_EXPORT whose backend is not `html`, so an invoice-shaped
+  // document lowered to "" — and "" is TRUTHY in ClojureScript, so the view mounted an empty .markdown-body and
+  // showed a silent blank pane with no error. The LaTeX here is document markup (\begin{center}); ADR-0025 now
+  // RENDERS it via unified-latex (center → a block <div>), not a highlighted `language-latex` code block.
+  const invoicePath = path.join(orgDir, 'invoice.org');
+  fs.writeFileSync(invoicePath, [
+    '#+TITLE: Invoice #42',
+    '#+AUTHOR: Ada Lovelace',
+    '#+DATE: 2026-06-30',
+    '#+LATEX_HEADER: \\usepackage{booktabs}',
+    '',
+    '#+BEGIN_EXPORT latex',
+    '\\begin{center}',
+    '  Billing Period: June 2026',
+    '\\end{center}',
+    '#+END_EXPORT',
+    ''
+  ].join('\n'));
+  state.contentByPath.set(invoicePath, await contentService.openUri(invoicePath));
+  win.webContents.send('vv:open-files', { paths: [invoicePath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-content .markdown-body h1')?.textContent.includes('Invoice #42')`),
+    'latex-only org renders its #+TITLE (was a silent blank pane)', 10000);
+  const invoice = await evalIn(win, `(() => {
+    const body = document.querySelector('.vv-content .markdown-body');
+    return {
+      blank: !body || body.innerHTML.trim() === '',
+      author: body.textContent.includes('Ada Lovelace'),
+      latexBlock: Boolean(body.querySelector('pre code[class*="language-latex"]')),
+      bodyKept: body.textContent.includes('Billing Period'),
+      leakedHeader: body.textContent.includes('usepackage'),
+      marker: Boolean(body.querySelector('.vv-tex-attempt')),
+      leakedHtmlTag: /html-tag|html-attr/.test(body.textContent),
+      emptyNotice: Boolean(document.querySelector('.vv-content .vv-empty'))
+    };
+  })()`);
+  assert.ok(!invoice.blank, 'latex-only org preview is NOT blank');
+  assert.ok(!invoice.emptyNotice, 'latex-only org shows real content, not the empty-document notice');
+  assert.ok(invoice.author, 'org #+AUTHOR renders as front matter');
+  // ADR-0025: the non-math #+BEGIN_EXPORT latex block is RENDERED by unified-latex, not shown as source
+  assert.ok(!invoice.latexBlock, 'a non-math #+BEGIN_EXPORT latex is rendered, not a language-latex code block');
+  assert.ok(!invoice.marker, 'no vv-tex-attempt marker is left in the DOM (the block is rendered, not attempted)');
+  assert.ok(invoice.bodyKept, 'the export block body is preserved and rendered, never silently swallowed');
+  assert.ok(!invoice.leakedHeader, '#+LATEX_HEADER keywords stay dropped (harvested for macros, not rendered)');
+  assert.ok(!invoice.leakedHtmlTag, 'no unified-latex \\html-tag: internal syntax leaks into the rendered output');
+  console.log('[ok] org latex-export-only document RENDERS the invoice body (title + author + rendered layout)');
+
+  // ── A document that genuinely renders NOTHING shows an explicit notice, never a silent blank pane ──────────
+  // Positive counterpart to the invoice assertion above: :doc/html is set to "" (a SUCCESSFUL render of nothing),
+  // and because "" is truthy in ClojureScript the view must test ir.backend.html/blank? rather than truthiness.
+  const orgEmptyPath = path.join(orgDir, 'empty.org');
+  fs.writeFileSync(orgEmptyPath, '#+OPTIONS: toc:nil num:nil\n# just a comment\n');
+  state.contentByPath.set(orgEmptyPath, await contentService.openUri(orgEmptyPath));
+  win.webContents.send('vv:open-files', { paths: [orgEmptyPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-empty'))`),
+    'a document that renders nothing shows the empty-preview notice', 10000);
+  const emptyDoc = await evalIn(win, `(() => ({
+    notice: document.querySelector('.vv-content .vv-empty').textContent,
+    noBody: !document.querySelector('.vv-content .markdown-body')
+  }))()`);
+  assert.ok(/Nothing to preview/i.test(emptyDoc.notice), `the notice explains the empty render (got: ${emptyDoc.notice})`);
+  assert.ok(/View Source/i.test(emptyDoc.notice), 'the notice points at View Source');
+  assert.ok(!/Rendering/i.test(emptyDoc.notice), 'it is the empty notice, not the still-rendering placeholder');
+  assert.ok(emptyDoc.noBody, 'no empty .markdown-body is mounted (the silent-blank-pane failure mode)');
+  console.log('[ok] a document that renders nothing shows an explicit notice, not a blank pane');
+
+  // ── An Org #+BEGIN_EXPORT latex block that IS math typesets via MathJax ─────────────────────────────────────
+  const orgMathPath = path.join(orgDir, 'math.org');
+  fs.writeFileSync(orgMathPath, [
+    '* Equations',
+    'Inline $E = mc^2$ math.',
+    '',
+    '#+BEGIN_EXPORT latex',
+    '\\begin{align} a &= b \\end{align}',
+    '#+END_EXPORT',
+    ''
+  ].join('\n'));
+  state.contentByPath.set(orgMathPath, await contentService.openUri(orgMathPath));
+  win.webContents.send('vv:open-files', { paths: [orgMathPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-math-display svg'))`),
+    'org latex export block that is real math typesets to MathJax SVG', 12000);
+  assert.ok(await evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-math-inline svg'))`),
+    'org inline $…$ math renders as MathJax SVG (uniorg emits span.math, normalized to code.math-inline)');
+  assert.ok(await evalIn(win, `!document.querySelector('.vv-content .markdown-body pre code[class*="language-latex"]')`),
+    'a math export block typesets instead of falling back to a code block');
+  console.log('[ok] org math renders via MathJax (inline + a math #+BEGIN_EXPORT latex block)');
+
+  // ── Org task lists reuse GFM's shape (and therefore GFM's sanitize allowlist + CSS) ────────────────────────
+  const orgTaskPath = path.join(orgDir, 'tasks.org');
+  fs.writeFileSync(orgTaskPath, '* Tasks\n- [ ] todo\n- [X] done\n');
+  state.contentByPath.set(orgTaskPath, await contentService.openUri(orgTaskPath));
+  win.webContents.send('vv:open-files', { paths: [orgTaskPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-content .markdown-body li.task-list-item input[type=checkbox]').length === 2`),
+    'org checkboxes render as GFM task-list items', 10000);
+  assert.ok(await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body input[type=checkbox]:checked').length === 1`),
+    'org [X] renders a checked box');
+  console.log('[ok] org task lists render with GFM checkbox parity');
 
   // ========================================================================================================
   // ── Phase 2 — MARKDOWN streaming parity: streamed HTML == batch HTML (the load-bearing gate) ──
@@ -2498,6 +2785,110 @@ async function main() {
   assert.ok(afterScroll > beforeScroll * 0.7, `scroll re-anchored after live-refresh (was ${beforeScroll}, now ${afterScroll}; geo=${JSON.stringify(geo)})`);
   console.log(`[ok] streamed doc re-anchors scroll across a live-refresh (${beforeScroll} → ${afterScroll})`);
 
+  // ── ORG streaming parity: the progressive engine is format-agnostic (it commits IR children, not markdown
+  //    nodes), so a >256 KiB .org must stream byte-identically to its batch render, exactly as markdown does.
+  //    Runs AFTER the markdown windowing / re-anchor assertions, which read the ACTIVE .vv-content. ─────────
+  const orgBig = createLargeOrgFixtures();
+  assert.ok(orgBig.size > 256 * 1024, `org fixture (${orgBig.size} B) must exceed the 256 KiB stream threshold`);
+  const orgStamp = Date.now();
+
+  win.webContents.send('vv:settings', '{:stream? false}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'streaming disabled for the org batch reference');
+  state.contentByPath.set(orgBig.batchPath, { ...(await contentService.openUri(orgBig.batchPath)), stamp: orgStamp });
+  win.webContents.send('vv:open-files', { paths: [orgBig.batchPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+    return b && b.querySelectorAll('h2').length >= ${orgBig.sections} && !document.querySelector('.vv-content .vv-stream-progress'); })()`),
+    'batch org renders whole (no stream progress strip)', 30000);
+  await delay(400);
+  const orgBatchHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  const orgBatchH2 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length`);
+  // the parity comparison is only meaningful if the batch render actually contains the constructs whose
+  // per-block handling could diverge — MathJax SVG, the RENDERED embedded-latex (ADR-0025), and task checkboxes
+  const orgBatchHas = await evalIn(win, `(() => {
+    const b = document.querySelector('.vv-content .markdown-body');
+    return { math: b.querySelectorAll('.vv-math-inline svg').length,
+             latexBlocks: b.querySelectorAll('pre code[class*="language-latex"]').length,
+             rendered: (b.textContent.match(/Not math/g) || []).length,
+             tasks: b.querySelectorAll('li.task-list-item input[type=checkbox]').length };
+  })()`);
+  assert.ok(orgBatchHas.math >= orgBatchH2, `batch org rendered inline MathJax in every section (${orgBatchHas.math})`);
+  assert.strictEqual(orgBatchHas.latexBlocks, 0, 'the non-math export blocks are RENDERED, never a language-latex code block');
+  assert.ok(orgBatchHas.rendered >= orgBatchH2, `the embedded latex export block is rendered in every section (${orgBatchHas.rendered})`);
+  assert.ok(orgBatchHas.tasks >= 2 * orgBatchH2, `batch org rendered task-list checkboxes (${orgBatchHas.tasks})`);
+  console.log(`[ok] batch org reference rendered (${orgBatchH2} sections, ${(orgBig.size / 1024).toFixed(0)} KiB; ${orgBatchHas.math} math, ${orgBatchHas.rendered} rendered latex blocks)`);
+
+  win.webContents.send('vv:settings', '{:stream? true}');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming re-enabled for the streamed org render');
+  state.contentByPath.set(orgBig.streamPath, { ...(await contentService.openUri(orgBig.streamPath)), stamp: orgStamp });
+  win.webContents.send('vv:open-files', { paths: [orgBig.streamPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => {
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
+    return streaming && document.querySelectorAll('.vv-content .markdown-body h2').length > 0;
+  })()`), 'org streams — progress strip + first blocks paint', 25000);
+  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h2').length >= ${orgBatchH2}
+    && (() => { const p = document.querySelector('.vv-content .vv-stream-progress'); return p && p.classList.contains('vv-stream-progress-done'); })()`,
+    'streamed org converges to the whole document', 60000);
+  await delay(600);
+  const orgStreamHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  if (orgStreamHtml !== orgBatchHtml) {
+    const at = firstDiff(orgStreamHtml, orgBatchHtml);
+    console.error(`org parity MISMATCH at char ${at} / stream ${orgStreamHtml.length} vs batch ${orgBatchHtml.length}`);
+    console.error('stream …', JSON.stringify(orgStreamHtml.slice(Math.max(0, at - 80), at + 120)));
+    console.error('batch  …', JSON.stringify(orgBatchHtml.slice(Math.max(0, at - 80), at + 120)));
+  }
+  assert.strictEqual(orgStreamHtml, orgBatchHtml, 'streamed org innerHTML must be byte-identical to the batch render');
+  console.log('[ok] streamed org is BYTE-IDENTICAL to the batch render (same progressive engine as markdown)');
+
+  // ── LaTeX streaming parity (ADR-0025): a >256 KiB .tex must stream byte-identically to its batch render. Same
+  //    whole-parse + progressive-paint engine; only the block provider (latex-stream-blocks) differs. \section
+  //    lowers to <h3> (unified-latex), not <h2>. ─────────────────────────────────────────────────────────────
+  const texBig = createLargeLatexFixtures();
+  assert.ok(texBig.size > 256 * 1024, `latex fixture (${texBig.size} B) must exceed the 256 KiB stream threshold`);
+  const texStamp = Date.now();
+
+  win.webContents.send('vv:settings', '{:stream? false}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'streaming disabled for the latex batch reference');
+  state.contentByPath.set(texBig.batchPath, { ...(await contentService.openUri(texBig.batchPath)), stamp: texStamp });
+  win.webContents.send('vv:open-files', { paths: [texBig.batchPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+    return b && b.querySelectorAll('h3').length >= ${texBig.sections} && !document.querySelector('.vv-content .vv-stream-progress'); })()`),
+    'batch latex renders whole (no stream progress strip)', 40000);
+  await delay(400);
+  const texBatchHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  const texBatchH3 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h3').length`);
+  const texBatchHas = await evalIn(win, `(() => {
+    const b = document.querySelector('.vv-content .markdown-body');
+    return { math: b.querySelectorAll('.vv-math-inline svg').length,
+             tables: b.querySelectorAll('table').length,
+             bold: b.querySelectorAll('b, strong').length };
+  })()`);
+  assert.ok(texBatchHas.math >= texBatchH3, `batch latex typeset inline MathJax in every section (${texBatchHas.math})`);
+  assert.ok(texBatchHas.tables >= texBatchH3, `batch latex rendered a tabular in every section (${texBatchHas.tables})`);
+  assert.ok(texBatchHas.bold >= texBatchH3, `batch latex rendered \\textbf in every section (${texBatchHas.bold})`);
+  console.log(`[ok] batch latex reference rendered (${texBatchH3} sections, ${(texBig.size / 1024).toFixed(0)} KiB; ${texBatchHas.math} math, ${texBatchHas.tables} tables)`);
+
+  win.webContents.send('vv:settings', '{:stream? true}');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming re-enabled for the streamed latex render');
+  state.contentByPath.set(texBig.streamPath, { ...(await contentService.openUri(texBig.streamPath)), stamp: texStamp });
+  win.webContents.send('vv:open-files', { paths: [texBig.streamPath], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => {
+    const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
+    return streaming && document.querySelectorAll('.vv-content .markdown-body h3').length > 0;
+  })()`), 'latex streams — progress strip + first blocks paint', 30000);
+  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h3').length >= ${texBatchH3}
+    && (() => { const p = document.querySelector('.vv-content .vv-stream-progress'); return p && p.classList.contains('vv-stream-progress-done'); })()`,
+    'streamed latex converges to the whole document', 60000);
+  await delay(600);
+  const texStreamHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
+  if (texStreamHtml !== texBatchHtml) {
+    const at = firstDiff(texStreamHtml, texBatchHtml);
+    console.error(`latex parity MISMATCH at char ${at} / stream ${texStreamHtml.length} vs batch ${texBatchHtml.length}`);
+    console.error('stream …', JSON.stringify(texStreamHtml.slice(Math.max(0, at - 80), at + 120)));
+    console.error('batch  …', JSON.stringify(texBatchHtml.slice(Math.max(0, at - 80), at + 120)));
+  }
+  assert.strictEqual(texStreamHtml, texBatchHtml, 'streamed latex innerHTML must be byte-identical to the batch render');
+  console.log('[ok] streamed latex is BYTE-IDENTICAL to the batch render (same progressive engine, latex-stream-blocks)');
+
   // ── Phase 3 — PDF reflow streaming parity (dev-only: the reflow toggle drives the re-frame global) ──
   // The opt-in "Reflow Text" view renders the extracted PDF text as prose. With streaming on it commits that
   // text progressively (ir-stream-body "pdf-reflow") and must be BYTE-IDENTICAL to the batch reflow HTML.
@@ -2538,6 +2929,12 @@ async function main() {
     assert.strictEqual(streamReflow, batchReflow, 'streamed PDF reflow must be byte-identical to the batch reflow');
     console.log('[ok] streamed PDF reflow is byte-identical to the batch reflow (progressive extracted-text commit)');
   }
+
+  // The CSP is a security control, not advice: a blocked resource is a bug, and it only ever surfaced as one
+  // more red line among the re-frame warnings. Injecting MathJax's stylesheet tripped `font-src` this way.
+  assert.deepStrictEqual(state.cspViolations, [],
+    `the renderer must trigger no Content-Security-Policy violations:\n  ${state.cspViolations.join('\n  ')}`);
+  console.log('[ok] no Content-Security-Policy violations during the run');
 
   win.close();
 }

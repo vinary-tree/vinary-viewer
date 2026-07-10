@@ -1,38 +1,126 @@
 '' vinary-viewer — shared PlantUML theme (per-concept color palette).
-'' !include ../diagrams/_vv-theme.iuml at the top of every diagram so a color always means one concept.
+'' !include _vv-theme.iuml at the top of every diagram so a color always means one concept.
 '' Palette is drawn from the app's own Spacemacs --vv-* tokens, so diagrams match the running UI.
+''
+'' ---- the tier contract: HUE carries identity, LIGHTNESS carries hierarchy ----
+'' Each concept owns one hue, expressed at four values. Which one you use is decided by ROLE,
+'' never by taste. The Spacemacs accents are *foreground* colors: legible as ink or as a small
+'' swatch, overwhelming as a large area fill. So the fills are derived from them, not equal to them.
+''
+''   <CONCEPT>_FILL    palest   package / container background   (HLS lightness 0.920, saturation x0.65)
+''   <CONCEPT>_TINT    mid      component / participant fill     (HLS lightness 0.845, saturation x0.80)
+''   <CONCEPT>_BORDER  dark     arrow strokes for that concept   (the accent, darkened)
+''   <CONCEPT>_COLOR   accent   legend swatches; the identity anchor. NEVER an area fill.
+''
+'' _FILL and _TINT are derived from _COLOR by moving lightness/saturation in HLS space with the hue
+'' held fixed, so the palette is reconstructible from the nine accents alone. Every _FILL and _TINT
+'' clears WCAG 2.x AA against the ink #1A1A1A by at least 10.8:1.
+''
+'' Element outlines are a single neutral grey (see componentBorderColor below) rather than a
+'' per-concept dark: the fill hue already names the concept, and a uniform outline keeps nested
+'' boxes reading as figure-on-ground. PlantUML 1.2026.5 rejects inline `;line:<color>` on
+'' components and packages, so per-element outlines would require a <<stereotype>> per concept —
+'' which would force `hide stereotype` and suppress the semantically meaningful <<planned>>,
+'' <<schema-less>>, <<bridge>> and <<actor>> labels this suite relies on.
+''
+'' ---- PlantUML 1.2026.5 syntax notes (verified; do not "simplify" these) ----
+''   * `[component] #TINT` and `package "P" #FILL {` are the ONLY inline-fill forms that parse.
+''   * `[component] #TINT;line:#BORDER` is a hard parse error; `rectangle ... ;line:` silently
+''     emits a yellow deprecation banner INTO the rendered SVG.
+''   * A `skinparam component { ... }` block must span multiple lines; the one-line brace form errors.
+''   * `skinparam package { ... }` is not a valid block — use the flat `packageXxx` forms.
+''   * Activity step fills are `:text; <<#COLOR>>`. The old `#COLOR:text;` form emits a banner and
+''     drops the fill.
+''   * Legend swatch padding must use the numeric entity `&#160;`; `&nbsp;` renders literally.
 
-'' ---- per-concept colors (a color ALWAYS means the same concept across all diagrams) ----
+'' ---- per-concept accents (a color ALWAYS means the same concept across all diagrams) ----
+'' MAIN — the Electron main process / Node IO (slate)
 !define MAIN_COLOR      #3A5BA0
 !define MAIN_BORDER     #27406F
+!define MAIN_FILL       #E4E8F1
+!define MAIN_TINT       #C9D2E6
+
+'' RENDERER — Chromium / reagent view (teal)
 !define RENDERER_COLOR  #2D9574
 !define RENDERER_BORDER #1F6B53
+!define RENDERER_FILL   #E3F2ED
+!define RENDERER_TINT   #C7E8DE
+
+'' IPC — preload, contextBridge, Mediator seam (amber). Every IPC arrow is amber.
 !define IPC_COLOR       #B1951D
 !define IPC_BORDER      #7F6B14
-!define DATASCRIPT_COLOR #A45BAD
+!define IPC_FILL        #F4F1E1
+!define IPC_TINT        #EEE6C1
+
+'' DATASCRIPT — the bounded content cache / single source of truth (purple)
+!define DATASCRIPT_COLOR  #A45BAD
 !define DATASCRIPT_BORDER #743F7B
+!define DATASCRIPT_FILL   #EEE6EF
+!define DATASCRIPT_TINT   #E0CDE2
+
+'' APPDB — ephemeral UI and navigation state (blue-violet)
 !define APPDB_COLOR     #7590DB
 !define APPDB_BORDER    #4C66AE
+!define APPDB_FILL      #E3E7F2
+!define APPDB_TINT      #C5CFEA
+
+'' REFRAME — events, effects, subscriptions (blue)
 !define REFRAME_COLOR   #4F97D7
 !define REFRAME_BORDER  #336699
+!define REFRAME_FILL    #E2EBF3
+!define REFRAME_TINT    #C4D9EB
+
+'' FS — filesystem / external editor / chokidar (tan)
 !define FS_COLOR        #9F8766
 !define FS_BORDER       #6F5E47
+!define FS_FILL         #EEEBE8
+!define FS_TINT         #DFD9D0
+
+'' MARKDOWN — the unified / remark / rehype pipeline (green)
 !define MARKDOWN_COLOR  #67B11D
 !define MARKDOWN_BORDER #487E12
+!define MARKDOWN_FILL   #EBF4E1
+!define MARKDOWN_TINT   #D7EEC1
+
+'' ERROR — errors and retractions (red)
 !define ERROR_COLOR     #E0211D
 !define ERROR_BORDER    #9C1614
-'' keymap-set registry / key-binding editor / link hints (magenta — also the running app's hint-label colour)
+!define ERROR_FILL      #F5E1E0
+!define ERROR_TINT      #F0C0BF
+
+'' IR — the common weighted-transducer document IR core (orange)
+!define IR_COLOR        #E67E22
+!define IR_BORDER       #A84E00
+!define IR_FILL         #F5EAE0
+!define IR_TINT         #F1D6BE
+
+'' KEYMAP — keymap-set registry / key-binding editor / link hints
+'' (magenta — also the running app's hint-label colour)
 !define KEYMAP_COLOR    #BC6EC5
 !define KEYMAP_BORDER   #8E4F96
+!define KEYMAP_FILL     #EFE5F0
+!define KEYMAP_TINT     #E2CAE5
+
+'' PLANNED — Forthcoming components (dashed grey). Not a hue; a state.
 !define PLANNED_COLOR   #DDDDDD
 !define PLANNED_BORDER  #999999
 
+'' ---- global surface ----
 skinparam backgroundColor #FBF8EF
 skinparam defaultFontName "Inter, Helvetica, sans-serif"
 skinparam shadowing false
 skinparam roundCorner 8
 skinparam ArrowColor #555555
 skinparam ArrowThickness 1.2
+
+'' One neutral outline for every box, on every fill tier. Contrast against the palest _FILL is
+'' 7.06:1 and against the darkest _TINT is 5.49:1, so no box loses its edge on any background.
+skinparam componentBorderColor #4A4A4A
+skinparam packageBorderColor #8A8A8A
+skinparam packageFontColor #1A1A1A
+skinparam packageFontStyle bold
+skinparam participantBorderColor #4A4A4A
+skinparam rectangleBorderColor #4A4A4A
 
 skinparam component {
   BorderThickness 1.4

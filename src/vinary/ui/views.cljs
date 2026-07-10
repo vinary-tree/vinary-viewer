@@ -10,6 +10,7 @@
             [vinary.app.link :as link]
             [vinary.renderer.math :as math]
             [vinary.renderer.markdown :as md]
+            [vinary.ir.backend.html :as ir-html]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
@@ -382,6 +383,8 @@
                                     ;; log/text leave it nil and take the bounded transport engine instead.
                                     blocks-fn (case kind
                                                 "markdown"   (fn [] (md/stream-blocks text (md/dir-of path) stamp))
+                                                "org"        (fn [] (md/org-stream-blocks text (md/dir-of path) stamp))
+                                                "latex"      (fn [] (md/latex-stream-blocks text (md/dir-of path) stamp))
                                                 "pdf-reflow" (fn [] (pdf/reflow-blocks! path))
                                                 nil)]
                                 (reset! path* path)
@@ -919,6 +922,8 @@
         tabs    @(rf/subscribe [:ui/tabs])
         uri     @(rf/subscribe [:ui/active-uri])
         vs?     @(rf/subscribe [:ui/active-view-source?])
+        rep     @(rf/subscribe [:ui/active-representation])   ; :document | :pdf (only :pdf when a sibling exists)
+        sib-loaded @(rf/subscribe [:pdf/sibling-loaded])      ; sibling-PDF paths whose bytes are cached
         reflow? @(rf/subscribe [:pdf/reflow?])
         stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))]   ; streaming on → reflow streams too
     [:div.vv-content
@@ -938,6 +943,14 @@
        ;; remounts the host and reloads the page), not shown as escaped source
        (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [web-host (media/path->file-url (:doc/path doc))]
+       ;; Document↔PDF representation switch: a doc collocated with an exported PDF, currently showing :pdf →
+       ;; render that sibling PDF in place (bytes are loaded byte-only into pdf-cache; a brief note until ready).
+       ;; Placed above :doc/error / :doc/streaming? so the faithful PDF shows regardless of the doc's own state.
+       (and (= :pdf rep) (:doc/pdf-sibling doc))
+       (if (contains? sib-loaded (:doc/pdf-sibling doc))
+         ^{:key (str "sibling-pdf:" (:doc/pdf-sibling doc))}
+         [pdf-view (:doc/pdf-sibling doc) (:doc/stamp doc)]
+         [:div.vv-empty "Loading PDF…"])
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        ;; a large streamable doc renders as a bounded-memory INCREMENTAL stream (ir-stream-body drives it from
        ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
@@ -963,7 +976,7 @@
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
        (and vs?
             (:doc/text doc)
-            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org"} (:doc/kind doc))))
+            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org" "latex"} (:doc/kind doc))))
        ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
        [source-view (:doc/text doc) (:doc/path doc)]
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
@@ -977,6 +990,11 @@
                                    [log-view doc]
        (#{"directory" "archive"} (:doc/kind doc)) ^{:key (str "dir:" (:doc/path doc))}
                                                    [dir-view (:doc/path doc) (:doc/entries doc)]
+       ;; The render FINISHED but produced nothing (`""` — truthy in CLJS, so this must precede the
+       ;; `(:doc/html doc)` catch-all or an empty .markdown-body mounts and the pane is silently blank).
+       ;; While the render is still in flight :doc/html is nil, so the "Rendering…" branch below still wins.
+       (and (some? (:doc/html doc)) (ir-html/blank? (:doc/html doc)))
+       [:div.vv-empty "Nothing to preview — this document has no renderable content. Use View Source to see the file."]
        (:doc/html doc)             [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
        :else                       [:div.vv-empty "Rendering…"])]))
 
@@ -1000,6 +1018,34 @@
                       [crumb]
                       [^{:key (str "sep" path)} [:span.vv-crumb-sep "›"] crumb])))
                 (uri/segments active-uri)))))
+
+(defn- seg-button [active? label title on-click]
+  [:button.vv-seg-btn {:class (when active? "vv-seg-active") :title title :on-click on-click} label])
+
+(defn view-switch-toolbar
+  "Contextual segmented controls in the toolbar: [Doc | PDF] when the active doc has a collocated exported PDF,
+   and [Preview | Source] when a previewable document (not the PDF) is showing. Both also live in the tab
+   right-click menu and the command palette; the toolbar makes them discoverable. Renders nothing otherwise."
+  []
+  (let [kind    @(rf/subscribe [:doc/kind])
+        sibling @(rf/subscribe [:doc/pdf-sibling])
+        rep     @(rf/subscribe [:ui/active-representation])
+        vs?     @(rf/subscribe [:ui/active-view-source?])
+        id      @(rf/subscribe [:ui/active-tab-id])
+        previewable? (contains? #{"markdown" "org" "latex" "mermaid"} kind)]
+    [:<>
+     (when sibling
+       [:div.vv-seg {:role "group" :aria-label "Representation"}
+        [seg-button (= rep :document) "Doc" "Show the rendered document"
+         #(rf/dispatch [:tab/set-representation id :document])]
+        [seg-button (= rep :pdf) "PDF" "Show the collocated exported PDF"
+         #(rf/dispatch [:tab/set-representation id :pdf])]])
+     (when (and previewable? (not= rep :pdf))
+       [:div.vv-seg {:role "group" :aria-label "View"}
+        [seg-button (not vs?) "Preview" "Show the rendered preview"
+         #(when vs? (rf/dispatch [:tab/toggle-source id]))]
+        [seg-button vs? "Source" "Show the source text"
+         #(when-not vs? (rf/dispatch [:tab/toggle-source id]))]])]))
 
 (defn uri-bar
   "Browser-style nav row: back / forward / reload + the address bar. The input shows the active tab's
@@ -1144,6 +1190,7 @@
                  matches))])
             (when (:error? uc)
               [:div.vv-uri-errmsg "No matching file or directory"])])
+         [view-switch-toolbar]
          [passwords-ui/toolbar-button]
          [ext-toolbar/ext-toolbar]]))))
 

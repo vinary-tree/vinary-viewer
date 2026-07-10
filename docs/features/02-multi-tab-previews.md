@@ -105,3 +105,29 @@ unretained docs are retracted from DataScript after the retained set changes.
 
 See [ADR-0010](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)
 for the current retention model.
+
+## 6. One model, two representations
+
+The horizontal tab strip and the vertical **Tabs** sidebar panel are two views over the
+*same* ordered `[:ui :tabs]` vector, rendered by the same `tab-item` component. Reordering
+in either surface splices that one vector, which is why the two can never drift apart.
+
+![Tabs — one ordered model rendered by a horizontal strip and a vertical panel](../diagrams/component-tab-dual-representation.svg)
+
+*Diagram source: [`../diagrams/component-tab-dual-representation.puml`](../diagrams/component-tab-dual-representation.puml).*
+
+## 7. Closing a tab
+
+Removing a tab from the ordered vector triggers retention reconciliation, which is what closes the now-unretained watchers.
+
+![Close a tab — app-db tab removal plus retained watcher and cache reconciliation](../diagrams/seq-tab-close.svg)
+
+*Diagram source: [`../diagrams/seq-tab-close.puml`](../diagrams/seq-tab-close.puml).*
+
+## 8. Document lifecycle
+
+Each open document is one `:doc` entity keyed by its path, moving through Opening, Loaded (by kind), and Error.
+
+![Tab and document lifecycle — one :doc entity in DataScript, keyed by :doc/path](../diagrams/state-tab-lifecycle.svg)
+
+*Diagram source: [`../diagrams/state-tab-lifecycle.puml`](../diagrams/state-tab-lifecycle.puml).*

@@ -27,7 +27,16 @@ const PAGE_CACHE_LIMIT = 96;
 const pageCache = new Map();
 const pageOrder = [];
 
-const textExts = new Set(['.txt', '.text', '.rst', '.org', '.adoc', '.asciidoc']);
+const textExts = new Set(['.txt', '.text', '.rst', '.adoc', '.asciidoc']);
+// Emacs Org-mode. MUST classify as its own kind, not 'text': the renderer dispatches :org/render on it, and the
+// CLI/TUI would otherwise upgrade a "text" file that has a bundled tree-sitter grammar to "source" and print
+// highlighted Org markup instead of rendering it. Mirrors vinary.main.file-kind/kind-of, its ClojureScript twin.
+const orgExts = new Set(['.org']);
+// LaTeX. MUST classify as its own kind, not 'text': the renderer dispatches :latex/render on it, and (as with
+// org) the CLI/TUI would otherwise upgrade a "text" file that has a bundled tree-sitter-latex grammar to "source"
+// and print highlighted LaTeX markup instead of rendering it. Mirrors vinary.main.file-kind/kind-of, its twin.
+// NOT .sty/.cls/.bib — those are LaTeX support files, better shown as highlighted source than rendered.
+const latexExts = new Set(['.tex', '.latex', '.ltx']);
 const officeExts = new Set(['.docx', '.odt', '.odp', '.odf']);
 const workbookExts = new Set(['.xlsx', '.xlsm', '.ods', '.fods']);
 const delimitedExts = new Set(['.csv', '.tsv', '.tab', '.psv', '.dsv']);
@@ -78,6 +87,8 @@ function classifyName(name) {
   if (zipExts.has(ext) || tarExts.has(ext)) return 'archive';
   if (logExts.has(ext) || isLogBasename(base)) return 'log';
   if (markdownExts.has(ext)) return 'markdown';
+  if (orgExts.has(ext)) return 'org';
+  if (latexExts.has(ext)) return 'latex';
   if (htmlExts.has(ext)) return 'html';
   if (mermaidExts.has(ext)) return 'mermaid';
   if (imageExts.has(ext)) return 'image';
@@ -251,7 +262,7 @@ function bufferToPayload(uri, name, bytes, stamp, meta) {
   if (kind === 'pdf') {
     return { path: uri, kind: 'pdf', bytes, stamp, meta };
   }
-  if (kind === 'markdown' || kind === 'mermaid') {
+  if (kind === 'markdown' || kind === 'mermaid' || kind === 'org' || kind === 'latex') {
     return { path: uri, kind, text: bytes.toString('utf8'), stamp, sourceable: true, meta };
   }
   if (kind === 'office') return officeBufferPayload(uri, name, bytes, stamp, meta);
@@ -693,6 +704,12 @@ async function openLocal(filePath) {
       return { path: filePath, kind: 'log', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, stat, { pageSize: LOG_PAGE_LINES }) };
     }
     return logTextPayload(filePath, filePath, fs.readFileSync(filePath, 'utf8'), stamp, stat);
+  }
+  // Org and LaTeX must short-circuit BEFORE the content sniff below: an Org table (`| a | b |`) or a LaTeX
+  // tabular (`a & b \\`) otherwise trips sniffDelimited and the document is previewed as a delimited table
+  // rather than rendered through uniorg / unified-latex.
+  if (kind === 'org' || kind === 'latex') {
+    return { path: filePath, kind, text: fs.readFileSync(filePath, 'utf8'), stamp, sourceable: true, meta: stat };
   }
   const sample = readPrefix(filePath, 64 * 1024);
   if (sniffLog(sample)) {

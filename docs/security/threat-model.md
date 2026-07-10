@@ -249,6 +249,12 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
 - **Images.** `<img src=url>` (Markdown or raw HTML) loads local (`file://`) and `data:` images, and — by
   project decision — remote **https** images (`http:` is blocked to force TLS). The renderer CSP
   `img-src 'self' file: data: https:` enforces this, and `connect-src` blocks remote fetch/XHR exfil.
+- **Fonts.** `font-src 'self' file: data:`. `data:` admits exactly one thing: the `@font-face` inside MathJax's
+  own stylesheet, which `vinary.renderer.math/install-stylesheet!` injects at startup and whose `src` is a base64
+  `data:` URL (`MJX-ZERO`, MathJax's zero-width line-break font). Chromium fetches it eagerly, so without `data:`
+  every launch logged a blocked-font CSP violation. A font is passive data — it cannot execute, and a `data:` URL
+  cannot reach the network — so this is the narrowest directive that admits it. The electron smoke fails the run
+  on **any** Content-Security-Policy console message, so a wider violation cannot creep back in unnoticed.
 - **Plain-text kind.** Non-markdown files are wrapped as `<pre class="vv-plain">` with the text
   **HTML-escaped** via `goog.string/htmlEscape` (`vinary.app.events/plain-html`), so a `.txt`/source
   file containing `<script>` is shown as inert, escaped text — never parsed as HTML.

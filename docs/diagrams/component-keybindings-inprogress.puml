@@ -4,18 +4,18 @@
 
 title Custom keybindings — command registry, palette, resolver, editor, persistence
 
-rectangle "DOM keydown" as KD #2D9574
-rectangle "vinary.input.keys\nKeyboardEvent -> canonical chord" as KEYS #2D9574
-rectangle "vinary.input.resolver\nmodal/chord state machine" as RES #2D9574
-rectangle "vinary.input.keymap\nactive keymap atom" as KM #A45BAD
-rectangle "resources/keymaps/*.edn\nStandard / Vim / Emacs" as PRESETS #A45BAD
-rectangle "vinary.input.keymaps-registry\napp-db registry helpers" as REG #7590DB
-rectangle "vinary.app.commands\ncommand registry" as CMD #4F97D7
-rectangle "vinary.ui.palette\ncommand/file palette" as PAL #2D9574
-rectangle "vinary.ui.keybindings-editor\nvisual editor + undo/redo" as EDIT #2D9574
-rectangle "vinary.main.config\nkeybindings.edn watch/save" as CONFIG #3A5BA0
-database "~/.config/vinary-viewer/keybindings.edn" as EDN #9F8766
-rectangle "re-frame dispatch/effects" as RF #4F97D7
+rectangle "DOM keydown" as KD RENDERER_TINT
+rectangle "vinary.input.keys\nKeyboardEvent -> canonical chord" as KEYS RENDERER_TINT
+rectangle "vinary.input.resolver\nmodal/chord state machine" as RES RENDERER_TINT
+rectangle "vinary.input.keymap\nactive keymap atom" as KM DATASCRIPT_TINT
+rectangle "resources/keymaps/*.edn\nStandard / Vim / Emacs" as PRESETS DATASCRIPT_TINT
+rectangle "vinary.input.keymaps-registry\napp-db registry helpers" as REG APPDB_TINT
+rectangle "vinary.app.commands\ncommand registry" as CMD REFRAME_TINT
+rectangle "vinary.ui.palette\ncommand/file palette" as PAL RENDERER_TINT
+rectangle "vinary.ui.keybindings-editor\nvisual editor + undo/redo" as EDIT RENDERER_TINT
+rectangle "vinary.main.config\nkeybindings.edn watch/save" as CONFIG MAIN_TINT
+database "~/.config/vinary-viewer/keybindings.edn" as EDN FS_TINT
+rectangle "re-frame dispatch/effects" as RF REFRAME_TINT
 
 PRESETS --> KM : compile-time defaults
 CONFIG --> EDN : read/write/watch
@@ -37,11 +37,11 @@ end note
 
 legend right
   |= color |= concept |
-  | <#2D9574> | renderer UI/input |
-  | <#7590DB> | app-db registry state |
-  | <#A45BAD> | keymap data |
-  | <#4F97D7> | re-frame command/effect layer |
-  | <#3A5BA0> | main process config service |
-  | <#9F8766> | user config file |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer UI/input |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db registry state |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| keymap data |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame command/effect layer |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main process config service |
+  |<#9F8766>&#160;&#160;&#160;&#160;| user config file |
 endlegend
 @enduml

@@ -22,22 +22,22 @@ skinparam artifact {
 
 node "Electron runtime\n(`electron .`)" as Runtime #white {
 
-  node "MAIN process\n(Node)" as MainNode MAIN_COLOR {
-    artifact "dist/main/main.js\n(`:node-script`)" as MainArt MAIN_COLOR
-    artifact "node_modules\n(chokidar · electron)" as Nm FS_COLOR
+  node "MAIN process\n(Node)" as MainNode MAIN_FILL {
+    artifact "dist/main/main.js\n(`:node-script`)" as MainArt MAIN_TINT
+    artifact "node_modules\n(chokidar · electron)" as Nm FS_TINT
   }
 
-  artifact "resources/preload.js\n(contextBridge `window.vv`)" as PreloadArt IPC_COLOR
+  artifact "resources/preload.js\n(contextBridge `window.vv`)" as PreloadArt IPC_TINT
 
   node "RENDERER process\n(Chromium · BrowserWindow)\ncontextIsolation = true\nnodeIntegration = false" as RendNode #line.dashed;line:B1951D {
-    artifact "resources/public/index.html" as Html RENDERER_COLOR
-    artifact "resources/public/js/main.js\n(`:browser`)" as RendArt RENDERER_COLOR
-    artifact "resources/public/css/\napp.css + themes/*.css" as Css RENDERER_COLOR
-    artifact "node_modules\n(unified · remark · rehype)\n[bundled into js/main.js]" as Nm2 MARKDOWN_COLOR
+    artifact "resources/public/index.html" as Html RENDERER_TINT
+    artifact "resources/public/js/main.js\n(`:browser`)" as RendArt RENDERER_TINT
+    artifact "resources/public/css/\napp.css + themes/*.css" as Css RENDERER_TINT
+    artifact "node_modules\n(unified · remark · rehype)\n[bundled into js/main.js]" as Nm2 MARKDOWN_TINT
   }
 }
 
-database "Filesystem volume\n(user's documents · git repo)" as Vol FS_COLOR
+database "Filesystem volume\n(user's documents · git repo)" as Vol FS_TINT
 
 MainNode --> PreloadArt : `webPreferences.preload`
 PreloadArt ..> RendNode : injected before page scripts
@@ -55,11 +55,11 @@ end note
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node IO |
-  | <#2D9574> | Renderer / Chromium UI |
-  | <#B1951D> | IPC seam (preload) |
-  | <#67B11D> | markdown / unified (bundled) |
-  | <#9F8766> | filesystem volume · node_modules |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node IO |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / Chromium UI |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (preload) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| markdown / unified (bundled) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem volume · node_modules |
   Dashed border = trust boundary (sandboxed renderer)
 endlegend
 @enduml

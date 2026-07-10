@@ -36,6 +36,27 @@
     (is (= ["• one" "• two"] (lines (root (el "ul" {} (el "li" {} (txt "one")) (el "li" {} (txt "two")))))))
     (is (= ["1. a" "2. b"] (lines (root (el "ol" {} (el "li" {} (txt "a")) (el "li" {} (txt "b")))))))))
 
+;; GFM's task-list shape — <li class="task-list-item"><input type="checkbox" [checked]> — is what BOTH the
+;; Markdown and the Org front-ends emit, so the terminal must read its state from the <input>. Without this the
+;; terminal printed "• a" for a checked and an unchecked item alike, dropping the one bit a TODO list carries.
+(defn- task-item [checked? & children]
+  (apply el "li" {:className ["task-list-item"]}
+         (el "input" (cond-> {:type "checkbox" :disabled true} checked? (assoc :checked true)))
+         (txt " ") children))
+
+(deftest task-lists
+  (testing "an unordered task list swaps the bullet for a ballot box carrying the checkbox state"
+    (is (= ["☐ todo" "☑ done"]
+           (lines (root (el "ul" {:className ["contains-task-list"]}
+                            (task-item false (txt "todo"))
+                            (task-item true  (txt "done"))))))))
+  (testing "an ordered task list keeps its ordinal and gains the box"
+    (is (= ["1. ☐ a" "2. ☑ b"]
+           (lines (root (el "ol" {} (task-item false (txt "a")) (task-item true (txt "b"))))))))
+  (testing "a plain item in a task list still renders as a bullet"
+    (is (= ["☐ todo" "• plain"]
+           (lines (root (el "ul" {} (task-item false (txt "todo")) (el "li" {} (txt "plain")))))))))
+
 (deftest blockquote-gutter
   (testing "a blockquote gets a │ gutter"
     (is (= ["│ quoted"] (lines (root (el "blockquote" {} (el "p" {} (txt "quoted")))))))))

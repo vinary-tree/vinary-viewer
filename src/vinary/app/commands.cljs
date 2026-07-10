@@ -65,6 +65,10 @@
    :palette/files {:id :palette/files :title "Find file" :category "Search" :dispatch [:palette/open {:source :file}]}
    ;; ---- View ----
    :sidebar/toggle {:id :sidebar/toggle :title "Toggle sidebar" :category "View" :dispatch [:sidebar/toggle]}
+   ;; Preview↔Source view toggle (previously reachable only from the tab right-click menu) + the Document↔PDF
+   ;; representation switch for a doc collocated with an exported PDF. Both self-gate (no-op when inapplicable).
+   :view/toggle-source         {:id :view/toggle-source :title "Toggle preview / source" :category "View" :dispatch [:tab/toggle-source]}
+   :view/toggle-representation {:id :view/toggle-representation :title "Toggle document / PDF" :category "View" :dispatch [:tab/toggle-representation]}
    :theme/cycle    {:id :theme/cycle :title "Cycle theme" :category "View" :dispatch [:theme/cycle]}
    :theme/pick     {:id :theme/pick :title "Choose theme…" :category "View" :prompt :theme}
    :view/zoom-in    {:id :view/zoom-in :title "Zoom in" :category "View" :dispatch [:view/zoom 1]}

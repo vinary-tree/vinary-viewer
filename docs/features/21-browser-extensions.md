@@ -70,3 +70,14 @@ Electron is not Chrome. Documented in [ADR-0015](../design-decisions/0015-scoped
 
 Security: extensions execute on the isolated `persist:vinary-web` session and **cannot reach `window.vv`
 or Node** — see [the threat model §6.5](../security/threat-model.md).
+
+## 5 · Installing an extension
+
+The install path stays inside the GPL-free runtime described by
+[ADR-0015](../design-decisions/0015-scoped-extension-runtime-gpl-free.md): the MIT
+`electron-chrome-web-store` fetches the CRX, and Electron's own built-in `session.extensions`
+loads it into the isolated web session.
+
+![Extension install sequence through the GPL-free runtime](../diagrams/seq-extension-install.svg)
+
+*Diagram source: [`../diagrams/seq-extension-install.puml`](../diagrams/seq-extension-install.puml).*

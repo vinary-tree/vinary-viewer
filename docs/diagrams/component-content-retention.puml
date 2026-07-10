@@ -6,38 +6,38 @@ title Bounded content retention and render metadata
 
 skinparam componentStyle rectangle
 
-package "Renderer process" RENDERER_COLOR {
-  [app-db tabs/history\n(:ui :tabs)] as Tabs APPDB_COLOR
-  [DataScript content cache\n(:doc/html :doc/toc :doc/assets)] as DS DATASCRIPT_COLOR
-  [Markdown render pipeline\nunified / rehype / tree-sitter post-pass] as MD MARKDOWN_COLOR
-  [TOC scroll-spy cache\nmeasured heading offsets] as Toc REFRAME_COLOR
+package "Renderer process" RENDERER_FILL {
+  [app-db tabs/history\n(:ui :tabs)] as Tabs APPDB_TINT
+  [DataScript content cache\n(:doc/html :doc/toc :doc/assets)] as DS DATASCRIPT_TINT
+  [Markdown render pipeline\nunified / rehype / tree-sitter post-pass] as MD MARKDOWN_TINT
+  [TOC scroll-spy cache\nmeasured heading offsets] as Toc REFRAME_TINT
 }
 
-package "Preload IPC mediator" IPC_COLOR {
-  [window.vv\nJSON IPC boundary] as VV IPC_COLOR
+package "Preload IPC mediator" IPC_FILL {
+  [window.vv\nJSON IPC boundary] as VV IPC_TINT
 }
 
-package "Main process" MAIN_COLOR {
-  [retained file set] as Retained MAIN_COLOR
-  [file watchers\nchokidar by path] as Watchers FS_COLOR
-  [asset watchers\nref-counted by owner doc] as Assets FS_COLOR
+package "Main process" MAIN_FILL {
+  [retained file set] as Retained MAIN_TINT
+  [file watchers\nchokidar by path] as Watchers FS_TINT
+  [asset watchers\nref-counted by owner doc] as Assets FS_TINT
 }
 
-Tabs -[#4F97D7,thickness=2]-> DS : evict docs not in retained histories
-Tabs -[#B1951D,thickness=2]-> VV : syncRetainedFiles(paths)
-VV -[#B1951D,thickness=2]-> Retained : vv:retained-files
-Retained -[#3A5BA0,thickness=2]-> Watchers : close unretained paths
-Retained -[#3A5BA0,thickness=2]-> Assets : release doc asset owners
-MD -[#67B11D,thickness=2]-> DS : {:html :toc :assets}
-DS -[#4F97D7,thickness=2]-> Toc : stored :doc/toc
-Toc -[#4F97D7,thickness=2]-> Tabs : active heading event
+Tabs -[#336699,thickness=2]-> DS : evict docs not in retained histories
+Tabs -[#7F6B14,thickness=2]-> VV : syncRetainedFiles(paths)
+VV -[#7F6B14,thickness=2]-> Retained : vv:retained-files
+Retained -[#27406F,thickness=2]-> Watchers : close unretained paths
+Retained -[#27406F,thickness=2]-> Assets : release doc asset owners
+MD -[#487E12,thickness=2]-> DS : {:html :toc :assets}
+DS -[#336699,thickness=2]-> Toc : stored :doc/toc
+Toc -[#336699,thickness=2]-> Tabs : active heading event
 
 legend
-  |<#7590DB>| app-db owns tab histories and therefore retention |
-  |<#A45BAD>| DataScript stores bounded rendered content metadata |
-  |<#B1951D>| IPC mediator is the only renderer-main channel |
-  |<#3A5BA0>| MAIN owns filesystem watchers |
-  |<#67B11D>| Markdown render emits structured metadata |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db owns tab histories and therefore retention |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript stores bounded rendered content metadata |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC mediator is the only renderer-main channel |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN owns filesystem watchers |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown render emits structured metadata |
 endlegend
 
 @enduml

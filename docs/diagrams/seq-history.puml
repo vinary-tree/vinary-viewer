@@ -9,13 +9,13 @@ title Navigation history — Alt+← (Back) ⟶ body swap (Command replay)\n:ui/
 
 autonumber "<b>[0]"
 
-actor User #9F8766
-participant "toolbar /\nkeybindings" as UI #2D9574
-participant ":history/back\n(reg-event-db)" as RF #4F97D7
-collections "app-db\n:ui/history" as DB #7590DB
-participant ":doc/active\nsubscription" as SUB #7590DB
-database "DataScript\nconn" as DS #A45BAD
-participant "views\nmarkdown-body" as V #2D9574
+actor User FS_TINT
+participant "toolbar /\nkeybindings" as UI RENDERER_TINT
+participant ":history/back\n(reg-event-db)" as RF REFRAME_TINT
+collections "app-db\n:ui/history" as DB APPDB_TINT
+participant ":doc/active\nsubscription" as SUB APPDB_TINT
+database "DataScript\nconn" as DS DATASCRIPT_TINT
+participant "views\nmarkdown-body" as V RENDERER_TINT
 
 == guard ==
 User -> UI : Alt+←  (or click ←)
@@ -56,10 +56,10 @@ end note
 
 legend right
   |= Colour |= Participant / concept |
-  |<#9F8766>| User |
-  |<#2D9574>| view (toolbar, body) |
-  |<#4F97D7>| re-frame event (:history/back) |
-  |<#7590DB>| app-db :ui/history (Command stack + idx) |
-  |<#A45BAD>| DataScript (the already-open :doc entity) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| User |
+  |<#2D9574>&#160;&#160;&#160;&#160;| view (toolbar, body) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame event (:history/back) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db :ui/history (Command stack + idx) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript (the already-open :doc entity) |
 endlegend
 @enduml

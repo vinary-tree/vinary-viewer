@@ -6,16 +6,16 @@
 
 title Open a directory → in-pane browser (piggybacks the vv:open / vv:content spine)
 
-|#2D9574|Renderer|
+|#E3F2ED|Renderer|
 start
 :folder click / URI bar / Alt+Down →\n[:doc/open dir] or [:tab/navigate dir];
 :nav/nav-active pushes a history entry;
 :fx [:vv/open dir];
 
-|#B1951D|IPC seam|
+|#F4F1E1|IPC seam|
 :window.vv.open(dir) → vv:open;
 
-|#3A5BA0|Main (Node)|
+|#E4E8F1|Main (Node)|
 :vinary.main.service/open!;
 if (directory? path) then (yes)
   :list-dir → [{:name :path :dir? :size :mtime :symlink} …];
@@ -26,29 +26,29 @@ else (file)
   :read + send file content (unchanged);
 endif
 
-|#B1951D|IPC seam|
+|#F4F1E1|IPC seam|
 :onContent → [:content/received];
 
-|#2D9574|Renderer (re-frame)|
+|#E3F2ED|Renderer (re-frame)|
 :event (PURE): attrs gain :doc/entries (vec entries);
 :record-recent → [:ui :recent]\ntrail (dir→child) + (file only) recent-files MRU;
 :fx [:vv/save-recent] (debounced 300ms → recent.edn);
 
-|#A45BAD|Stores|
+|#EEE6EF|Stores|
 :**:ds/transact** {:doc/path :doc/kind "directory" :doc/entries};
 :bridge → [:ds/changed] → :ds/rev inc (:doc/active recomputes);
 
-|#7590DB|DOM / app-db|
+|#E3E7F2|DOM / app-db|
 :content-view branch (= "directory" (:doc/kind doc));
 :**dir-view** (pure Reagent): detailed list,\nsort dirs-first; highlight = nav/effective-selected;
 stop
 
 legend right
   |= Colour |= Swimlane |
-  |<#2D9574>| Renderer (re-frame events + fx) |
-  |<#B1951D>| IPC seam (preload / window.vv) |
-  |<#3A5BA0>| Main process (Node IO) |
-  |<#A45BAD>| Stores (DataScript) |
-  |<#7590DB>| DOM / app-db (dir-view) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer (re-frame events + fx) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (preload / window.vv) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| Main process (Node IO) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| Stores (DataScript) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| DOM / app-db (dir-view) |
 endlegend
 @enduml

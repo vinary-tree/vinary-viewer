@@ -9,7 +9,7 @@
 
 title Source preview via tree-sitter (superseded legacy design)
 
-rectangle "Electron RENDERER (Chromium)" as REND #2D9574 {
+rectangle "Electron RENDERER (Chromium)" as REND RENDERER_FILL {
   component "source-view\nStrategy entry" as SV <<planned>>
 
   package "read-only CodeMirror 6 editor" <<planned>> {
@@ -25,7 +25,7 @@ rectangle "Electron RENDERER (Chromium)" as REND #2D9574 {
   }
 }
 
-rectangle "grammar source" as GR #9F8766 {
+rectangle "grammar source" as GR FS_FILL {
   component "Language.load(<name>.wasm)\n(legacy plan)" as LANG <<planned>>
 }
 
@@ -44,8 +44,8 @@ end note
 
 legend right
   |= color/style |= concept |
-  | <#2D9574> | renderer (Chromium UI) |
-  | <#9F8766> | grammar source (filesystem / registry) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer (Chromium UI) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| grammar source (filesystem / registry) |
   | dashed grey <<planned>> | superseded legacy planned component |
 endlegend
 @enduml

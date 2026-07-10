@@ -8,42 +8,42 @@ start
 :read active tab URI,\nactive doc,\nview-source flag;
 
 if (no open tabs?) then (yes)
-  :watermark; <<#2D9574>>
+  :watermark; <<RENDERER_TINT>>
   stop
 endif
 
 if (doc has :doc/error?) then (yes)
-  :error view; <<#E0211D>>
+  :error view; <<ERROR_TINT>>
   stop
 endif
 
 if (active URI is HTTP/HTTPS?) then (yes)
-  :HTTP web-host\n(main-owned WebContentsView); <<#3A5BA0>>
+  :HTTP web-host\n(main-owned WebContentsView); <<MAIN_TINT>>
   stop
 endif
 
 if (:doc/kind = "pdf"?) then (yes)
-  :PDF host\n(main-owned WebContentsView); <<#3A5BA0>>
+  :PDF host\n(main-owned WebContentsView); <<MAIN_TINT>>
   stop
 endif
 
 if (:doc/kind = "image"?) then (yes)
-  :image preview; <<#2D9574>>
+  :image preview; <<RENDERER_TINT>>
   stop
 endif
 
 if (:doc/kind = "source"?) then (yes)
-  :CodeMirror source view\n(tree-sitter when grammar exists); <<#2D9574>>
+  :CodeMirror source view\n(tree-sitter when grammar exists); <<RENDERER_TINT>>
   stop
 endif
 
 if (Markdown View Source?) then (yes)
-  :source view over cached Markdown text; <<#2D9574>>
+  :source view over cached Markdown text; <<RENDERER_TINT>>
   stop
 endif
 
 if (:doc/html present?) then (yes)
-  :markdown/text HTML body\n(form-3 innerHTML sink); <<#67B11D>>
+  :markdown/text HTML body\n(form-3 innerHTML sink); <<MARKDOWN_TINT>>
   stop
 else (no)
   :Rendering placeholder; <<#DDDDDD>>
@@ -57,10 +57,10 @@ partition "Planned future branch" #line.dashed;line:999999 {
 
 legend right
   |= Colour |= Branch / concept |
-  |<#2D9574>| renderer UI strategy |
-  |<#3A5BA0>| main-owned native view |
-  |<#67B11D>| Markdown/text HTML |
-  |<#E0211D>| error view |
-  |<#DDDDDD>| placeholder or planned future branch |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer UI strategy |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main-owned native view |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown/text HTML |
+  |<#E0211D>&#160;&#160;&#160;&#160;| error view |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| placeholder or planned future branch |
 endlegend
 @enduml

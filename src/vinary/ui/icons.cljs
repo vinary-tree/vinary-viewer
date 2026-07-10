@@ -48,6 +48,7 @@
    generic file glyph for anything unlisted."
   {;; prose / docs
    "md" text "markdown" text "txt" text "rst" text "org" text "adoc" text "asciidoc" text "log" text
+   "tex" text "latex" text "ltx" text
    ;; source / config / data → code glyph
    "clj" code "cljs" code "cljc" code "cljd" code "edn" code "bb" code
    "js" code "mjs" code "cjs" code "jsx" code "ts" code "tsx" code

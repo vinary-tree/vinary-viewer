@@ -119,8 +119,27 @@
  :<- [:ds/rev] :<- [:ui/active-path]
  (fn [[_rev path] _] (when path (ds/active-doc (ds/snapshot) path))))
 
-;; the active document's kind ("markdown" / "org" / "source" / "pdf" / …) — gates the "Go to preview" jump item
+;; the active document's kind ("markdown" / "org" / "latex" / "source" / "pdf" / …) — gates the "Go to preview" jump item
 (rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
+
+;; the active document's collocated exported PDF (absolute path), or nil — enables the Document↔PDF switch
+(rf/reg-sub :doc/pdf-sibling :<- [:doc/active] (fn [doc _] (:doc/pdf-sibling doc)))
+
+;; the EFFECTIVE representation of the active doc: :pdf or :document. Only :pdf when a sibling PDF exists AND
+;; either the user chose it on this tab or the collocated-default preference (default :pdf) says so.
+(rf/reg-sub
+ :ui/active-representation
+ :<- [:ui/active-tab] :<- [:doc/active] :<- [:ui/settings]
+ (fn [[tab doc settings] _]
+   (nav/effective-representation (:representation tab)
+                                 (boolean (:doc/pdf-sibling doc))
+                                 (get settings :collocated-default :pdf))))
+
+;; whether a collocated sibling PDF's bytes are cached yet (content-view shows a loading note until then)
+(rf/reg-sub :pdf/sibling-loaded (fn [db _] (get-in db [:ui :pdf-sibling-loaded] #{})))
+
+;; the persisted default representation for docs that have a collocated PDF (Settings toggle reads this)
+(rf/reg-sub :ui/collocated-default :<- [:ui/settings] (fn [s _] (get s :collocated-default :pdf)))
 
 (rf/reg-sub :ui/web-toc (fn [db _] (get-in db [:ui :web-toc])))
 (rf/reg-sub :pdf/reflow? (fn [db _] (boolean (get-in db [:ui :pdf :reflow?]))))

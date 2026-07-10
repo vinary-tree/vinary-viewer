@@ -9,13 +9,13 @@ title The :ds/rev bridge — one DataScript transaction makes the right subscrip
 
 autonumber "<b>[0]"
 
-participant ":ds/transact\n(re-frame fx)" as FX #4F97D7
-database "DataScript\nconn" as CONN #A45BAD
-participant "conn listener\n::reframe" as LIS #A45BAD
-participant ":ds/changed\n(reg-event-db)" as EV #4F97D7
-collections "app-db\n{:ds/rev n}" as DB #7590DB
-participant ":doc/active / :doc/toc\nsubscriptions" as SUB #7590DB
-participant "reagent\nviews" as VIEW #2D9574
+participant ":ds/transact\n(re-frame fx)" as FX REFRAME_TINT
+database "DataScript\nconn" as CONN DATASCRIPT_TINT
+participant "conn listener\n::reframe" as LIS DATASCRIPT_TINT
+participant ":ds/changed\n(reg-event-db)" as EV REFRAME_TINT
+collections "app-db\n{:ds/rev n}" as DB APPDB_TINT
+participant ":doc/active / :doc/toc\nsubscriptions" as SUB APPDB_TINT
+participant "reagent\nviews" as VIEW RENDERER_TINT
 
 == Mutate the source of truth ==
 FX -> CONN : **d/transact!** conn tx\n(e.g. {:doc/path p :doc/html h})
@@ -44,7 +44,7 @@ deactivate CONN
 SUB --> VIEW : new derived value
 deactivate SUB
 activate VIEW
-VIEW -> VIEW : re-render (view ≔ f(state))
+VIEW -> VIEW : re-render (<latex>\mathrm{view} := f(\mathrm{state})</latex>)
 deactivate VIEW
 
 note over SUB
@@ -56,10 +56,10 @@ end note
 
 legend right
   |= Colour |= Concept |
-  |<#4F97D7>| re-frame machinery (fx + event) |
-  |<#A45BAD>| DataScript content cache (conn + listener) |
-  |<#7590DB>| app-db ephemeral (:ds/rev + subs) |
-  |<#2D9574>| reagent view |
-  |<#B1951D>| the bridge hop (listener → [:ds/changed]) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame machinery (fx + event) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache (conn + listener) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db ephemeral (:ds/rev + subs) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| reagent view |
+  |<#B1951D>&#160;&#160;&#160;&#160;| the bridge hop (listener → [:ds/changed]) |
 endlegend
 @enduml

@@ -64,6 +64,17 @@ ok(tocFrame.includes('TUI Doc') && tocFrame.includes('Section Two'), 'TOC overla
 const tocJump = strip(drive('t' + '\x1b[B' + '\r', doc, ['--no-color', '--width', '40']));  // t, down, Enter
 ok(tocJump.includes('Section Two'), 'selecting the 2nd heading and Enter jumps to it');
 
+// ── 4b. Org (.org) renders through uniorg + the common IR, not as highlighted source markup ────────
+// Same regression as the CLI: content_service.js's classifyName had no `org` arm, so the TUI's
+// "text + a bundled tree-sitter grammar → source" upgrade paged raw Org markup instead of a rendered doc.
+const orgDoc = path.join(tmp, 'doc.org');
+fs.writeFileSync(orgDoc, '#+TITLE: Org TUI\n\n* Section One\nSome *bold* text.\n\n** Section Two\nMore text.\n');
+const orgFrame = strip(drive('', orgDoc, ['--no-color', '--width', '40']));
+ok(orgFrame.includes('Org TUI'), 'org #+TITLE renders as document front matter in the TUI');
+ok(!orgFrame.includes('#+TITLE'), 'org is RENDERED in the TUI, not paged as raw source markup');
+const orgToc = strip(drive('t', orgDoc, ['--no-color', '--width', '40']));
+ok(orgToc.includes('Section One') && orgToc.includes('Section Two'), 'the TUI TOC lists the org headings');
+
 // ── 5. streaming log stays bounded (ring): a log larger than the cap drops older lines ─────────────
 // 130k lines, padded so the file exceeds BOTH the 5 MiB streaming threshold AND the 100k viewport-ring cap
 const biglog = path.join(tmp, 'big.log');

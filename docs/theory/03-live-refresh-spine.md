@@ -73,3 +73,11 @@ consume a navigation restore unless one is pending for the active render.
 ![Bounded content retention and render metadata](../diagrams/component-content-retention.svg)
 
 *Diagram source: [`../diagrams/component-content-retention.puml`](../diagrams/component-content-retention.puml).*
+
+## 7. Layer ownership of one file change
+
+The spine crosses four layers. This swimlane view shows which layer owns each step, and where the `:doc/*`-only invariant is enforced.
+
+![Live-refresh spine — layer ownership of one file change through to re-render](../diagrams/activity-live-refresh-spine.svg)
+
+*Diagram source: [`../diagrams/activity-live-refresh-spine.puml`](../diagrams/activity-live-refresh-spine.puml).*

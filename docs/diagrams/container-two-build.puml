@@ -18,23 +18,22 @@ skinparam rectangle {
   FontColor #1A1A1A
 }
 
-rectangle "shadow-cljs\n(`shadow-cljs.edn` → 2 builds)" as Build REFRAME_COLOR {
-}
+rectangle "shadow-cljs\n(`shadow-cljs.edn` → 2 builds)" as Build REFRAME_TINT
 
 package "Electron runtime" {
 
-  rectangle "**MAIN process** (Node)\n`:main` build → `:node-script`\n`dist/main/main.js`\nentry `vinary.main.core/main`" as Main MAIN_COLOR {
-    rectangle "main.core\nwindow + lifecycle" as MCore MAIN_COLOR
-    rectangle "main.service\nfs read · chokidar watch · git" as MSvc MAIN_COLOR
+  rectangle "**MAIN process** (Node)\n`:main` build → `:node-script`\n`dist/main/main.js`\nentry `vinary.main.core/main`" as Main MAIN_FILL {
+    rectangle "main.core\nwindow + lifecycle" as MCore MAIN_TINT
+    rectangle "main.service\nfs read · chokidar watch · git" as MSvc MAIN_TINT
   }
 
-  rectangle "preload (IPC seam)\n`resources/preload.js`\ncontextBridge → `window.vv`" as Preload IPC_COLOR
+  rectangle "preload (IPC seam)\n`resources/preload.js`\ncontextBridge → `window.vv`" as Preload IPC_TINT
 
   rectangle "trust boundary\n(contextIsolation = true,\nnodeIntegration = false)" as Boundary #line.dashed;line:B1951D {
-    rectangle "**RENDERER process** (Chromium)\n`:renderer` build → `:browser`\n`resources/public/js/main.js`\ninit `vinary.renderer.core/init`" as Rend RENDERER_COLOR {
-      rectangle "re-frame loop\n(events · subs · fx)" as RFrame REFRAME_COLOR
-      rectangle "DataScript conn\n(documents / tabs SSOT)" as DS DATASCRIPT_COLOR
-      rectangle "reagent UI (React 19)\n+ unified markdown" as UI RENDERER_COLOR
+    rectangle "**RENDERER process** (Chromium)\n`:renderer` build → `:browser`\n`resources/public/js/main.js`\ninit `vinary.renderer.core/init`" as Rend RENDERER_FILL {
+      rectangle "re-frame loop\n(events · subs · fx)" as RFrame REFRAME_TINT
+      rectangle "DataScript conn\n(documents / tabs SSOT)" as DS DATASCRIPT_TINT
+      rectangle "reagent UI (React 19)\n+ unified markdown" as UI RENDERER_TINT
     }
   }
 }
@@ -55,11 +54,11 @@ MSvc --> MSvc  : reads filesystem\n(out of band)
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node IO |
-  | <#2D9574> | Renderer / Chromium UI |
-  | <#B1951D> | IPC seam (preload / contextBridge) |
-  | <#A45BAD> | DataScript single-source-of-truth |
-  | <#4F97D7> | re-frame machinery / shadow-cljs |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node IO |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / Chromium UI |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (preload / contextBridge) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript single-source-of-truth |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame machinery / shadow-cljs |
   Dashed border = trust boundary · Amber arrow = IPC message
 endlegend
 @enduml

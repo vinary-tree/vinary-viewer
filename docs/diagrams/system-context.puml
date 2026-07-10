@@ -20,12 +20,12 @@ skinparam rectangle {
 
 actor "User\n(reads docs, edits\nin a separate editor)" as User #white
 
-rectangle "vinary-viewer\n(Electron desktop app)\n— reactive document previewer" as App RENDERER_COLOR {
+rectangle "vinary-viewer\n(Electron desktop app)\n— reactive document previewer" as App RENDERER_FILL {
 }
 
-rectangle "External Editor\n(Emacs, VS Code, Vim …)" as Editor <<actor>> FS_COLOR
-rectangle "Filesystem\n(Markdown / images / text\non disk)" as FS FS_COLOR
-rectangle "git repository\n(`git ls-files` →\nfile-tree sidebar)" as Git FS_COLOR
+rectangle "External Editor\n(Emacs, VS Code, Vim …)" as Editor <<actor>> FS_TINT
+rectangle "Filesystem\n(Markdown / images / text\non disk)" as FS FS_TINT
+rectangle "git repository\n(`git ls-files` →\nfile-tree sidebar)" as Git FS_TINT
 
 User --> App : launches `vv README.md`,\nclicks tabs / tree / TOC,\nfinds, switches theme
 Editor --> FS : saves the file\nthe user is editing
@@ -43,9 +43,9 @@ end note
 
 legend right
   |= Colour |= Concept |
-  | <#2D9574> | the vinary-viewer application |
-  | <#9F8766> | filesystem · external editor · git |
-  | <#FFFFFF> | human actor |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the vinary-viewer application |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem · external editor · git |
+  |<#FFFFFF>&#160;&#160;&#160;&#160;| human actor |
   Solid arrow = request / command · Dashed = asynchronous event
 endlegend
 @enduml

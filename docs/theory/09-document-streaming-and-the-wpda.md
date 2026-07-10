@@ -1,8 +1,15 @@
 # Document streaming and the WPDA — bounded-memory incremental rendering
 
 **Status: Implemented (v0.3.0), default-ON for large documents. Two engines share this spine: a bounded WPDA
-*byte-stream* (logs/text — this document's model) and a byte-parity *progressive block-commit* (Markdown,
+*byte-stream* (logs/text — this document's model) and a byte-parity *progressive block-commit* (Markdown, Org,
 PDF-reflow — §6.1). Source stays batch: CodeMirror 6 already viewport-virtualizes.**
+
+> **Erratum (2026-07-09).** For its first four phases the progressive engine never ran on a real file. The gate
+> `stream.flag/enabled?` requires $`\mathit{size} \geq \mathit{threshold}`$, and the size arrives as `(:size meta)` on the `vv:content`
+> payload — but the main process's `:text` route, which serves Markdown, Org, source, and diagram, sent no
+> `:meta` at all, so the comparison was always $`0 \geq 256\ \mathrm{KiB}`$. The byte-parity smoke passed because it *stubs*
+> `meta: {size}` into a fake content service. The route now sends the file size, and a unit test pins that a
+> `nil` size never streams. See [ADR-0024](../design-decisions/0024-org-export-blocks-front-matter-and-math.md).
 
 ![Streaming pipeline — one batch's lifecycle](../diagrams/seq-document-streaming.svg)
 
@@ -192,17 +199,23 @@ flight, the append is skipped.
 **context-free** — a node's safety is independent of its siblings — so per-block sanitization is provably
 identical to whole-document sanitization. See [security/threat-model](../security/threat-model.md).
 
-### 6.1 · The second engine — progressive block-commit (Markdown, PDF-reflow)
+### 6.1 · The second engine — progressive block-commit (Markdown, Org, PDF-reflow)
 
 Sections 2–5 describe the **bounded byte-stream** used for logs/text, whose bytes are *not* in renderer memory.
-Markdown and PDF-reflow are different: the whole source (Markdown) or extracted text (PDF) is **already in
-renderer memory**, and their renderers are **document-global** — CommonMark dedups heading slugs, resolves
+Markdown, Org, and PDF-reflow are different: the whole source (Markdown/Org) or extracted text (PDF) is **already
+in renderer memory**, and their renderers are **document-global** — CommonMark dedups heading slugs, resolves
 *forward* reference definitions, and lays out footnotes across the whole document; `reflow-ir` classifies
 heading-vs-paragraph against a **document-global median line-height**. A byte-parity *bounded-parse* is
 therefore infeasible: any block may depend on content arbitrarily far away.
 
+This engine is **format-agnostic by construction**: it commits IR *children*, never format-specific nodes. A
+frontend joins it by supplying its own parse prefix and nothing else — which is exactly how Org joined
+(`org-stream-blocks` wraps `org-pipeline`; `stream-blocks*` is parameterized by the pipeline builder). No new
+engine, no new parser, and parity follows from the same argument below.
+
 So these kinds use a **progressive block-commit**. The exact batch renderer runs **once** (`md/stream-blocks`:
-the whole `base-pipeline`; `pdf/reflow-blocks!`: the whole page scan → `reflow-ir`), giving full document
+the whole `base-pipeline`; `md/org-stream-blocks`: the whole `org-pipeline`; `pdf/reflow-blocks!`: the whole page
+scan → `reflow-ir`), giving full document
 context, and the resulting IR document's **top-level children** are committed across idle frames by the *same*
 scheduler + sink. Because the children are emitted **verbatim** — element blocks *and* the inter-block
 whitespace `:text` leaves that carry remark-rehype's exact separators — and the sink concatenates them with **no
@@ -281,6 +294,7 @@ Streaming trades a higher constant on total time for an **asymptotically smaller
 | 3 | PDF-reflow — progressive block-commit; canvas already page-windowed | ✅ streamed reflow byte-identical to batch reflow |
 | 4 | Capabilities hardened + **default-on** + **windowed DOM** | ✅ find-materialize, live-refresh re-anchor, Preferences toggle, `stream-default true`, and a `content-visibility:auto` **render-window** (off-screen blocks skip layout/paint; nodes stay in the DOM so find/spy/selection keep working — chosen over node removal, which would break all three). |
 | 5 | Source — spike-gated | ✅ **stays batch**: CodeMirror 6 already viewport-virtualizes; async outline parse. No beneficial streaming path. |
+| 6 | Org — the same progressive block-commit; and the `:meta {:size}` gate the engine had always needed | ✅ streamed Org `innerHTML` **byte-identical** to batch over a 301 KiB corpus; large Markdown streams for the first time ([ADR-0024](../design-decisions/0024-org-export-blocks-front-matter-and-math.md)) |
 
 ---
 

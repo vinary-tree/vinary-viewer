@@ -87,3 +87,17 @@ permits `unsafe-eval` and is sandboxed, see [ADR-0013](../design-decisions/0013-
 (deferred ~400 ms so a fast page never flashes it); a render that genuinely errors (as opposed to being
 cancelled by a scroll-away or a re-fit) shows a **click-to-retry** chip and a `console.error`, so a slow or
 failed page is never a silent blank.
+
+## 4 · The render pipeline, end to end
+
+Bytes arrive over `vv:content`, land in the path-keyed byte cache, and are handed to the pdf.js
+worker; the canvas, text, and link layers are then composed inside `.vv-content`.
+
+![PDF render pipeline — main service through the byte cache into the pdf.js worker](../diagrams/seq-pdf-render.svg)
+
+*Diagram source: [`../diagrams/seq-pdf-render.puml`](../diagrams/seq-pdf-render.puml).*
+
+> **Historical note.** [`../diagrams/component-native-pdf.puml`](../diagrams/component-native-pdf.puml)
+> depicts the *superseded* design, in which a main-process `WebContentsView` hosted Chromium's own PDF
+> viewer. [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md) replaced it with the in-renderer
+> pdf.js pipeline above; the diagram is retained only so older reviews stay intelligible.

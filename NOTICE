@@ -32,6 +32,9 @@ Attribution & third-party components (v0.2 — the standalone application)
 
 5. Libraries & tools  (under their own licenses; via npm / Maven / the system)
    - remark / unified / rehype-* (Markdown pipeline)
+   - uniorg (Org-mode frontend) and @unified-latex/* (LaTeX frontend), both MIT — additional
+     document frontends that parse into the same unified HAST spine
+   - @mathjax/src (MathJax 4, math typesetting)
    - web-tree-sitter, CodeMirror 6 (@codemirror/*) (source highlighting)
    - reagent, re-frame, re-com, DataScript, RxJS (the reactive UI stack)
    - Electron, chokidar (the desktop + file-watch runtime)

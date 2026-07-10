@@ -9,14 +9,14 @@ skinparam component {
   BorderThickness 1.5
 }
 
-component "vinary.main.core" as Core MAIN_COLOR
+component "vinary.main.core" as Core MAIN_TINT
 note bottom of Core
   app lifecycle
   BrowserWindow creation
   initial argv file
 end note
 
-component "vinary.main.service" as Svc MAIN_COLOR
+component "vinary.main.service" as Svc MAIN_TINT
 note bottom of Svc
   read + classify files
   reconcile retained watchers
@@ -24,14 +24,14 @@ note bottom of Svc
   send content/errors/tree
 end note
 
-component "vinary.main.file-kind" as Kind MAIN_COLOR
-component "vinary.main.pdf" as Pdf MAIN_COLOR
-component "vinary.main.web" as Web MAIN_COLOR
-component "vinary.main.config" as Config MAIN_COLOR
-component "vinary.main.settings" as Settings MAIN_COLOR
-component "vinary.main.grammars" as Grammars MAIN_COLOR
+component "vinary.main.file-kind" as Kind MAIN_TINT
+component "vinary.main.pdf" as Pdf MAIN_TINT
+component "vinary.main.web" as Web MAIN_TINT
+component "vinary.main.config" as Config MAIN_TINT
+component "vinary.main.settings" as Settings MAIN_TINT
+component "vinary.main.grammars" as Grammars MAIN_TINT
 
-component "ipcMain handlers" as Ipc IPC_COLOR {
+component "ipcMain handlers" as Ipc IPC_FILL {
   portin "vv:open" as POpen
   portin "vv:retained-files" as PRetained
   portin "vv:watch-assets" as PAssets
@@ -42,13 +42,13 @@ component "ipcMain handlers" as Ipc IPC_COLOR {
   portin "vv:grammars-request" as PGrammars
 }
 
-component "preload\ncontextBridge `window.vv`" as Preload IPC_COLOR
+component "preload\ncontextBridge `window.vv`" as Preload IPC_TINT
 
-cloud "Node built-ins\n(fs · path · child_process)" as Node FS_COLOR
-cloud "chokidar\n(retained file + asset watchers)" as Chk FS_COLOR
-cloud "git CLI\n(rev-parse · ls-files)" as Git FS_COLOR
-cloud "Electron native views\nWebContentsView" as Native FS_COLOR
-database "~/.config/vinary-viewer" as Conf FS_COLOR
+cloud "Node built-ins\n(fs · path · child_process)" as Node FS_TINT
+cloud "chokidar\n(retained file + asset watchers)" as Chk FS_TINT
+cloud "git CLI\n(rev-parse · ls-files)" as Git FS_TINT
+cloud "Electron native views\nWebContentsView" as Native FS_TINT
+database "~/.config/vinary-viewer" as Conf FS_TINT
 
 Core --> Svc : init and initial open
 Core --> Preload : webPreferences.preload
@@ -92,8 +92,8 @@ Grammars ..> Preload : vv:grammars
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node service |
-  | <#B1951D> | IPC seam |
-  | <#9F8766> | external/native resource |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node service |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#9F8766>&#160;&#160;&#160;&#160;| external/native resource |
 endlegend
 @enduml

@@ -49,6 +49,15 @@ fs.writeFileSync(md, [
   '| A | B |', '|---|---|', '| 1 | 2 |', '',
 ].join('\n'));
 
+// GFM task lists reach the terminal with their state (the same <input type=checkbox> shape Org emits)
+const mdTasks = run(['--no-color', (() => {
+  const p = path.join(tmp, 'tasks.md');
+  fs.writeFileSync(p, '- [ ] unchecked\n- [x] checked\n- plain\n');
+  return p;
+})()]);
+ok(mdTasks.includes('☐ unchecked') && mdTasks.includes('☑ checked') && mdTasks.includes('• plain'),
+   'markdown task lists render ☐ / ☑ and leave plain items as bullets');
+
 const mdColor = run(['--color', '--width', '72', md]);
 ok(mdColor.includes(ESC + '['), 'markdown --color emits SGR escapes');
 ok(mdColor.includes('Title') && mdColor.includes('Section'), 'markdown heading text present');
@@ -71,6 +80,60 @@ ok(!run(['--plain', md]).includes(ESC), '--plain output contains ZERO escape byt
 // --toc → outline
 const toc = run(['--no-color', '--toc', md]);
 ok(/Contents/.test(toc) && /Title/.test(toc) && /Section/.test(toc), '--toc prints the document outline');
+
+// ── 1b. Org (.org) → the SAME uniorg/common-IR render as the GUI, lowered to ANSI ────────────────
+// Regression: content_service.js's classifyName (the JS twin of file-kind/kind-of) once had no `org` arm and
+// kept .org in textExts, so the CLI's "text + a bundled tree-sitter grammar → source" upgrade printed
+// highlighted Org MARKUP instead of rendering it. It also let an Org table trip the delimited-CSV sniff.
+const org = path.join(tmp, 'doc.org');
+fs.writeFileSync(org, [
+  '#+TITLE: Org Title',
+  '#+AUTHOR: Ada Lovelace',
+  '#+LATEX_HEADER: \\usepackage{booktabs}',
+  '',
+  '* Section',
+  'Some *bold* text.',
+  '- [ ] todo',
+  '- [X] done',
+  '',
+  '#+begin_src python',
+  'def f():',
+  '    return 1',
+  '#+end_src',
+  '',
+  '| A | B |',
+  '|---+---|',
+  '| 1 | 2 |',
+  '',
+  '#+BEGIN_EXPORT latex',
+  '\\begin{center}Billing Period\\end{center}',
+  '#+END_EXPORT',
+  '',
+].join('\n'));
+
+const orgOut = run(['--no-color', org]);
+ok(orgOut.includes('☐ todo') && orgOut.includes('☑ done'),
+   'org task lists carry their checkbox STATE into the terminal (☐ / ☑, not a bare bullet)');
+ok(orgOut.includes('Org Title'), 'org #+TITLE renders as document front matter');
+ok(orgOut.includes('Ada Lovelace'), 'org #+AUTHOR renders as document front matter');
+ok(!orgOut.includes('#+TITLE'), 'org is RENDERED, not printed as raw source markup');
+ok(!orgOut.includes('usepackage'), 'org #+LATEX_HEADER keywords stay dropped');
+ok(orgOut.includes('Section') && orgOut.includes('bold'), 'org heading and inline markup render');
+ok(orgOut.includes('┌') && orgOut.includes('│'), 'org table renders with box-drawing (NOT sniffed as a CSV)');
+ok(orgOut.includes('▏') && orgOut.includes('return 1'), 'org #+begin_src block renders with the ▏ code gutter');
+// the terminal has no DOM, so the MathJax attempt cannot run: a latex export block ALWAYS takes the
+// code-block fallback — and its body must never be silently swallowed
+ok(orgOut.includes('Billing Period'), 'org #+BEGIN_EXPORT latex body is preserved (code-block fallback)');
+ok(!orgOut.includes(ESC), 'NO_COLOR org output contains ZERO escape bytes');
+
+// an org document that renders to nothing must not crash the CLI
+const orgEmpty = path.join(tmp, 'empty.org');
+fs.writeFileSync(orgEmpty, '#+OPTIONS: toc:nil\n# just a comment\n');
+ok(typeof run(['--no-color', orgEmpty]) === 'string', 'an org document that renders nothing exits cleanly');
+
+// --toc works for org (heading outline, incl. the front-matter title)
+const orgToc = run(['--no-color', '--toc', org]);
+ok(/Contents/.test(orgToc) && /Section/.test(orgToc), '--toc prints the org document outline');
 
 // ── 2. CSV → box-drawing table ───────────────────────────────────────────────────────────────────
 const csv = path.join(tmp, 'data.csv');

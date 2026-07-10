@@ -146,7 +146,7 @@ algorithm SEARCH(query):
 > **Intent (`cycle!`).** Move the focused match by `dir` (+1 next, −1 previous),
 > **wrapping** at the ends, repaint the current highlight, scroll to it, and return
 > the **1-based** index (0 if there are no matches). The wrap is modular:
-> `idx ≔ (idx + dir) mod n`.
+> $`\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n`$.
 
 ```
 algorithm CYCLE(dir):
@@ -191,12 +191,12 @@ number of matches.
 - **`collect-ranges`** visits every text node once via the `TreeWalker` and runs
   `indexOf` along each node's text. Across all nodes the scanning is linear in the
   text length, and it emits one Range per match, so its cost is
-  `O(T + M) = O(T)` (since `M ≤ T`). We summarise this as **`O(total_text_length)`**.
+  $`O(T + M) = O(T)`$ (since $`M \leq T`$). We summarise this as **`O(total_text_length)`**.
 - **`paint!`** adds `M` ranges to a Highlight and does two `CSS.highlights.set`
   calls: `O(M)`.
 - **`cycle!`** is `O(1)` arithmetic plus an `O(M)` repaint of the current
   highlight (it re-`paint!`s; the dominant cost is re-adding the `M` ranges to
-  `"vv-find"`). The cursor move itself is constant time: `idx ≔ (idx + dir) mod n`.
+  `"vv-find"`). The cursor move itself is constant time: $`\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n`$.
 
 So a fresh search is **linear in the document's text length** and cycling is
 effectively constant for the user. There is no super-linear blow-up regardless of
@@ -277,7 +277,7 @@ Source: [`../diagrams/state-find.puml`](../diagrams/state-find.puml).
 - The three algorithms — `collect-ranges` (TreeWalker + case-insensitive
   `indexOf`, non-overlapping, within single text nodes), `paint!`, and
   `cycle!`/`search!` — were given literately; the cursor wraps via
-  `idx ≔ (idx + dir) mod n` (0-based internally, 1-based for display).
+  $`\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n`$ (0-based internally, 1-based for display).
 - A fresh search is **`O(total_text_length)`**; cycling is effectively `O(1)` for
   the user.
 - The feature **degrades to a no-op** when unsupported (guarded by `supported?`)

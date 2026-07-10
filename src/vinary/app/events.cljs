@@ -79,7 +79,7 @@
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged] :as payload}]]
+                            sourceable paged pdfSibling] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -101,10 +101,12 @@
                    dataUrl               (assoc :doc/data-url dataUrl)
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
+                   pdfSibling            (assoc :doc/pdf-sibling pdfSibling)   ; collocated exported PDF (Doc↔PDF switch)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
-                   ;; markdown/office/org derive their :doc/toc + :doc/assets from the IR render (arriving async
-                   ;; via :content/rendered), so DON'T reset those here; every other kind clears them.
-                   (and (not= kind "markdown") (not ir-office?) (not= kind "org")) (assoc :doc/toc [] :doc/assets []))
+                   ;; markdown/office/org/latex derive their :doc/toc + :doc/assets from the IR render (arriving
+                   ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
+                   (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex"))
+                   (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
@@ -125,11 +127,21 @@
               ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
               ir-office?          (conj [:office/render {:html html :path path
                                                          :on-done [:content/rendered path stamp]}])
-              ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown
-              (= kind "org")      (conj [:org/render {:text text :path path :stamp stamp
-                                                      :on-done [:content/rendered path stamp]}])
+              ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown.
+              ;; A streaming doc is driven by ir-stream-body from the file path → skip the batch render fx.
+              (and (= kind "org") (not stream?))
+              (conj [:org/render {:text text :path path :stamp stamp
+                                  :on-done [:content/rendered path stamp]}])
+              ;; latex (.tex) → the common-IR render via unified-latex (HTML + heading TOC + assets), like org.
+              ;; LaTeX always batch-renders (not in stream-flag/streamable-kinds), but keep the guard for symmetry.
+              (and (= kind "latex") (not stream?))
+              (conj [:latex/render {:text text :path path :stamp stamp
+                                    :on-done [:content/rendered path stamp]}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
+              ;; a doc with a collocated sibling PDF: eagerly load its bytes into pdf-cache so the Document↔PDF
+              ;; switch (and a PDF-first default) shows the PDF with no wait. Byte-only — spawns no tab.
+              pdfSibling (conj [:pdf/ensure-sibling-bytes {:path pdfSibling}])
               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
        db'))))
 
@@ -311,6 +323,29 @@
 ;; content text is already cached, so no window replacement
 (rf/reg-event-db :tab/toggle-source
                  (fn [db [_ id]] (if id (nav/toggle-source db id) (nav/toggle-source db))))
+
+;; Document↔PDF representation switch (a doc with a collocated sibling PDF). Setting :pdf ensures the sibling's
+;; bytes are cached (byte-only; no tab) so pdf-view can mount them in-place.
+(rf/reg-event-fx :tab/set-representation
+                 (fn [{:keys [db]} [_ id rep]]
+                   (let [db' (if id (nav/set-representation db id rep) (nav/set-representation db rep))
+                         sib (ds/doc-attr (ds/snapshot) (nav/active-path db') :doc/pdf-sibling)]
+                     (cond-> {:db db'}
+                       (and (= rep :pdf) sib) (assoc :fx [[:pdf/ensure-sibling-bytes {:path sib}]])))))
+
+;; a collocated sibling PDF's bytes finished loading into pdf-cache → record it so content-view can mount pdf-view
+(rf/reg-event-db :pdf/sibling-ready
+                 (fn [db [_ path]] (update-in db [:ui :pdf-sibling-loaded] (fnil conj #{}) path)))
+
+;; flip the active doc's representation (:document ↔ :pdf) — the command-palette / keybinding entry. No-op unless
+;; the doc has a collocated sibling PDF. Delegates to :tab/set-representation (which ensures the PDF bytes).
+(rf/reg-event-fx :tab/toggle-representation
+                 (fn [{:keys [db]} _]
+                   (if (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/pdf-sibling)
+                     (let [cur (or (nav/representation db) (get-in db [:ui :settings :collocated-default] :pdf))
+                           nxt (if (= cur :pdf) :document :pdf)]
+                       {:fx [[:dispatch [:tab/set-representation nil nxt]]]})
+                     {})))
 
 ;; ── bidirectional source⇄preview jump ("Go to source" / "Go to preview" context-menu items + keymap) ──
 ;; The EVENT decides whether the pane must toggle (it knows the current view), and the FX either scrolls the
@@ -725,6 +760,16 @@
    (let [inv      (not (get-in db [:ui :pdf :invert?]))
          settings (assoc (get-in db [:ui :settings]) :pdf-invert? inv)]
      {:db (-> db (assoc-in [:ui :pdf :invert?] inv) (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
+
+;; which representation a doc collocated with an exported PDF opens in by default (:pdf — the faithful compiler
+;; output — or :document — the rendered preview). Persisted; a per-tab toggle can still override per document.
+(rf/reg-event-fx
+ :settings/set-collocated-default
+ (fn [{:keys [db]} [_ mode]]
+   (let [mode     (if (= mode :document) :document :pdf)
+         settings (assoc (get-in db [:ui :settings]) :collocated-default mode)]
+     {:db (assoc-in db [:ui :settings :collocated-default] mode)
       :fx [[:vv/save-settings (pr-str settings)]]})))
 
 ;; Opt-in PDF text reflow (ADR-0017): show the extracted text as reflowable prose instead of the fixed-layout

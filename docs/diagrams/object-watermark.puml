@@ -12,12 +12,12 @@
 title Watermark emblem pipeline — vinary-tree-logo.svg → <img> + grayscale filter → faint logo
 
 '' ---- the source asset (filesystem / static resource = tan) ----
-rectangle "vinary-tree-logo.svg\n(resources/public/assets)" as SVG FS_COLOR {
+rectangle "vinary-tree-logo.svg\n(resources/public/assets)" as SVG FS_FILL {
   card "the full-color Vinary Tree crest\n(heraldic shield + tree-of-life\n+ 'VINARY TREE' wordmark)" as SVGBODY #FBF8EF
 }
 
 '' ---- the renderer markup + CSS that fades it to a watermark (renderer = teal) ----
-rectangle ".vv-watermark-logo  <img>  (views.cljs + app.css)" as IMG RENDERER_COLOR {
+rectangle ".vv-watermark-logo  <img>  (views.cljs + app.css)" as IMG RENDERER_FILL {
   card "<img src=\"assets/vinary-tree-logo.svg\">\ncentered by .vv-watermark (flex)" as TAG #FBF8EF
   card "width: 40%; max-width: 360px\nheight: auto" as SIZE #FBF8EF
   card "filter : grayscale(1)\nopacity: 0.08" as FADE #FBF8EF
@@ -29,8 +29,8 @@ rectangle "rendered emblem\n.vv-watermark > img.vv-watermark-logo" as OUT #1F6B5
 }
 
 '' ---- wiring (each arrow is one rendering step) ----
-SVG -[#9F8766,thickness=2]-> IMG : (1) loaded as an <img>\n(its own colors, drawn as-is)
-IMG -[#2D9574,thickness=2]-> OUT : (2) desaturated by grayscale(1)\nand faded to 8% opacity
+SVG -[#6F5E47,thickness=2]-> IMG : (1) loaded as an <img>\n(its own colors, drawn as-is)
+IMG -[#1F6B53,thickness=2]-> OUT : (2) desaturated by grayscale(1)\nand faded to 8% opacity
 
 note bottom of OUT
   The watermark is **theme-independent**: the logo is desaturated and faded by CSS,
@@ -41,8 +41,8 @@ end note
 
 legend right
   |= color |= concept |
-  | <#9F8766> | filesystem / static SVG asset |
-  | <#2D9574> | renderer (Chromium) markup + CSS — no IPC, paint-only |
-  | <#1F6B53> | final rendered emblem |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem / static SVG asset |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer (Chromium) markup + CSS — no IPC, paint-only |
+  |<#1F6B53>&#160;&#160;&#160;&#160;| final rendered emblem |
 endlegend
 @enduml

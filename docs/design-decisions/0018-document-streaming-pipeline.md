@@ -9,7 +9,7 @@
 
 > **Two engines, one spine.** As implemented, streaming has *two* modes behind the same scheduler + sink:
 > a **bounded byte-stream** (logs/text — bytes are NOT in renderer memory, pulled from the main session and
-> WPDA-segmented, so the working set is genuinely bounded), and a **progressive block-commit** (markdown,
+> WPDA-segmented, so the working set is genuinely bounded), and a **progressive block-commit** (markdown, org,
 > PDF-reflow — the whole source/text is already in memory, and CommonMark's document-global constructs
 > [forward reference definitions, footnotes, whole-document slug dedup] make a byte-parity *bounded-parse*
 > infeasible, so the batch renderer runs ONCE and its top-level blocks are committed across idle frames). The
@@ -182,8 +182,30 @@ asserted on its blocks, with find/spy/parity/re-anchor all still passing *with* 
 is capability-preserving); and a streamed doc re-anchors its scroll (3000 → 3000) across a live-refresh. Gate
 at every phase: 0 warnings (`:main` `:simple` + renderer, dev + release), all node tests green, lint clean.
 
+## Amendment (2026-07-09) — the `:meta {:size}` prerequisite, and Org joins the progressive engine
+
+Two corrections landed with [ADR-0024](0024-org-export-blocks-front-matter-and-math.md).
+
+**The size gate was never satisfied for prose.** `stream.flag/enabled?` requires $`\mathit{size} \geq \mathit{threshold}`$, and the size
+arrives as `(:size meta)` on the `vv:content` payload. But `service.cljs`'s `:text` route — the route that serves
+**markdown**, org, source, and diagram — sent no `:meta` at all, so the gate always compared `0` against 256 KiB
+and the progressive engine never ran on a real file. The byte-parity smoke passed only because it *stubs*
+`meta: {size}` into a fake content service. The `:text` route now `statSync`s and sends `:meta {:size …}`, and
+`flag_test` locks in that a `nil` size never streams. Consequence: large Markdown documents now genuinely stream,
+as this ADR always intended.
+
+**The progressive engine is format-agnostic.** It commits **IR children**, not Markdown nodes, so any
+tree-producing frontend can stream through it by supplying its own parse prefix. `stream-blocks` is generalized
+to `stream-blocks*` (parameterized by the pipeline builder); `org-stream-blocks` is a thin wrapper over
+`org-pipeline`. `flag` gains `"org"` (256 KiB), `scheduler`'s `posts-for` / `sep-for` gain an `"org"` arm, and
+`ir-stream-body` gains an `"org"` block provider. No new engine, no new parser, and byte-parity holds by the same
+construction — the separators live in emitted whitespace `:text` leaves, so `concat(map lower children) ==
+lower(document)` exactly.
+
 ## Related
 
+- [ADR-0024 — Org export blocks, front matter, and math](0024-org-export-blocks-front-matter-and-math.md)
+  (fixes the size gate; puts Org on this engine)
 - [ADR-0017 — the common document IR](0017-common-document-ir.md) (the IR + WPDA this streams)
 - [ADR-0010 — bounded content retention](0010-bounded-content-retention-and-render-metadata.md) (the
   whole-document retention this consciously does *not* extend to streamed docs)

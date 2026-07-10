@@ -79,6 +79,9 @@ after load and on scroll-settle) in an atom, and when `:ui/overlay-open?` turns 
 menu, context menu, dialog, or palette — it synchronously swaps that image into the DOM (`.vv-web-snap`)
 and hides the native view; closing every overlay restores the live view. There is no capture on the open
 path, so the swap is instant and a dialog now shows the **dimmed** page rather than blanking it. (If no
-push has arrived yet, `freeze!` pulls main's cache once via the `vv:http-snapshot` invoke.) The handoff is
-diagrammed in [`seq-instant-overlay-snapshot.puml`](../diagrams/seq-instant-overlay-snapshot.puml).
+push has arrived yet, `freeze!` pulls main's cache once via the `vv:http-snapshot` invoke.)
 Verified by a dedicated scroll-parity probe.
+
+![Instant, flash-free overlay compositing over the web view](../diagrams/seq-instant-overlay-snapshot.svg)
+
+*Diagram source: [`../diagrams/seq-instant-overlay-snapshot.puml`](../diagrams/seq-instant-overlay-snapshot.puml).*

@@ -8,14 +8,14 @@
 title Find-bar state machine (:ui/find)\n{:visible? :query :count :idx}
 
 skinparam state {
-  BackgroundColor #7590DB
+  BackgroundColor APPDB_TINT
 }
 
 [*] --> Hidden
 
 state "Hidden" as Hidden #DDDDDD : visible? = false\nhighlights cleared
-state "Visible (empty)" as Empty #7590DB : visible? = true\nquery = ""  ·  count = 0
-state "Visible (matches: n)" as Matches #67B11D : visible? = true\ncount = n > 0  ·  idx ∈ 1..n\nhighlights painted
+state "Visible (empty)" as Empty APPDB_TINT : visible? = true\nquery = ""  ·  count = 0
+state "Visible (matches: n)" as Matches MARKDOWN_TINT : visible? = true\ncount = n > 0  ·  <latex>\mathit{idx} \in 1..n</latex>\nhighlights painted
 
 Hidden  --> Empty   : Ctrl+F  /  [:find/toggle]
 Empty   --> Hidden  : Ctrl+F (toggle off) | Escape\n/ [:find/close] → clear!
@@ -25,22 +25,25 @@ Empty   --> Empty   : type query (no match)\ncount = 0
 Matches --> Empty   : edit query → 0 matches\nor clear the field
 Matches --> Matches : type a new query\n(re-run search!, new n)
 
-Matches --> Matches : Enter / ↓  [:find/cycle +1]\nidx ≔ (idx mod n)+1  (1-based)
-Matches --> Matches : Shift+Enter / ↑  [:find/cycle -1]\nidx ≔ ((idx-2 mod n)+1)
+Matches --> Matches : Enter / ↓  [:find/cycle +1]\nShift+Enter / ↑  [:find/cycle -1]\n(see note)
 
 Matches --> Hidden  : Escape / ×  [:find/close]\n→ clear! (delete vv-find, vv-find-current)
 Matches --> Hidden  : Ctrl+F (toggle off)
 
 note bottom of Matches #FFF6D6
-  cycle! wraps with modular arithmetic:
-  idx ≔ (idx + dir) mod n  (internally 0-based;
-  returns the 1-based index shown as "idx/n").
+  cycle! wraps with modular arithmetic. Internally the
+  cursor is 0-based and steps by <latex>\mathit{dir} \in \{+1, -1\}</latex>:
+  <latex>\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n</latex>
+  Forward (Enter) is therefore, in the 1-based index the UI shows as "idx/n":
+  <latex>\mathit{idx} := (\mathit{idx} \bmod n) + 1</latex>
+  and backward (Shift+Enter) is:
+  <latex>\mathit{idx} := ((\mathit{idx} - 2) \bmod n) + 1</latex>
 end note
 
 legend right
   |= Colour |= State / concept |
-  |<#DDDDDD>| Hidden (find bar closed, highlights cleared) |
-  |<#7590DB>| Visible, no current matches (app-db :ui/find) |
-  |<#67B11D>| Visible with painted matches (CSS highlights) |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| Hidden (find bar closed, highlights cleared) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| Visible, no current matches (app-db :ui/find) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Visible with painted matches (CSS highlights) |
 endlegend
 @enduml

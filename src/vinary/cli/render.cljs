@@ -9,6 +9,7 @@
             ["path" :as path]
             ["fs" :as fs]
             [clojure.string :as str]
+            [vinary.renderer.latex :as latex]
             [vinary.renderer.markdown-pipeline :as pipeline]
             [vinary.renderer.media :as media]
             [vinary.ir.frontend.markdown :as ir-md]
@@ -26,15 +27,40 @@
             [vinary.grammar-catalog :as gc]
             [vinary.stream.protocol :as proto]))
 
-(defn markdown->ir
-  "Markdown text → Promise<IR> via the shared DOM-free base-pipeline (byte-for-byte the GUI's parse)."
-  [text base-dir]
+(defn- pipeline->ir
+  "Run one of the shared DOM-free unified pipelines over `text` and capture its HAST as the common IR.
+   `make-pipeline` is (fn [metadata base-dir cache-token] processor) — pipeline/base-pipeline or
+   pipeline/org-pipeline — so Markdown and Org differ ONLY in their parse prefix, never in the IR they yield."
+  [make-pipeline text base-dir]
   (let [captured (atom nil)]
-    (-> (pipeline/base-pipeline (atom {:toc [] :assets #{}}) base-dir nil)
+    (-> (make-pipeline (atom {:toc [] :assets #{}}) base-dir nil)
         (.use (pipeline/capture-hast captured))
         (.use rehype-stringify)
         (.process (or text ""))
         (.then (fn [_] (ir-md/hast->ir @captured))))))
+
+(defn markdown->ir
+  "Markdown text → Promise<IR> via the shared DOM-free base-pipeline (byte-for-byte the GUI's parse)."
+  [text base-dir]
+  (pipeline->ir pipeline/base-pipeline text base-dir))
+
+(defn org->ir
+  "Org text → Promise<IR> via the shared DOM-free org-pipeline (byte-for-byte the GUI's parse). The terminal has
+   no DOM, so the GUI's MathJax/figure post-passes never run: math stays a `code.math-*` span and a
+   `#+BEGIN_EXPORT latex` block stays a `language-latex` code block — which is precisely the GUI's fallback."
+  [text base-dir]
+  (pipeline->ir pipeline/org-pipeline text base-dir))
+
+(defn latex->ir
+  "LaTeX text → Promise<IR> via the shared DOM-free tex-processor (renderer.latex converts LaTeX → an HTML string
+   → a raw node, then the same app suffix + tex-normalize as Org). runSync (not the async pipeline->ir) because
+   tex-processor is transform-only — unified-latex parses synchronously and no custom Parser is used. The
+   terminal has no DOM, so the GUI's MathJax post-pass never runs: math stays a `code.math-*` span (the GUI's
+   fallback), and the layout (tables, styling, lists) is already lowered by unified-latex."
+  [text base-dir]
+  (let [tree (.runSync ^js (pipeline/tex-processor (atom {:toc [] :assets #{}}) base-dir nil)
+                       (pipeline/latex-raw-tree (latex/latex->html text)))]
+    (js/Promise.resolve (ir-md/hast->ir tree))))
 
 (defn- log->ir
   "Log text → a :document of WPDA-segmented :record blocks (multi-line stack/JSON entries stay whole,
@@ -66,6 +92,12 @@
   (letfn [(done [ir sep] (js/Promise.resolve {:ir ir :toc (ir-toc/toc-of ir) :block-sep sep}))]
     (case kind
       "markdown" (-> (markdown->ir text (pipeline/dir-of path))
+                     (.then (fn [ir] {:ir ir :toc (ir-toc/toc-of ir) :block-sep "\n\n"})))
+      ;; Org is a semantic superset of GFM: same IR, same ANSI backend — only the parse prefix differs.
+      "org"      (-> (org->ir text (pipeline/dir-of path))
+                     (.then (fn [ir] {:ir ir :toc (ir-toc/toc-of ir) :block-sep "\n\n"})))
+      ;; LaTeX → unified-latex → the same common IR + ANSI backend as Markdown/Org.
+      "latex"    (-> (latex->ir text (pipeline/dir-of path))
                      (.then (fn [ir] {:ir ir :toc (ir-toc/toc-of ir) :block-sep "\n\n"})))
       ;; pdf → headless pdf.js text extraction → reflowable prose IR (paragraphs + anchored headings)
       "pdf"      (-> (tpdf/pdf->ir bytes)

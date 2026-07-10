@@ -7,14 +7,14 @@ title Close a tab — app-db tab removal, retained watcher/cache reconciliation
 autonumber "0:"
 
 actor User #white
-participant "tab item\n(× button)" as Tabs RENDERER_COLOR
-participant "re-frame\n:tab/close" as RF REFRAME_COLOR
-collections "app-db\n[:ui :tabs]" as DB APPDB_COLOR
-participant "nav/close" as Nav APPDB_COLOR
-database "DataScript\ncontent cache" as DS DATASCRIPT_COLOR
-participant "preload\nwindow.vv" as Vv IPC_COLOR
-participant "main.service" as Svc MAIN_COLOR
-participant "reagent UI" as UI RENDERER_COLOR
+participant "tab item\n(× button)" as Tabs RENDERER_TINT
+participant "re-frame\n:tab/close" as RF REFRAME_TINT
+collections "app-db\n[:ui :tabs]" as DB APPDB_TINT
+participant "nav/close" as Nav APPDB_TINT
+database "DataScript\ncontent cache" as DS DATASCRIPT_TINT
+participant "preload\nwindow.vv" as Vv IPC_TINT
+participant "main.service" as Svc MAIN_TINT
+participant "reagent UI" as UI RENDERER_TINT
 
 User -> Tabs : click ×\n(stopPropagation)
 Tabs -> RF : dispatch [:tab/close id]
@@ -37,11 +37,11 @@ UI -> UI : tab strip re-renders;\nwatermark if no tabs remain
 
 legend right
   |= Colour |= Concept |
-  | <#2D9574> | Renderer / UI |
-  | <#4F97D7> | re-frame |
-  | <#7590DB> | app-db tabs/history |
-  | <#A45BAD> | DataScript content cache |
-  | <#B1951D> | IPC seam |
-  | <#3A5BA0> | MAIN watchers |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db tabs/history |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN watchers |
 endlegend
 @enduml

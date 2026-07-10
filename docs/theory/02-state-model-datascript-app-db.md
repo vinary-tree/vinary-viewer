@@ -104,3 +104,11 @@ This keeps Back/Forward reliable without keeping abandoned content forever.
 - DataScript: <https://github.com/tonsky/datascript>
 - re-frame documentation: <https://day8.github.io/re-frame/>
 - ADR-0010: [../design-decisions/0010-bounded-content-retention-and-render-metadata.md](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)
+
+## 6. How one transaction reaches the right subscriptions
+
+A single DataScript transaction bumps `:ds/rev` in `app-db`, and only the subscriptions that read it recompute.
+
+![The :ds/rev bridge — one DataScript transaction makes the right subscriptions recompute](../diagrams/object-ds-rev-bridge.svg)
+
+*Diagram source: [`../diagrams/object-ds-rev-bridge.puml`](../diagrams/object-ds-rev-bridge.puml).*

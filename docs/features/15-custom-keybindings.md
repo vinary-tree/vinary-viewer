@@ -180,7 +180,7 @@ This round adds three user-facing surfaces on top of the engine above, plus the 
 
 ### 6.1 The keymap-set registry (`src/vinary/input/keymaps_registry.cljs`)
 
-Where the engine knew only *one* active keymap (one preset ⊕ one optional user delta), it now manages a
+Where the engine knew only *one* active keymap (one preset $`\oplus`$ one optional user delta), it now manages a
 **registry of named sets** over the app-db slice `[:ui :keymaps] = {:active :order :sets}` — mirroring the
 browser-tab model in `nav.cljs` (pure reads + transforms over app-db, plus one side-effecting bridge):
 
@@ -264,7 +264,7 @@ the instant its full length is typed, with no disambiguation timeout):
     else              : labels ← the first n strings of the product Σ × Σ     ⟨2-char labels⟩
 ```
 
-Two characters suffice for any realistic page because `|Σ|² = 196 ≥ n` once `n > |Σ| = 14`. The trade-off
+Two characters suffice for any realistic page because $`|\Sigma|^2 = 196 \geq n`$ once $`n > |\Sigma| = 14`$. The trade-off
 versus Vimium (which mixes 1- and 2-char labels and disambiguates with a short delay) is a few extra
 keystrokes on dense pages in exchange for **zero ambiguity** and no timing dependence — e.g. `f` then `s`
 then `a` follows the link labelled `SA` immediately.
@@ -323,3 +323,11 @@ DOI — a 1994 textbook and an open-source project — so the canonical ISBN / r
 2. P. Crowther et al. *Vimium — The Hacker's Browser.* Open-source browser extension.
    <https://github.com/philc/vimium> — the model for the `f` **link-hint** interaction and the `h`/`j`/`k`/`l`
    + `/` keys mirrored by the `vim` keymap.
+
+## 9. The keybinding subsystem
+
+A keydown becomes a canonical chord, the resolver walks the active keymap trie, and the resulting command runs from the registry.
+
+![Custom keybindings — command registry, palette, resolver, editor, persistence](../diagrams/component-keybindings-inprogress.svg)
+
+*Diagram source: [`../diagrams/component-keybindings-inprogress.puml`](../diagrams/component-keybindings-inprogress.puml).*

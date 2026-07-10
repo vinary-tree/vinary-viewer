@@ -14,13 +14,13 @@ title Bounded preview streaming - first page, adjacent page, nested archive
 autonumber "0:"
 
 actor User #white
-participant "reagent UI\ncontent-view" as UI RENDERER_COLOR
-participant "preload\nwindow.vv" as Vv IPC_COLOR
-participant "main.service\nipcMain" as Svc MAIN_COLOR
-participant "content_service.js\nparser/streamer" as CS MAIN_COLOR
-participant "Archive reader\nyauzl/tar-stream" as AR FS_COLOR
-participant "Filesystem\nReadable stream" as FS FS_COLOR
-participant "DataScript\ncontent cache" as DS DATASCRIPT_COLOR
+participant "reagent UI\ncontent-view" as UI RENDERER_TINT
+participant "preload\nwindow.vv" as Vv IPC_TINT
+participant "main.service\nipcMain" as Svc MAIN_TINT
+participant "content_service.js\nparser/streamer" as CS MAIN_TINT
+participant "Archive reader\nyauzl/tar-stream" as AR FS_TINT
+participant "Filesystem\nReadable stream" as FS FS_TINT
+participant "DataScript\ncontent cache" as DS DATASCRIPT_TINT
 
 == first open ==
 User -> UI : open `/var/log/app.log`\nor `bundle.zip`
@@ -82,10 +82,10 @@ Vv -> UI : render final member
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node IO |
-  | <#2D9574> | Renderer / UI |
-  | <#B1951D> | IPC seam |
-  | <#A45BAD> | DataScript content cache |
-  | <#9F8766> | filesystem / archive stream |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node IO |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem / archive stream |
 endlegend
 @enduml

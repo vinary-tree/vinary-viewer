@@ -15,6 +15,9 @@
    post-sanitize (the one MathJax vector the HTML sanitizer can't see)."
   (:require [clojure.string :as str]
             [goog.string :as gstr]
+            ;; the single sanitize schema — for `tex-attempt-class`, the marker the Org frontend stamps on a
+            ;; `#+BEGIN_EXPORT latex` block and the schema deliberately preserves (see render-tex-blocks).
+            [vinary.ir.backend.sanitize :as sanitize]
             ;; MathJax 4 composed from source — @mathjax/src/cjs (CommonJS; shadow-cljs bundles it for BOTH :browser
             ;; and :node-script). As in v3 we build the MathDocument directly with handler.create (NOT js/mathjax.js)
             ;; and import only the SAFE TeX package configs — the dangerous html(\\href)/require/autoload configs are
@@ -134,7 +137,18 @@
                                  ;; wrapper: that would break \left\llbracket, which needs a bare delimiter token.
                                  :macros #js {"llbracket" "⟦"    ; ⟦
                                               "rrbracket" "⟧"}}) ; ⟧
-            svg-output (new (.-SVG svg-mod) #js {:fontCache "none" :fontData (new (.-MathJaxModernFont modern-font))})
+            ;; linebreaks.inline MUST be false. MathJax 4 turned automatic INLINE line-breaking on by default,
+            ;; and its break opportunities are exactly `mo` (operators) and `mspace` (spacing). We typeset
+            ;; off-DOM through liteAdaptor, so MathJax has no container to measure and takes EVERY break: it
+            ;; emits one <svg> per "line", and the first one carries ALL the ink inside a degenerate viewBox
+            ;; (`\implies` → three siblings, the first 16 units wide holding the whole ⟹ path). The browser's
+            ;; `svg:not(:root){overflow:hidden}` then clipped it to an invisible blank gap of about the right
+            ;; width. Breaking is meaningless here anyway: each expression is rendered once, cached, and injected
+            ;; as a static SVG string into a variable-width column it can never measure or reflow into.
+            ;; Display math is unaffected either way (it is governed by displayOverflow, default "overflow").
+            svg-output (new (.-SVG svg-mod) #js {:fontCache "none"
+                                                 :linebreaks #js {:inline false}
+                                                 :fontData (new (.-MathJaxModernFont modern-font))})
             _          (.loadDynamicFilesSync ^js (.-font svg-output)) ; install all 26 ranges up front (needs the sync flag)
             ;; handler.create(document, options) builds the MathDocument (what mathjax.document would do), with
             ;; no dependency on the singleton in js/mathjax.js.
@@ -167,6 +181,49 @@
    building the engine is memoised, so this is cheap after the first call."
   []
   (.. ^js (:math-doc (mj-engine!)) -outputJax -font -constructor -NAME))
+
+;; ── MathJax's own stylesheet ────────────────────────────────────────────────────────────────────────────────
+;;
+;; MathJax normally inserts this itself when it typesets a live document. We drive it through `liteAdaptor` and
+;; serialize with `.outerHTML`, so it never touches a real <head> and the CSS never arrives. Two of its rules
+;; are load-bearing:
+;;
+;;   mjx-container[jax="SVG"] > svg        { overflow: visible; }   ← without it the UA rule
+;;                                                                    `svg:not(:root){overflow:hidden}` clips any
+;;                                                                    ink outside the viewBox. Correct MathJax
+;;                                                                    output spills a few percent (italic
+;;                                                                    correction, accents): even `x^2` loses the
+;;                                                                    tail of its exponent.
+;;   mjx-container[jax="SVG"] path[data-c] { stroke-width: 3; }     ← the emitted root <g> carries the
+;;                                                                    presentation attribute stroke-width="0";
+;;                                                                    CSS beats presentation attributes, so this
+;;                                                                    is how MathJax fattens its glyph outlines.
+;;
+;; It also carries the `mjx-assistive-mml` clip rule (because AssistiveMmlHandler is registered on our handler),
+;; which keeps the screen-reader MathML in the DOM but out of the picture and out of copied text. app.css used to
+;; hand-copy that one rule; injecting the real sheet makes that copy redundant and undriftable.
+
+(def ^:private stylesheet-id "vv-mathjax-style")
+
+(defn engine-stylesheet
+  "MathJax's own CSS for this engine, as a string. DOM-free — safe to call from :node-test / vv-cli / vv-tui."
+  []
+  (let [{:keys [^js adaptor ^js math-doc]} (mj-engine!)]
+    (.textContent adaptor (.styleSheet ^js (.-outputJax math-doc) math-doc))))
+
+(defn install-stylesheet!
+  "Insert `engine-stylesheet` into the live document once, as <style id=\"vv-mathjax-style\"> appended to <head>.
+   Idempotent. Browser-only: guarded on js/document so requiring this namespace stays safe in the DOM-free Node
+   builds (:test, :cli, :tui all pull it in transitively through renderer.markdown-pipeline). Appended AFTER
+   app.css, but every app.css math rule is more specific than MathJax's, so the app still wins each tie."
+  []
+  (when (and (exists? js/document)
+             (nil? (.getElementById js/document stylesheet-id)))
+    (let [^js style (.createElement js/document "style")]
+      (set! (.-id style) stylesheet-id)
+      (set! (.-textContent style) (engine-stylesheet))
+      (.appendChild (.-head js/document) style)
+      style)))
 
 (defn strip-math-fence
   "Clean the TeX of a math node produced from GitHub's backtick-wrapped inline form.
@@ -228,6 +285,70 @@
               (set! (.-textContent wrapper) (str "MathJax error: " (.-message e)))
               (.add (.-classList wrapper) "vv-math-error")
               (.replaceWith target wrapper)))))
+      (js/Promise.resolve (.-innerHTML (.-body doc))))))
+
+;; ── Org `#+BEGIN_EXPORT latex` blocks: attempt MathJax, fall back to a highlighted code block ────────────────
+;;
+;; MathJax does NOT throw on bad TeX here: the engine loads the `noerrors` + `noundefined` packages (see
+;; safe-packages), so a bad macro or environment renders an error node instead of raising. The reliable failure
+;; signal is therefore the error node itself, not an exception — `\begin{center}` yields
+;; `data-mjx-error="Unknown environment 'center'"`. We check for both, plus a real throw (a font "retry").
+
+(defn tex-error?
+  "Did MathJax fail to typeset? True when the rendered container carries an error node. `render-tex` returns
+   normally in that case (noerrors/noundefined are loaded), so this — not try/catch — is the fallback signal."
+  [html]
+  (boolean (re-find #"data-mjx-error|<merror" (or html ""))))
+
+;; MathJax typesets MATH, not document markup. An export block full of \begin{center} / tabular / itemize is
+;; not math; worse, a block of prose built only from math-legal macros (`\textbf{Hi} \\ World`) typesets
+;; "successfully" into garbage that no error check can catch. So attempt a conversion only when the block
+;; positively looks like math AND carries no document-structure macro.
+(def ^:private math-env-re
+  #"\\begin\{(equation|align|gather|multline|split|aligned|alignat|array|[bBpvV]?matrix|cases|eqnarray|CD)\*?\}|\\\[|\$\$|\\\(")
+
+(def ^:private non-math-re
+  #"\\begin\{(center|flushleft|flushright|itemize|enumerate|description|tabular\w*|longtable|figure|table|minipage|verbatim|quote|quotation|abstract|document)\}|\\(includegraphics|usepackage|section|subsection|maketitle|tableofcontents|newpage)\b")
+
+(defn tex-block-math?
+  "Should this `#+BEGIN_EXPORT latex` body even be ATTEMPTED as math? See math-env-re / non-math-re."
+  [source]
+  (let [source (or source "")]
+    (and (boolean (re-find math-env-re source))
+         (not (re-find non-math-re source)))))
+
+(defn render-tex-blocks
+  "Replace every `code.vv-tex-attempt` (an Org `#+BEGIN_EXPORT latex` block) with MathJax SVG when it typesets
+   cleanly; otherwise drop the marker class and LEAVE the code block, so the later tree-sitter pass highlights
+   it as `language-latex`. Must run post-sanitize (MathJax's <svg> is not in the allowlist) and BEFORE the
+   syntax pass. Returns Promise<html> so it composes in `apply-posts`.
+
+   Fast-pathed on a substring test: Markdown/office/PDF documents never carry the marker, so they never pay for
+   a DOMParser round-trip — which matters because the streaming sink runs `apply-posts` once per block. In
+   :node-test / vv-cli / vv-tui there is no DOMParser, so the block simply stays a highlighted code block."
+  [html]
+  (if-not (and (exists? js/DOMParser)
+               (str/includes? (or html "") sanitize/tex-attempt-class))
+    (js/Promise.resolve html)
+    (let [parser    (js/DOMParser.)
+          doc       (.parseFromString parser (or html "") "text/html")
+          node-list (.querySelectorAll doc (str "code." sanitize/tex-attempt-class))]
+      (dotimes [i (.-length node-list)]
+        (let [^js code  (.item node-list i)
+              source    (str/trim (.-textContent code))
+              rendered  (when (tex-block-math? source)
+                          (try (let [svg (render-tex source true)]
+                                 (when-not (tex-error? svg) svg))
+                               (catch :default _ nil)))]
+          (if rendered
+            (let [wrapper (.createElement doc "div")
+                  target  (or (.-parentElement code) code)]   ; the <pre>
+              (.add (.-classList wrapper) "vv-math-display")
+              ;; keep the LaTeX recoverable by the copy paths, exactly as render-html-math does
+              (.setAttribute wrapper "data-tex" source)
+              (set! (.-innerHTML wrapper) rendered)
+              (.replaceWith target wrapper))
+            (.remove (.-classList code) sanitize/tex-attempt-class))))
       (js/Promise.resolve (.-innerHTML (.-body doc))))))
 
 (defn error-html [message source]

@@ -9,18 +9,18 @@
 title Document streaming — one batch's lifecycle (bounded memory end-to-end)
 
 box "Disk" #EFEAD9
-  participant "File\n(large log)" as FS #9F8766
+  participant "File\n(large log)" as FS FS_TINT
 end box
 box "Main (Node)" #E4EAF4
-  participant "content_service\nstream session" as CS #3A5BA0
+  participant "content_service\nstream session" as CS MAIN_TINT
 end box
 box "Renderer" #E1F0EA
-  participant "transport\n(pull client)" as TR #2D9574
-  participant "scheduler\n(parser + sink)" as SC #2D9574
+  participant "transport\n(pull client)" as TR RENDERER_TINT
+  participant "scheduler\n(parser + sink)" as SC RENDERER_TINT
 end box
 box "Stores / DOM" #F0E6F2
-  participant "DataScript\n+ re-frame" as DS #A45BAD
-  participant ".vv-content\nDOM" as DOM #7590DB
+  participant "DataScript\n+ re-frame" as DS DATASCRIPT_TINT
+  participant ".vv-content\nDOM" as DOM APPDB_TINT
 end box
 
 == open ==
@@ -34,11 +34,11 @@ note over CS: session held in a Map\n(idle-GC after 30 s)
 
 == pull loop (credit ~1) ==
 loop until :done
-  SC -> SC : requestIdleCallback tick\n(≤ 8 ms budget, {timeout 100})
+  SC -> SC : requestIdleCallback tick\n(<latex>\leq</latex> 8 ms budget, {timeout 100})
   SC -> TR : pull!(session)
   TR -> CS : invoke vv:stream-pull {sessionId}
   activate CS
-  CS -> FS : resume → read ≤ 1000 lines
+  CS -> FS : resume → read <latex>\leq</latex> 1000 lines
   CS -> CS : **pause** at the batch cap\n(readline.pause — backpressure)
   CS --> TR : {seq, lines, done, progress}
   deactivate CS

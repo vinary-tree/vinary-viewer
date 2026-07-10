@@ -117,3 +117,11 @@ context remains in app-db.
 - [Theory: live-refresh spine](../theory/03-live-refresh-spine.md)
 
 ![Bounded content retention and render metadata](../diagrams/component-content-retention.svg)
+
+## 7. One full round trip
+
+The complete round trip from an editor save to a painted DOM. The invariant to watch: the content cache changes, while UI and navigation state are untouched.
+
+![Live refresh — editor save through to painted DOM, one full round trip](../diagrams/seq-live-refresh.svg)
+
+*Diagram source: [`../diagrams/seq-live-refresh.puml`](../diagrams/seq-live-refresh.puml).*

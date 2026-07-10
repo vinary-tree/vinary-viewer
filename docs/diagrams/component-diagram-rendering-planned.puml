@@ -11,21 +11,21 @@
 
 title Diagram rendering (Forthcoming / «planned») — new Strategy entries: source → SVG
 
-rectangle "content-view — Renderer Registry [Strategy]\n(views/content-view, keyed by :doc/kind)" as REG #2D9574 {
-  component "markdown\n(unified/remark — existing)" as MD #67B11D
-  component "image\n(<img file://> — existing)" as IMG #2D9574
-  component "text\n(<pre> — existing)" as TXT #2D9574
+rectangle "content-view — Renderer Registry [Strategy]\n(views/content-view, keyed by :doc/kind)" as REG RENDERER_FILL {
+  component "markdown\n(unified/remark — existing)" as MD MARKDOWN_TINT
+  component "image\n(<img file://> — existing)" as IMG RENDERER_TINT
+  component "text\n(<pre> — existing)" as TXT RENDERER_TINT
   component "diagram-svg" as DG <<planned>>
 }
 
-rectangle "Electron MAIN — diagram service" as MAIN #3A5BA0 {
+rectangle "Electron MAIN — diagram service" as MAIN MAIN_FILL {
   component "d2\n→ SVG" as D2 <<planned>>
   component "plantuml\n→ SVG" as PUML <<planned>>
   component "mermaid\n→ SVG" as MER <<planned>>
-  component "chokidar watcher\n(existing — reused)" as WATCH #9F8766
+  component "chokidar watcher\n(existing — reused)" as WATCH FS_TINT
 }
 
-rectangle "preload (contextBridge seam)" as PRE #B1951D {
+rectangle "preload (contextBridge seam)" as PRE IPC_FILL {
   component "window.vv.renderDiagram(src, engine)\n→ Promise<svg string>" as BRIDGE <<planned>>
 }
 
@@ -46,11 +46,11 @@ end note
 
 legend right
   |= color/style |= concept |
-  | <#67B11D> | markdown / unified pipeline (existing) |
-  | <#2D9574> | renderer Strategy entries (existing) |
-  | <#3A5BA0> | MAIN process render engines |
-  | <#B1951D> | IPC seam (contextBridge) |
-  | <#9F8766> | filesystem watcher (reused) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| markdown / unified pipeline (existing) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer Strategy entries (existing) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN process render engines |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (contextBridge) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem watcher (reused) |
   | dashed grey <<planned>> | NOT yet built (Forthcoming) |
 endlegend
 @enduml

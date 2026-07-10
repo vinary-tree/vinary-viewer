@@ -13,15 +13,15 @@ rectangle "registry atom\n(name → grammar config)" as REG <<planned>> {
   card "{ :rholang {…} :metta {…}\n  :markdown {…} … }\nvalidated by clojure.spec\n(:grammar/name :wasm :highlights\n :extensions :scope)" as ATOMBODY
 }
 
-rectangle "bundled grammars\n(compile-time)" as BUNDLED #9F8766 {
+rectangle "bundled grammars\n(compile-time)" as BUNDLED FS_FILL {
   component "embed-base64\n<name>.wasm + highlights.scm\n→ inlined into the build\n(legacy plan)" as EMBED <<planned>>
 }
 
-rectangle "user grammars\n~/.config/vinary-viewer/grammars/" as USER #9F8766 {
+rectangle "user grammars\n~/.config/vinary-viewer/grammars/" as USER FS_FILL {
   component "<name>.wasm\n+ highlights.scm\n+ config map (.edn)\n(legacy plan)" as USERFILES <<planned>>
 }
 
-rectangle "consumer" as CONS #2D9574 {
+rectangle "consumer" as CONS RENDERER_FILL {
   component "source-view\nresolve grammar by\nfile extension / scope\n(legacy plan)" as RESOLVE <<planned>>
 }
 
@@ -37,9 +37,9 @@ end note
 
 legend right
   |= color/style |= concept |
-  | <#9F8766> | grammar source (bundled asset / user config dir) |
-  | <#A45BAD> | registry = single stateful owner (the atom) |
-  | <#2D9574> | renderer consumer (source-view) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| grammar source (bundled asset / user config dir) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| registry = single stateful owner (the atom) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer consumer (source-view) |
   | dashed grey <<planned>> | superseded legacy planned component |
 endlegend
 @enduml

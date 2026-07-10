@@ -15,15 +15,15 @@ title Open a file — `vv README.md` → first render
 autonumber "0:"
 
 actor User #white
-participant "main.core" as Core MAIN_COLOR
-participant "main.service" as Svc MAIN_COLOR
-participant "Filesystem\n+ chokidar" as FS FS_COLOR
-participant "preload `window.vv`" as Vv IPC_COLOR
-participant "renderer.core\n`bridge!`" as RCore RENDERER_COLOR
-participant "re-frame\nevents/fx" as RF REFRAME_COLOR
-participant "DataScript\nconn" as DS DATASCRIPT_COLOR
-participant "unified\npipeline" as MD MARKDOWN_COLOR
-participant "reagent UI" as UI RENDERER_COLOR
+participant "main.core" as Core MAIN_TINT
+participant "main.service" as Svc MAIN_TINT
+participant "Filesystem\n+ chokidar" as FS FS_TINT
+participant "preload `window.vv`" as Vv IPC_TINT
+participant "renderer.core\n`bridge!`" as RCore RENDERER_TINT
+participant "re-frame\nevents/fx" as RF REFRAME_TINT
+participant "DataScript\nconn" as DS DATASCRIPT_TINT
+participant "unified\npipeline" as MD MARKDOWN_TINT
+participant "reagent UI" as UI RENDERER_TINT
 
 == boot ==
 User -> Core : `vv README.md`
@@ -73,12 +73,12 @@ deactivate Svc
 
 legend right
   |= Colour |= Concept |
-  | <#3A5BA0> | MAIN / Node IO |
-  | <#2D9574> | Renderer / UI |
-  | <#B1951D> | IPC seam |
-  | <#A45BAD> | DataScript content cache |
-  | <#4F97D7> | re-frame |
-  | <#67B11D> | markdown pipeline |
-  | <#9F8766> | filesystem / chokidar |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node IO |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame |
+  |<#67B11D>&#160;&#160;&#160;&#160;| markdown pipeline |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem / chokidar |
 endlegend
 @enduml

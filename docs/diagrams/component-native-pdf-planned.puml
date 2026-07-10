@@ -8,19 +8,19 @@
 
 title Native PDF (superseded legacy design) — BrowserView before WebContentsView
 
-rectangle "Electron MAIN process" as MAIN #3A5BA0 {
-  component "main.service\n(existing)" as SVC #3A5BA0
+rectangle "Electron MAIN process" as MAIN MAIN_FILL {
+  component "main.service\n(existing)" as SVC MAIN_TINT
   component "PdfService\n(legacy plan)" as PDF <<planned>>
   component "BrowserView\nlegacy design\n(Chromium PDF viewer)" as BV <<planned>>
-  component "chokidar watcher\n(existing — reused)" as WATCH #9F8766
+  component "chokidar watcher\n(existing — reused)" as WATCH FS_TINT
 }
 
-rectangle "preload (contextBridge seam)" as PRE #B1951D {
+rectangle "preload (contextBridge seam)" as PRE IPC_FILL {
   component "window.vv.pdfBounds(rect)\nwindow.vv.onPdfReload(cb)\n(legacy plan)" as BRIDGE <<planned>>
 }
 
-rectangle "Electron RENDERER (Chromium)" as REND #2D9574 {
-  component "content-view\nStrategy (existing)" as CV #2D9574
+rectangle "Electron RENDERER (Chromium)" as REND RENDERER_FILL {
+  component "content-view\nStrategy (existing)" as CV RENDERER_TINT
   component "pdf placeholder div\n(measured each layout)\n(legacy plan)" as PH <<planned>>
 }
 
@@ -39,10 +39,10 @@ end note
 
 legend right
   |= color/style |= concept |
-  | <#3A5BA0> | MAIN process (Node IO) — solid = existing |
-  | <#B1951D> | IPC seam (contextBridge) — all IPC arrows amber |
-  | <#2D9574> | renderer (Chromium UI) — solid = existing |
-  | <#9F8766> | filesystem watcher (reused) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN process (Node IO) — solid = existing |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (contextBridge) — all IPC arrows amber |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer (Chromium UI) — solid = existing |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem watcher (reused) |
   | dashed grey <<planned>> | superseded legacy planned component |
 endlegend
 @enduml

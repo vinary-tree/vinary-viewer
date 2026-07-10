@@ -311,6 +311,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   border-radius: 3px; padding: 1px 9px; margin-right: 4px; cursor: pointer; font-size: 14px; line-height: 1.4; }
 .vv-nav-btn:hover:not(:disabled) { color: var(--vv-head1); background: var(--vv-bg-code); }
 .vv-nav-btn:disabled { opacity: 0.4; cursor: default; }
+/* segmented switch: Preview|Source and Doc|PDF (view-switch-toolbar) */
+.vv-seg { display: inline-flex; margin-left: 6px; border: 1px solid var(--vv-border); border-radius: 3px;
+  overflow: hidden; flex: 0 0 auto; }
+.vv-seg-btn { background: var(--vv-bg2); color: var(--vv-fg); border: none; border-left: 1px solid var(--vv-border);
+  padding: 1px 8px; cursor: pointer; font-size: 12px; line-height: 1.5; font-family: inherit; }
+.vv-seg-btn:first-child { border-left: none; }
+.vv-seg-btn:hover:not(.vv-seg-active) { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-seg-btn.vv-seg-active { background: var(--vv-accent, var(--vv-head1)); color: var(--vv-bg1); cursor: default; }
 .vv-theme-select { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
   border-radius: 3px; padding: 2px 6px; font-size: 12px; font-family: inherit; outline: none; }
 
@@ -522,6 +530,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   display: block; margin-left: auto; margin-right: auto; }
 .markdown-body > a.vv-figure-link > img:not([src^="emoji"]) {
   display: block; margin-left: auto; margin-right: auto; }
+/* Org TODO keywords: uniorg emits <span class="todo TODO"> / <span class="done DONE"> on the headline; the
+   sanitize schema keeps the generic todo/done class (never the keyword-specific one) so this can style them. */
+.markdown-body span.todo { color: var(--vv-error); font-weight: 600; }
+.markdown-body span.done { color: var(--vv-comment); font-weight: 600; }
+
+/* MathJax ships its own stylesheet, and two of its rules are load-bearing: `overflow: visible` on the rendered
+   <svg> (without it the UA's `svg:not(:root){overflow:hidden}` clips every glyph reaching past the viewBox) and
+   `stroke-width: 3` on glyph paths. It also carries the clip rule that hides the <mjx-assistive-mml> screen-
+   reader MathML, which Chromium would otherwise paint as a text-size duplicate under the SVG. We typeset
+   off-DOM through liteAdaptor, so MathJax never inserts any of it — vinary.renderer.math/install-stylesheet!
+   does, at startup. Do NOT hand-copy MathJax's rules into this file: they drift the next time @mathjax/src is
+   bumped (this block used to carry a stale copy of the assistive-MathML rule).
+
+   The app's own math rules follow. The injected <style> is appended after app.css, but each rule here is more
+   specific than MathJax's counterpart, so the app still wins every tie. The one deliberate exception is
+   MathJax's `mjx-container[display] { padding: .3em 2px }`: .vv-math-display sets `overflow-x: auto`, which
+   makes overflow-y a clipping scroll container, and that padding is exactly what reserves room for the ink that
+   `overflow: visible` now paints. */
 .markdown-body .vv-math-inline mjx-container { margin: 0 0.12em; }
 .markdown-body .vv-math-display { display: block; max-width: 100%; overflow-x: auto; margin: 1em 0; text-align: center; }
 .markdown-body .vv-math-display mjx-container { margin: 0 auto; }
@@ -529,17 +555,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    selection intersects an equation, vinary.renderer.core toggles .vv-math-selected — paint it with the same
    selection colour so math highlights together with the surrounding prose (see math-selection-highlight!). */
 .markdown-body :is(.vv-math-inline, .vv-math-display).vv-math-selected { background: var(--vv-highlight); border-radius: 2px; }
-/* MathJax's tex2svg emits <mjx-assistive-mml><math> next to the SVG for screen readers, but because we
-   typeset to an HTML string (startup.typeset=false) MathJax never inserts its own hiding stylesheet — so
-   Chromium's native MathML paints the <math> as a text-size duplicate under the SVG. Re-add MathJax's own
-   clip rule verbatim: keeps the MathML in the DOM for a11y, hides it visually, and (user-select:none) keeps
-   it out of copied text. */
-mjx-container mjx-assistive-mml {
-  position: absolute !important; top: 0; left: 0;
-  clip: rect(1px, 1px, 1px, 1px); padding: 1px 0 0 0 !important;
-  border: 0 !important; display: block !important; width: auto !important;
-  overflow: hidden !important; user-select: none; }
-mjx-container mjx-assistive-mml[display="block"] { width: 100% !important; }
 .markdown-body .vv-mermaid { max-width: 100%; overflow-x: auto; margin: 16px 0; text-align: center; }
 .markdown-body .vv-mermaid svg { max-width: 100%; height: auto; }
 .vv-mermaid-view { padding: 24px; overflow: auto; }

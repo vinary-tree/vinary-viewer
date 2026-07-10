@@ -162,6 +162,23 @@
   ([db]    (toggle-source db (active-id db)))
   ([db id] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (update % :view-source? not) %) ts)))))
 
+;; ---- Document↔PDF representation (only meaningful when the active doc has a collocated sibling PDF) ----
+;; A tab's :representation is the user's EXPLICIT choice (:document / :pdf); nil means "follow the configured
+;; collocated-default preference". The effective representation is resolved in the :ui/active-representation sub,
+;; which also accounts for whether a sibling PDF actually exists.
+(defn representation [db] (:representation (active-tab db)))
+(defn set-representation
+  ([db rep]    (set-representation db (active-id db) rep))
+  ([db id rep] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (assoc % :representation rep) %) ts)))))
+
+(defn effective-representation
+  "Resolve which representation to show. Only :pdf when a sibling PDF exists AND either the tab explicitly chose
+   it (`tab-rep`) or the persisted `pref-default` is :pdf; otherwise :document. Pure so the sub + tests share it."
+  [tab-rep has-sibling? pref-default]
+  (if has-sibling?
+    (or tab-rep (if (= pref-default :document) :document :pdf))
+    :document))
+
 (defn nth-id
   "The id of the tab `dir` steps from the active one (wrapping), or nil if no tabs."
   [db dir]

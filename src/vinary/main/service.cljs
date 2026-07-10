@@ -88,6 +88,16 @@
   (try (mapv #(entry->map dir %) (.readdirSync fs dir #js {:withFileTypes true}))
        (catch :default _ [])))
 
+(defn- sibling-pdf
+  "The same-directory, same-stem `.pdf` companion of `p` if it exists on disk, else nil. Lets a previewable
+   document (LaTeX/Org/Markdown) collocated with an exported PDF offer a Document↔PDF representation switch —
+   computed main-side because the renderer has no filesystem access. The pure candidate-path arithmetic lives in
+   file-kind/pdf-sibling-path (node-tested); here we only add the filesystem existence check."
+  [p]
+  (when-let [pdf (file-kind/pdf-sibling-path p)]
+    (when (try (.isFile (.statSync fs pdf)) (catch :default _ false))
+      pdf)))
+
 (defn- send-parsed-content! [^js wc path]
   (-> (.openUri content-service path)
       (.then (fn [payload] (.send wc "vv:content" payload)))
@@ -128,10 +138,19 @@
              (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp})))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
-      ;; everything else (source, markdown, diagram, …) — read as UTF-8 text and send with its kind.
+      ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
+      ;; :meta {:size} is REQUIRED, not decorative: stream-flag/enabled? gates on it, so without it a large
+      ;; markdown/org document silently never streams (it compares 0 against the 256 KiB threshold). The
+      ;; :parsed route already supplies meta; this one used to omit it.
       :text
-      (try (let [text (.readFileSync fs path "utf8")]
-             (.send wc "vv:content" (clj->js {:path path :kind kind :text text :stamp stamp})))
+      (try (let [text (.readFileSync fs path "utf8")
+                 size (try (.-size (.statSync fs path)) (catch :default _ nil))
+                 ;; a previewable doc collocated with a same-stem exported PDF advertises it, so the renderer can
+                 ;; offer a Document↔PDF switch (kind-agnostic: LaTeX papers AND Org/Markdown invoices).
+                 pdf  (when (contains? #{"latex" "org" "markdown"} kind) (sibling-pdf path))]
+             (.send wc "vv:content" (clj->js (cond-> {:path path :kind kind :text text :stamp stamp}
+                                               size (assoc :meta {:size size})
+                                               pdf  (assoc :pdfSibling pdf)))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)})))))))
 
 (defn- send-open-content! [path]
@@ -269,6 +288,9 @@
   (.handle ipcMain "vv:stream-pull"  (fn [_e req] (.streamPull  content-service req)))
   (.handle ipcMain "vv:stream-close" (fn [_e req] (.streamClose content-service req)))
   (.handle ipcMain "vv:complete-path" (fn [_e raw] (clj->js (complete raw))))
+  ;; load a collocated sibling PDF's bytes into the renderer's pdf-cache WITHOUT opening a tab (the Document↔PDF
+  ;; representation switch renders the sibling in-place). Returns the Buffer, or nil if unreadable.
+  (.handle ipcMain "vv:load-pdf-bytes" (fn [_e p] (try (.readFileSync fs p) (catch :default _ nil))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]

@@ -346,6 +346,10 @@
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (bridge!)
   (copy-shortcuts!)
+  ;; MathJax typesets off-DOM (liteAdaptor) and we inject the SVG as a string, so MathJax never inserts its own
+  ;; stylesheet — without it the UA's `svg:not(:root){overflow:hidden}` clips every glyph that reaches past the
+  ;; viewBox. Install it before the first paint. Costs one memoised engine build (~16 ms).
+  (math/install-stylesheet!)
   (math-selection-highlight!)
   (keybindings!)
   (menubar/install-access-keys!)

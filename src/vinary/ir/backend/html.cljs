@@ -6,9 +6,18 @@
    :attrs (verbatim for the markdown front-end ⇒ exact) with a kind→tag fallback for pure front-ends
    (tables/logs) that carry no original tag. DOM-free (unified + rehype-stringify are pure); the
    math/mermaid/syntax post-passes stay with the caller so they apply identically to the legacy path."
-  (:require ["unified" :refer [unified]]
+  (:require [clojure.string :as str]
+            ["unified" :refer [unified]]
             ["rehype-stringify$default" :as rehype-stringify]
             [vinary.ir.node :as node]))
+
+(defn blank?
+  "Did lowering produce NOTHING to preview? A frontend can legitimately render an empty document — an Org file
+   whose entire body is a `#+BEGIN_EXPORT latex` block used to lower to \"\" — and `\"\"` is TRUTHY in
+   ClojureScript, so a naive `(:doc/html doc)` guard mounts an empty body and shows a silent blank pane with no
+   error. Callers must test this instead of testing the string for truthiness."
+  [html]
+  (str/blank? html))
 
 (defn- kind->tag
   "Fallback HAST tag for an IR node whose front-end supplied no :meta :tag (pure front-ends)."

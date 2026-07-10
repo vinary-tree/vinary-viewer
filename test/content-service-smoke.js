@@ -118,6 +118,19 @@ async function main() {
     assert.strictEqual(logPage.index, 1);
     assert.ok(logPage.lines.length > 0);
 
+    // Org (.org). content_service is the CLJS file-kind classifier's JavaScript twin; it once had no org arm,
+    // so `.org` classified as 'text' and vv-cli / vv-tui rendered Org as highlighted source instead of
+    // rendering it through uniorg. It also let an Org table trip the delimited-CSV content sniff.
+    assert.strictEqual(content.classifyName('notes.org'), 'org', '.org classifies as its own kind');
+    assert.strictEqual(content.classifyName('NOTES.ORG'), 'org', '.org classification is case-insensitive');
+    const orgPath = path.join(tmp, 'tables.org');
+    fs.writeFileSync(orgPath, '#+TITLE: Tables\n* Heading\n| a | b |\n|---+---|\n| 1 | 2 |\n');
+    const org = await content.openUri(orgPath);
+    assert.strictEqual(org.kind, 'org', 'an Org file with a pipe table is NOT sniffed as a delimited table');
+    assert.ok(/#\+TITLE/.test(org.text), 'org payload carries the raw text for the uniorg pipeline');
+    assert.strictEqual(org.sourceable, true, 'org has a source view');
+    assert.ok(org.meta && typeof org.meta.size === 'number', 'org payload carries :size (the streaming gate)');
+
     const gzLogPath = path.join(tmp, 'app.log.gz');
     fs.writeFileSync(gzLogPath, zlib.gzipSync('2026-06-29T10:00:00Z WARN compressed\n'.repeat(3)));
     const gzLog = await content.openUri(gzLogPath);
@@ -166,6 +179,7 @@ async function main() {
     const bundlePath = path.join(tmp, 'bundle.tar');
     const bundle = await tarBuffer([
       { name: 'logs/app.log', body: Buffer.from('2026-06-29T10:00:00Z ERROR failed\n') },
+      { name: 'notes.org', body: Buffer.from('#+TITLE: Archived\n* Head\n| a | b |\n|---+---|\n| 1 | 2 |\n') },
       { name: 'nested.tar', body: nested }
     ]);
     fs.writeFileSync(bundlePath, bundle);
@@ -181,6 +195,14 @@ async function main() {
     const archivedLog = await content.openUri(content.archiveUri(bundlePath, ['logs/app.log']));
     assert.strictEqual(archivedLog.kind, 'log');
     assert.ok(archivedLog.text.includes('ERROR failed'));
+
+    // an .org nested in an archive reaches the renderer as kind "org" (→ :org/render), exactly like a nested
+    // .md reaches it as "markdown" — bufferToPayload classifies archive entries with the same classifyName that
+    // once had no org arm. Its pipe table must not be sniffed as a delimited CSV.
+    const archivedOrg = await content.openUri(content.archiveUri(bundlePath, ['notes.org']));
+    assert.strictEqual(archivedOrg.kind, 'org', 'an .org inside an archive is kind "org", not "text"/"table"');
+    assert.ok(archivedOrg.text.includes('#+TITLE'), 'the nested org entry carries its raw text for uniorg');
+    assert.strictEqual(archivedOrg.sourceable, true, 'a nested org entry has a source view');
 
     const nestedListing = await content.openUri(content.archiveUri(bundlePath, ['nested.tar']));
     assert.strictEqual(nestedListing.kind, 'archive');

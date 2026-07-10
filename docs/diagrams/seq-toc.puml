@@ -6,15 +6,15 @@ title Scroll-spy TOC — render metadata, cached offsets, binary-search spy
 
 autonumber
 
-participant "markdown render\nHAST traversal" as MD #67B11D
-participant "DataScript\n:doc/toc + :doc/html" as DS #A45BAD
-participant ".markdown-body\nDOM" as BODY #2D9574
-participant "figures/scale-figures!" as FIG #2D9574
-participant "toc/refresh-offsets!" as OFF #2D9574
-participant ".vv-content\nscroll container" as CONTENT #2D9574
-participant "toc/spy!" as SPY #2D9574
-participant "re-frame" as RF #4F97D7
-participant "Contents panel" as PANEL #2D9574
+participant "markdown render\nHAST traversal" as MD MARKDOWN_TINT
+participant "DataScript\n:doc/toc + :doc/html" as DS DATASCRIPT_TINT
+participant ".markdown-body\nDOM" as BODY RENDERER_TINT
+participant "figures/scale-figures!" as FIG RENDERER_TINT
+participant "toc/refresh-offsets!" as OFF RENDERER_TINT
+participant ".vv-content\nscroll container" as CONTENT RENDERER_TINT
+participant "toc/spy!" as SPY RENDERER_TINT
+participant "re-frame" as RF REFRAME_TINT
+participant "Contents panel" as PANEL RENDERER_TINT
 
 == render commit ==
 MD -> DS : {:html :toc :assets}
@@ -39,9 +39,9 @@ RF -> CONTENT : scroll heading into view
 
 legend right
   |= color |= concept |
-  | <#67B11D> | Markdown render pipeline |
-  | <#A45BAD> | DataScript content cache |
-  | <#4F97D7> | re-frame event/subscription layer |
-  | <#2D9574> | renderer DOM/runtime |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown render pipeline |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript content cache |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame event/subscription layer |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer DOM/runtime |
 endlegend
 @enduml

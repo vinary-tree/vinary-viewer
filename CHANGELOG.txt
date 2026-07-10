@@ -54,6 +54,31 @@ Added
     - "Go to source" / "Go to preview": bidirectional jump navigation between the
       preview and source panes (right-click menu + command palette), reusing the
       per-node source positions. See docs/design-decisions/0021-bidirectional-source-preview-jump.md.
+    - LaTeX (.tex / .latex / .ltx) support: rendered as a formatted document through the
+      common IR via the @unified-latex/* toolchain (parse -> expand macros -> HTML string
+      -> the shared Markdown/Org hast suffix), reusing MathJax, sections/styling, tables,
+      figures (auto-scaled), and syntax-highlighted code. A macro preprocessor expands
+      \newcommand-family definitions (including argument-bearing and optional-argument
+      macros) at their use sites. unified-latex parses inside its own bundled unified@10
+      and returns only an HTML string, so nothing crosses into the app's unified@11.
+      Embedded LaTeX in Org (a non-math #+BEGIN_EXPORT latex block / bare \begin{tabular}
+      / \textbf{}) now RENDERS through this frontend -- so Org invoices show a real table
+      instead of a code block -- while genuine math stays on the MathJax path (no
+      regression). .sty/.cls/.bib stay highlighted source. vv --cli / vv --tui render
+      .tex through the same frontend. Large .tex (>=256 KiB) stream on the same
+      progressive-paint engine as markdown/org (whole-doc parse, IR children committed
+      progressively; byte-identical to the batch render, guarded by a unit parity test
+      and a batch-vs-stream electron-smoke assertion on a 300 KiB .tex). See
+      docs/design-decisions/0025-latex-rendering-via-unified-latex.md
+      and docs/features/27-latex-rendering.md.
+    - Document<->PDF representation switch: a previewable document (LaTeX / Org / Markdown)
+      collocated with a same-stem exported .pdf can switch between its rendered self and
+      the faithful exported PDF (loaded byte-only into the pdf-cache over a new
+      vv:load-pdf-bytes channel -- no extra tab). Defaults to the PDF, configurable via
+      the collocated-default preference. The Preview<->Source view toggle -- previously
+      only in the tab right-click menu -- gains visible toolbar segmented controls, command
+      -palette entries, and default keybindings (Ctrl+Shift+S, Ctrl+Shift+D), benefiting
+      Markdown and Org too.
 
 Changed
     - Diagrams and inline Mermaid are now sized BEFORE the HTML is inserted into the
@@ -86,8 +111,155 @@ Changed
     - Markdown and office render through the common IR unconditionally; output is
       byte-identical to the retired legacy path (guaranteed by the lossless HAST
       round-trip, ir.parity-test).
+    - Org #+TITLE now renders as an <h1>, so it is slugged and joins the Contents
+      outline. Existing .org documents gain a top-level outline entry. This matches
+      Emacs' ox-html, which also emits a document title.
+    - A #+BEGIN_EXPORT latex block (and bare \begin{...} environments / inline macros) is
+      routed by a math-vs-layout screen (tex-block-math?): genuine math (a math environment
+      / \[ / $$ / \(, and no document-structure macro) is typeset via MathJax as before,
+      while NON-math layout (\begin{center}, tabular, itemize, \textbf...) is now RENDERED
+      through the LaTeX frontend (ADR-0025) instead of shown as a language-latex code block
+      -- so an Org invoice renders as a real table. The math screen is unchanged (MathJax
+      never throws with the noerrors/noundefined packages, so the failure signal is a
+      data-mjx-error node, and prose built from math-legal macros must be screened out
+      before an attempt); its SVG is still injected post-sanitize off the vv-tex-attempt
+      marker. #+LATEX_HEADER \newcommand definitions are harvested and expanded in the body.
+    - Org (.org) joins the progressive streaming engine at the same 256 KiB threshold as
+      Markdown. The engine commits IR children, not Markdown nodes, so it was already
+      format-agnostic: stream-blocks is generalized over its pipeline builder and
+      org-stream-blocks is a thin wrapper. Streamed Org is byte-identical to its batch
+      render (guarded by a per-block lowering parity test). No new engine, no new parser.
+    - The single sanitize schema gains three CLASS NAMES -- code.vv-tex-attempt and
+      span.todo / span.done (Org TODO keywords, now colourised) -- and no new tags,
+      attributes, or protocols.
+    - vv --cli / vv --tui render .org through the same org-pipeline and common IR,
+      lowered to ANSI.
+    - The terminal backend renders task-list state: an unordered task item swaps its
+      bullet for ☐ / ☑, an ordered one keeps its ordinal and gains the box, and a plain
+      item stays a bullet. This affects Markdown as well as Org -- both front-ends emit
+      GitHub's <li class="task-list-item"><input type="checkbox"> shape, which
+      ir.backend.ansi previously ignored, so `vv --cli todo.md` printed a checked and an
+      unchecked item identically.
+    - The electron smoke drives Org through the REAL content_service classifier rather
+      than a hand-written {kind:'org'} stub. Every other fixture stubs the payload, which
+      is exactly why the classifier divergence and the missing :meta {:size} both
+      survived CI.
+    - Documentation diagrams are re-tiered by VALUE, not just hue. The Spacemacs accents
+      are foreground colours; used as large area fills they saturated the canvas, and a
+      container and its children drawn from the same accent had as little as 1.00:1
+      contrast between them (component-content-retention's "retained file set" box was
+      literally invisible on its parent package). Each concept now exists at four tiers
+      in docs/diagrams/_vv-theme.iuml -- _FILL (containers), _TINT (elements), _BORDER
+      (arrows), _COLOR (legend swatches only, never a fill) -- with _FILL/_TINT derived
+      from the accent by moving HLS lightness/saturation with the hue held fixed. Every
+      tier now clears WCAG AA against the ink by at least 10.8:1, and box outlines are a
+      single neutral grey. Concept -> hue mapping is unchanged.
+    - Diagram labels carrying mathematics now use PlantUML's bundled JLaTeXMath
+      (<latex>...</latex>) instead of Unicode literals, and the prose docs use GitHub's
+      MathJax delimiters (an inline backtick span wrapped in dollar signs; a fenced
+      `math` block for display). docs/README.md previously mandated the opposite
+      ("Mathematics in backticks with Unicode"), so it was instructing every author to
+      violate the project's own documentation guidelines.
+    - The keymap magenta (#BC6EC5) and the common-IR orange (#E67E22) are now documented
+      concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Three activity diagrams (activity-log-segmentation, activity-kbedit-undo,
+      activity-link-hints) rendered with NO step colours and a yellow "this syntax is
+      deprecated" banner baked into the committed SVG. PlantUML 1.2026.5 rejects the old
+      `#RRGGBB:step text;` form: it does not exit non-zero, it draws the warning into the
+      image and silently drops the fill. Rewritten to `:step text; <<#RRGGBB>>`. The
+      render step now greps the output for `deprecated` and `contains errors`, which is
+      the check that would have caught this the day it broke.
+    - Legend colour swatches rendered as 1-px slivers rather than chips: a table cell
+      whose only content is its background colour collapses. Padded with the numeric
+      entity `&#160;` (the named `&nbsp;` renders literally as text in PlantUML).
+    - docs/diagrams/README.md's catalog claimed host documents for 13 diagrams that no
+      document actually embedded, and omitted 14 diagrams entirely. The catalog is now
+      complete and true: the 13 are embedded in their host docs, and the only diagrams
+      with no host are the four superseded design figures, marked as such. Two shell
+      loops in that README re-check both properties against the filesystem.
+    - features/11-native-pdf.md no longer points at component-native-pdf.puml as though
+      it described the shipping design: that diagram shows the main-owned WebContentsView
+      that ADR-0013 superseded with the in-renderer pdf.js pipeline. It is retained and
+      labelled as a historical figure.
+    - The Krasner & Pope (1988) citation is no longer presented as a DOI. The ACM
+      Digital Library's 10.5555 prefix is a placeholder for pre-DOI material and
+      doi.org/10.5555/50757.50759 returns HTTP 404; it is cited as a library link.
+    - docs/README.md's document map listed theory pages 01-09 (theory/10 exists) and
+      "features 01...15" (26 exist).
+    - Inline math containing an operator or a spacing macro no longer renders as a blank
+      gap. MathJax 4 turned automatic INLINE line-breaking on by default, and its break
+      opportunities are exactly `mo` (operators) and `mspace` (spacing). We typeset
+      off-DOM through liteAdaptor, so MathJax had no container to measure and took EVERY
+      break opportunity: it emitted one <svg> per "line". For `\implies`
+      (= \;\Longrightarrow\;) that produced three siblings, the FIRST of which was a
+      16-unit-wide viewBox containing the whole ⟹ path -- which the browser's
+      `svg:not(:root){overflow:hidden}` then clipped away entirely. `\implies` and `\iff`
+      (the two most common logical connectives) were therefore completely invisible: a gap
+      of about the right width, no ink, no error, no console message. Fixed by
+      `linebreaks: {inline: false}` -- breaking is meaningless here anyway, since each
+      expression is rendered once, cached, and injected as a static SVG into a column it
+      can neither measure nor reflow into. Display math was never affected and its output
+      is byte-identical before and after. Measured over a 154-file / 1743-occurrence
+      corpus: 385 occurrences split into multiple <svg> elements and 35 lost >50% of their
+      ink; after the fix, zero of each.
+    - MathJax's own stylesheet is now injected at startup (vinary.renderer.math/
+      install-stylesheet! → <style id="vv-mathjax-style">). Because we typeset to an HTML
+      string through liteAdaptor, MathJax never inserted it itself, so two load-bearing
+      rules were missing: `mjx-container[jax="SVG"] > svg { overflow: visible }` (without
+      which the UA rule `svg:not(:root){overflow:hidden}` clips the 3-unit glyph stroke,
+      accents, and stretchy delimiters -- glyph fill ink touches the viewBox top and bottom
+      edges exactly, because MathJax derives the box from the font's height and depth) and
+      `path[data-c] { stroke-width: 3 }`, which overrides the stroke-width="0" presentation
+      attribute on the emitted root <g>. app.css's hand-copied mjx-assistive-mml rule is
+      deleted: the injected sheet carries it (AssistiveMmlHandler contributes it), so the
+      copy was redundant and would have drifted on the next @mathjax/src bump.
+    - font-src now allows data:. MathJax's stylesheet carries an @font-face whose src is a
+      base64 data: URL (MJX-ZERO, its zero-width line-break font); Chromium fetches it
+      eagerly, so injecting the sheet logged a blocked-font CSP violation on every launch.
+      A font is passive data and a data: URL cannot reach the network. The electron smoke
+      now FAILS on any Content-Security-Policy console message, which is how this was
+      caught -- previously such violations only scrolled past among the re-frame warnings.
+    - Org (.org) documents whose entire body is a #+BEGIN_EXPORT block no longer render
+      as a completely blank preview pane. uniorg-rehype drops every #+KEYWORD and drops
+      any export block whose backend is not `html`, so such a document (an invoice, say)
+      lowered to the empty string -- and "" is TRUTHY in ClojureScript, so the view's
+      (:doc/html doc) catch-all mounted an empty .markdown-body and reported success.
+      #+TITLE / #+AUTHOR / #+DATE now render as document front matter (matching Emacs
+      ox-html), and a non-html export block renders as a highlighted code block in its
+      backend's language instead of being silently swallowed. ir.backend.html/blank? is
+      now the contract for "rendered nothing" -- never truthiness -- and the preview
+      shows an explicit notice, for every format. See ADR-0024.
+    - Org math never rendered. renderer.math/render-html-math selects code.math-inline /
+      code.math-display, but uniorg emits span.math / div.math and the GitHub sanitize
+      schema strips className from span/div -- so $E = mc^2$ displayed as literal text.
+      Org's math nodes are normalized into the shared code.math-* shape pre-sanitize.
+    - Org task lists lost their checkboxes (uniorg drops list-item.checkbox); they now
+      emit GFM's ul.contains-task-list / li.task-list-item / input[type=checkbox] shape,
+      which GitHub's sanitize allowlist already permits verbatim.
+    - Org footnotes emitted a bare <h1>Footnotes:</h1> that outranked every real heading
+      in the Contents outline; it is an <h2> now, matching GFM.
+    - vv --cli and vv --tui rendered .org as highlighted SOURCE, never through uniorg:
+      content_service.js (the JavaScript twin of the ClojureScript file-kind classifier)
+      kept .org in textExts and had no org arm, so a text file with a bundled tree-sitter
+      grammar was upgraded to "source". An Org table (| a | b |) could also trip the
+      delimited-CSV content sniff in openLocal. Both fixed; .org nested inside an archive
+      now renders too.
+    - Large Markdown documents never actually streamed. stream.flag/enabled? gates on
+      (:size meta), but service.cljs's :text route -- which serves markdown, org, source
+      and diagram -- sent no :meta at all, so the gate compared 0 against the 256 KiB
+      threshold forever. The byte-parity smoke passed only because it stubs meta:{size}
+      into a fake content service. The route now sends :meta {:size}, and flag_test locks
+      in that a nil size never streams.
+    - The RELEASE electron smoke (`npm run test:electron:release`) could not pass: the
+      bidirectional-jump feature drove `re_frame.core.dispatch_sync` from the test, but
+      the release :simple build encapsulates that global, so the run died with
+      "ReferenceError: re_frame is not defined" long before any later assertion. The jump
+      steps are now dev-gated with the same rationale the PDF-reflow block already used
+      (release covers the pure jump math via the DOM-free source-nav unit tests), and the
+      org View Source step drives the real View menu item instead, so it runs in BOTH
+      builds. The release smoke passes again.
     - Embedded .svg figures whose source carries relative CSS font sizes no longer
       render at column width with magnified text. parse-svg-meta picked the figure's
       dominant font size by counting every font-size value unit-blind, so a d2 diagram

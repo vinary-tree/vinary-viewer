@@ -14,31 +14,31 @@ title one tab history evolution — A -> B -> C -> back -> D truncates the forwa
 '' Each object is one snapshot of {:stack [...] :idx n}. The bracketed «idx»
 '' marks the entry the current active-path points at.
 
-object "S0 · initial" as S0 #7590DB {
+object "S0 · initial" as S0 APPDB_TINT {
   stack = []
   idx   = -1
   active = (none)
 }
 
-object "S1 · nav A" as S1 #7590DB {
+object "S1 · nav A" as S1 APPDB_TINT {
   stack = [ **A«0»** ]
   idx   = 0
   active = A
 }
 
-object "S2 · nav B" as S2 #7590DB {
+object "S2 · nav B" as S2 APPDB_TINT {
   stack = [ A, **B«1»** ]
   idx   = 1
   active = B
 }
 
-object "S3 · nav C" as S3 #7590DB {
+object "S3 · nav C" as S3 APPDB_TINT {
   stack = [ A, B, **C«2»** ]
   idx   = 2
   active = C
 }
 
-object "S4 · back" as S4 #4F97D7 {
+object "S4 · back" as S4 REFRAME_TINT {
   stack = [ A, **B«1»**, C ]
   idx   = 1
   active = B
@@ -46,7 +46,7 @@ object "S4 · back" as S4 #4F97D7 {
   (C retained;\n idx moved left)
 }
 
-object "S5 · nav D (divergent)" as S5 #E0211D {
+object "S5 · nav D (divergent)" as S5 ERROR_TINT {
   stack = [ A, B, **D«2»** ]
   idx   = 2
   active = D
@@ -58,20 +58,20 @@ S0 -[#A45BAD,thickness=2]-> S1 : nav-active A\npush entry A
 S1 -[#A45BAD,thickness=2]-> S2 : nav-active B\npush entry B
 S2 -[#A45BAD,thickness=2]-> S3 : nav-active C\npush entry C
 S3 -[#4F97D7,thickness=2]-> S4 : :history/back\nidx ← idx−1   (stack unchanged)
-S4 -[#E0211D,thickness=2]-> S5 : nav-active D\ntruncate + push:\nstack' ≔ (conj (vec (take (inc idx) stack)) D)\n      = (conj [A B] D)
+S4 -[#E0211D,thickness=2]-> S5 : nav-active D\ntruncate + push:\n<latex>\mathit{stack}' := \mathtt{(conj\ (vec\ (take\ (inc\ idx)\ stack))\ D)}</latex>\n<latex>= \mathtt{(conj\ [A\ B]\ D)}</latex>
 
 note bottom of S5
   **nav-active** keeps only `take (inc idx)` of the old stack before appending
-  the new path, then sets `idx ≔ (dec (count stack'))`. This is exactly the
+  the new path, then sets <latex>\mathit{idx} := \mathtt{(dec\ (count\ stack'))}</latex>. This is exactly the
   browser-history rule: navigating after a Back **discards** the forward branch.
   Navigating to the path you are already on is a no-op (no duplicate entry).
 end note
 
 legend right
   |= color |= concept |
-  | <#7590DB> | app-db ephemeral UI state (a history snapshot) |
-  | <#A45BAD> | a forward navigation (record-nav appends) |
-  | <#4F97D7> | back/forward move (idx slides, stack frozen) |
-  | <#E0211D> | divergent nav — forward branch truncated |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db ephemeral UI state (a history snapshot) |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| a forward navigation (record-nav appends) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| back/forward move (idx slides, stack frozen) |
+  |<#E0211D>&#160;&#160;&#160;&#160;| divergent nav — forward branch truncated |
 endlegend
 @enduml

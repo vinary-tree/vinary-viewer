@@ -6,32 +6,32 @@ title Read-only source preview and tree-sitter highlighting
 
 skinparam componentStyle rectangle
 
-package "Main process" MAIN_COLOR {
-  [file classifier\nkind = source] as Classifier MAIN_COLOR
-  [grammar registry scan\n~/.config/vinary-viewer/grammars] as MainRegistry FS_COLOR
+package "Main process" MAIN_FILL {
+  [file classifier\nkind = source] as Classifier MAIN_TINT
+  [grammar registry scan\n~/.config/vinary-viewer/grammars] as MainRegistry FS_TINT
 }
 
-package "Renderer process" RENDERER_COLOR {
-  [source-view\nread-only CodeMirror 6] as SourceView RENDERER_COLOR
-  [grammar catalog\nbundled + user configs] as Registry DATASCRIPT_COLOR
-  [web-tree-sitter\nLanguage / Parser / Query] as TreeSitter MARKDOWN_COLOR
-  [CodeMirror decorations\ncapture -> CSS class] as Decorations REFRAME_COLOR
+package "Renderer process" RENDERER_FILL {
+  [source-view\nread-only CodeMirror 6] as SourceView RENDERER_TINT
+  [grammar catalog\nbundled + user configs] as Registry DATASCRIPT_TINT
+  [web-tree-sitter\nLanguage / Parser / Query] as TreeSitter MARKDOWN_TINT
+  [CodeMirror decorations\ncapture -> CSS class] as Decorations REFRAME_TINT
 }
 
-Classifier -[#B1951D,thickness=2]-> SourceView : vv:content {:kind "source" :text}
-MainRegistry -[#B1951D,thickness=2]-> Registry : vv:grammars EDN
-SourceView -[#4F97D7,thickness=2]-> Registry : grammar-for(path)
-Registry -[#67B11D,thickness=2]-> TreeSitter : wasm-url + highlights.scm
-TreeSitter -[#67B11D,thickness=2]-> Decorations : captures
-Decorations -[#4F97D7,thickness=2]-> SourceView : read-only highlighted view
+Classifier -[#7F6B14,thickness=2]-> SourceView : vv:content {:kind "source" :text}
+MainRegistry -[#7F6B14,thickness=2]-> Registry : vv:grammars EDN
+SourceView -[#336699,thickness=2]-> Registry : grammar-for(path)
+Registry -[#487E12,thickness=2]-> TreeSitter : wasm-url + highlights.scm
+TreeSitter -[#487E12,thickness=2]-> Decorations : captures
+Decorations -[#336699,thickness=2]-> SourceView : read-only highlighted view
 
 legend
-  |<#3A5BA0>| main classifies source files |
-  |<#9F8766>| filesystem/user grammar directory |
-  |<#B1951D>| IPC mediator transfers content and grammar configs |
-  |<#A45BAD>| renderer grammar catalog |
-  |<#67B11D>| tree-sitter parse/query pipeline |
-  |<#4F97D7>| CodeMirror/re-frame rendering support |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main classifies source files |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem/user grammar directory |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC mediator transfers content and grammar configs |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| renderer grammar catalog |
+  |<#67B11D>&#160;&#160;&#160;&#160;| tree-sitter parse/query pipeline |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| CodeMirror/re-frame rendering support |
 endlegend
 
 @enduml

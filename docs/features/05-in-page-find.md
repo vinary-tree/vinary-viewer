@@ -258,7 +258,7 @@ both themed via `--vv-*` like everything else ([feature 06](06-themes-and-live-s
       0)))
 ```
 
-- **`idx' ≔ (mod (+ idx dir) n)`** — the wraparound: from the last match, `+1` wraps to `0`; from
+- $`\mathit{idx}' := \mathtt{(mod\ (+\ idx\ dir)\ n)}`$ — the wraparound: from the last match, `+1` wraps to `0`; from
   the first, `-1` wraps to `n-1` (Clojure's `mod` returns a non-negative result). Returns the
   **1-based** index `(inc idx')` for the counter display.
 

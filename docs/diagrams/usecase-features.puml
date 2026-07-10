@@ -9,7 +9,7 @@
 '' palette hexes are written out here. They are exactly the _vv-theme.iuml values (teal #2D9574 = renderer,
 '' tan #9F8766 = filesystem/user, grey #DDDDDD/#999999 = «planned»).
 skinparam usecase {
-  BackgroundColor #2D9574
+  BackgroundColor RENDERER_TINT
   BorderColor #1F6B53
   FontColor #1A1A1A
 }
@@ -24,7 +24,7 @@ skinparam actorStyle awesome
 
 left to right direction
 
-actor "User\n(reads/edits docs)" as User #9F8766
+actor "User\n(reads/edits docs)" as User FS_TINT
 
 rectangle "vinary-viewer" as VV {
 
@@ -82,8 +82,8 @@ end note
 
 legend right
   |= Colour |= Concept |
-  |<#2D9574>| Available now (renderer-served feature) |
-  |<#DDDDDD>| Forthcoming (planned) — dashed «planned» |
-  |<#9F8766>| User actor (reads/edits files) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Available now (renderer-served feature) |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| Forthcoming (planned) — dashed «planned» |
+  |<#9F8766>&#160;&#160;&#160;&#160;| User actor (reads/edits files) |
 endlegend
 @enduml

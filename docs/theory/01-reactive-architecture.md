@@ -7,7 +7,9 @@ state, and all state changes move through explicit events and effects.
 
 ## 1. Central equation
 
-`view ≔ f(state)`
+```math
+\mathrm{view} := f(\mathrm{state})
+```
 
 The view is defined by state. A user action, file change, render completion, or
 native-view callback does not mutate the visible UI directly; it dispatches an
@@ -106,3 +108,11 @@ configuration.
 - re-frame documentation: <https://day8.github.io/re-frame/>
 - DataScript: <https://github.com/tonsky/datascript>
 - Reagent: <https://reagent-project.github.io/>
+
+## 7. The closed loop
+
+Data flows exactly one way: event → handler → effect → state → subscription → view → event.
+
+![re-frame's six dominoes — the closed unidirectional loop](../diagrams/flow-unidirectional-dataflow.svg)
+
+*Diagram source: [`../diagrams/flow-unidirectional-dataflow.puml`](../diagrams/flow-unidirectional-dataflow.puml).*

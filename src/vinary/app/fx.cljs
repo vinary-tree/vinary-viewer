@@ -80,6 +80,16 @@
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "org render error: " (.-message e))}]))))))
 
+;; LaTeX (.tex) render through the common IR via unified-latex (HTML + heading TOC + assets), modeled on
+;; :org/render — base-dir resolves relative \includegraphics image URLs to file://, and the preserved TeX +
+;; fenced code highlight via apply-posts.
+(rf/reg-fx
+ :latex/render
+ (fn [{:keys [text path stamp on-done]}]
+   (-> (md/render-latex-ir text (md/dir-of path) stamp)
+       (.then (fn [result] (rf/dispatch (conj on-done result))))
+       (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "latex render error: " (.-message e))}]))))))
+
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
 (rf/reg-fx
  :theme/apply
@@ -90,6 +100,25 @@
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
 (rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
+
+;; Load a collocated sibling PDF's bytes into pdf-cache (Document↔PDF switch), without opening a tab: main reads
+;; the file over the vv:load-pdf-bytes invoke seam. Already-cached → mark ready immediately. On success, dispatch
+;; :pdf/sibling-ready so content-view mounts pdf-view for it.
+(rf/reg-fx
+ :pdf/ensure-sibling-bytes
+ (fn [{:keys [path]}]
+   (cond
+     (not path)                 nil
+     (pdf-cache/get-bytes path) (rf/dispatch [:pdf/sibling-ready path])
+     :else
+     (when-let [^js v (.-vv js/window)]
+       (when (.-loadPdfBytes v)
+         (-> (.loadPdfBytes v path)
+             (.then (fn [buf]
+                      (when buf
+                        (pdf-cache/put-bytes! path buf)
+                        (rf/dispatch [:pdf/sibling-ready path]))))
+             (.catch (fn [_] nil))))))))
 ;; the :pdf/reflow effect is registered in vinary.renderer.pdf (a renderer-only ns; keeping it there avoids
 ;; pulling pdf.js — which touches `document` at load — into the DOM-free :node-test build).
 

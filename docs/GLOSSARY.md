@@ -5,8 +5,9 @@ defined once and alphabetized. Each entry notes **where it is first introduced**
 (the document that motivates it); this glossary is the canonical, context-free
 definition you can return to. Symbols and notation are collected at the end.
 
-> Convention reminder: mathematics is written in backticks with Unicode, and the
-> symbol `≔` reads "is defined as". A leading colon (`:doc/path`, `:ui/find`)
+> Convention reminder: mathematics is written as MathJax math spans — inline as a
+> backtick span wrapped in dollar signs, display as a fenced ` math ` block — and the
+> operator $`:=`$ reads "is defined as". A leading colon (`:doc/path`, `:ui/find`)
 > marks a **Clojure keyword** — an interned, self-evaluating identifier used as a
 > map key or an event/effect/subscription name.
 
@@ -417,21 +418,33 @@ pipeline; `unified()` builds a processor onto which `remark`/`rehype` plugins ar
 *First introduced in `theory/05-strategy-renderer-registry.md`. See
 [unifiedjs.com](https://unifiedjs.com/).*
 
+**unified-latex** (`@unified-latex/*`) — The LaTeX toolchain vinary-viewer uses to
+render `.tex` documents: it parses LaTeX to an AST and lowers it to an HTML string
+(`convertToHtml`), and expands `\newcommand`-family macros. It runs inside its **own**
+bundled `unified@10`, so only a plain HTML string crosses into the app's `unified@11`
+(wrapped as a `raw` node the shared `rehype-raw` parses). *See ADR-0025 and
+`features/27-latex-rendering.md`.*
+
+**uniorg** — The Emacs Org-mode counterpart of remark: `uniorg-parse` +
+`uniorg-rehype` turn an `.org` file into the same HAST the Markdown pipeline produces,
+so Org reuses the whole shared spine. *See ADR-0020/0024 and
+`features/26-org-mode.md`.*
+
 ---
 
 ## Symbols and notation
 
 | Symbol | Reads as | Meaning / where used |
 |--------|----------|----------------------|
-| `≔` | "is defined as" | Binds a name to an expression, e.g. `view ≔ f(state)`. |
-| `view ≔ f(state)` | "the view is a function of state" | The SSOT/unidirectional invariant: the rendered UI is a pure function of application state. (`theory/01`) |
+| $`:=`$ | "is defined as" | Binds a name to an expression, e.g. $`\mathrm{view} := f(\mathrm{state})`$. |
+| $`\mathrm{view} := f(\mathrm{state})`$ | "the view is a function of state" | The SSOT/unidirectional invariant: the rendered UI is a pure function of application state. (`theory/01`) |
 | `:foo/bar` | "the keyword foo-slash-bar" | A namespaced **Clojure keyword** — a map key or an event/effect/sub name (e.g. `:doc/path`, `:find/run`). |
 | `:<- [:sub]` | "subscribes to" | A re-frame sub-of-sub input declaration; the sub recomputes when `[:sub]` changes (e.g. `:<- [:ds/rev]`). (`theory/01`, `02`) |
-| `mod` | modulo | Remainder after division; the find cursor wraps via `idx ≔ (idx + dir) mod n`. (`theory/06`) |
-| `stack′` | "stack-prime" | The *next* value of `stack` after an update, e.g. the history push `stack′ ≔ (conj (vec (take (inc idx) stack)) path)`. (`theory/07`) |
-| `∀` | "for all" | Universal quantifier, used in diagram annotations (e.g. "`Highlight.add(range)` ∀ matches"). |
-| `∈` | "is an element of" | Set membership, e.g. `idx ∈ 1..n`, `kind ∈ {"markdown","image","text"}`. |
-| `O(·)` | "big-O of" | Asymptotic upper bound on cost, e.g. find is `O(total_text_length)`. (`theory/06`) |
+| `mod` | modulo | Remainder after division; the find cursor wraps via $`\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n`$. (`theory/06`) |
+| $`\mathit{stack}'`$ | "stack-prime" | The *next* value of `stack` after an update, e.g. the history push $`\mathit{stack}' := \mathtt{(conj\ (vec\ (take\ (inc\ idx)\ stack))\ path)}`$. (`theory/07`) |
+| $`\forall`$ | "for all" | Universal quantifier, used in diagram annotations (e.g. `Highlight.add(range)` $`\forall`$ matches). |
+| $`\in`$ | "is an element of" | Set membership, e.g. $`\mathit{idx} \in 1..n`$, $`\mathit{kind} \in \{\mathtt{"markdown"}, \mathtt{"image"}, \mathtt{"text"}\}`$. |
+| $`O(\cdot)`$ | "big-O of" | Asymptotic upper bound on cost, e.g. find is $`O(\mathit{total\_text\_length})`$. (`theory/06`) |
 | `n` | count | The number of find matches (or of history entries), as context dictates. |
 
 ---
