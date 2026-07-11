@@ -24,6 +24,15 @@ function eq(a, b, msg) { assert.deepStrictEqual(a, b, msg); n++; }
   ok(v6.rawHost === '2001:db8::1' && v6.port === 22 && v6.user === 'bob' && v6.path === '/x', 'IPv6 bracketed host');
   ok(cfg.parseSshUri('ssh://h/a%20b.txt').path === '/a b.txt', 'percent-decoded path');
   assert.throws(() => cfg.parseSshUri('http://h/a'), 'non-ssh scheme throws'); n++;
+  // SECURITY: shell/config metacharacters in the authority are rejected at parse time (host/user flow into
+  // `Match exec` %-tokens → cp.execSync; a URI can be document-supplied) — command-injection guard.
+  for (const bad of ['ssh://a;id/x', 'ssh://$(id)/x', 'ssh://a b/x', 'ssh://a|b/x', 'ssh://a&b/x', 'ssh://u;id@h/x', 'ssh://u$(x)@h/x']) {
+    assert.throws(() => cfg.parseSshUri(bad), 'rejects an injection-y authority: ' + bad); n++;
+  }
+  // …while legitimate hosts / users / IPs / IPv6 / config-aliases still parse fine
+  for (const good of ['ssh://host.example.com/x', 'ssh://user@127.0.0.1:22/x', 'ssh://[::1]:22/x', 'ssh://prod-web/x', 'ssh://a_b.c-d/x']) {
+    assert.doesNotThrow(() => cfg.parseSshUri(good), 'accepts a valid authority: ' + good); n++;
+  }
 })();
 
 // ── resolveSftpPath ──────────────────────────────────────────────────────────

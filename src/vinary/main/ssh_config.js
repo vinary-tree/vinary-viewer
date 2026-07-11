@@ -138,6 +138,14 @@ function parseSshUri(uri) {
   }
   host = safeDecode(host);
   if (!host) throw new Error('Missing host in URI: ' + s);
+  // SECURITY: reject shell/config metacharacters in the authority AT PARSE TIME. A remote URI can be
+  // document-supplied, and its host/user flow into `Match exec` %-tokens (cp.execSync) and every other
+  // ssh_config directive — so an unvalidated host/user is a command-injection vector. A hostname / IP /
+  // config-alias only needs [A-Za-z0-9._:-] (':' for IPv6, brackets already stripped; '%' zone-IDs are
+  // rejected — use a config alias instead); a username only [A-Za-z0-9._-]. This closes the injection at
+  // the source for the whole config pipeline, not just the one exec call.
+  if (!/^[A-Za-z0-9._:-]+$/.test(host)) throw new Error('Invalid characters in SSH host: ' + s);
+  if (user != null && !/^[A-Za-z0-9._-]+$/.test(user)) throw new Error('Invalid characters in SSH user: ' + s);
 
   let path, homeRelative;
   if (pathPart === '') { path = '.'; homeRelative = true; }              // bare host → remote home

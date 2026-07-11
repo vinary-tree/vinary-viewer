@@ -221,8 +221,11 @@ The threat model ([threat-model.md](../security/threat-model.md)) is amended: a 
 untrusted input source** — SFTP bytes and directory listings are a trust boundary like the local parsers,
 and remote streamed content rides the **same** per-block GitHub-allowlist sanitizer as local content. Key
 protections: secrets stay main-side (no persistence); host-key **TOFU with change-rejection** (a first-
-connect MITM window, closed thereafter); the `~user` command is username-validated (no shell injection);
-and `vv-remote://` serves only file bytes over SFTP (no arbitrary command execution).
+connect MITM window, closed thereafter); **URI authorities are validated at parse time** — a remote URI's
+host and user are restricted to hostname/username-safe characters (and `~user` paths before any remote
+`echo ~user`), so **no URI-derived value can reach a shell** (a `Match exec` `%h`/`%r` token → `cp.execSync`)
+or any `~/.ssh/config` directive, even though a URI may be document-supplied; and `vv-remote://` serves only
+file bytes over SFTP (no arbitrary command execution).
 
 ## Consequences
 

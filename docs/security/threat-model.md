@@ -157,8 +157,10 @@ bytes and directory listings are now a trust boundary (like the local parsers), 
 credentials from a host **you** named. Protections: all sockets, keys, passphrases, and host-key checks
 live **main-side** (the sandboxed renderer sees only non-secret metadata; the sole secret-bearing channel,
 `vv:ssh-prompt-reply`, is one-shot and never persisted); host keys are verified against `~/.ssh/known_hosts`
-with **trust-on-first-use and hard-reject-on-change**; a `~user` path is username-validated before any
-remote `echo ~user` (no shell injection); the `vv-remote://` scheme serves only file bytes over SFTP (no
+with **trust-on-first-use and hard-reject-on-change**; a remote URI's **host and user are validated at parse
+time** (and `~user` paths before any remote `echo ~user`), so no URI-derived value can reach a shell — a
+`Match exec` `%h`/`%r` token or any `~/.ssh/config` directive — even when the URI is document-supplied (no
+shell injection); the `vv-remote://` scheme serves only file bytes over SFTP (no
 command execution); and remote streamed content rides the **same** per-block GitHub-allowlist sanitizer as
 local content. A remote directory listing can only name child URIs **on the same host**, and connecting is
 always **user-initiated**.
