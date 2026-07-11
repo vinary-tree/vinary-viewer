@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0026**.
+The next free number is **0028**.
 
 ---
 
@@ -83,6 +83,8 @@ The next free number is **0026**.
 | [0023](0023-streaming-scrollbar-and-pacing.md) | Pre-estimated streaming scrollbar + rAF pacing | Accepted |
 | [0024](0024-org-export-blocks-front-matter-and-math.md) | Org export blocks, front matter, and math: rendering what uniorg drops | Accepted |
 | [0025](0025-latex-rendering-via-unified-latex.md) | LaTeX (.tex) rendering via unified-latex, and the Document↔PDF switch | Accepted |
+| [0026](0026-diff-rendering-side-by-side-and-repo-filetypes.md) | Diff (.diff/.patch) rendering + side-by-side, standard repo filetypes, reverse PDF↔source switch | Accepted |
+| [0027](0027-remote-files-over-ssh.md) | Opening remote files & directories over SSH (ssh2, virtual URIs, polling refresh) | Accepted |
 
 ---
 

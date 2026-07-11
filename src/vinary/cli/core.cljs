@@ -5,8 +5,10 @@
    `vv-cli huge.log | less` never holds the whole file. Colour/graphics auto-disable when piped (isatty) or
    under NO_COLOR."
   (:require ["../main/content_service.js" :as cs]
+            ["../main/ssh_transport.js" :as ssh-transport]
             ["path" :as path]
             ["fs" :as fs]
+            ["readline" :as readline]
             [clojure.string :as str]
             [vinary.cli.render :as render]
             [vinary.terminal.caps :as caps]
@@ -103,6 +105,43 @@
   (-> (render/render-payload payload aopts)
       (.then (fn [{:keys [body toc]}] (write (str (toc-lines toc opts) body "\n"))))))
 
+;; ── remote (ssh://sftp://) terminal auth prompts (TTY-gated; non-interactive → decline, so a piped run relies on
+;;    ssh-agent / keys). Configured on the shared transport so a CLI remote open authenticates like the GUI. ──
+(defn- read-secret [prompt-str]
+  (js/Promise.
+   (fn [resolve _reject]
+     (if-not (.-isTTY js/process.stdin)
+       (resolve nil)
+       (let [^js rl (.createInterface readline #js {:input js/process.stdin :output js/process.stderr})
+             muted  (atom false)]
+         ;; mask keystrokes (only echo newlines) once the prompt itself has been written
+         (set! (.-_writeToOutput rl)
+               (fn [s] (when (or (not @muted) (re-find #"[\r\n]" s)) (.write js/process.stderr s))))
+         (.question rl prompt-str (fn [ans] (.close rl) (.write js/process.stderr "\n") (resolve ans)))
+         (reset! muted true))))))
+
+(defn- prompt-host-key-cli [info]
+  (js/Promise.
+   (fn [resolve _reject]
+     (let [m (js->clj info :keywordize-keys true)]
+       (if-not (.-isTTY js/process.stdin)
+         (resolve false)
+         (let [^js rl (.createInterface readline #js {:input js/process.stdin :output js/process.stderr})]
+           (.question rl (str "The authenticity of host '" (:host m) "' can't be established.\n"
+                              (:keyType m) " key fingerprint is " (:fingerprint m) ".\n"
+                              "Are you sure you want to continue connecting (yes/no)? ")
+                      (fn [ans] (.close rl) (resolve (boolean (re-find #"(?i)^y" (str ans))))))))))))
+
+(defn- setup-remote! []
+  (.configure ssh-transport
+              #js {:promptHostKey prompt-host-key-cli
+                   :promptSecret  (fn [req]
+                                    (let [m    (js->clj req :keywordize-keys true)
+                                          what (case (:kind m) "passphrase" "Passphrase" "keyboard-interactive"
+                                                 (or (:prompt m) "Response") "Password")]
+                                      (read-secret (str what " for " (:user m) "@" (:host m) ": "))))
+                   :onError       (fn [info] (ewrite (str "vv-cli: ssh: " (.-message info))))}))
+
 (defn- render-file! [file opts]
   (let [aopts (ansi-opts opts)]
     ;; run the kind-detection + read (classifyName / statSync / readFileSync — all of which THROW synchronously on
@@ -115,6 +154,11 @@
                        ;; tree-sitter grammar (e.g. .cljs, .rs, .py) is a source file → highlight it
                        kind (if (and (= "text" k0) (gc/grammar-for-path file gc/bundled-grammars {})) "source" k0)]
                    (cond
+                     ;; remote (ssh://sftp://): the fs shortcuts below can't reach the host — route every kind
+                     ;; through the remote reader, passing the grammar-aware kind so a remote source highlights.
+                     (.isRemoteUri ssh-transport file)
+                     (-> (.openRemoteUri cs file kind)
+                         (.then (fn [payload] (emit-doc (js->clj payload :keywordize-keys true) aopts opts))))
                      ;; large log/text → bounded WPDA stream to stdout
                      (and (#{"log" "text"} kind) (big? file)) (stream-log! file aopts)
                      ;; text kinds: read directly (bypass content_service content-sniffing)
@@ -137,6 +181,11 @@
       (:version opts)   (do (println version) (js/Promise.resolve nil))
       (empty? files)    (do (ewrite usage) (set! (.-exitCode js/process) 1) (js/Promise.resolve nil))
       :else
-      ;; render each file in argv order (a blank line between multiple docs)
-      (reduce (fn [p file] (-> p (.then (fn [_] (render-file! file opts)))))
-              (js/Promise.resolve nil) files))))
+      (do
+        (setup-remote!)   ; configure SSH terminal prompts in case any arg is a remote URI
+        ;; render each file in argv order (a blank line between multiple docs), then close any pooled SSH
+        ;; connection so the process can exit (an open socket would otherwise hold the event loop open).
+        (-> (reduce (fn [p file] (-> p (.then (fn [_] (render-file! file opts)))))
+                    (js/Promise.resolve nil) files)
+            (.finally (fn [] (.closeAll ssh-transport))))))))
+

@@ -14,6 +14,19 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Open remote files AND directories over SSH via ssh:// and sftp:// URIs (ssh2,
+      main-process only). A remote URI is a virtual backend modeled on vv-archive://:
+      it opens through the same pipeline, renderers, streaming, paging, and refresh as
+      a local path. Large remote logs/text stream bounded-memory (a mid-stream drop
+      keeps the partial content, never a silent truncation); directory browsing, remote
+      paged nav, Document↔PDF siblings, side-by-side diff enrichment, relative-image
+      data URLs, live remote HTML (a vv-remote:// web-view scheme), and remote archive
+      browsing all work. Auth: ssh-agent, key files (with passphrase prompts and
+      AddKeysToAgent), ~/.ssh/config (Host/Match/Include/ProxyJump/%-tokens), and
+      keyboard-interactive/password prompts; host keys verified against known_hosts with
+      a trust-on-first-use prompt and hard-reject on change. Live-refresh is polling
+      (opt-in, settings.edn :remote :poll-seconds). Secrets stay main-side (never in
+      app-db or config). Terminal parity in vv-cli/vv-tui. See ADR-0027.
     - A DOM-free, node-tested common-IR core (vinary.ir.*): a tagged node with
       span/bbox/role/anchor-id metadata; a semiring algebra (Boolean/Tropical/Log/
       Probability/Product/Lexicographic) with full law coverage; a weighted tree

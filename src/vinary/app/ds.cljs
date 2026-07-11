@@ -67,4 +67,4 @@
                 :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta
                 :doc/sourceable? :doc/data-url :doc/reflow-html :doc/pdf-sibling
                 :doc/source-sibling :doc/diff-split-html
-                :doc/streaming? :doc/stream-progress] eid)))
+                :doc/streaming? :doc/stream-progress :doc/stream-note] eid)))

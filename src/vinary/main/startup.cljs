@@ -107,6 +107,7 @@
                   (nil? u)         nil
                   (uri/http? u)    u
                   (uri/archive? u) u
+                  (uri/remote? u)  u          ; ssh://sftp:// kept verbatim (never resolve-abs a remote URI)
                   :else            (resolve-abs u)))))
        (remove nil?)
        vec))

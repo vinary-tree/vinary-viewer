@@ -250,8 +250,128 @@ async function main() {
         assert.ok(/directory/i.test(msg), 'directory open should reject with a clear directory message: ' + msg);
         return true;
       });
+
+    await testRemote();
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// Remote SSH reads through openRemoteUri, against the hermetic in-process SFTP fixture (no network).
+async function testRemote() {
+  const { startSftpServer } = require('./fixtures/ssh-server.js');
+  const transport = require('../src/vinary/main/ssh_transport.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-cshome-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+
+  // a small in-memory tar for the remote-archive test
+  const pack = tar.pack();
+  const chunks = [];
+  pack.on('data', c => chunks.push(c));
+  const packed = new Promise(res => pack.on('end', res));
+  pack.entry({ name: 'inside.txt' }, 'archived content');
+  pack.entry({ name: 'dir/nested.md' }, '# Nested');
+  pack.finalize();
+  await packed;
+
+  const srv = await startSftpServer({
+    password: 'pw',
+    files: {
+      'readme.md': '# Remote Doc\nhello world',
+      'sub/a.txt': 'alpha',
+      'pic.svg': '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>',
+      'data.csv': 'name,age\nAlice,30\nBob,25\n',
+      'bundle.tar': Buffer.concat(chunks),
+      'paper.tex': '\\documentclass{article}\\begin{document}Hi\\end{document}',
+      'paper.pdf': '%PDF-1.4\n%fake pdf bytes\n',
+      'src/greet.js': 'function greet(){ return "hello"; }',
+      'doc.md': '# Doc\n![pic](./assets/pic.png)',
+      'assets/pic.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      'app.log': Array.from({ length: 20000 }, (_, i) => `log line ${i}`).join('\n') + '\n',
+    },
+  });
+  let srvClosed = false;
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => 'pw', onError: () => {},
+  });
+  try {
+    const md = await content.openRemoteUri(srv.url('/readme.md'), 'markdown');
+    assert.strictEqual(md.kind, 'markdown', 'remote .md → markdown');
+    assert.ok(/hello world/.test(md.text), 'remote markdown carries its text');
+    assert.ok(md.meta && typeof md.meta.size === 'number', 'remote payload carries meta.size (the streaming gate)');
+
+    const dir = await content.openRemoteUri(srv.url('/'), 'text');
+    assert.strictEqual(dir.kind, 'directory', 'remote directory → listing');
+    assert.ok(dir.entries.some(e => e.name === 'sub' && e['dir?']), 'listing marks subdirectories');
+    assert.ok(dir.entries.every(e => /^ssh:\/\//.test(e.path)), 'entries carry child ssh:// URIs');
+
+    const img = await content.openRemoteUri(srv.url('/pic.svg'), 'image');
+    assert.ok(img.kind === 'image' && img.dataUrl.startsWith('data:image/svg+xml;base64,'), 'remote image → data URL (file:// cannot reach a remote host)');
+
+    const csv = await content.openRemoteUri(srv.url('/data.csv'), 'table');
+    assert.ok(csv.kind === 'table' && csv.sheets[0].rows.length >= 3, 'remote csv → parsed table');
+
+    const arc = await content.openRemoteUri(srv.url('/bundle.tar'), 'archive');
+    assert.ok(arc.kind === 'archive' && arc.entries.some(e => e.name === 'inside.txt'), 'remote archive browses (root read as a buffer)');
+
+    const src = await content.openRemoteUri(srv.url('/sub/a.txt'), 'source');
+    assert.strictEqual(src.kind, 'source', 'the grammar-aware CLJS kind is honored (source, not sniffed text)');
+
+    // Document↔PDF siblings over remote (both directions)
+    const texWithPdf = await content.openRemoteUri(srv.url('/paper.tex'), 'latex');
+    assert.ok(texWithPdf.pdfSibling && texWithPdf.pdfSibling.endsWith('/paper.pdf'), 'a remote .tex advertises its collocated .pdf');
+    const pdfWithSrc = await content.openRemoteUri(srv.url('/paper.pdf'), 'pdf');
+    assert.ok(pdfWithSrc.sourceSibling && pdfWithSrc.sourceSibling.endsWith('/paper.tex'), 'a remote .pdf advertises its collocated source');
+
+    // remote diff on-disk enrichment (resolve a referenced file over SFTP, walking ancestors)
+    const diffSrcs = await content.loadRemoteDiffSources(srv.url('/change.diff'), ['src/greet.js']);
+    assert.ok(/hello/.test(diffSrcs['src/greet.js'] || ''), 'remote diff-source enrichment resolves a referenced file over SFTP');
+
+    // remote relative asset → data URL (neither the sandboxed renderer nor file:// can reach the host)
+    const asset = await content.loadRemoteAsset('./assets/pic.png', srv.url('/doc.md'));
+    assert.ok(asset.startsWith('data:image/png;base64,'), "a remote doc's relative image resolves to a data URL");
+
+    // remote streaming (transport engine): open → pull batches → done, leak-free
+    const so = await content.streamOpen({ path: srv.url('/app.log'), mode: 'lines' });
+    assert.ok(so.sessionId && so.size > 0, 'remote streamOpen returns a session + size');
+    let total = 0, seq = 0, done = false, maxBatch = 0;
+    while (!done) {
+      const b = await content.streamPull({ sessionId: so.sessionId });
+      assert.ok(b.seq > seq, 'monotonic batch seq'); seq = b.seq;
+      const nlines = (b.lines || []).length;
+      maxBatch = Math.max(maxBatch, nlines);
+      total += nlines;
+      done = b.done;
+    }
+    assert.strictEqual(total, 20000, 'streamed every remote log line');
+    assert.ok(maxBatch < 20000, 'streaming is incremental — no single pull returns the whole file (bounded memory)');
+    content.streamClose({ sessionId: so.sessionId });
+    assert.strictEqual(content.streamCount(), 0, 'no leaked remote stream session');
+
+    // remote paged log nav (page 1 = lines 2000.., hasPrev)
+    const pg = await content.contentPage({ path: srv.url('/app.log'), kind: 'log', page: 1, stamp: Date.now() });
+    assert.ok(pg.index === 1 && pg.hasPrev && pg.lines.length > 0, 'remote paged log nav (page 1)');
+
+    // mid-stream drop: abruptly reset the connection; the next pull ends the stream flagged partial (never a hang,
+    // and never a silent EOF that would truncate content undetected)
+    const sd = await content.streamOpen({ path: srv.url('/app.log'), mode: 'lines' });
+    await content.streamPull({ sessionId: sd.sessionId });
+    srv.destroyConnections();
+    let ended = false, sawPartial = false;
+    for (let i = 0; i < 100 && !ended; i++) {
+      const b = await content.streamPull({ sessionId: sd.sessionId });
+      if (b.done) { ended = true; sawPartial = b.partial === true; }
+    }
+    assert.ok(ended, 'a dropped remote stream terminates (no hang)');
+    assert.ok(sawPartial, 'a dropped remote stream is flagged partial (truncation is visible, not a silent EOF)');
+    content.streamClose({ sessionId: sd.sessionId });
+
+    console.log('[ok] remote SSH: openRemoteUri + Doc↔PDF siblings + diff/asset + streaming/paging + mid-stream-drop partial');
+  } finally {
+    transport.closeAll();
+    if (!srvClosed) await srv.close();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 }
 

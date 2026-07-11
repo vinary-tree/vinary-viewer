@@ -22,6 +22,13 @@
 (rf/reg-cofx :content-scroll (fn [cofx _] (assoc cofx :content-scroll (scroll/current))))
 (rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
 
+;; send a user-typed SSH secret straight to main (vv:ssh-prompt-reply) — the ONLY secret-bearing channel; the
+;; value came from the prompt modal's local state and is never stored in app-db.
+(rf/reg-fx :ssh/reply
+           (fn [{:keys [promptId secret]}]
+             (when-let [^js vv (.-vv js/window)]
+               (.sshPromptReply vv promptId secret))))
+
 ;; Vimium link hints: collect visible links + assign labels (→ :hints/activate); follow a chosen target
 (rf/reg-fx :hints/collect
            (fn [_]

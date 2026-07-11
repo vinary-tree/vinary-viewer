@@ -150,7 +150,18 @@ or path confinement.
 **Why this is acceptable in the intended model:** vinary-viewer is a **CLI-invoked, single-user
 viewer**. The paths it reads originate from (a) the command line you typed and (b) files you clicked in
 the git tree of your own repository. The process runs with **your** privileges and reads files **you can
-already read**; it never elevates. There is no remote input source that could name a path.
+already read**; it never elevates.
+
+**Remote SSH input (ADR-0027).** Opening `ssh://`/`sftp://` URIs adds a **remote input source**: SFTP
+bytes and directory listings are now a trust boundary (like the local parsers), read with **your** SSH
+credentials from a host **you** named. Protections: all sockets, keys, passphrases, and host-key checks
+live **main-side** (the sandboxed renderer sees only non-secret metadata; the sole secret-bearing channel,
+`vv:ssh-prompt-reply`, is one-shot and never persisted); host keys are verified against `~/.ssh/known_hosts`
+with **trust-on-first-use and hard-reject-on-change**; a `~user` path is username-validated before any
+remote `echo ~user` (no shell injection); the `vv-remote://` scheme serves only file bytes over SFTP (no
+command execution); and remote streamed content rides the **same** per-block GitHub-allowlist sanitizer as
+local content. A remote directory listing can only name child URIs **on the same host**, and connecting is
+always **user-initiated**.
 
 **Where this would be a problem:** if the renderer were ever to load **remote or untrusted web content**
 that could script `window.vv.open("/etc/passwd")` (or any readable path) and exfiltrate the returned

@@ -165,3 +165,9 @@
 (rf/reg-sub :doc/streaming? :<- [:doc/active] (fn [doc _] (boolean (:doc/streaming? doc))))
 ;; stream completion in [0,1] (nil until the first batch), for the progress affordance
 (rf/reg-sub :doc/stream-progress :<- [:doc/active] (fn [doc _] (:doc/stream-progress doc)))
+;; a non-fatal note shown in the stream progress strip (e.g. a remote SSH connection dropped mid-stream)
+(rf/reg-sub :doc/stream-note :<- [:doc/active] (fn [doc _] (:doc/stream-note doc)))
+
+;; SSH: the pending auth-prompt request (non-secret) and the last connection error
+(rf/reg-sub :ui/ssh-prompt (fn [db _] (get-in db [:ui :ssh-prompt])))
+(rf/reg-sub :ui/ssh-error  (fn [db _] (get-in db [:ui :ssh-error])))

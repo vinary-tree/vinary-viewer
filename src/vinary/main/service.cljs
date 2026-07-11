@@ -10,6 +10,8 @@
             ["child_process" :as cp]
             ["chokidar" :refer [watch]]
             ["./content_service.js" :as content-service]
+            ["./ssh_transport.js" :as ssh-transport]
+            [cljs.reader :as reader]
             [clojure.set :as set]
             [clojure.string :as str]
             [vinary.main.file-kind :as file-kind]
@@ -137,9 +139,34 @@
       (.then (fn [payload] (.send wc "vv:content" payload)))
       (.catch (fn [e] (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))
 
+;; A remote (ssh://sftp://) URI is read ASYNCHRONOUSLY by the transport-backed content service. The grammar-aware
+;; `kind-of` is threaded in so a remote `.rs` renders as highlighted source (not sniffed text); openRemoteUri
+;; stats internally to decide list-vs-read and to fill meta.size (the streaming gate). Errors surface as vv:error.
+(defn- send-remote-content! [^js wc uri]
+  (-> (.openRemoteUri content-service uri (kind-of uri))
+      (.then  (fn [payload] (.send wc "vv:content" payload)))
+      (.catch (fn [e] (.send wc "vv:error" (clj->js {:path uri :message (.-message e)}))))))
+
+(defn- conf-dir []
+  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
+    (path/join home "vinary-viewer")))
+
+(defn- read-remote-prefs
+  "The `:remote {:poll-seconds :poll-dirs?}` block from settings.edn (read main-side so the poller is
+   self-sufficient), or nil. Polling is opt-in: absent / non-positive :poll-seconds means no live-refresh."
+  []
+  (try
+    (let [p   (path/join (conf-dir) "settings.edn")
+          txt (when (.existsSync fs p) (.readFileSync fs p "utf8"))
+          m   (when (and txt (not (str/blank? txt))) (reader/read-string txt))]
+      (:remote m))
+    (catch :default _ nil)))
+
 (defn- send-content! [^js wc path]
-  (let [kind  (kind-of path)
-        stamp (js/Date.now)]
+  (if (file-kind/remote-uri? path)
+    (send-remote-content! wc path)
+    (let [kind  (kind-of path)
+          stamp (js/Date.now)]
     (case (service-util/route {:directory? (directory? path)
                                :archive?   (archive-uri? path)
                                :kind       kind})
@@ -189,11 +216,63 @@
              (.send wc "vv:content" (clj->js (cond-> {:path path :kind kind :text text :stamp stamp}
                                                size (assoc :meta {:size size})
                                                pdf  (assoc :pdfSibling pdf)))))
-           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)})))))))
+           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
 
 (defn- send-open-content! [path]
   (when-let [wc (and (contains? @retained-paths path) (get @doc-webcontents path))]
     (send-content! wc path)))
+
+;; ---- remote (SSH) live-refresh via polling ----
+;; SFTP has no inotify, so a remote doc cannot be chokidar-watched. Instead a per-doc poller re-stats the URI
+;; and, on a size/mtime change, re-sends it (send-open-content! → a fresh Date.now stamp → the renderer remounts
+;; / re-streams). Opt-in via settings.edn `:remote {:poll-seconds …}`; exponential backoff (to 60s) + ±25%
+;; jitter avoid hammering a downed host; directory listings poll slower (or not at all). Lifecycle is tied to
+;; unwatch-file!, so closing a tab / navigating away stops the poll for free (the same guarantee as watchers).
+(defonce ^:private remote-pollers (atom {}))   ; ssh-uri -> {:sig {…} :base ms :backoff ms :poll-dirs? bool :timer t}
+
+(defn- stop-remote-poller! [path]
+  (when-let [{:keys [timer]} (get @remote-pollers path)]
+    (js/clearTimeout timer))
+  (swap! remote-pollers dissoc path))
+
+(declare poll-remote!)
+
+(defn- reschedule-remote-poll! [path delay-ms]
+  (when (get @remote-pollers path)
+    (let [jitter (js/Math.floor (* (js/Math.random) 0.25 delay-ms))
+          t      (js/setTimeout #(poll-remote! path) (+ delay-ms jitter))]
+      (when (.-unref t) (.unref t))
+      (swap! remote-pollers update path assoc :timer t))))
+
+(defn- poll-remote! [path]
+  (when-let [entry (get @remote-pollers path)]
+    (if-not (and (contains? @retained-paths path) (get @doc-webcontents path))
+      (stop-remote-poller! path)                       ; tab gone → stop polling
+      (let [base (:base entry)]
+        (-> (.remoteStat ssh-transport path)
+            (.then (fn [^js st]
+                     (let [is-dir (.-isDirectory st)
+                           sig    {:size (.-size st) :mtime (.-mtime st) :dir is-dir}]
+                       (if (and is-dir (not (:poll-dirs? entry)))
+                         (stop-remote-poller! path)     ; a directory listing, and dir-polling is off → stop
+                         (do
+                           (when (and (:sig entry) (not= sig (:sig entry)))
+                             (send-open-content! path))
+                           (swap! remote-pollers update path assoc :sig sig :backoff base)
+                           (reschedule-remote-poll! path (if is-dir (max base 15000) base)))))))
+            (.catch (fn [_]
+                      (let [next (min 60000 (* 2 (:backoff entry base)))]
+                        (swap! remote-pollers update path assoc :backoff next)
+                        (reschedule-remote-poll! path next)))))))))
+
+(defn- start-remote-poller! [path]
+  (let [prefs (read-remote-prefs)
+        secs  (:poll-seconds prefs)]
+    (when (and (number? secs) (pos? secs) (not (get @remote-pollers path)))
+      (let [base (* 1000 (max 1 secs))]
+        (swap! remote-pollers assoc path {:sig nil :base base :backoff base
+                                          :poll-dirs? (boolean (:poll-dirs? prefs))})
+        (reschedule-remote-poll! path base)))))
 
 (defn- refresh-asset-owners! [asset-path]
   (doseq [doc-path (:owners (get @asset-watchers asset-path))]
@@ -250,6 +329,7 @@
   (when-let [^js w (get @watchers path)]
     (.close w)
     (swap! watchers dissoc path))
+  (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
   (release-doc-assets! path)
   (swap! doc-webcontents dissoc path))
 
@@ -272,9 +352,14 @@
   [^js wc path]
   (swap! doc-webcontents assoc path wc)
   (send-content! wc path)
-  (when-not (archive-uri? path)
-    (send-tree! wc path))
-  (when-not (or (archive-uri? path) (get @watchers path))
+  (when-not (or (archive-uri? path) (file-kind/remote-uri? path))
+    (send-tree! wc path))                    ; the git tree sidebar is a LOCAL-repo concern
+  (cond
+    ;; remote (ssh://sftp://): no inotify over SSH, so poll for changes instead of chokidar-watching (which
+    ;; would statSync/watch a non-path). Opt-in via settings.edn :remote :poll-seconds.
+    (file-kind/remote-uri? path)
+    (start-remote-poller! path)
+    (not (or (archive-uri? path) (get @watchers path)))
     (let [dir? (directory? path)
           w    (watch path (if dir? dir-watch-options watch-options))]
       (if dir?
@@ -317,6 +402,22 @@
      :exists? (boolean st)
      :dir?    (boolean (and st (.isDirectory st)))}))
 
+(defn- complete-remote
+  "Async URI-bar completion for a remote (ssh://sftp://) input: list the directory it points into via SFTP so
+   the renderer can filter by the typed basename. Same shape as `complete`, but resolved as a Promise (the
+   renderer is sandboxed and has no SFTP access)."
+  [raw]
+  (let [s        (str raw)
+        sep-i    (.lastIndexOf s "/")
+        dir-part (if (neg? sep-i) s (subs s 0 (inc sep-i)))]
+    (-> (.remoteReaddir ssh-transport dir-part)
+        (.then (fn [entries]
+                 (clj->js {:input s :dir dir-part :target s :exists? true :dir? true
+                           :entries (mapv (fn [^js e] {:name (.-name e) :path (.-path e) :dir? (.-dir e)
+                                                       :size (.-size e) :mtime (.-mtime e) :symlink (.-symlink e)})
+                                          entries)})))
+        (.catch (fn [_] (clj->js {:input s :dir dir-part :target s :entries [] :exists? false :dir? false}))))))
+
 (defn init! []
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [_e path] (close! path)))
@@ -325,16 +426,30 @@
   (.handle ipcMain "vv:stream-open"  (fn [_e req] (.streamOpen  content-service req)))
   (.handle ipcMain "vv:stream-pull"  (fn [_e req] (.streamPull  content-service req)))
   (.handle ipcMain "vv:stream-close" (fn [_e req] (.streamClose content-service req)))
-  (.handle ipcMain "vv:complete-path" (fn [_e raw] (clj->js (complete raw))))
+  (.handle ipcMain "vv:complete-path"
+           (fn [_e raw] (if (file-kind/remote-uri? raw) (complete-remote raw) (clj->js (complete raw)))))
   ;; load a collocated sibling PDF's bytes into the renderer's pdf-cache WITHOUT opening a tab (the Document↔PDF
-  ;; representation switch renders the sibling in-place). Returns the Buffer, or nil if unreadable.
-  (.handle ipcMain "vv:load-pdf-bytes" (fn [_e p] (try (.readFileSync fs p) (catch :default _ nil))))
-  ;; resolve a diff's referenced files on disk (relative to the diff, walking up ancestors) → {rel → content},
-  ;; for the side-by-side view's full-file enrichment. Renderer-driven (it has no fs), like vv:load-pdf-bytes.
+  ;; representation switch renders the sibling in-place). Returns the Buffer, or nil if unreadable; a remote
+  ;; sibling reads over SFTP (so Doc↔PDF works for a remote paper.tex ↔ paper.pdf too).
+  (.handle ipcMain "vv:load-pdf-bytes"
+           (fn [_e p]
+             (if (file-kind/remote-uri? p)
+               (.remoteReadFile ssh-transport p)
+               (try (.readFileSync fs p) (catch :default _ nil)))))
+  ;; resolve a diff's referenced files (relative to the diff, walking up ancestors) → {rel → content}, for the
+  ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"
            (fn [_e req]
              (let [{:keys [diffPath files]} (js->clj req :keywordize-keys true)]
-               (clj->js (load-diff-sources diffPath files)))))
+               (if (file-kind/remote-uri? diffPath)
+                 (.loadRemoteDiffSources content-service diffPath (clj->js files))
+                 (clj->js (load-diff-sources diffPath files))))))
+  ;; fetch a remote asset's bytes → a data: URL, so a remote Markdown/Office doc's relative images render (the
+  ;; renderer can't reach the host, and file:// cannot either). `relativeTo` is the remote doc's URI.
+  (.handle ipcMain "vv:load-remote-asset"
+           (fn [_e req]
+             (let [{:keys [uri relativeTo]} (js->clj req :keywordize-keys true)]
+               (.loadRemoteAsset content-service uri relativeTo))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]

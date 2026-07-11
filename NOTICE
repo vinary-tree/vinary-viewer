@@ -38,6 +38,8 @@ Attribution & third-party components (v0.2 — the standalone application)
    - web-tree-sitter, CodeMirror 6 (@codemirror/*) (source highlighting)
    - reagent, re-frame, re-com, DataScript, RxJS (the reactive UI stack)
    - Electron, chokidar (the desktop + file-watch runtime)
+   - ssh2 (MIT, © Brian White) — the SSH/SFTP client that powers opening remote files and
+     directories over ssh://, and the in-process SSH server used by the hermetic remote tests
    - the d2, PlantUML, Mermaid (mmdc), and Graphviz (dot) command-line tools, invoked
      to render diagram source files to SVG (not bundled; must be installed separately)
 

@@ -99,6 +99,10 @@
                 (rf/dispatch [:stream/progress path (:progress batch)])
                 (when (:done batch)
                   (emit-blocks (:blocks (proto/finish (:parser @ctrl))))
+                  ;; a mid-stream drop (remote SSH): keep every committed block and show a NON-FATAL note — never
+                  ;; :content/error, which views.cljs tests before :doc/streaming? and would blank the streamed DOM.
+                  (when (:error batch)
+                    (rf/dispatch [:stream/interrupted path (:error batch)]))
                   (finish!))))
             (tick [_]
               (when (alive?)

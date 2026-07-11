@@ -6,6 +6,24 @@
 (defn http? [uri] (boolean (and uri (re-find #"(?i)^https?://" uri))))
 (defn archive? [uri] (str/starts-with? (str uri) "vv-archive://"))
 
+;; ---- remote (SSH/SFTP) URIs: ssh://[user@]host[:port]/path and the sftp:// alias ----
+;; Both drive the SFTP subsystem for file ops; the scheme is retained only for display. Like archive
+;; URIs, these are virtual addresses served entirely main-side (never a local path), so file-path
+;; PRESERVES them and every path-arithmetic helper below keeps the user@host[:port] AUTHORITY intact.
+(defn ssh?    [uri] (boolean (and uri (re-find #"(?i)^ssh://"  uri))))
+(defn sftp?   [uri] (boolean (and uri (re-find #"(?i)^sftp://" uri))))
+(defn remote? [uri] (or (ssh? uri) (sftp? uri)))
+
+(defn remote-parts
+  "Split a remote uri into [prefix path]: prefix = \"scheme://[user@]host[:port]\" (the authority, no
+   trailing '/'), path = the remote path beginning with '/' (or \"/\" when absent). The authority is
+   matched as [^/]* so a user@host:port is never split on its ':' or '@'. Returns [uri \"/\"] for a
+   non-remote or malformed uri (callers gate on `remote?` first)."
+  [uri]
+  (if-let [m (re-find #"(?i)^(s(?:sh|ftp)://[^/]*)(/.*)?$" (str uri))]
+    [(nth m 1) (or (nth m 2) "/")]
+    [(str uri) "/"]))
+
 (defn archive-chain [uri]
   (when (archive? uri)
     (try
@@ -26,6 +44,7 @@
   (cond (nil? uri)                        nil
         (http? uri)                       nil
         (archive? uri)                    uri
+        (remote? uri)                     uri        ; ssh://sftp:// opened by main's remote reader
         (str/starts-with? uri "file://")  (subs uri 7)
         :else                             uri))
 
@@ -37,13 +56,15 @@
     (cond (str/blank? t)                  nil
           (http? t)                       t
           (archive? t)                    t
+          (remote? t)                     t
           (str/starts-with? t "file://")  (subs t 7)
           :else                           t)))
 
 (defn display
   "How a uri appears in the URI bar: http(s) as-is; a local path shown file://-prefixed."
   [uri]
-  (cond (nil? uri) "" (http? uri) uri (archive? uri) (archive-display uri) :else (str "file://" uri)))
+  (cond (nil? uri) "" (http? uri) uri (archive? uri) (archive-display uri)
+        (remote? uri) uri :else (str "file://" uri)))
 
 (defn basename
   "Short tab label: a file's basename, or for http the last path segment (falling back to the host)."
@@ -55,6 +76,9 @@
                        (or (not-empty seg) (.-hostname u)))
                      (catch :default _ uri))
     (archive? uri) (or (some-> (last (archive-chain uri)) (str/split #"/") last) "Archive")
+    (remote? uri) (let [[_ p] (remote-parts uri)
+                        segs  (remove str/blank? (str/split p #"/"))]
+                    (or (last segs) "/"))       ; remote file/dir name; "/" at the remote root
     :else       (last (str/split uri #"/"))))
 
 (defn- strip-trailing-slash
@@ -66,7 +90,8 @@
   "Parent directory path of a local-file uri (file:// stripped). nil for http(s) or when there is no
    parent (the filesystem root). A trailing slash is ignored, so a directory uri yields its parent."
   [uri]
-  (if (archive? uri)
+  (cond
+    (archive? uri)
     (let [[root & entries] (archive-chain uri)]
       (when root
         (if (seq entries)
@@ -74,6 +99,17 @@
             (str "vv-archive://open?chain="
                  (js/encodeURIComponent (.stringify js/JSON (clj->js (into [root] parent))))))
           (dirname root))))
+    ;; remote: keep the authority on the parent — "ssh://a/x/y" -> "ssh://a/x"; "ssh://a/foo" -> "ssh://a/";
+    ;; the remote root ("ssh://a/" or "ssh://a") has no parent -> nil
+    (remote? uri)
+    (let [[prefix p] (remote-parts uri)
+          p* (strip-trailing-slash p)
+          i  (str/last-index-of p* "/")]
+      (cond
+        (nil? i)  nil
+        (zero? i) (when (> (count p*) 1) (str prefix "/"))
+        :else     (str prefix (subs p* 0 i))))
+    :else
     (when-let [p (some-> (file-path uri) strip-trailing-slash)]
       (let [i (str/last-index-of p "/")]
         (cond
@@ -86,7 +122,8 @@
    cumulative absolute path navigable to that point. The filesystem root is included as {:name \"/\"
    :path \"/\"}. nil for http(s)."
   [uri]
-  (if (archive? uri)
+  (cond
+    (archive? uri)
     (let [[root & entries] (archive-chain uri)
           root-segs (segments root)
           entry-segs (map-indexed
@@ -97,6 +134,16 @@
                                       (js/encodeURIComponent (.stringify js/JSON (clj->js chain))))}))
                       entries)]
       (vec (concat root-segs entry-segs)))
+    ;; remote: the authority is the root crumb (lists the remote "/"), then one navigable crumb per segment
+    (remote? uri)
+    (let [[prefix p] (remote-parts uri)
+          named      (remove str/blank? (str/split (strip-trailing-slash p) #"/"))]
+      (into [{:name prefix :path (str prefix "/")}]
+            (map-indexed (fn [i name]
+                           {:name name
+                            :path (str prefix "/" (str/join "/" (take (inc i) named)))})
+                         named)))
+    :else
     (when-let [p (some-> (file-path uri) strip-trailing-slash)]
       (let [named (rest (str/split p #"/"))]      ; \"/a/b\" → (\"a\" \"b\"); \"/\" → ()
         (into [{:name "/" :path "/"}]

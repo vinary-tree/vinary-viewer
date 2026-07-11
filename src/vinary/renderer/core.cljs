@@ -102,6 +102,17 @@
       (.onPasswordSavePrompt vv (fn [p] (rf/dispatch [:passwords/save-prompt p]))))
     (when (.-onPasswordResult vv)
       (.onPasswordResult vv (fn [p] (rf/dispatch [:passwords/result-received p]))))
+    ;; SSH/SFTP remote files: the (non-secret) auth-prompt request, connection errors/status, and the persisted
+    ;; connection EDN. The prompt's typed secret returns via vv:ssh-prompt-reply (renderer→main), never here.
+    (when (.-onSshPrompt vv)
+      (.onSshPrompt vv (fn [p] (rf/dispatch [:ssh/prompt (js->clj p :keywordize-keys true)]))))
+    (when (.-onSshError vv)
+      (.onSshError vv (fn [p] (rf/dispatch [:ssh/error (js->clj p :keywordize-keys true)]))))
+    (when (.-onSshStatus vv)
+      (.onSshStatus vv (fn [p] (rf/dispatch [:ssh/status (js->clj p :keywordize-keys true)]))))
+    (when (.-onConnections vv)
+      (.onConnections vv (fn [text] (rf/dispatch [:connections/received text])))
+      (when (.-requestConnections vv) (.requestConnections vv)))
     (when (.-onZoomChanged vv)
       (.onZoomChanged vv (fn [p] (rf/dispatch [:view/zoom-changed p]))))
     (when (.-onAppInfo vv)

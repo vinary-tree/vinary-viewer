@@ -16,6 +16,7 @@ these files; the renderer receives plain EDN text or plain data over the
 | `recent.edn` | Available | Recent-navigation memory: the dir→child `:trail` and the `:recent-files` MRU. |
 | `window.edn` | Available | Main-window geometry: position, size, and maximized state. |
 | `filetypes.edn` | Available | Filename and pattern mappings to source grammar ids. |
+| `connections.edn` | Available | Non-secret SSH connection metadata (host aliases, last path, recent-remote MRU). **Never** holds passwords, passphrases, or keys. |
 | `grammars/<lang>/grammar.wasm` | Available | Optional tree-sitter grammar for a source language. |
 | `grammars/<lang>/highlights.scm` | Available | Optional highlight query for that grammar. |
 
@@ -171,6 +172,29 @@ Configuration files are local input. Keep these rules:
 
 Update [../security/threat-model.md](../security/threat-model.md) when adding a
 new config file, IPC capability, or external loader.
+
+## Remote files over SSH
+
+Open remote files and directories with `ssh://[user@]host[:port]/path` (or the `sftp://` alias) — typed in
+the address bar, passed on the command line (`vv ssh://host/notes.md`), or clicked in a remote directory
+listing. See [../design-decisions/0027-remote-files-over-ssh.md](../design-decisions/0027-remote-files-over-ssh.md).
+
+- **Authentication** reuses your existing SSH setup: the running `ssh-agent`, key files under `~/.ssh/`
+  (with a passphrase prompt for encrypted keys), and `~/.ssh/config` (`Host`/`HostName`/`User`/`Port`/
+  `IdentityFile`/`ProxyJump`/`Match`/`Include`). If those don't suffice, you're prompted for a password /
+  passphrase / one-time code. **Secrets are never persisted** — they live only in the running process.
+- **Host keys** are verified against `~/.ssh/known_hosts`; an unknown host prompts once (trust-on-first-use)
+  and, on accept, is appended there. A **changed** host key is rejected outright.
+- **`connections.edn`** stores only non-secret host metadata (aliases, recently-opened remotes).
+- **Live-refresh** for remote docs is **opt-in polling** (SFTP has no file-change events). Enable it in
+  `settings.edn`:
+
+```clojure
+{:remote {:poll-seconds 4      ; poll a remote doc every N seconds; 0 or absent = off (the default)
+          :poll-dirs? false}}  ; also poll open directory listings (heavier); default false
+```
+
+Polling backs off (to 60 s) and jitters on error so a downed host is not hammered; closing the tab stops it.
 
 ---
 

@@ -20,6 +20,8 @@
             [vinary.main.ext-config :as ext-config]
             [vinary.main.ext-popup :as ext-popup]
             [vinary.main.passwords :as passwords]
+            [vinary.main.ssh :as ssh]
+            [vinary.main.connections :as connections]
             [vinary.main.grammars :as grammars]))
 
 (def ^js app (.-app electron))
@@ -64,6 +66,8 @@
              (recent/init! (.-webContents win))
              (ext-config/init! (.-webContents win))
              (grammars/init! (.-webContents win))
+             (connections/init! (.-webContents win))   ; persisted (non-secret) SSH connection metadata
+             (ssh/init! win)                            ; SSH/SFTP transport prompts + vv:ssh-* channels
              ;; open every file/URI named on the command line, each in its own tab (first focused);
              ;; reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx)
              (when-let [args (seq (initial-args))]
@@ -124,6 +128,13 @@
     nil)
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
+  ;; register the privileged vv-remote:// scheme BEFORE app 'ready' — the web view loads it to live-render remote
+  ;; HTML, and main serves each vv-remote:// URL's bytes over SFTP (vinary.main.web). standard+secure so the
+  ;; page's relative assets resolve and it runs in a secure context, exactly like an http(s) page.
+  (.registerSchemesAsPrivileged (.-protocol electron)
+                                (clj->js [{:scheme "vv-remote"
+                                           :privileges {:standard true :secure true :supportFetchAPI true
+                                                        :stream true :corsEnabled true}}]))
   ;; Chromium switches the app always needs — see vinary.main.startup/chromium-switches: disable-gpu-sandbox
   ;; (Linux GPU-process DRI/GBM driver access; renderer stays sandboxed) + two defensive software-compositor
   ;; switches (disable-partial-raster, ui-disable-partial-swap). NOTE: those two do NOT fix the NVIDIA +
@@ -147,5 +158,6 @@
   ;; keybindings own the accelerators (so the default menu's Ctrl+R/W/etc. don't double-fire)
   (-> (.whenReady app) (.then (fn [] (.setApplicationMenu (.-Menu electron) nil) (create-window!))))
   (.on app "activate" (fn [] (when (nil? @main-window) (create-window!))))
+  (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   (.on app "window-all-closed"
        (fn [] (when-not (= js/process.platform "darwin") (.quit app)))))

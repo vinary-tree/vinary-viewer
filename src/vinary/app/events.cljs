@@ -183,6 +183,34 @@
    (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
      {:fx [[:ds/transact [[:db/add eid :doc/stream-progress 1]]]]})))
 
+;; A streamed remote doc's connection dropped mid-stream. NON-fatal: the already-committed blocks stay in the
+;; DOM; we only set a light note (shown in the progress strip). Never :doc/error (that would blank the content).
+(rf/reg-event-fx
+ :stream/interrupted
+ (fn [_ [_ path _msg]]
+   (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
+     {:fx [[:ds/transact [[:db/add eid :doc/stream-note "Connection lost — showing partial content. Reopen to retry."]]]]})))
+
+;; ---- SSH/SFTP: auth prompts + connection errors (main → renderer) ---------------------------------------------
+;; The prompt REQUEST (non-secret: kind/host/user/attempt/prompt) is stored in app-db so the modal can render;
+;; the typed SECRET never lands here — the modal holds it locally and dispatches :ssh/prompt-reply, which sends
+;; it straight to main over vv:ssh-prompt-reply.
+(rf/reg-event-db :ssh/prompt        (fn [db [_ req]]  (assoc-in db [:ui :ssh-prompt] req)))
+(rf/reg-event-fx :ssh/prompt-reply
+                 (fn [{:keys [db]} [_ prompt-id secret]]
+                   {:db (assoc-in db [:ui :ssh-prompt] nil)
+                    :fx [[:ssh/reply {:promptId prompt-id :secret secret}]]}))
+(rf/reg-event-db :ssh/error         (fn [db [_ info]] (assoc-in db [:ui :ssh-error] info)))
+(rf/reg-event-db :ssh/dismiss-error (fn [db _]        (assoc-in db [:ui :ssh-error] nil)))
+;; connection status (connecting/ready/closed) — kept for a future indicator; harmless if unused
+(rf/reg-event-db :ssh/status        (fn [db [_ info]] (assoc-in db [:ui :ssh-status] info)))
+;; persisted (non-secret) connection metadata pushed as raw EDN text — parsed and stored for host/URI hints
+(rf/reg-event-db :connections/received
+                 (fn [db [_ text]]
+                   (assoc-in db [:ui :connections]
+                             (when (and (string? text) (not (str/blank? text)))
+                               (try (reader/read-string text) (catch :default _ nil))))))
+
 ;; markdown progressive stream: the whole outline + asset list are known upfront (one base-pipeline pass), so
 ;; set :doc/toc + :doc/assets at once and start watching the assets (image live-refresh parity with the batch).
 (rf/reg-event-fx

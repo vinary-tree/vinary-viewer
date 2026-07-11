@@ -60,6 +60,13 @@ contextBridge.exposeInMainWorld('vv', {
   passwordFill: (item) => ipcRenderer.send('vv:password-fill', item),
   passwordSave: (payload) => ipcRenderer.send('vv:password-save', payload),
   passwordDismissSave: (token) => ipcRenderer.send('vv:password-dismiss-save', token),
+  // SSH/SFTP remote files (renderer → main). vv:ssh-prompt-reply carries a user-typed secret and NOTHING else
+  // does — it is one-shot and never persisted. The rest are non-secret metadata / EDN text.
+  sshPromptReply: (promptId, secret) => ipcRenderer.send('vv:ssh-prompt-reply', { promptId, secret }),
+  sshCloseConnection: (connKey) => ipcRenderer.send('vv:ssh-close-connection', connKey),
+  requestConnections: () => ipcRenderer.send('vv:connections-request'),
+  saveConnections: (edn) => ipcRenderer.send('vv:connections-save', edn),
+  loadRemoteAsset: (req) => ipcRenderer.invoke('vv:load-remote-asset', req),   // fetch a remote asset's bytes → data URL
   requestAppInfo: () => ipcRenderer.send('vv:app-info-request'),
   quit: () => ipcRenderer.send('vv:quit'),
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),
@@ -149,6 +156,12 @@ contextBridge.exposeInMainWorld('vv', {
   onPasswordItems: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-items', h); return () => ipcRenderer.removeListener('vv:password-items', h); },
   onPasswordSavePrompt: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-save-prompt', h); return () => ipcRenderer.removeListener('vv:password-save-prompt', h); },
   onPasswordResult: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:password-result', h); return () => ipcRenderer.removeListener('vv:password-result', h); },
+  // SSH/SFTP (main → renderer). vv:ssh-prompt is a NON-secret request (the reply carries the secret); the rest
+  // are non-secret status/errors and the connections EDN text.
+  onSshPrompt: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ssh-prompt', h); return () => ipcRenderer.removeListener('vv:ssh-prompt', h); },
+  onSshError: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ssh-error', h); return () => ipcRenderer.removeListener('vv:ssh-error', h); },
+  onSshStatus: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ssh-status', h); return () => ipcRenderer.removeListener('vv:ssh-status', h); },
+  onConnections: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:connections', h); return () => ipcRenderer.removeListener('vv:connections', h); },
   onZoomChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:zoom-changed', h); return () => ipcRenderer.removeListener('vv:zoom-changed', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);

@@ -65,3 +65,31 @@
     []
     (let [doc (.parseFromString (js/DOMParser.) html "text/html")]
       (local-media-paths-from-root doc))))
+
+(defn remote-url? [url] (boolean (and (string? url) (re-find #"(?i)^s(?:sh|ftp)://" url))))
+
+(defn remote->vv-remote-url
+  "Map a remote doc URI (ssh://user@host:port/path) to the privileged vv-remote:// scheme the web view loads for
+   live-rendering remote HTML. The whole ssh tree is remapped 1:1, so the page's relative assets resolve back to
+   vv-remote:// URLs that main serves over SFTP (main/web.cljs). Returns nil for a non-remote uri."
+  [uri]
+  (when-let [m (re-find #"(?i)^s(?:sh|ftp)://(.*)$" (str uri))]
+    (str "vv-remote://" (second m))))
+
+(defn resolve-remote-media!
+  "Post-DOM pass for a REMOTE document: replace every remote (ssh://sftp://) media URL under `node` with a data:
+   URL fetched over the vv bridge (vv:load-remote-asset → main reads the bytes over SFTP). Neither the sandboxed
+   renderer nor file:// can reach the host, so inlining as data: is the only CSP-safe path. Async + best-effort
+   per element; a failed fetch simply leaves the broken image (no crash)."
+  [^js node doc-path]
+  (when-let [^js vv (.-vv js/window)]
+    (when (and node (.-loadRemoteAsset vv))
+      (let [els (.querySelectorAll node media-selector)]
+        (dotimes [i (.-length els)]
+          (let [^js el (aget els i)]
+            (doseq [attr ["src" "poster"]]
+              (let [url (.getAttribute el attr)]
+                (when (remote-url? url)
+                  (-> (.loadRemoteAsset vv (clj->js {:uri url :relativeTo doc-path}))
+                      (.then (fn [data-url] (when (and data-url (.-isConnected el)) (.setAttribute el attr data-url))))
+                      (.catch (fn [_] nil))))))))))))

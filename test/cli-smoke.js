@@ -38,6 +38,19 @@ function run(args, env) {
   });
 }
 
+// Async runner — required when the CLI subprocess must talk to an in-process server (a synchronous execFileSync
+// would block the event loop the server runs on).
+function runAsync(args, env) {
+  return new Promise((resolve, reject) => {
+    const p = spawn('node', [CLI, ...args], { env: { ...process.env, ...(env || {}) } });
+    let out = '', err = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (err += d));
+    p.on('close', (code) => resolve({ code, out, err }));
+    p.on('error', reject);
+  });
+}
+
 console.log('cli-smoke: headless terminal renderer');
 
 // ── 1. markdown → structured ANSI ────────────────────────────────────────────────────────────────
@@ -242,6 +255,26 @@ function peakRssKb(args) {
 }
 
 (async () => {
+  // ── remote (ssh://) file over the CLI — a hermetic in-process SFTP fixture, passwordless (allowNone) so no
+  //    TTY prompt is needed; a pre-seeded known_hosts skips the TOFU prompt. Proves the CLI routes a remote URI
+  //    through openRemoteUri and renders it. ──
+  {
+    const { startSftpServer } = require('./fixtures/ssh-server.js');
+    const sshcfg = require('../src/vinary/main/ssh_config.js');
+    const srv = await startSftpServer({ allowNone: true, files: { 'notes.md': '# Remote CLI\nhello from ssh' } });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-cli-sshhome-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.ssh', 'known_hosts'),
+      sshcfg.knownHostsLine('127.0.0.1', srv.port, srv.hostKeyType, srv.hostKeyB64) + '\n');
+    try {
+      const { out, code } = await runAsync(['--no-color', srv.url('/notes.md')], { HOME: home, SSH_AUTH_SOCK: '' });
+      ok(code === 0 && /hello from ssh/.test(out), 'vv-cli renders a remote ssh:// markdown file');
+    } finally {
+      await srv.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }
+
   const small = path.join(tmp, 'small.log');   // ~6 MiB — crosses the 5 MiB stream threshold
   const large = path.join(tmp, 'large.log');   // ~30 MiB — 5× the small file
   makeLog(small, 90000);

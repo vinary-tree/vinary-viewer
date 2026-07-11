@@ -18,6 +18,8 @@
         :next-tab-id 0
         :projects []                ; [{:root :files} …] — one git-rooted file tree per open project
         ;; menu bar / dialogs / context menu (Phase 5)
+        :ssh-prompt nil             ; a pending SSH auth-prompt request (non-secret) shown by the prompt modal
+        :ssh-error nil              ; the last SSH connection error (for the dismissable toast)
         :menu nil                   ; which top-level menu is open (label) or nil
         :menu-submenu nil           ; which flyout submenu is open inside the active menu, or nil
         :menu-focus nil             ; focused item index inside the open top-level menu

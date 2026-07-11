@@ -229,6 +229,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   background: var(--vv-border); overflow: hidden; }
 .vv-stream-progress-bar { height: 100%; background: var(--vv-head1); transition: width 120ms linear; }
 .vv-stream-progress-done { display: none; }
+/* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
+.vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
+  background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }
 
 .markdown-body .cm-keyword     { color: var(--vv-head1); }
 .markdown-body .cm-operator    { color: var(--vv-head1); }
@@ -705,6 +708,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-modal-title { font-size: 17px; font-weight: 700; color: var(--vv-head1); margin-bottom: 14px; }
 .vv-modal-body { font-size: 13px; color: var(--vv-fg); }
 .vv-modal-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+
+/* ── SSH remote files: the auth prompt modal + the connection-error toast ── */
+.vv-modal.vv-ssh-prompt { max-width: 460px; }
+.vv-ssh-prompt-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.vv-ssh-label { font-size: 0.9em; color: var(--vv-fg); word-break: break-word; }
+.vv-ssh-attempt { color: var(--vv-head4, #b1951d); }
+.vv-ssh-input { font-family: var(--vv-font-fixed); font-size: 0.95em; padding: 7px 10px; border-radius: 6px;
+  border: 1px solid var(--vv-border); background: var(--vv-bg1); color: var(--vv-fg); }
+.vv-ssh-input:focus { outline: none; border-color: var(--vv-accent, var(--vv-head1)); }
+.vv-ssh-error { position: fixed; right: 16px; bottom: 44px; z-index: 60; max-width: 440px; display: flex;
+  align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 0.86em;
+  background: rgba(229, 83, 75, 0.16); color: #e5534b; border: 1px solid rgba(229, 83, 75, 0.4); }
+.vv-ssh-error-msg { flex: 1 1 auto; word-break: break-word; }
+.vv-ssh-error-x { flex: 0 0 auto; background: none; border: none; color: inherit; cursor: pointer; font-size: 1em; }
 /* wide modals using the standard title/body/actions sections (Extensions, Passwords) get padded, divided
    sections so content is not flush to the 920px panel edges; the keybindings editor brings its own header. */
 .vv-modal-wide:not(.vv-kb-modal) > .vv-modal-title { padding: 12px 18px; margin: 0;

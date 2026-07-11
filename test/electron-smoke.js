@@ -15,6 +15,8 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 // does) so the test drives genuine createReadStream/readline batching + the session registry, and can assert
 // streamCount() returns to 0 (no fd/session leak) after teardown.
 const contentService = require(path.join(__dirname, '..', 'src', 'vinary', 'main', 'content_service.js'));
+const sshTransport = require(path.join(__dirname, '..', 'src', 'vinary', 'main', 'ssh_transport.js'));
+const { startSftpServer } = require('./fixtures/ssh-server.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'resources', 'public', 'index.html');
@@ -516,6 +518,13 @@ function installIpc(state) {
     state.openDialogs += 1;
   });
   ipcMain.on('vv:open', (event, filePath) => {
+    // remote (ssh://) paths route through the REAL remote reader exactly as service.cljs/send-remote-content! does
+    if (sshTransport.isRemoteUri(filePath)) {
+      contentService.openRemoteUri(filePath, contentService.classifyName(filePath))
+        .then((p) => event.sender.send('vv:content', p))
+        .catch((e) => event.sender.send('vv:error', { path: filePath, message: e.message }));
+      return;
+    }
     const payload = state.contentByPath.get(filePath);
     if (payload) {
       event.sender.send('vv:content', { ...payload, stamp: Date.now() });
@@ -553,6 +562,9 @@ function installIpc(state) {
   // the diff side-by-side view asks main to resolve referenced files on disk; the smoke returns whatever the
   // active test staged in state.diffSources (default none → the split view falls back to the hunk windows).
   ipcMain.handle('vv:load-diff-sources', (_event, _req) => state.diffSources || {});
+  // SSH remote files: capture the (secret) prompt reply for assertions; serve remote assets from the fixture.
+  ipcMain.on('vv:ssh-prompt-reply', (_event, payload) => { state.sshReply = payload; });
+  ipcMain.handle('vv:load-remote-asset', (_event, req) => contentService.loadRemoteAsset(req.uri, req.relativeTo));
   // a collocated sibling PDF's bytes (byte-only load, no tab) for the Document↔PDF switch — the smoke stages
   // real PDF bytes in state.siblingPdfBytes so a .tex→PDF preview (and its flush layout) can be exercised.
   ipcMain.handle('vv:load-pdf-bytes', () => state.siblingPdfBytes || null);
@@ -893,6 +905,51 @@ async function main() {
     'toggling back shows the unified view', 8000
   );
   console.log('[ok] the [Unified | Split] toggle switches diff layouts');
+
+  // ── Remote SSH (ADR-0027): open a remote file + browse a remote directory against a hermetic in-process SFTP
+  //    fixture, and exercise the SSH auth-prompt modal. Configures the REAL transport (agent off, temp home,
+  //    auto-accept host key, fixed password) so vv:open → openRemoteUri authenticates with no live host. ──
+  {
+    const sshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-esmoke-sshhome-'));
+    fs.mkdirSync(path.join(sshHome, '.ssh'), { recursive: true });
+    sshTransport.configure({ homeDir: sshHome, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'pw', onError: () => {} });
+    const sshSrv = await startSftpServer({ password: 'pw', files: {
+      'notes.md': '# Remote Doc\nhello over ssh',
+      'sub/one.txt': 'one', 'sub/two.txt': 'two',
+    } });
+
+    await evalIn(win, `window.__vvopen(${JSON.stringify(sshSrv.url('/notes.md'))})`);
+    await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body'); return Boolean(b) && /hello over ssh/.test(b.textContent); })()`),
+      'a remote ssh:// markdown file renders in the GUI', 12000);
+    console.log('[ok] a remote ssh:// markdown file renders in the GUI');
+
+    await evalIn(win, `window.__vvopen(${JSON.stringify(sshSrv.url('/sub'))})`);
+    await waitFor(() => evalIn(win, `(() => { const t = document.querySelector('.vv-content').textContent; return /one\\.txt/.test(t) && /two\\.txt/.test(t); })()`),
+      'a remote ssh:// directory lists its entries in-pane', 12000);
+    console.log('[ok] a remote ssh:// directory browses in the in-pane file list');
+
+    // SSH auth-prompt modal: main pushes a (non-secret) prompt request → the modal appears → OK sends the secret
+    state.sshReply = null;
+    win.webContents.send('vv:ssh-prompt', { promptId: 'smoke1', kind: 'password', host: 'demo.example', user: 'alice', attempt: 1 });
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-ssh-prompt .vv-ssh-input'))`), 'the SSH auth-prompt modal appears', 8000);
+    await evalIn(win, `(() => {
+      const i = document.querySelector('.vv-ssh-input');
+      // React controlled input: set via the native value setter so React/reagent's onChange fires
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(i, 'hunter2'); i.dispatchEvent(new Event('input', { bubbles: true }));
+      const ok = Array.from(document.querySelectorAll('.vv-ssh-prompt button')).find((b) => b.textContent.trim() === 'OK');
+      ok.click();
+    })()`);
+    await waitFor(() => state.sshReply && state.sshReply.promptId === 'smoke1', 'the SSH prompt reply reaches main', 8000);
+    assert.strictEqual(state.sshReply.secret, 'hunter2', 'the typed secret is sent back over vv:ssh-prompt-reply');
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-ssh-prompt')`), 'the SSH prompt modal closes after OK', 8000);
+    console.log('[ok] the SSH auth-prompt modal collects a secret and replies to main');
+
+    sshTransport.closeAll();
+    await sshSrv.close();
+    fs.rmSync(sshHome, { recursive: true, force: true });
+  }
 
   // restore the PDF as the active view — this diff test navigated the tab away from it, and the PDF
   // selection / hit-test / find steps below operate on the pdf.js view.

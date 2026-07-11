@@ -29,6 +29,7 @@
             [vinary.ui.ext-toolbar :as ext-toolbar]
             [vinary.ui.extensions :as extensions-ui]
             [vinary.ui.passwords :as passwords-ui]
+            [vinary.ui.ssh :as ssh-ui]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -275,6 +276,10 @@
                        (let [token (swap! render-token inc)]
                          (reset! html* html)
                          (set-inner! @node html)
+                         ;; a remote doc's ssh:// media URLs can't be reached by the renderer or file:// — fetch
+                         ;; their bytes over the vv bridge and inline them as data: URLs (best-effort, async)
+                         (when (media/remote-url? @path*)
+                           (media/resolve-remote-media! @node @path*))
                          (after-render! token #(scroll/apply! @node))))
         on-resize (fn []
                     (when (and @node (not @raf))
@@ -404,6 +409,12 @@
                                 (let [ens (fn [] (stream-scheduler/materialize! @ctrl*))]
                                   (reset! ensurer* ens)
                                   (pdf-cache/set-ensurer! ens))
+                                ;; a streamed REMOTE doc (progressive markdown/org/latex): once every block has
+                                ;; landed, inline its ssh:// media URLs as data: URLs (the batch path does this in
+                                ;; render-html!; the transport engine — logs/text — has no media)
+                                (when (media/remote-url? path)
+                                  (-> (stream-scheduler/when-settled @ctrl*)
+                                      (.then (fn [_] (when @node (media/resolve-remote-media! @node path))))))
                                 ;; consume any saved scroll for this path (from a prior remount) → re-anchor after
                                 ;; the whole doc has settled (drain done + appends landed), so the target height
                                 ;; exists; the browser clamps if the doc came back shorter
@@ -449,10 +460,14 @@
                         ;; grows → did-update re-measures the scroll-spy for the newly-appended records
                         @(rf/subscribe [:doc/toc])
                         (let [p        @(rf/subscribe [:doc/stream-progress])
+                              note     @(rf/subscribe [:doc/stream-note])
                               loading? (and p (< p 1))]
                           [:<>
                            [:div.vv-stream-progress {:class (when-not loading? "vv-stream-progress-done")}
                             [:div.vv-stream-progress-bar {:style {:width (str (* 100 (or p 0)) "%")}}]]
+                           ;; a non-fatal note (e.g. a remote SSH connection dropped mid-stream) — the already
+                           ;; committed blocks below stay visible; never a blanking :doc/error
+                           (when note [:div.vv-stream-note note])
                            ;; .vv-streamed enables windowed rendering: content-visibility skips layout/paint of
                            ;; off-screen top-level blocks (bounded render on huge docs) while the nodes stay in
                            ;; the DOM, so find / scroll-spy / selection keep working on the whole document
@@ -945,10 +960,13 @@
        (empty? tabs)               [watermark]
        (nil? uri)                  [:div.vv-empty "New Tab"]
        (uri/http? uri)             [web-host uri]
-       ;; local .html → render live in the web view via its file:// URL (keyed by stamp so a live-refresh
-       ;; remounts the host and reloads the page), not shown as escaped source
+       ;; .html → render live in the web view (keyed by stamp so a live-refresh remounts the host and reloads),
+       ;; not shown as escaped source. A LOCAL file loads by its file:// URL; a REMOTE file loads by its
+       ;; vv-remote:// URL, which main serves over SFTP (so the page's relative CSS/JS/images resolve too).
        (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [web-host (media/path->file-url (:doc/path doc))]
+                                   [web-host (if (uri/remote? (:doc/path doc))
+                                               (media/remote->vv-remote-url (:doc/path doc))
+                                               (media/path->file-url (:doc/path doc)))]
        ;; Document↔PDF representation switch: a doc collocated with an exported PDF, currently showing :pdf →
        ;; render that sibling PDF in place (bytes are loaded byte-only into pdf-cache; a brief note until ready).
        ;; Placed above :doc/error / :doc/streaming? so the faithful PDF shows regardless of the doc's own state.
@@ -1313,6 +1331,8 @@
    [extensions-ui/dialog]
    [passwords-ui/dialog]
    [passwords-ui/save-prompt]
+   [ssh-ui/prompt-dialog]
+   [ssh-ui/error-toast]
    [about/dialog]
    (when @(rf/subscribe [:kbedit/open?]) [kbedit/dialog])
    [hints-overlay]])

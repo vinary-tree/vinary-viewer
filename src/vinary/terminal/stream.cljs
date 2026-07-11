@@ -19,11 +19,10 @@
    Returns a `stop!` fn that cancels the stream and closes the session (idempotent)."
   [file {:keys [on-blocks on-progress on-done on-error pace]}]
   (let [pace       (or pace (fn [f] (f)))
-        ^js session (.streamOpen cs #js {:path file :mode "lines"})
-        sid        (.-sessionId session)
         stopped    (atom false)
         parser     (atom (log-stream/parser))
-        close!     (fn [] (try (.streamClose cs #js {:sessionId sid}) (catch :default _ nil)))]
+        sid*       (atom nil)                      ; streamOpen is async (remote sources stat/open over SFTP)
+        close!     (fn [] (when-let [sid @sid*] (try (.streamClose cs #js {:sessionId sid}) (catch :default _ nil))))]
     (letfn [(finish! []
               (when-not @stopped
                 (reset! stopped true)
@@ -33,7 +32,7 @@
                 (when on-done (on-done))))
             (pump []
               (when-not @stopped
-                (-> (.streamPull cs #js {:sessionId sid})
+                (-> (.streamPull cs #js {:sessionId @sid*})
                     (.then (fn [^js batch]
                              (when-not @stopped
                                (let [{p :parser blocks :blocks} (proto/feed @parser (vec (.-lines batch)))]
@@ -46,5 +45,11 @@
                                 (reset! stopped true)
                                 (close!)
                                 (if on-error (on-error e) (throw e))))))))]
-      (pace pump)
+      ;; open the session (async: a remote source stats + opens over SFTP), then start the pull loop
+      (-> (.streamOpen cs #js {:path file :mode "lines"})
+          (.then (fn [^js session]
+                   (reset! sid* (.-sessionId session))
+                   (when-not @stopped (pace pump))))
+          (.catch (fn [e] (when-not @stopped (reset! stopped true)
+                            (if on-error (on-error e) (throw e))))))
       (fn stop! [] (when-not @stopped (reset! stopped true) (close!))))))

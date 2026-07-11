@@ -5,8 +5,9 @@
    page's heading outline and reports the active heading on scroll — so the Contents/TOC tab follows HTML
    sections just like Markdown — and scrolls to a heading on request. did-navigate is relayed so in-page
    link clicks update the active tab's URI + history."
-  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard]]
-            ["path" :as path]))
+  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session]]
+            ["path" :as path]
+            ["./ssh_transport.js" :as ssh-transport]))
 
 (defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false :owner-tab nil}))
 (defonce ^:private inited (atom false))
@@ -189,6 +190,33 @@
 
 (defn hide! [] (when-let [^js v (:view @state)] (.setVisible v false) (swap! state assoc :visible? false)))
 
+(def ^:private mime-types
+  {".html" "text/html" ".htm" "text/html" ".xhtml" "application/xhtml+xml"
+   ".css" "text/css" ".js" "text/javascript" ".mjs" "text/javascript" ".json" "application/json"
+   ".svg" "image/svg+xml" ".png" "image/png" ".jpg" "image/jpeg" ".jpeg" "image/jpeg" ".gif" "image/gif"
+   ".webp" "image/webp" ".avif" "image/avif" ".ico" "image/x-icon" ".bmp" "image/bmp"
+   ".woff" "font/woff" ".woff2" "font/woff2" ".ttf" "font/ttf" ".otf" "font/otf"
+   ".pdf" "application/pdf" ".txt" "text/plain" ".xml" "application/xml" ".webmanifest" "application/manifest+json"})
+
+(defn- mime-for [uri]
+  (let [ext (some-> (re-find #"(\.[^./?#]+)(?:[?#].*)?$" (str uri)) second .toLowerCase)]
+    (get mime-types ext "application/octet-stream")))
+
+(defn- register-remote-protocol!
+  "Serve vv-remote:// on the web view's session: map each request URL 1:1 back to its ssh:// URI and stream the
+   file's bytes over SFTP. This lets the web view live-render a remote HTML page whose relative assets (CSS / JS
+   / images) resolve to vv-remote:// URLs — the SSH analog of loading an http(s) page. Registered once."
+  []
+  (let [^js sess (.fromPartition session "persist:vinary-web")]
+    (.handle (.-protocol sess) "vv-remote"
+             (fn [^js request]
+               (let [url     (.-url request)
+                     ssh-uri (str "ssh://" (subs url (count "vv-remote://")))]
+                 (-> (.remoteReadFile ssh-transport ssh-uri)
+                     (.then (fn [bytes] (js/Response. bytes #js {:headers #js {"content-type" (mime-for ssh-uri)}})))
+                     (.catch (fn [^js e] (js/Response. (str "remote fetch failed: " (.-message e))
+                                                       #js {:status 502 :headers #js {"content-type" "text/plain"}})))))))))
+
 (defn init! [^js win]
   ;; a recreated window invalidates the old view (it belonged to the closed window)
   (when (not= win (:win @state)) (swap! state assoc :view nil :url nil :snapshot nil :visible? false))
@@ -196,6 +224,7 @@
   (attach-app-command! win)
   (when-not @inited
     (reset! inited true)
+    (register-remote-protocol!)   ; vv-remote:// → SFTP, for live-rendering remote HTML in the web view
     ;; ---- app renderer → web view ----
     (.on ipcMain "vv:http-show"
          (fn [_e ^js p] (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m) (:tabId m)))))

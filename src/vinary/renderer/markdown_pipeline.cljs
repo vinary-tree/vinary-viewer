@@ -186,12 +186,18 @@
       (dotimes [i (.-length kids)] (collect-metadata! state (aget kids i))))))
 
 (defn- rewrite-urls
-  "A rehype (hast) transformer plugin: rewrite relative element URLs to absolute file:// against base-dir."
+  "A rehype (hast) transformer plugin: rewrite relative element URLs to absolute against base-dir — file:// for a
+   local doc, or the remote dir itself (ssh://…) for a remote doc. Those ssh:// media URLs are then fetched to
+   data: URLs by a post-DOM pass (media/resolve-remote-media!), since neither the sandboxed renderer nor file://
+   can reach the host."
   [base-dir cache-token]
   (fn [_opts]
     (fn [tree _file]
       (when (and base-dir (not (str/blank? base-dir)))
-        (walk-rewrite! tree (str "file://" base-dir "/") cache-token))
+        (let [base (if (re-find #"(?i)^s(?:sh|ftp)://" base-dir)
+                     (str base-dir "/")
+                     (str "file://" base-dir "/"))]
+          (walk-rewrite! tree base cache-token)))
       tree)))
 
 (defn- wrap-images

@@ -26,6 +26,15 @@
 (defn archive-uri? [uri]
   (str/starts-with? (str uri) "vv-archive://"))
 
+(defn remote-uri?
+  "True for an ssh:// or sftp:// remote URI — served by the async remote reader (SFTP over ssh2), not the
+   local filesystem path. Mirrors vinary.app.uri/remote? on the main side so service.cljs can short-circuit
+   into the async path. `kind-of` needs no remote arm: it classifies off the basename extension, which is
+   already correct on the ssh://…/a/b tail (a dotted host never leaks — `extension` is end-anchored)."
+  [uri]
+  (let [s (str uri)]
+    (or (str/starts-with? s "ssh://") (str/starts-with? s "sftp://"))))
+
 (defn pdf-sibling-path
   "The same-directory, same-stem candidate `.pdf` path for a document path `p` (PURE — the caller checks
    existence on disk). nil when `p` has no extension (no stem to swap) or IS itself a `.pdf` (a document never

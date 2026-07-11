@@ -45,7 +45,12 @@ is an address for an archive member that has not been extracted to disk.
 | `vv:close` | `close(path)` | string path | `vinary.main.service` | Close an individual watcher path. Kept for compatibility; retained sync is authoritative. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained local path set. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a Markdown document. |
-| `vv:content-page` | `contentPage(request)` | page request map | `vinary.main.service` | Fetch one bounded page of a large log or delimited-table preview. |
+| `vv:content-page` | `contentPage(request)` | page request map | `vinary.main.service` | Fetch one bounded page of a large log or delimited-table preview. (Accepts `ssh://` paths.) |
+| `vv:load-remote-asset` | `loadRemoteAsset(req)` | `{uri, relativeTo}` | `vinary.main.service` | Fetch a remote asset's bytes over SFTP → a `data:` URL (remote Markdown/Office relative images). |
+| `vv:ssh-prompt-reply` | `sshPromptReply(promptId, secret)` | `{promptId, secret}` | `vinary.main.ssh` | The typed SSH secret — the **only** secret-bearing channel; one-shot, never persisted. |
+| `vv:ssh-close-connection` | `sshCloseConnection(connKey)` | connKey string | `vinary.main.ssh` | Close a pooled SSH connection. |
+| `vv:connections-request` | `requestConnections()` | none | `vinary.main.connections` | Push current `connections.edn`. |
+| `vv:connections-save` | `saveConnections(edn)` | EDN string | `vinary.main.connections` | Persist non-secret SSH connection metadata. |
 | `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config` | Push current `keybindings.edn`. |
 | `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config` | Persist keybinding registry. |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars` | Push grammar registry. |
@@ -88,6 +93,10 @@ Every `on*` API returns an unsubscribe function.
 | `vv:history-nav` | `onHistoryNav(cb)` | direction | history event |
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened payload]` |
 | `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received text]` |
+| `vv:ssh-prompt` | `onSshPrompt(cb)` | `{promptId, kind, host, user, attempt, keyPath?, prompt?}` (non-secret request) | `[:ssh/prompt req]` |
+| `vv:ssh-error` | `onSshError(cb)` | `{connKey, host, kind, message}` | `[:ssh/error info]` |
+| `vv:ssh-status` | `onSshStatus(cb)` | `{connKey, host, state}` | `[:ssh/status info]` |
+| `vv:connections` | `onConnections(cb)` | EDN string | `[:connections/received text]` |
 | `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received text]` |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata | `[:app-info/received info]` |
 

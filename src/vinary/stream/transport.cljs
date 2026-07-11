@@ -20,7 +20,11 @@
                 :done     (boolean (.-done b))
                 :progress (or (.-progress b) 0)
                 :lines    (when (.-lines b) (vec (.-lines b)))
-                :text     (.-text b)}))))
+                :text     (.-text b)
+                ;; a mid-stream drop (a remote SSH source) ends the stream flagged partial with a message —
+                ;; the scheduler surfaces this as a non-fatal note, keeping the already-committed blocks
+                :error    (.-error b)
+                :partial  (boolean (.-partial b))}))))
 
 (defn open!
   "Open a stream session for `path` of `kind`. Returns Promise<session> where session is an opaque map

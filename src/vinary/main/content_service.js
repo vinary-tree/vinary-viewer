@@ -10,6 +10,7 @@ const tar = require('tar-stream');
 const Papa = require('papaparse');
 const mammoth = require('mammoth');
 const { XMLParser } = require('fast-xml-parser');
+const transport = require('./ssh_transport.js');   // SSH/SFTP remote reads (ssh://, sftp://)
 
 const SMALL_LOG_BYTES = 5 * 1024 * 1024;
 const SMALL_TABLE_BYTES = 2 * 1024 * 1024;
@@ -694,6 +695,10 @@ async function contentPage(req) {
     const source = await archiveEntrySource(uri);
     name = source.name;
     page = await pageFromStream(request, entryContentStream(source), name);
+  } else if (transport.isRemoteUri(uri)) {
+    // remote paged nav (large log / table) — read only up to the requested window over SFTP, then destroy the
+    // channel. The page cache (keyed [path,stamp,kind,page,sheet]) works verbatim with the ssh:// URI as `path`.
+    page = await pageFromStream(request, await remoteContentStream(uri), uri);
   } else {
     name = uri;
     const stat = fs.statSync(uri);
@@ -707,9 +712,141 @@ async function contentPage(req) {
   return rememberPage(request, page);
 }
 
-async function openUri(uri) {
+async function openUri(uri, kind) {
   if (isArchiveUri(uri)) return openArchiveUri(uri);
+  if (transport.isRemoteUri(uri)) return openRemoteUri(uri, kind || classifyName(uri));
   return openLocal(uri);
+}
+
+// A gunzip-aware Readable over a remote file (mirrors localContentStream: `.gz` log names are decompressed).
+async function remoteContentStream(uri) {
+  return contentStreamForName(uri, await transport.remoteCreateReadStream(uri));
+}
+
+// The remote reader — an ssh://sftp:// analog of openLocal, paralleling openArchiveUri (a virtual backend).
+// It stats once (to decide list-vs-read and to fill meta.size, which the streaming gate needs), then produces
+// the SAME payload contract, reusing every existing parser (office/table/log/image/pdf/text sniff) and the
+// archive machinery. `kind` is the grammar-aware classification threaded from the CLJS caller (so a remote
+// `.rs` is "source", not sniffed "text"); it falls back to the name-based classifier for direct callers.
+async function openRemoteUri(uri, kind) {
+  const stamp = Date.now();
+  const st = await transport.remoteStat(uri);
+  if (st.isDirectory) {
+    const children = await transport.remoteReaddir(uri);
+    return {
+      path: uri, kind: 'directory', stamp,
+      // each entry carries its child ssh:// URI, so the in-pane dir-view + :doc/open reuse works unchanged
+      entries: children.map(e => ({ name: e.name, path: e.path, 'dir?': e.dir, size: e.size, mtime: e.mtime, symlink: e.symlink })),
+    };
+  }
+  const meta = { size: st.size, mtime: st.mtime };
+  const k = kind || classifyName(uri);
+
+  // A remote archive browses exactly like a local one — archiveLayerSource reads the remote root into a buffer.
+  if (k === 'archive') return archiveListingPayload(uri, [], stamp);
+
+  if (k === 'office') return officeBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: OFFICE_PREVIEW_BYTES }), stamp, meta);
+
+  if (k === 'table') {
+    if (delimitedExts.has(extname(uri)) && st.size > SMALL_TABLE_BYTES) {
+      const page = await streamDelimitedPage(await remoteContentStream(uri), delimiterFor(uri), 0);
+      return { path: uri, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: TABLE_PAGE_ROWS }) };
+    }
+    return tableBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: WORKBOOK_PREVIEW_BYTES }), stamp, meta);
+  }
+
+  if (k === 'log') {
+    if (st.size > SMALL_LOG_BYTES || gzipLogName(uri)) {
+      const page = await streamLogPage(await remoteContentStream(uri), 0);   // first page only — large logs stream (E)
+      return { path: uri, kind: 'log', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: LOG_PAGE_LINES }) };
+    }
+    return logTextPayload(uri, uri, await transport.remoteReadText(uri), stamp, meta);
+  }
+
+  if (k === 'markdown' || k === 'mermaid' || k === 'org' || k === 'latex' || k === 'diff' || k === 'source') {
+    const payload = { path: uri, kind: k, text: await transport.remoteReadText(uri), stamp, sourceable: true, meta };
+    if (k === 'markdown' || k === 'org' || k === 'latex') {   // a doc collocated with an exported PDF → Document↔PDF
+      const pdfSib = await firstExistingRemote([swapExtUri(uri, '.pdf')]);
+      if (pdfSib && pdfSib !== uri) payload.pdfSibling = pdfSib;
+    }
+    return payload;
+  }
+  if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri)), stamp, meta };
+  if (k === 'pdf') {
+    const payload = { path: uri, kind: 'pdf', bytes: await transport.remoteReadFile(uri), stamp, meta };
+    // the reverse: a PDF collocated with its previewable source (paper.pdf → paper.tex) advertises it
+    const srcSib = await firstExistingRemote(['.tex', '.latex', '.ltx', '.md', '.markdown', '.org'].map(e => swapExtUri(uri, e)));
+    if (srcSib) payload.sourceSibling = srcSib;
+    return payload;
+  }
+  // Remote HTML is live-rendered in the web view via the vv-remote:// protocol (see main/service.cljs); the
+  // `text` is carried too so the terminal (vv-cli/tui) can show the source.
+  if (k === 'html') return { path: uri, kind: 'html', text: await transport.remoteReadText(uri), stamp, sourceable: true, meta, remoteHtml: true };
+
+  // generic text / unknown → whole-file sniff (log / delimited / plain text), like openLocal's tail
+  return bufferToPayload(uri, uri, await transport.remoteReadFile(uri), stamp, meta);
+}
+
+// ── remote URI arithmetic + on-disk-companion resolution (shared by siblings / diff-sources / assets) ──
+function remotePartsJs(uri) {
+  const m = /^(s(?:sh|ftp):\/\/[^/]*)(\/.*)?$/i.exec(String(uri));
+  return m ? [m[1], m[2] || '/'] : [String(uri), '/'];
+}
+
+function posixDirname(p) {
+  const s = String(p).replace(/\/+$/, '');
+  const i = s.lastIndexOf('/');
+  return i <= 0 ? '/' : s.slice(0, i);
+}
+
+function swapExtUri(uri, newExt) {
+  const ext = extname(uri);
+  if (!ext) return null;
+  return uri.slice(0, uri.length - ext.length) + newExt;
+}
+
+async function firstExistingRemote(uris) {
+  for (const u of uris) {
+    if (!u) continue;
+    try { const s = await transport.remoteStat(u); if (s.isFile) return u; } catch (_e) { /* not present */ }
+  }
+  return null;
+}
+
+// A remote diff's referenced file, resolved relative to the diff's directory then walking up ancestors → its
+// utf8 content, or null. The SFTP analog of service.cljs/resolve-diff-source, for the side-by-side enrichment.
+async function loadRemoteDiffSources(diffUri, rels) {
+  const [prefix, p] = remotePartsJs(diffUri);
+  const out = {};
+  for (const rel of rels || []) {
+    let dir = posixDirname(p);
+    for (let depth = 0; depth < 30; depth++) {
+      const cand = prefix + path.posix.join(dir, rel);
+      try {
+        const s = await transport.remoteStat(cand);
+        if (s.isFile) { out[rel] = await transport.remoteReadText(cand); break; }
+      } catch (_e) { /* keep walking up */ }
+      const parent = posixDirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return out;
+}
+
+// A remote doc's relative asset (image) → a data: URL (bytes fetched over SFTP, since neither the sandboxed
+// renderer nor file:// can reach the host). `relativeTo` is the doc's remote URI. http(s)/data: refs pass through.
+async function loadRemoteAsset(assetRef, relativeTo) {
+  const ref = String(assetRef);
+  if (/^(https?:|data:)/i.test(ref)) return ref;
+  let assetUri;
+  if (transport.isRemoteUri(ref)) {
+    assetUri = ref;
+  } else {
+    const [prefix, p] = remotePartsJs(relativeTo);
+    assetUri = prefix + path.posix.resolve(posixDirname(p), ref.replace(/^\.\//, ''));
+  }
+  return dataUrlFor(assetUri, await transport.remoteReadFile(assetUri, { maxBytes: 64 * 1024 * 1024 }));
 }
 
 async function openLocal(filePath) {
@@ -824,11 +961,21 @@ async function archiveListingPayload(root, entries, stamp) {
   };
 }
 
+// The base layer for an archive root: a local path is opened by `filePath`; a remote (ssh://) archive root is
+// read whole into a `buffer` (the same in-memory source variant nested archives already use), so the entire
+// archive machinery browses a remote .zip/.tar with no other change.
+async function rootLayer(root) {
+  if (transport.isRemoteUri(root)) {
+    return { name: root, kind: classifyName(root), buffer: await transport.remoteReadFile(root) };
+  }
+  return { name: root, kind: classifyName(root), filePath: root };
+}
+
 async function archiveLayerSource(root, entries) {
   if (entries.length === 0) {
-    return { name: root, kind: classifyName(root), filePath: root };
+    return rootLayer(root);
   }
-  let layer = { name: root, kind: classifyName(root), filePath: root };
+  let layer = await rootLayer(root);
   for (const entryPath of entries) {
     if (isArchiveDirectoryEntry(entryPath)) throw new Error('Directory entries cannot contain nested archive layers');
     if (classifyName(entryPath) !== 'archive') throw new Error(`Archive entry is not an archive: ${entryPath}`);
@@ -1147,21 +1294,38 @@ const STREAM_IDLE_MS = 60000;
 
 function bufBytes(sess) { let n = 0; for (const s of sess.buf) n += s.length; return n; }
 
-function streamOpen(req) {
+async function streamOpen(req) {
   const filePath = req.path;
   const mode = req.mode === 'bytes' ? 'bytes' : 'lines';
   let size = 0;
-  try { size = fs.statSync(filePath).size; } catch (e) { size = 0; }
-  const raw = fs.createReadStream(filePath);
+  let raw;
+  // A remote (ssh://) source substitutes an SFTP read-stream for fs.createReadStream — a drop-in Readable, so the
+  // credit-1 pull cursor and the whole session are otherwise identical. The `.gz` gunzip check is name-based and
+  // works the same on the remote basename. (Only the transport engine — logs/text — streams; the progressive
+  // engine for markdown/org/latex re-parses the already-delivered text and never opens a stream.)
+  if (transport.isRemoteUri(filePath)) {
+    try { size = (await transport.remoteStat(filePath)).size; } catch (e) { size = 0; }
+    raw = await transport.remoteCreateReadStream(filePath);
+  } else {
+    try { size = fs.statSync(filePath).size; } catch (e) { size = 0; }
+    raw = fs.createReadStream(filePath);
+  }
   const decoded = gzipLogName(filePath) ? raw.pipe(zlib.createGunzip()) : raw;
   const sessionId = 'st' + (++streamSeq);
-  const sess = { raw, rl: null, decoded, buf: [], done: false, waiter: null,
+  const sess = { raw, rl: null, decoded, buf: [], done: false, error: null, waiter: null,
                  bytesRead: 0, size, mode, seq: 0, lastPull: Date.now() };
   const wake = () => { const w = sess.waiter; if (w) { sess.waiter = null; w(); } };
-  raw.on('error', () => { sess.done = true; wake(); });
+  // A mid-stream error (e.g. the SSH connection dropped) ends the stream gracefully with a partial flag so the
+  // renderer keeps the already-committed blocks and shows a "connection lost" note (never :doc/error). The
+  // error can surface on the raw stream, the gunzip pipe, OR the readline Interface (which re-emits its input's
+  // error) — all are handled here, so a drop is never an unhandled 'error' crash.
+  const onError = (err) => { if (!sess.error) sess.error = (err && err.message) || 'stream error'; sess.done = true; wake(); };
+  raw.on('error', onError);
+  if (decoded !== raw) decoded.on('error', onError);
   if (mode === 'lines') {
     const rl = readline.createInterface({ input: decoded, crlfDelay: Infinity });
     sess.rl = rl;
+    rl.on('error', onError);
     rl.on('line', (line) => {
       sess.buf.push(line);
       sess.bytesRead += Buffer.byteLength(line, 'utf8') + 1;   // approx raw progress (fine for a progress bar)
@@ -1194,6 +1358,7 @@ async function streamPull(req) {
   const out = { seq: (sess.seq = sess.seq + 1),
                 done: sess.done && sess.buf.length === 0,
                 progress: sess.size > 0 ? Math.min(1, sess.bytesRead / sess.size) : (sess.done ? 1 : 0) };
+  if (out.done && sess.error) { out.error = sess.error; out.partial = true; }   // dropped mid-stream → partial
   if (sess.mode === 'lines') out.lines = taken; else out.text = taken.join('');
   return out;
 }
@@ -1225,6 +1390,10 @@ module.exports = {
   displayArchiveUri,
   isArchiveUri,
   openUri,
+  openRemoteUri,
+  remoteContentStream,
+  loadRemoteDiffSources,
+  loadRemoteAsset,
   parseArchiveUri,
   streamOpen,
   streamPull,
