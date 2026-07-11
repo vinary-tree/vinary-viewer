@@ -45,4 +45,6 @@
 {:id "lean" :language "lean" :extensions [".lean"] :wasm-url "grammars/lean/grammar.wasm" :scm-url "grammars/lean/highlights.scm" :source-kind "git" :source "https://github.com/Julian/tree-sitter-lean"}
 {:id "tlaplus" :language "tlaplus" :extensions [".tla"] :wasm-url "grammars/tlaplus/grammar.wasm" :scm-url "grammars/tlaplus/highlights.scm" :source-kind "git" :source "https://github.com/tlaplus-community/tree-sitter-tlaplus"}
 {:id "proto" :language "proto" :extensions [".proto"] :wasm-url "grammars/proto/grammar.wasm" :scm-url "grammars/proto/highlights.scm" :source-kind "git" :source "https://github.com/coder3101/tree-sitter-proto"}
+{:id "make" :language "make" :extensions [".mk" ".make" ".mak"] :wasm-url "grammars/make/grammar.wasm" :scm-url "grammars/make/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-make"}
+{:id "gitignore" :language "gitignore" :extensions [".gitignore"] :wasm-url "grammars/gitignore/grammar.wasm" :scm-url "grammars/gitignore/highlights.scm" :source-kind "git" :source "https://github.com/shunsambongi/tree-sitter-gitignore"}
 ]

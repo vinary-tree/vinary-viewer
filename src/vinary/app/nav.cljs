@@ -179,6 +179,18 @@
     (or tab-rep (if (= pref-default :document) :document :pdf))
     :document))
 
+;; ---- Diff unified⇄split view (per-tab; only meaningful for a .diff/.patch doc) ----
+;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the default (:unified —
+;; side-by-side is opt-in, so opening a diff never triggers the split view's on-disk source resolution).
+(defn diff-view [db] (:diff-view (active-tab db)))
+(defn set-diff-view
+  ([db view]    (set-diff-view db (active-id db) view))
+  ([db id view] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (assoc % :diff-view view) %) ts)))))
+(defn effective-diff-view
+  "The diff view to show: the tab's explicit choice, else :unified. Pure so the sub + tests share it."
+  [tab-view]
+  (or tab-view :unified))
+
 (defn nth-id
   "The id of the tab `dir` steps from the active one (wrapping), or nil if no tabs."
   [db dir]

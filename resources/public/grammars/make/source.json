@@ -1,0 +1,14 @@
+{
+  "id": "make",
+  "language": "make",
+  "extensions": [
+    ".mk",
+    ".make",
+    ".mak"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/tree-sitter-grammars/tree-sitter-make"
+  },
+  "sourceRev": "70613f3d812cbabbd7f38d104d60a409c4008b43"
+}

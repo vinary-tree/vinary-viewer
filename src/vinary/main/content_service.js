@@ -47,6 +47,21 @@ const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.b
 const markdownExts = new Set(['.md', '.markdown', '.mdx']);
 const htmlExts = new Set(['.html', '.htm', '.xhtml']);
 const mermaidExts = new Set(['.mmd', '.mermaid']);
+// unified/git diffs — rendered (colored unified in the terminal; colored + side-by-side in the GUI) via the
+// diff IR front-end. Its own kind, not 'text': a diff's `@@`/`+`/`-`/tabbed hunks otherwise trip sniffDelimited.
+const diffExts = new Set(['.diff', '.patch']);
+// Standard repo files that carry no (useful) extension. `wellKnownKind` below classifies them deterministically,
+// INDEPENDENT of any bundled grammar — the CLI/TUI twin of vinary.main.file-kind/well-known-kind. Without this a
+// GNU Makefile (its `target:` and tab-indented recipes) mis-detects as a delimited table via sniffDelimited.
+const wellKnownTextNames = new Set(['license', 'licence', 'copying', 'copying.lesser', 'copyright', 'authors',
+  'contributors', 'notice', 'patents', 'install', 'news', 'thanks', 'maintainers', 'todo', 'version', 'readme',
+  'changelog', 'codeowners']);
+const wellKnownSourceNames = new Set(['makefile', 'gnumakefile', 'dockerfile', 'containerfile', 'cmakelists.txt',
+  'gemfile', 'rakefile', 'guardfile', 'podfile', 'vagrantfile', 'brewfile', 'capfile', 'berksfile', 'thorfile',
+  'jenkinsfile', 'pkgbuild', '.gitignore', '.gitattributes', '.gitmodules', '.gitconfig', '.dockerignore',
+  '.npmignore', '.prettierignore', '.eslintignore', '.stylelintignore', '.editorconfig', '.npmrc', '.inputrc',
+  '.bashrc', '.zshrc', '.bash_profile', '.bash_aliases', '.bash_logout', '.zprofile', '.zshenv', '.profile']);
+const wellKnownSourceSuffixes = ['.mk', '.make', '.mak', '.dockerfile', '.gemspec', '.podspec', '.rake'];
 
 function archiveUri(root, entries) {
   return 'vv-archive://open?chain=' + encodeURIComponent(JSON.stringify([root].concat(entries || [])));
@@ -79,6 +94,20 @@ function basename(name) {
   return String(name || '').split(/[\\/]/).pop() || String(name || '');
 }
 
+// Deterministic kind for a well-known repo file (Makefile / LICENSE / .gitignore / git config / …), or null.
+// Twin of vinary.main.file-kind/well-known-kind. Grammar-independent, so classification is stable even before
+// (or without) a bundled grammar; highlighting is layered separately via grammar-catalog/built-in-filetypes.
+function wellKnownKind(name) {
+  const norm = String(name).replace(/\\/g, '/');
+  const base = basename(norm).toLowerCase();
+  if (wellKnownTextNames.has(base)) return 'text';
+  if (wellKnownSourceNames.has(base)) return 'source';
+  if (wellKnownSourceSuffixes.some(s => base.endsWith(s))) return 'source';
+  if (base === '.env' || base.startsWith('.env.')) return 'source';   // .env, .env.local, .env.production …
+  if (/(?:^|\/)\.git\/config$/.test(norm)) return 'source';           // a repo's .git/config
+  return null;
+}
+
 function classifyName(name) {
   const ext = extname(name);
   const base = basename(name).toLowerCase();
@@ -89,10 +118,15 @@ function classifyName(name) {
   if (markdownExts.has(ext)) return 'markdown';
   if (orgExts.has(ext)) return 'org';
   if (latexExts.has(ext)) return 'latex';
+  if (diffExts.has(ext)) return 'diff';
   if (htmlExts.has(ext)) return 'html';
   if (mermaidExts.has(ext)) return 'mermaid';
   if (imageExts.has(ext)) return 'image';
   if (ext === '.pdf') return 'pdf';
+  // well-known repo files BEFORE the plain-text fallback, so a Makefile is 'source' (not sniffed as a table)
+  // and a LICENSE is deterministically 'text'.
+  const wk = wellKnownKind(name);
+  if (wk) return wk;
   if (textExts.has(ext)) return 'text';
   return 'text';
 }
@@ -709,6 +743,12 @@ async function openLocal(filePath) {
   // tabular (`a & b \\`) otherwise trips sniffDelimited and the document is previewed as a delimited table
   // rather than rendered through uniorg / unified-latex.
   if (kind === 'org' || kind === 'latex') {
+    return { path: filePath, kind, text: fs.readFileSync(filePath, 'utf8'), stamp, sourceable: true, meta: stat };
+  }
+  // Source / diff, and well-known plain-text repo files (LICENSE/COPYING/…), likewise short-circuit the sniff:
+  // a GNU Makefile's `target:`/tab-indented recipes and a diff's `@@`/`+`/`-` hunks are classic sniffDelimited
+  // false positives. Generic extensionless `text` still falls through to the sniff (unknown logs / CSVs).
+  if (kind === 'source' || kind === 'diff' || (kind === 'text' && wellKnownKind(filePath) === 'text')) {
     return { path: filePath, kind, text: fs.readFileSync(filePath, 'utf8'), stamp, sourceable: true, meta: stat };
   }
   const sample = readPrefix(filePath, 64 * 1024);

@@ -65,6 +65,66 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-empty { color: var(--vv-fg-dim); }
 /* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
 .vv-image-view img { display: block; width: 100%; max-width: none; height: auto; }
+
+/* ── diff (.diff/.patch): a colored UNIFIED view + a side-by-side SPLIT view, both rendered through
+   markdown-body (so in-page find / scroll-spy / the themed context menu / the Contents outline all work). The
+   unified line's two line-number gutters are CSS pseudo-elements fed by data-old/data-new and grid-ordered ahead
+   of the .vv-diff-code text — so they draw in the GUI yet stay invisible to the terminal's text-only ANSI
+   renderer. Add/delete use translucent tints so they read on any theme background with no new theme variables. */
+.markdown-body .vv-diff { font-family: var(--vv-font-fixed); font-size: var(--vv-code-font-size); line-height: 1.5; }
+.markdown-body .vv-diff-preamble { background: var(--vv-bg2); border: 1px solid var(--vv-border);
+  border-radius: 6px; padding: 8px 12px; color: var(--vv-fg-dim); white-space: pre-wrap; margin: 0 0 14px; }
+/* file banner (an <h2> in the unified view, a <header> in the split view; both anchor the Contents outline) */
+.markdown-body .vv-diff-file-head { display: flex; align-items: center; gap: 8px; margin: 20px 0 0; padding: 7px 12px;
+  background: var(--vv-bg2); border: 1px solid var(--vv-border); border-bottom: none; border-radius: 6px 6px 0 0;
+  font-family: var(--vv-font-fixed); font-size: 0.92em; font-weight: 500; color: var(--vv-fg); }
+.markdown-body .vv-diff-file-status { flex: 0 0 auto; text-transform: uppercase; font-size: 0.68em;
+  letter-spacing: 0.05em; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.vv-diff-status-added    { background: rgba(64, 160, 43, 0.20);  color: #2ea043; }
+.vv-diff-status-deleted  { background: rgba(229, 83, 75, 0.20);  color: #e5534b; }
+.vv-diff-status-modified { background: rgba(88, 166, 255, 0.20); color: #4c8fd6; }
+.vv-diff-status-renamed  { background: rgba(210, 153, 34, 0.22); color: #bb8009; }
+.vv-diff-status-binary   { background: var(--vv-bg-code); color: var(--vv-fg-dim); }
+.markdown-body .vv-diff-file-name { flex: 1 1 auto; word-break: break-all; }
+/* unified diff lines: a grid [old-gutter | new-gutter | code], gutters ordered ahead of the code by `order` */
+.markdown-body .vv-diff-line { display: grid; grid-template-columns: 3.2em 3.2em 1fr; align-items: start;
+  border-left: 1px solid var(--vv-border); border-right: 1px solid var(--vv-border); color: var(--vv-fg); }
+.markdown-body .vv-diff-line::before, .markdown-body .vv-diff-line::after { color: var(--vv-fg-dim); opacity: 0.65;
+  text-align: right; padding-right: 0.7em; white-space: nowrap; user-select: none; -webkit-user-select: none; }
+.markdown-body .vv-diff-line::before { content: attr(data-old); order: 0; }
+.markdown-body .vv-diff-line::after  { content: attr(data-new); order: 1; }
+.markdown-body .vv-diff-code { order: 2; white-space: pre-wrap; word-break: break-word; padding-left: 0.6em;
+  border-left: 1px solid var(--vv-border); }
+.markdown-body .vv-diff-insert { background: rgba(64, 160, 43, 0.13); }
+.markdown-body .vv-diff-delete { background: rgba(229, 83, 75, 0.13); }
+/* hunk header + note lines span all columns and carry no gutters */
+.markdown-body .vv-diff-hunk, .markdown-body .vv-diff-note { display: block; padding: 2px 12px; background: var(--vv-bg2);
+  border-left: 1px solid var(--vv-border); border-right: 1px solid var(--vv-border); }
+.markdown-body .vv-diff-hunk::before, .markdown-body .vv-diff-hunk::after,
+.markdown-body .vv-diff-note::before, .markdown-body .vv-diff-note::after { content: none; }
+.markdown-body .vv-diff-hunk .vv-diff-code { color: var(--vv-meta); border-left: none; padding-left: 0; }
+.markdown-body .vv-diff-note .vv-diff-code { color: var(--vv-fg-dim); font-style: italic; border-left: none; padding-left: 0; }
+
+/* side-by-side (split) view: each file is a stack of 4-column rows [old# | old | new# | new] */
+.markdown-body .vv-diff-splitview { font-family: var(--vv-font-fixed); font-size: var(--vv-code-font-size); }
+.markdown-body .vv-diff-grid { border: 1px solid var(--vv-border); border-radius: 0 0 6px 6px; overflow: hidden;
+  margin: 0 0 18px; }
+.markdown-body .vv-diff-row { display: grid; grid-template-columns: 3em 1fr 3em 1fr; align-items: start; line-height: 1.5; }
+.markdown-body .vv-diff-num { text-align: right; padding: 0 0.6em; color: var(--vv-fg-dim); opacity: 0.6;
+  background: var(--vv-bg2); user-select: none; -webkit-user-select: none; }
+.markdown-body .vv-diff-side { white-space: pre-wrap; word-break: break-word; padding: 0 0.6em; min-width: 0; }
+.markdown-body .vv-diff-side-old { border-right: 1px solid var(--vv-border); }
+.markdown-body .vv-diff-row-change .vv-diff-side-old, .markdown-body .vv-diff-row-delete .vv-diff-side-old { background: rgba(229, 83, 75, 0.13); }
+.markdown-body .vv-diff-row-change .vv-diff-side-new, .markdown-body .vv-diff-row-insert .vv-diff-side-new { background: rgba(64, 160, 43, 0.13); }
+.markdown-body .vv-diff-row-delete .vv-diff-num-new, .markdown-body .vv-diff-row-delete .vv-diff-side-new,
+.markdown-body .vv-diff-row-insert .vv-diff-num-old, .markdown-body .vv-diff-row-insert .vv-diff-side-old { background: var(--vv-bg-code); }
+.markdown-body .vv-diff-row-hunk { display: block; padding: 2px 12px; background: var(--vv-bg2); color: var(--vv-meta); }
+.markdown-body .vv-diff-row-note { display: block; padding: 3px 12px; background: var(--vv-bg2); color: var(--vv-fg-dim); font-style: italic; }
+.markdown-body .vv-diff-gap { background: var(--vv-bg1); }
+.markdown-body .vv-diff-gap-summary { cursor: pointer; padding: 2px 12px; background: var(--vv-bg2); color: var(--vv-fg-dim);
+  list-style: none; user-select: none; -webkit-user-select: none; }
+.markdown-body .vv-diff-gap-summary::-webkit-details-marker { display: none; }
+.markdown-body .vv-diff-gap[open] .vv-diff-gap-summary { border-bottom: 1px solid var(--vv-border); }
 /* PDF / web hosts: empty boxes a native WebContentsView is positioned over (it sits on top) */
 .vv-pdf-host { width: 100%; height: 100%; min-height: 400px; }
 .vv-web-host { width: 100%; height: 100%; min-height: 400px; }

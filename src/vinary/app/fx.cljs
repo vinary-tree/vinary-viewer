@@ -4,6 +4,9 @@
   (:require [re-frame.core :as rf]
             [datascript.core :as d]
             [vinary.app.ds :as ds]
+            [vinary.diff :as diff]
+            [vinary.ir.frontend.diff :as ir-diff]
+            [vinary.ir.backend.html :as ir-html]
             [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
@@ -89,6 +92,35 @@
    (-> (md/render-latex-ir text (md/dir-of path) stamp)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "latex render error: " (.-message e))}]))))))
+
+;; Diff (.diff/.patch) UNIFIED render → the colored single-column HTML + a per-file Contents outline. Pure
+;; (ir.frontend.diff → ir.backend.html): the HTML is fixed structure + escaped text nodes, so it needs no
+;; post-passes and no runtime sanitizer (there is no raw-HTML vector — untrusted content is only ever text).
+(rf/reg-fx
+ :diff/render
+ (fn [{:keys [text path on-done]}]
+   (try
+     (let [ir (ir-diff/diff->ir text)]
+       (rf/dispatch (conj on-done {:html (ir-html/lower ir) :toc (ir-diff/outline ir) :assets []})))
+     (catch :default e
+       (rf/dispatch [:content/error {:path path :message (str "diff render error: " (.-message e))}])))))
+
+;; Diff SIDE-BY-SIDE (split) build: parse once, emit the baseline two-column HTML immediately (derivable from the
+;; hunks alone), then ask main to resolve the referenced files on disk and, when any are found, re-emit an
+;; ENRICHED split with full-file context. Both land on the doc as :doc/diff-split-html (:diff/split-ready).
+(rf/reg-fx
+ :diff/build-split
+ (fn [{:keys [path text]}]
+   (let [model (diff/parse text)]
+     (rf/dispatch [:diff/split-ready path (diff/split-html model)])          ; instant, sources-free baseline
+     (when-let [^js v (.-vv js/window)]
+       (when (.-loadDiffSources v)
+         (-> (.loadDiffSources v (clj->js {:diffPath path :files (diff/referenced-paths model)}))
+             (.then (fn [srcs]
+                      (let [sources (js->clj srcs)]
+                        (when (seq sources)
+                          (rf/dispatch [:diff/split-ready path (diff/split-html model sources)])))))
+             (.catch (fn [_] nil))))))))
 
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
 (rf/reg-fx

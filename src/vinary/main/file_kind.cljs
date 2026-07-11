@@ -6,6 +6,7 @@
 (def ^:private org-exts #{".org"})   ; Emacs Org-mode → rendered via uniorg through the common IR (like markdown)
 (def ^:private latex-exts #{".tex" ".latex" ".ltx"})   ; LaTeX → rendered via unified-latex through the common IR
 ;; NOTE: NOT .sty/.cls/.bib — those are LaTeX support files, better shown as highlighted source than rendered.
+(def ^:private diff-exts #{".diff" ".patch"})   ; unified/git diffs → rendered (colored + side-by-side) via vinary.ir.frontend.diff
 (def ^:private image-exts #{".png" ".jpg" ".jpeg" ".gif" ".svg" ".webp" ".bmp" ".ico" ".avif"})
 (def ^:private mermaid-exts #{".mmd" ".mermaid"})
 (def ^:private html-exts #{".html" ".htm" ".xhtml"})   ; rendered live in the web view, not shown as source
@@ -35,6 +36,63 @@
     (when (and ext (not= ".pdf" (str/lower-case ext)))
       (str (subs (str p) 0 (- (count (str p)) (count ext))) ".pdf"))))
 
+(def ^:private source-sibling-exts
+  ;; the previewable-document companions a `.pdf` may have been exported from (LaTeX papers, Org/Markdown docs),
+  ;; in preference order — the reverse of `pdf-sibling-path`.
+  [".tex" ".latex" ".ltx" ".md" ".markdown" ".org"])
+
+(defn source-sibling-paths
+  "Candidate same-directory, same-stem previewable-SOURCE companions of a `.pdf` `p` (PURE — the caller checks
+   existence on disk and picks the first that exists), one per `source-sibling-exts` in preference order. nil
+   when `p` is not itself a `.pdf`. The reverse of `pdf-sibling-path`: lets a PDF opened alongside its source
+   offer the same Document↔PDF switch (`paper.pdf` → render `paper.tex`)."
+  [p]
+  (let [ext (extension p)]
+    (when (and ext (= ".pdf" (str/lower-case ext)))
+      (let [stem (subs (str p) 0 (- (count (str p)) (count ext)))]
+        (mapv #(str stem %) source-sibling-exts)))))
+
+(defn- basename-of [path]
+  (-> (str path) (str/replace #"\\" "/") (str/split #"/") last))
+
+(def ^:private well-known-text-names
+  ;; standard repo prose files that carry no extension (or a bare name) → plain text, NOT delimited/log-sniffed.
+  #{"license" "licence" "copying" "copying.lesser" "copyright" "authors" "contributors" "notice" "patents"
+    "install" "news" "thanks" "maintainers" "todo" "version" "readme" "changelog" "codeowners"})
+
+(def ^:private well-known-source-names
+  ;; standard repo build/config files (extensionless or dotfiles) → source. Grammar-INDEPENDENT: this guarantees
+  ;; a `Makefile` classifies as source (escaped-source route) instead of tripping the delimited-content sniffer,
+  ;; whether or not a tree-sitter grammar is bundled for it. Highlighting (where a grammar exists) is layered on
+  ;; separately via grammar-catalog/built-in-filetypes.
+  #{"makefile" "gnumakefile" "dockerfile" "containerfile" "cmakelists.txt"
+    "gemfile" "rakefile" "guardfile" "podfile" "vagrantfile" "brewfile" "capfile" "berksfile" "thorfile"
+    "jenkinsfile" "pkgbuild"
+    ".gitignore" ".gitattributes" ".gitmodules" ".gitconfig"
+    ".dockerignore" ".npmignore" ".prettierignore" ".eslintignore" ".stylelintignore"
+    ".editorconfig" ".npmrc" ".inputrc"
+    ".bashrc" ".zshrc" ".bash_profile" ".bash_aliases" ".bash_logout" ".zprofile" ".zshenv" ".profile"})
+
+(def ^:private well-known-source-suffixes
+  ;; basename suffixes → source (the extension arms miss these — no dedicated ext set)
+  [".mk" ".make" ".mak" ".dockerfile" ".gemspec" ".podspec" ".rake"])
+
+(defn well-known-kind
+  "Classify a well-known repo file by basename/path, INDEPENDENT of grammar availability — returns \"source\",
+   \"text\", or nil. Makes classification deterministic for `Makefile`/`LICENSE`/`.gitignore`/git config/… so a
+   Makefile never mis-detects as a delimited table and standard prose files render as plain text. Mirrored in
+   content_service.js/wellKnownKind (the CLI/TUI twin)."
+  [path]
+  (let [name  (str/lower-case (basename-of path))
+        norm  (str/replace (str path) #"\\" "/")]
+    (cond
+      (contains? well-known-text-names name)                        "text"
+      (contains? well-known-source-names name)                      "source"
+      (some #(str/ends-with? name %) well-known-source-suffixes)    "source"
+      (or (= name ".env") (str/starts-with? name ".env."))          "source"   ; .env, .env.local, .env.production …
+      (re-find #"(?:^|/)\.git/config$" norm)                        "source"   ; a repo's .git/config
+      :else nil)))
+
 (defn- log-basename? [file-path]
   (let [name (some-> (str file-path)
                      (str/replace #"\\" "/")
@@ -48,7 +106,8 @@
 (defn kind-of
   "Classify file-path. source? is injected so this namespace stays pure and testable."
   [source? file-path]
-  (let [ext (extension file-path)]
+  (let [ext (extension file-path)
+        wk  (well-known-kind file-path)]
     (cond
       (archive-uri? file-path) "archive"
       (contains? markdown-exts ext) "markdown"
@@ -56,6 +115,8 @@
       ;; latex BEFORE the source? arm: a tree-sitter-latex grammar is bundled, so `.tex` would otherwise
       ;; classify as "source" (highlighted markup) instead of a rendered document — the exact trap org had.
       (contains? latex-exts ext) "latex"
+      ;; diff/patch BEFORE the source? arm too — rendered (colored + side-by-side) via the diff IR front-end.
+      (contains? diff-exts ext) "diff"
       (contains? image-exts ext) "image"
       (= ".pdf" ext) "pdf"
       (contains? html-exts ext) "html"
@@ -64,6 +125,9 @@
       (contains? archive-exts ext) "archive"
       (or (contains? log-exts ext) (log-basename? file-path)) "log"
       (contains? mermaid-exts ext) "mermaid"
+      ;; well-known repo files (Makefile/LICENSE/.gitignore/git config/…) BEFORE the source? arm so their kind is
+      ;; deterministic even when no grammar is bundled — a Makefile becomes "source" (not a sniffed delimited table).
+      wk wk
       (or (contains? source-diagram-exts ext)
           (source? file-path)) "source"
       :else "text")))

@@ -18,6 +18,7 @@
             [vinary.ir.frontend.archive :as ir-archive]
             [vinary.ir.frontend.log :as ir-log]
             [vinary.ir.frontend.log-stream :as log-stream]
+            [vinary.ir.frontend.diff :as ir-diff]
             [vinary.ir.capability.toc :as ir-toc]
             [vinary.ir.node :as node]
             [vinary.ir.backend.ansi :as ansi]
@@ -112,6 +113,9 @@
       ("directory" "archive") (done (dir->ir entries) "\n")
       ;; a source file IS its (highlighted) code — render it as one fenced code block in the file's language
       "source"   (done (code-block-ir text (some-> (gc/grammar-for-path path gc/bundled-grammars {}) :id)) "\n")
+      ;; a diff/patch → the unified (colored) IR; the ANSI backend colours ±/hunk lines. Single-newline blocks
+      ;; (a line-structured document), like logs — never a blank line between diff lines.
+      "diff"     (done (ir-diff/diff->ir text) "\n")
       ;; pdf and anything unrecognised: fall back to any :text as plain lines (pdf gets its own path in vv-cli)
       (done (ir-log/text->ir (or text (str "[" kind " — no terminal renderer]"))) "\n"))))
 

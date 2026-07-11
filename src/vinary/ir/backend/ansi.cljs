@@ -91,6 +91,21 @@
 
 (defn- math-node? [n] (boolean (some #(str/starts-with? (str %) "math") (classes n))))
 
+(defn- diff-line-style
+  "Terminal style for a unified-diff line node, keyed by its `vv-diff-*` class (added → green, removed → red,
+   hunk header → bold cyan, note → dim, context → default). nil for any non-diff node, so ordinary blocks are
+   unaffected. The diff front-end (ir.frontend.diff) tags each line with these classes; this is the ANSI analog
+   of the GUI's CSS line colouring, so a colored unified diff renders in `vv-cli`/the TUI with no bespoke arm."
+  [n]
+  (let [cs (set (classes n))]
+    (cond
+      (contains? cs "vv-diff-insert")  {:fg :green}
+      (contains? cs "vv-diff-delete")  {:fg :red}
+      (contains? cs "vv-diff-hunk")    {:fg :cyan :bold? true}
+      (contains? cs "vv-diff-note")    {:fg :gray :italic? true}
+      (contains? cs "vv-diff-context") {}
+      :else                            nil)))
+
 (defn- inline->spans
   "Flatten an inline IR subtree to spans under the accumulated `style` and `opts`."
   [n style opts]
@@ -360,12 +375,16 @@
     (:comment :raw-node :doctype) []
     ;; a bare :text block leaf (whitespace between blocks / plain-text kind) or a generic element container
     :text          (if (str/blank? (node/text n)) [] (wrapped n {} indent width opts))
-    ;; generic element (div/details/section/figure/…): a lone image → block image; inline content → wrap; else recurse
-    (if-let [img (sole-image n)]
-      (image-lines img opts indent width)
-      (if (inline-container? n)
-        (wrapped n {} indent width opts)
-        (mapcat #(block->lines % opts indent width) (node/children n))))))
+    ;; a class-tagged unified-diff line → colour it by its vv-diff-* class (checked BEFORE the generic
+    ;; image/inline/recurse fallbacks, since a diff line is a plain div that would otherwise render un-styled)
+    (if-let [ds (diff-line-style n)]
+      (wrapped n ds indent width opts)
+      ;; generic element (div/details/section/figure/…): a lone image → block image; inline content → wrap; else recurse
+      (if-let [img (sole-image n)]
+        (image-lines img opts indent width)
+        (if (inline-container? n)
+          (wrapped n {} indent width opts)
+          (mapcat #(block->lines % opts indent width) (node/children n)))))))
 
 ;; ─────────────────────────────── public API ──────────────────────────────────
 (def ^:private defaults {:width 80 :color? true :truecolor? false :hyperlinks? false :block-sep "\n\n"})

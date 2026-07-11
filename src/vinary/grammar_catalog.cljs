@@ -32,14 +32,39 @@
    "yml" "yaml" "jsonc" "json"})
 
 (def built-in-filetypes
-  "Filename/pattern mappings for extensionless files whose grammar is known.
+  "Filename/pattern mappings for extensionless / dot-prefixed files whose grammar is known — the highlighting
+   layer for standard repo files. Classification (text vs source) is decided independently by
+   vinary.main.file-kind/well-known-kind, so an unbundled grammar here only means \"no colour yet\", never a
+   mis-classified file. Language ids resolve through `grammar-for-language` (aliases → id → extension), so a
+   value like \"ruby\" lights up a Gemfile with the already-bundled ruby grammar; \"make\"/\"gitignore\" resolve
+   once those grammars are bundled (scripts/grammars.lock.json).
 
    User config uses the same shape in ~/.config/vinary-viewer/filetypes.edn:
 
    {:filenames {\"Cargo.lock\" \"toml\"}
     :patterns  {\"*.config\" \"toml\"}}"
-  {:filenames {"Cargo.lock" "toml"}
-   :patterns []})
+  {:filenames {"Cargo.lock" "toml"
+               ;; build systems
+               "Makefile" "make" "makefile" "make" "GNUmakefile" "make"
+               "CMakeLists.txt" "cmake"
+               "Dockerfile" "dockerfile" "Containerfile" "dockerfile"
+               ;; ruby-based project files (already-bundled ruby grammar)
+               "Gemfile" "ruby" "Rakefile" "ruby" "Guardfile" "ruby" "Podfile" "ruby"
+               "Vagrantfile" "ruby" "Berksfile" "ruby" "Capfile" "ruby" "Thorfile" "ruby" "Brewfile" "ruby"
+               ;; CI / packaging (already-bundled groovy/bash grammars)
+               "Jenkinsfile" "groovy" "PKGBUILD" "bash"
+               ;; git + editor config are INI-shaped → the already-bundled ini grammar
+               ".gitconfig" "ini" ".gitmodules" "ini" ".editorconfig" "ini" ".npmrc" "ini"
+               ;; ignore files share gitignore syntax
+               ".gitignore" "gitignore" ".dockerignore" "gitignore" ".npmignore" "gitignore"
+               ".prettierignore" "gitignore" ".eslintignore" "gitignore" ".stylelintignore" "gitignore"
+               ;; shell rc/profile files (already-bundled bash grammar)
+               ".bashrc" "bash" ".zshrc" "bash" ".bash_profile" "bash" ".bash_aliases" "bash"
+               ".bash_logout" "bash" ".zprofile" "bash" ".zshenv" "bash" ".profile" "bash"}
+   :patterns [["*.mk" "make"] ["*.make" "make"] ["*.mak" "make"]
+              ["*.gemspec" "ruby"] ["*.podspec" "ruby"] ["*.rake" "ruby"]
+              ["*.dockerfile" "dockerfile"]
+              ["**/.git/config" "ini"]]})
 
 (defn grammar-for-id
   [id grammars]

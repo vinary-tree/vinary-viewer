@@ -98,6 +98,40 @@
     (when (try (.isFile (.statSync fs pdf)) (catch :default _ false))
       pdf)))
 
+(defn- sibling-source
+  "The first existing same-directory, same-stem previewable SOURCE companion of a `.pdf` `p` (`.tex`/`.md`/
+   `.org`/…), else nil — the reverse of `sibling-pdf`. Lets a PDF opened alongside its source offer the same
+   [Doc | PDF] switch (\"Doc\" navigates the tab to the rendered source). Candidate paths come from the pure,
+   node-tested file-kind/source-sibling-paths; here we add the filesystem existence check."
+  [p]
+  (some (fn [cand] (when (try (.isFile (.statSync fs cand)) (catch :default _ false)) cand))
+        (file-kind/source-sibling-paths p)))
+
+(defn- resolve-diff-source
+  "Locate a diff's referenced file `rel` on disk: try it relative to the diff's own directory, then walk up the
+   ancestors (a diff is usually generated from a repo root but may be viewed from a subdirectory). Returns an
+   absolute path, or nil when not found. Powers the side-by-side view's full-file enrichment."
+  [diff-path rel]
+  (loop [dir (.dirname path diff-path) depth 0]
+    (when (and dir (< depth 30))
+      (let [cand (.join path dir rel)]
+        (if (try (.isFile (.statSync fs cand)) (catch :default _ false))
+          cand
+          (let [parent (.dirname path dir)]
+            (when (not= parent dir) (recur parent (inc depth)))))))))
+
+(defn- load-diff-sources
+  "Resolve each referenced `rel` path of the diff at `diff-path` against the filesystem and read the found ones →
+   {rel → utf8-content}. The renderer has no fs access, so the side-by-side view requests this over IPC."
+  [diff-path rels]
+  (reduce (fn [acc rel]
+            (if-let [p (resolve-diff-source diff-path rel)]
+              (if-let [content (try (.readFileSync fs p "utf8") (catch :default _ nil))]
+                (assoc acc rel content)
+                acc)
+              acc))
+          {} (or rels [])))
+
 (defn- send-parsed-content! [^js wc path]
   (-> (.openUri content-service path)
       (.then (fn [payload] (.send wc "vv:content" payload)))
@@ -134,8 +168,12 @@
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
       ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)
       :pdf
-      (try (let [bytes (.readFileSync fs path)]
-             (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp})))
+      (try (let [bytes (.readFileSync fs path)
+                 ;; a PDF collocated with its previewable source advertises it, so the renderer can offer the
+                 ;; reverse [Doc | PDF] switch ("Doc" navigates to the rendered source — paper.pdf → paper.tex).
+                 src   (sibling-source path)]
+             (.send wc "vv:content" (clj->js (cond-> {:path path :kind "pdf" :bytes bytes :stamp stamp}
+                                               src (assoc :sourceSibling src)))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
       ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
@@ -291,6 +329,12 @@
   ;; load a collocated sibling PDF's bytes into the renderer's pdf-cache WITHOUT opening a tab (the Document↔PDF
   ;; representation switch renders the sibling in-place). Returns the Buffer, or nil if unreadable.
   (.handle ipcMain "vv:load-pdf-bytes" (fn [_e p] (try (.readFileSync fs p) (catch :default _ nil))))
+  ;; resolve a diff's referenced files on disk (relative to the diff, walking up ancestors) → {rel → content},
+  ;; for the side-by-side view's full-file enrichment. Renderer-driven (it has no fs), like vv:load-pdf-bytes.
+  (.handle ipcMain "vv:load-diff-sources"
+           (fn [_e req]
+             (let [{:keys [diffPath files]} (js->clj req :keywordize-keys true)]
+               (clj->js (load-diff-sources diffPath files)))))
   (.on ipcMain "vv:retained-files" (fn [^js e paths] (sync-retained! (.-sender e) (js->clj paths))))
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]

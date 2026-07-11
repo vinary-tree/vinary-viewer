@@ -923,12 +923,18 @@
         uri     @(rf/subscribe [:ui/active-uri])
         vs?     @(rf/subscribe [:ui/active-view-source?])
         rep     @(rf/subscribe [:ui/active-representation])   ; :document | :pdf (only :pdf when a sibling exists)
+        dv      @(rf/subscribe [:ui/active-diff-view])         ; :unified | :split (diff docs only)
         sib-loaded @(rf/subscribe [:pdf/sibling-loaded])      ; sibling-PDF paths whose bytes are cached
         reflow? @(rf/subscribe [:pdf/reflow?])
         stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))]   ; streaming on → reflow streams too
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
-                   (= "pdf" (:doc/kind doc))                       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
+                   ;; A true PDF OR a previewable doc currently showing its collocated sibling PDF (rep=:pdf) both
+                   ;; render the pdf.js canvas, which supplies its own gutter — drop the prose reading gutter so the
+                   ;; pages sit flush at the top-left. Without the sibling arm a .tex→PDF preview kept the 32×45
+                   ;; padding and the pages fell down-and-right, outside the visible bounds.
+                   (or (= "pdf" (:doc/kind doc))
+                       (and (= :pdf rep) (:doc/pdf-sibling doc))) "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
                    :else                                           nil)
       ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
       ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri
@@ -976,9 +982,21 @@
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
        (and vs?
             (:doc/text doc)
-            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org" "latex"} (:doc/kind doc))))
+            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org" "latex" "diff"} (:doc/kind doc))))
        ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
        [source-view (:doc/text doc) (:doc/path doc)]
+       ;; diff (.diff/.patch): the colored UNIFIED HTML by default; the side-by-side SPLIT HTML when chosen and
+       ;; built (falls back to unified while the split is still building). Both render through markdown-body, so
+       ;; find / scroll-spy / the themed context menu / the Contents outline all work. "Source" (above) shows raw.
+       (= "diff" (:doc/kind doc))
+       (cond
+         (and (= :split dv) (:doc/diff-split-html doc))
+         ^{:key (str "diff-split:" (:doc/path doc) ":" (:doc/stamp doc))}
+         [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)]
+         (:doc/html doc)
+         ^{:key (str "diff:" (:doc/path doc) ":" (:doc/stamp doc))}
+         [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+         :else [:div.vv-empty "Rendering…"])
        (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
        (= "mermaid" (:doc/kind doc)) ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
                                      [mermaid-view (:doc/text doc) (:doc/path doc)]
@@ -1023,23 +1041,44 @@
   [:button.vv-seg-btn {:class (when active? "vv-seg-active") :title title :on-click on-click} label])
 
 (defn view-switch-toolbar
-  "Contextual segmented controls in the toolbar: [Doc | PDF] when the active doc has a collocated exported PDF,
-   and [Preview | Source] when a previewable document (not the PDF) is showing. Both also live in the tab
-   right-click menu and the command palette; the toolbar makes them discoverable. Renders nothing otherwise."
+  "Contextual segmented controls in the toolbar: [Doc | PDF] when the active doc has a collocated PDF (a source
+   doc's exported PDF, switched in-place) OR is itself a PDF collocated with a source (\"Doc\" navigates to the
+   rendered source); [Unified | Split] for a diff's layout; and [Preview | Source] when a previewable document
+   (not the PDF) is showing. All also live in the tab right-click menu and the command palette; the toolbar makes
+   them discoverable. Renders nothing otherwise."
   []
-  (let [kind    @(rf/subscribe [:doc/kind])
-        sibling @(rf/subscribe [:doc/pdf-sibling])
-        rep     @(rf/subscribe [:ui/active-representation])
-        vs?     @(rf/subscribe [:ui/active-view-source?])
-        id      @(rf/subscribe [:ui/active-tab-id])
-        previewable? (contains? #{"markdown" "org" "latex" "mermaid"} kind)]
+  (let [kind       @(rf/subscribe [:doc/kind])
+        sibling    @(rf/subscribe [:doc/pdf-sibling])       ; a source doc's exported PDF → in-place switch
+        source-sib @(rf/subscribe [:doc/source-sibling])    ; a PDF's collocated source → navigate-to switch
+        rep        @(rf/subscribe [:ui/active-representation])
+        dv         @(rf/subscribe [:ui/active-diff-view])
+        vs?        @(rf/subscribe [:ui/active-view-source?])
+        id         @(rf/subscribe [:ui/active-tab-id])
+        diff?      (= "diff" kind)
+        previewable? (contains? #{"markdown" "org" "latex" "mermaid" "diff"} kind)]
     [:<>
-     (when sibling
+     ;; [Doc | PDF] — a source doc with an exported PDF (switched in-place), or a PDF with a collocated source
+     ;; (where "Doc" navigates the tab to the rendered source, which itself offers "PDF" to return).
+     (cond
+       sibling
        [:div.vv-seg {:role "group" :aria-label "Representation"}
         [seg-button (= rep :document) "Doc" "Show the rendered document"
          #(rf/dispatch [:tab/set-representation id :document])]
         [seg-button (= rep :pdf) "PDF" "Show the collocated exported PDF"
-         #(rf/dispatch [:tab/set-representation id :pdf])]])
+         #(rf/dispatch [:tab/set-representation id :pdf])]]
+       source-sib
+       [:div.vv-seg {:role "group" :aria-label "Representation"}
+        [seg-button false "Doc" "Open the collocated source document"
+         #(rf/dispatch [:tab/open-representation-source id])]
+        [seg-button true "PDF" "Showing this PDF" (fn [] nil)]])
+     ;; [Unified | Split] — a diff's layout (hidden while viewing the raw source text)
+     (when (and diff? (not vs?))
+       [:div.vv-seg {:role "group" :aria-label "Diff layout"}
+        [seg-button (= dv :unified) "Unified" "Show the unified (single-column) diff"
+         #(when (not= dv :unified) (rf/dispatch [:tab/set-diff-view id :unified]))]
+        [seg-button (= dv :split) "Split" "Show the side-by-side diff"
+         #(when (not= dv :split) (rf/dispatch [:tab/set-diff-view id :split]))]])
+     ;; [Preview | Source] — a previewable document showing its rendered self (never over a PDF)
      (when (and previewable? (not= rep :pdf))
        [:div.vv-seg {:role "group" :aria-label "View"}
         [seg-button (not vs?) "Preview" "Show the rendered preview"

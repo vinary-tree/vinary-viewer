@@ -47,3 +47,41 @@
     (is (nil? (fk/pdf-sibling-path "/a/README"))    "an extensionless path has no stem swap")
     (is (nil? (fk/pdf-sibling-path "/a/paper.pdf"))  "a .pdf never siblings itself")
     (is (nil? (fk/pdf-sibling-path "/a/paper.PDF"))  "…case-insensitively")))
+
+(deftest source-sibling-paths-computation
+  (testing "the reverse: a .pdf → its candidate previewable-source companions (checked in preference order)"
+    (is (= ["/a/paper.tex" "/a/paper.latex" "/a/paper.ltx" "/a/paper.md" "/a/paper.markdown" "/a/paper.org"]
+           (fk/source-sibling-paths "/a/paper.pdf")))
+    (is (= ["/d.v2/x.tex" "/d.v2/x.latex" "/d.v2/x.ltx" "/d.v2/x.md" "/d.v2/x.markdown" "/d.v2/x.org"]
+           (fk/source-sibling-paths "/d.v2/x.PDF")) "case-insensitive on the .pdf extension")
+    (is (nil? (fk/source-sibling-paths "/a/paper.tex")) "only a .pdf has source siblings")
+    (is (nil? (fk/source-sibling-paths "/a/README")) "no extension → no candidates")))
+
+(deftest kind-of-diff
+  (testing ".diff/.patch classify as \"diff\" — ahead of the source arm, so they render (colored + side-by-side)"
+    (is (= "diff" (fk/kind-of never-source "/p/change.diff")))
+    (is (= "diff" (fk/kind-of never-source "/p/Change.PATCH")))
+    (is (= "diff" (fk/kind-of always-source "/p/change.diff")) "the explicit .diff arm wins over the source grammar")))
+
+(deftest well-known-repo-files
+  (testing "standard repo build/config files classify as source DETERMINISTICALLY — independent of any grammar,
+            so a GNU Makefile never trips the delimited-content sniffer (its old bug)"
+    (is (= "source" (fk/kind-of never-source "/proj/Makefile")))
+    (is (= "source" (fk/kind-of never-source "/proj/GNUmakefile")))
+    (is (= "source" (fk/kind-of never-source "/proj/build.mk")))
+    (is (= "source" (fk/kind-of never-source "/proj/CMakeLists.txt")))
+    (is (= "source" (fk/kind-of never-source "/proj/Dockerfile")))
+    (is (= "source" (fk/kind-of never-source "/proj/Gemfile")))
+    (is (= "source" (fk/kind-of never-source "/proj/.gitignore")))
+    (is (= "source" (fk/kind-of never-source "/proj/.gitconfig")))
+    (is (= "source" (fk/kind-of never-source "/home/me/repo/.git/config")) "a repo's .git/config (by path)")
+    (is (= "source" (fk/kind-of never-source "/home/me/.bashrc"))))
+  (testing "standard prose/legal files classify as plain text (not sniffed as delimited/log)"
+    (is (= "text" (fk/kind-of never-source "/proj/LICENSE")))
+    (is (= "text" (fk/kind-of never-source "/proj/COPYING")))
+    (is (= "text" (fk/kind-of never-source "/proj/AUTHORS")))
+    (is (= "text" (fk/kind-of never-source "/proj/README")))
+    (is (= "text" (fk/kind-of never-source "/proj/CHANGELOG")) "bare CHANGELOG → text"))
+  (testing "the extension-based document kinds still win over a well-known bare name"
+    (is (= "markdown" (fk/kind-of never-source "/proj/README.md")) "README.md is still markdown")
+    (is (= "text" (fk/kind-of never-source "/proj/LICENSE.txt")))))

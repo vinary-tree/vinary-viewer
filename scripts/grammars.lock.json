@@ -90,6 +90,8 @@
     },
     {"id": "lean", "language": "lean", "extensions": [".lean"], "source": {"type": "git", "url": "https://github.com/Julian/tree-sitter-lean"}},
     {"id": "tlaplus", "language": "tlaplus", "extensions": [".tla"], "source": {"type": "git", "url": "https://github.com/tlaplus-community/tree-sitter-tlaplus"}},
-    {"id": "proto", "language": "proto", "extensions": [".proto"], "source": {"type": "git", "url": "https://github.com/coder3101/tree-sitter-proto"}}
+    {"id": "proto", "language": "proto", "extensions": [".proto"], "source": {"type": "git", "url": "https://github.com/coder3101/tree-sitter-proto"}},
+    {"id": "make", "language": "make", "extensions": [".mk", ".make", ".mak"], "source": {"type": "git", "url": "https://github.com/tree-sitter-grammars/tree-sitter-make"}},
+    {"id": "gitignore", "language": "gitignore", "extensions": [".gitignore"], "source": {"type": "git", "url": "https://github.com/shunsambongi/tree-sitter-gitignore", "queryText": "(comment) @comment\n(pattern) @string\n(negation) @operator\n"}}
   ]
 }

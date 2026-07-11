@@ -135,6 +135,34 @@ ok(typeof run(['--no-color', orgEmpty]) === 'string', 'an org document that rend
 const orgToc = run(['--no-color', '--toc', org]);
 ok(/Contents/.test(orgToc) && /Section/.test(orgToc), '--toc prints the org document outline');
 
+// ── 1c. diff (.diff/.patch) → the unified colored IR, lowered to ANSI (the terminal has no split view) ──
+// content_service.js classifies .diff as its own kind and openLocal short-circuits the delimited sniff; cli/render
+// then lowers it through ir.frontend.diff → ir.backend.ansi with per-line colour.
+const diffFile = path.join(tmp, 'change.diff');
+fs.writeFileSync(diffFile, [
+  'diff --git a/src/app.js b/src/app.js',
+  '--- a/src/app.js',
+  '+++ b/src/app.js',
+  '@@ -1,3 +1,3 @@',
+  ' const a = 1;',
+  '-const b = 2;',
+  '+const b = 3;',
+  ' const c = 4;',
+  '',
+].join('\n'));
+const diffPlain = run(['--no-color', diffFile]);
+ok(diffPlain.includes('src/app.js'), 'diff renders the file banner');
+ok(diffPlain.includes('@@ -1 +1 @@'), 'diff renders the hunk header');
+ok(diffPlain.includes('-const b = 2;') && diffPlain.includes('+const b = 3;'), 'diff renders ±-marked lines');
+const diffColor = run(['--color', diffFile]);
+// robust to 16-colour AND truecolor terminals (the smoke inherits the ambient COLORTERM)
+const green = /\[32m/.test(diffColor) || /\[38;2;152;195;121m/.test(diffColor);
+const red = /\[31m/.test(diffColor) || /\[38;2;224;108;117m/.test(diffColor);
+ok(green, 'a diff insertion is coloured green in the terminal');
+ok(red, 'a diff deletion is coloured red in the terminal');
+// --toc lists the changed files (one Contents entry per file banner)
+ok(/Contents/.test(run(['--no-color', '--toc', diffFile])), '--toc lists the diff\'s changed files');
+
 // ── 2. CSV → box-drawing table ───────────────────────────────────────────────────────────────────
 const csv = path.join(tmp, 'data.csv');
 fs.writeFileSync(csv, 'name,age\nAlice,30\nBob,25\n');

@@ -27,6 +27,7 @@
    "C-b"     :sidebar/toggle
    "C-S-s"   :view/toggle-source           ; Preview ↔ Source (self-gates: no-op for non-previewable docs)
    "C-S-d"   :view/toggle-representation    ; Document ↔ PDF (self-gates: no-op without a collocated PDF)
+   "C-S-b"   :view/toggle-diff-split        ; Unified ↔ Split diff (self-gates: no-op for non-diff docs)
    "C-t"     :tab/new-blank
    "C-0"     :view/zoom-reset
    "C-="     :view/zoom-in

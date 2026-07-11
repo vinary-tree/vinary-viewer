@@ -1,0 +1,13 @@
+{
+  "id": "gitignore",
+  "language": "gitignore",
+  "extensions": [
+    ".gitignore"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/shunsambongi/tree-sitter-gitignore",
+    "queryText": "(comment) @comment\n(pattern) @string\n(negation) @operator\n"
+  },
+  "sourceRev": "f4685bf11ac466dd278449bcfe5fd014e94aa504"
+}

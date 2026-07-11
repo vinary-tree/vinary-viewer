@@ -131,6 +131,35 @@ async function main() {
     assert.strictEqual(org.sourceable, true, 'org has a source view');
     assert.ok(org.meta && typeof org.meta.size === 'number', 'org payload carries :size (the streaming gate)');
 
+    // GNU Makefile. Its `target:` lines and tab-indented recipes used to trip the delimited-CSV content sniff, so
+    // an extensionless Makefile (classified 'text') previewed as a table. well-known-kind now classifies it 'source'
+    // and openLocal short-circuits the sniff — the exact bug fix.
+    assert.strictEqual(content.classifyName('/proj/Makefile'), 'source', 'Makefile classifies as source');
+    assert.strictEqual(content.classifyName('/proj/build.mk'), 'source', '*.mk classifies as source');
+    const mkPath = path.join(tmp, 'Makefile');
+    fs.writeFileSync(mkPath, '.PHONY: all clean\n\nall: build\n\tcargo build --release\n\nclean:\n\trm -rf target\n');
+    const mk = await content.openUri(mkPath);
+    assert.strictEqual(mk.kind, 'source', 'a Makefile is NOT sniffed as a delimited table');
+    assert.ok(/cargo build/.test(mk.text), 'the Makefile payload carries its raw text for the source view');
+
+    // Standard repo files: LICENSE → plain text (not delimited), .gitignore → source, git config → source.
+    assert.strictEqual(content.classifyName('/proj/LICENSE'), 'text', 'LICENSE is plain text');
+    assert.strictEqual(content.classifyName('/proj/.gitignore'), 'source', '.gitignore is source');
+    assert.strictEqual(content.classifyName('/home/me/repo/.git/config'), 'source', 'a repo .git/config is source');
+    const licPath = path.join(tmp, 'LICENSE');
+    fs.writeFileSync(licPath, 'MIT License\n\nCopyright (c) 2026\n\nPermission is hereby granted, free of charge...\n');
+    const lic = await content.openUri(licPath);
+    assert.strictEqual(lic.kind, 'text', 'a LICENSE opens as plain text');
+
+    // Diffs (.diff/.patch) classify as their own kind and carry raw text for the diff IR front-end.
+    assert.strictEqual(content.classifyName('change.diff'), 'diff', '.diff classifies as diff');
+    assert.strictEqual(content.classifyName('fix.patch'), 'diff', '.patch classifies as diff');
+    const diffPath = path.join(tmp, 'change.diff');
+    fs.writeFileSync(diffPath, 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new\n');
+    const df = await content.openUri(diffPath);
+    assert.strictEqual(df.kind, 'diff', 'a diff opens as kind diff (not sniffed as a table)');
+    assert.ok(/\+new/.test(df.text), 'the diff payload carries its raw text for the diff front-end');
+
     const gzLogPath = path.join(tmp, 'app.log.gz');
     fs.writeFileSync(gzLogPath, zlib.gzipSync('2026-06-29T10:00:00Z WARN compressed\n'.repeat(3)));
     const gzLog = await content.openUri(gzLogPath);

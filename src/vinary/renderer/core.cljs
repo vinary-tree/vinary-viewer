@@ -344,6 +344,7 @@
   (set! (.-__vvdb js/window) (fn [] (clj->js @rfdb/app-db)))            ; DEV inspect hooks
   (set! (.-__vvds js/window) (fn [] (clj->js (ds/open-docs (ds/snapshot)))))
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
+  (set! (.-__vvopen js/window) (fn [p] (rf/dispatch [:doc/open p])))   ; DEV/test: open a path in the active tab
   (bridge!)
   (copy-shortcuts!)
   ;; MathJax typesets off-DOM (liteAdaptor) and we inject the SVG as a string, so MathJax never inserts its own

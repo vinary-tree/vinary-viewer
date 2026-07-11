@@ -66,4 +66,5 @@
     (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/entries
                 :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta
                 :doc/sourceable? :doc/data-url :doc/reflow-html :doc/pdf-sibling
+                :doc/source-sibling :doc/diff-split-html
                 :doc/streaming? :doc/stream-progress] eid)))

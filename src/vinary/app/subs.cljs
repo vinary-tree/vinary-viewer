@@ -125,6 +125,13 @@
 ;; the active document's collocated exported PDF (absolute path), or nil — enables the Document↔PDF switch
 (rf/reg-sub :doc/pdf-sibling :<- [:doc/active] (fn [doc _] (:doc/pdf-sibling doc)))
 
+;; the reverse: an opened PDF's collocated previewable SOURCE (absolute path), or nil — enables PDF→Doc (the
+;; toolbar's [Doc | PDF] on a PDF, where "Doc" navigates the tab to the rendered source)
+(rf/reg-sub :doc/source-sibling :<- [:doc/active] (fn [doc _] (:doc/source-sibling doc)))
+
+;; the EFFECTIVE diff view of the active doc (:unified | :split); split is opt-in, so the default is :unified
+(rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] (fn [tab _] (nav/effective-diff-view (:diff-view tab))))
+
 ;; the EFFECTIVE representation of the active doc: :pdf or :document. Only :pdf when a sibling PDF exists AND
 ;; either the user chose it on this tab or the collocated-default preference (default :pdf) says so.
 (rf/reg-sub

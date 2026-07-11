@@ -30,6 +30,7 @@
 
   /* headings + meta */
   --vv-head1: #4f97d7;          /* h1 / links / keyword / active accent (blue) */
+  --vv-accent: var(--vv-head1); /* active-accent override for segmented view-switch controls (defaults to head1) */
   --vv-head2: #2d9574;          /* h2 / blockquote rule / strings (teal-green) */
   --vv-head3: #67b11d;          /* h3 / diff addition (green) */
   --vv-head4: #b1951d;          /* h4 / inline code (yellow) */

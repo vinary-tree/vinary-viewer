@@ -79,7 +79,7 @@
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged pdfSibling] :as payload}]]
+                            sourceable paged pdfSibling sourceSibling] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -102,10 +102,11 @@
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
                    pdfSibling            (assoc :doc/pdf-sibling pdfSibling)   ; collocated exported PDF (Doc↔PDF switch)
+                   sourceSibling         (assoc :doc/source-sibling sourceSibling) ; a PDF's collocated source (PDF→Doc switch)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
-                   ;; markdown/office/org/latex derive their :doc/toc + :doc/assets from the IR render (arriving
+                   ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
                    ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
-                   (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex"))
+                   (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex") (not= kind "diff"))
                    (assoc :doc/toc [] :doc/assets []))
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
@@ -137,6 +138,12 @@
               (and (= kind "latex") (not stream?))
               (conj [:latex/render {:text text :path path :stamp stamp
                                     :on-done [:content/rendered path stamp]}])
+              ;; diff (.diff/.patch) → the unified colored HTML + per-file Contents outline (ir.frontend.diff).
+              (= kind "diff")
+              (conj [:diff/render {:text text :path path :on-done [:content/rendered path stamp]}])
+              ;; a live-refresh of a diff whose side-by-side view was already built → rebuild it against the new text
+              (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
+              (conj [:diff/build-split {:path path :text text}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
               ;; a doc with a collocated sibling PDF: eagerly load its bytes into pdf-cache so the Document↔PDF
@@ -346,6 +353,47 @@
                            nxt (if (= cur :pdf) :document :pdf)]
                        {:fx [[:dispatch [:tab/set-representation nil nxt]]]})
                      {})))
+
+;; PDF→source: the "Doc" side of [Doc | PDF] on an opened PDF that is collocated with a previewable source. Unlike
+;; the in-place source→PDF switch, here the PDF IS the tab's doc, so "Doc" NAVIGATES the tab to the rendered source
+;; (which knows its own PDF sibling → "PDF" returns) and forces :document so the collocated-default :pdf pref, which
+;; would otherwise bounce straight back to the PDF, does not win. Reuses the whole Document↔PDF machinery.
+(rf/reg-event-fx :tab/open-representation-source
+                 (fn [{:keys [db]} [_ id]]
+                   (if-let [src (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/source-sibling)]
+                     {:fx [[:dispatch [:tab/navigate src]]
+                           [:dispatch [:tab/set-representation (or id (nav/active-id db)) :document]]]}
+                     {})))
+
+;; Diff unified⇄split view switch (a .diff/.patch doc). Selecting :split builds the side-by-side HTML the first
+;; time (baseline immediately, then enriched with on-disk sources) — see the :diff/build-split fx.
+(rf/reg-event-fx :tab/set-diff-view
+                 (fn [{:keys [db]} [_ id view]]
+                   (let [id    (or id (nav/active-id db))
+                         db'   (nav/set-diff-view db id view)
+                         path  (nav/active-path db')
+                         snap  (ds/snapshot)
+                         text  (ds/doc-attr snap path :doc/text)
+                         built? (some? (ds/doc-attr snap path :doc/diff-split-html))]
+                     (cond-> {:db db'}
+                       (and (= view :split) text (not built?))
+                       (assoc :fx [[:diff/build-split {:path path :text text}]])))))
+
+;; flip the active diff's view (:unified ↔ :split) — the command-palette / keybinding entry. No-op unless the
+;; active doc is a diff. Delegates to :tab/set-diff-view (which builds the split HTML on demand).
+(rf/reg-event-fx :tab/toggle-diff-view
+                 (fn [{:keys [db]} _]
+                   (if (= "diff" (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/kind))
+                     (let [nxt (if (= (nav/effective-diff-view (nav/diff-view db)) :split) :unified :split)]
+                       {:fx [[:dispatch [:tab/set-diff-view nil nxt]]]})
+                     {})))
+
+;; the side-by-side (split) HTML for a diff finished building (baseline or on-disk-enriched) → store it on the doc
+(rf/reg-event-fx :diff/split-ready
+                 (fn [_ [_ path html]]
+                   (let [snap (ds/snapshot)]
+                     (when-let [eid (ds/eid-for-path snap path)]
+                       {:fx [[:ds/transact [[:db/add eid :doc/diff-split-html html]]]]}))))
 
 ;; ── bidirectional source⇄preview jump ("Go to source" / "Go to preview" context-menu items + keymap) ──
 ;; The EVENT decides whether the pane must toggle (it knows the current view), and the FX either scrolls the

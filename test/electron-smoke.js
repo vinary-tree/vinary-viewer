@@ -550,6 +550,12 @@ function installIpc(state) {
   ipcMain.handle('vv:stream-pull',  (_event, req) => contentService.streamPull(req));
   ipcMain.handle('vv:stream-close', (_event, req) => contentService.streamClose(req));
   ipcMain.on('vv:watch-assets', () => {});
+  // the diff side-by-side view asks main to resolve referenced files on disk; the smoke returns whatever the
+  // active test staged in state.diffSources (default none → the split view falls back to the hunk windows).
+  ipcMain.handle('vv:load-diff-sources', (_event, _req) => state.diffSources || {});
+  // a collocated sibling PDF's bytes (byte-only load, no tab) for the Document↔PDF switch — the smoke stages
+  // real PDF bytes in state.siblingPdfBytes so a .tex→PDF preview (and its flush layout) can be exercised.
+  ipcMain.handle('vv:load-pdf-bytes', () => state.siblingPdfBytes || null);
   ipcMain.handle('vv:complete-path', (_event, input) => ({
     input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
   }));
@@ -811,6 +817,97 @@ async function main() {
   await dispatchWindowKey(win, 'Escape');
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed (pdf)');
   console.log('[ok] View ▸ Fit + Invert PDF appear only with a PDF active');
+
+  // ── Diff (.diff/.patch) — colored multi-file unified view + the side-by-side split toggle + on-disk
+  //    enrichment (ADR-0026). __vvopen navigates the active tab to the diff path (so content-view shows it);
+  //    the content is then pushed directly (the unified HTML is computed client-side by :diff/render).
+  const diffPath = path.join(ROOT, 'test', 'greet.diff');
+  const diffText = [
+    'diff --git a/src/greet.js b/src/greet.js',
+    '--- a/src/greet.js',
+    '+++ b/src/greet.js',
+    '@@ -1,3 +1,3 @@',
+    ' function greet(name) {',
+    '-  return "hi " + name;',
+    '+  return "hello " + name;',
+    ' }',
+    'diff --git a/README.md b/README.md',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/README.md',
+    '@@ -0,0 +1 @@',
+    '+# Project',
+    ''
+  ].join('\n');
+  // stage the on-disk NEW file so the split view can splice full-file context beyond the hunk window
+  state.diffSources = { 'src/greet.js': 'function greet(name) {\n  return "hello " + name;\n}\nconst VERSION = "1.0";\nmodule.exports = greet;\n' };
+  await evalIn(win, `window.__vvopen(${JSON.stringify(diffPath)})`);
+  win.webContents.send('vv:content', { path: diffPath, kind: 'diff', text: diffText, stamp: Date.now(), meta: { size: diffText.length } });
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-insert') && document.querySelector('.vv-content .markdown-body .vv-diff-delete'))`),
+    'diff unified view renders colored insert/delete lines', 8000
+  );
+  const diffUnified = await evalIn(win, `(() => {
+    const insert = document.querySelector('.vv-diff-insert');
+    return {
+      banners: document.querySelectorAll('.vv-diff-file-head').length,
+      hasHunk: Boolean(document.querySelector('.vv-diff-hunk')),
+      insertText: (document.querySelector('.vv-diff-insert .vv-diff-code') || {}).textContent || '',
+      deleteText: (document.querySelector('.vv-diff-delete .vv-diff-code') || {}).textContent || '',
+      dataNew: insert ? (insert.getAttribute('data-new') || '') : ''
+    };
+  })()`);
+  assert.strictEqual(diffUnified.banners, 2, 'a multi-file diff renders one <h2> banner per file (also the Contents anchors)');
+  assert.ok(diffUnified.hasHunk, 'the unified view renders the @@ hunk header');
+  assert.ok(/hello/.test(diffUnified.insertText) && diffUnified.insertText.startsWith('+'), 'the inserted line renders with its + marker');
+  assert.ok(/hi /.test(diffUnified.deleteText) && diffUnified.deleteText.startsWith('-'), 'the deleted line renders with its - marker');
+  assert.ok(diffUnified.dataNew && Number(diffUnified.dataNew) > 0, 'the insert line carries a data-new gutter number');
+  console.log('[ok] diff renders a colored, multi-file unified view with gutter line numbers');
+
+  // toggle to the side-by-side split view via the toolbar's [Unified | Split] control
+  const clickedSplit = await evalIn(win, `(() => {
+    const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Split');
+    if (b) b.click();
+    return Boolean(b);
+  })()`);
+  assert.strictEqual(clickedSplit, true, 'the [Unified | Split] toolbar control is present for a diff');
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-diff-splitview .vv-diff-row'))`),
+    'the split (side-by-side) view renders two-column rows', 8000
+  );
+  const split = await evalIn(win, `(() => ({
+    hasOld: Boolean(document.querySelector('.vv-diff-side-old')),
+    hasNew: Boolean(document.querySelector('.vv-diff-side-new')),
+    text: document.querySelector('.vv-diff-splitview').textContent
+  }))()`);
+  assert.ok(split.hasOld && split.hasNew, 'the split view has old and new side columns');
+  // enrichment: the staged on-disk file contributes context lines BEYOND the hunk window
+  assert.ok(/VERSION/.test(split.text) && /module\.exports/.test(split.text),
+    'the split view is enriched with full-file context from the on-disk source (beyond the diff hunk)');
+  console.log('[ok] diff split view renders side-by-side and enriches from the on-disk source file');
+
+  // toggle back to unified
+  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Unified'); if (b) b.click(); })()`);
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-line')) && !document.querySelector('.vv-diff-splitview')`),
+    'toggling back shows the unified view', 8000
+  );
+  console.log('[ok] the [Unified | Split] toggle switches diff layouts');
+
+  // restore the PDF as the active view — this diff test navigated the tab away from it, and the PDF
+  // selection / hit-test / find steps below operate on the pdf.js view.
+  state.diffSources = null;
+  await evalIn(win, `window.__vvopen(${JSON.stringify(pdfFixture)})`);
+  win.webContents.send('vv:content', { path: pdfFixture, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), stamp: Date.now() });
+  await waitFor(
+    () => evalIn(win, `(() => { const c = document.querySelector('.vv-pdf-doc .vv-pdf-page canvas.vv-pdf-canvas'); return Boolean(c) && c.getBoundingClientRect().width > 0; })()`),
+    'PDF view restored after the diff test', 15000
+  );
+  // the text layer builds asynchronously AFTER the canvas — the PDF selection/hit-test steps below need it
+  await waitFor(
+    () => evalIn(win, `document.querySelectorAll('.vv-pdf-text span').length > 0`),
+    'PDF text layer restored after the diff test', 15000
+  );
 
   // selection → Ctrl+C copies the PDF text (copy parity with markdown/source)
   state.lastCopiedText = null;
@@ -2113,6 +2210,10 @@ async function main() {
   await dispatchWindowKey(win, 's', { altKey: true });
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'Settings'`), 'Settings menu open over the web view');
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('img.vv-web-snap'))`), 'page snapshot frozen under the menu');
+  // the native view is hidden ASYNCHRONOUSLY, only after the snapshot <img> has decoded (hide-after-paint! →
+  // img.decode() → rAF → httpHide). Wait for that rather than racing it — under CPU load the hide can lag the
+  // img appearing above, which intermittently tripped the `httpVisible === false` assertion below.
+  await waitFor(() => state.httpVisible === false, 'native view hidden once the frozen snapshot is shown');
   const frozen = await evalIn(win, `(() => {
     const img = document.querySelector('img.vv-web-snap');
     return { src: (img && img.getAttribute('src')) || '', insideHost: Boolean(img && img.closest('.vv-web-host')),
@@ -2929,6 +3030,59 @@ async function main() {
     assert.strictEqual(streamReflow, batchReflow, 'streamed PDF reflow must be byte-identical to the batch reflow');
     console.log('[ok] streamed PDF reflow is byte-identical to the batch reflow (progressive extracted-text commit)');
   }
+
+  // ── Document↔PDF sizing (ADR-0026 Part 0) + reverse PDF→source switch (Part 1) ──
+  // A .tex collocated with an exported .pdf. Its default representation is :pdf (collocated-default), so it opens
+  // showing the sibling PDF. The bug: content-view only applied vv-content-pdf-flush for kind "pdf", so a sibling
+  // PDF under a "latex" doc kept the 32×45 reading gutter and the pages fell down-and-right. Assert the flush class
+  // is now present, then toggle to "Doc" (the rendered .tex) and back.
+  state.siblingPdfBytes = fs.readFileSync(pdfFixture);   // a Buffer, matching the real vv:load-pdf-bytes handler
+  const texPath = path.join(ROOT, 'test', 'paper.tex');
+  const texSiblingPdf = path.join(ROOT, 'test', 'paper.pdf');
+  const texContent = '\\documentclass{article}\\begin{document}\\section{Intro}Hello \\textbf{world}.\\end{document}\n';
+  // register the .tex content so the reverse "Doc" navigation (Part 1) can load it
+  state.contentByPath.set(texPath, { path: texPath, kind: 'latex', text: texContent, pdfSibling: texSiblingPdf, meta: { size: texContent.length } });
+  await evalIn(win, `window.__vvopen(${JSON.stringify(texPath)})`);
+  win.webContents.send('vv:content', { path: texPath, kind: 'latex', text: texContent, pdfSibling: texSiblingPdf, stamp: Date.now(), meta: { size: texContent.length } });
+  // the doc has a collocated PDF → the [Doc | PDF] switch appears and, by the collocated-default :pdf preference,
+  // the PDF surface shows (representation :pdf). The flush class is applied from (rep=:pdf AND pdf-sibling), so it
+  // is present immediately — independent of whether the sibling bytes have finished loading.
+  await waitFor(
+    () => evalIn(win, `Array.from(document.querySelectorAll('.vv-seg-btn')).some(b => b.textContent.trim() === 'PDF')`),
+    'the [Doc | PDF] switch appears for a .tex with a collocated PDF', 8000
+  );
+  const flush = await evalIn(win, `(() => ({
+    hasFlush: document.querySelector('.vv-content').classList.contains('vv-content-pdf-flush'),
+    seg: Array.from(document.querySelectorAll('.vv-seg-btn')).map(b => b.textContent.trim())
+  }))()`);
+  assert.ok(flush.seg.includes('Doc') && flush.seg.includes('PDF'), 'the [Doc | PDF] switch is offered for a doc with a collocated PDF');
+  assert.strictEqual(flush.hasFlush, true, 'a .tex showing its sibling PDF must get vv-content-pdf-flush (Part 0 fix: pages sit flush at top-left, not offset down-and-right by the 32×45 reading gutter)');
+  console.log('[ok] a .tex→PDF preview drops the reading gutter (vv-content-pdf-flush) — Part 0 fix');
+  // "Doc" → the rendered .tex; the flush class is dropped (the document view keeps its reading gutter)
+  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Doc'); if (b) b.click(); })()`);
+  await waitFor(
+    () => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body'); return Boolean(b) && /world/.test(b.textContent) && !document.querySelector('.vv-content').classList.contains('vv-content-pdf-flush'); })()`),
+    'the "Doc" side renders the .tex and restores the reading gutter', 8000
+  );
+  console.log('[ok] [Doc | PDF] toggles a .tex between its render and the collocated PDF');
+
+  // reverse (Part 1): open the .pdf itself with a collocated source sibling → "Doc" NAVIGATES to the source.
+  const pdfWithSource = path.join(ROOT, 'test', 'paper.pdf');
+  state.contentByPath.set(texPath, { path: texPath, kind: 'latex', text: texContent, pdfSibling: pdfWithSource, meta: { size: texContent.length } });
+  await evalIn(win, `window.__vvopen(${JSON.stringify(pdfWithSource)})`);
+  win.webContents.send('vv:content', { path: pdfWithSource, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), sourceSibling: texPath, stamp: Date.now() });
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas.vv-pdf-canvas'))`),
+    'the opened PDF renders', 15000
+  );
+  const revSeg = await evalIn(win, `Array.from(document.querySelectorAll('.vv-seg-btn')).map(b => b.textContent.trim())`);
+  assert.ok(revSeg.includes('Doc') && revSeg.includes('PDF'), 'an opened PDF with a collocated source offers [Doc | PDF] (Part 1)');
+  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Doc'); if (b) b.click(); })()`);
+  await waitFor(
+    () => evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && (t.uri || '').includes('paper.tex'); })()`),
+    'the PDF\'s "Doc" navigates the tab to the collocated source (.tex)', 8000
+  );
+  console.log('[ok] opening a PDF collocated with a source offers [Doc | PDF]; "Doc" opens the rendered source');
 
   // The CSP is a security control, not advice: a blocked resource is a bug, and it only ever surfaced as one
   // more red line among the re-frame warnings. Injecting MathJax's stylesheet tripped `font-src` this way.
