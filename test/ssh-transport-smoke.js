@@ -100,10 +100,96 @@ async function main() {
   // 9. ProxyJump — reach a target host THROUGH a jump host (both pooled + authed independently).
   await testProxyJump();
 
+  // 9b. keyboard-interactive (MFA) — multi-prompt auth; the transport answers each prompt via promptSecret.
+  await testKeyboardInteractive();
+
+  // 9c. publickey (key file) auth — the transport reads ~/.ssh/id_ed25519, parses it, offers it; server verifies.
+  await testPublicKeyAuth();
+
+  // 9d. agent auth — a key added to a throwaway ssh-agent authenticates via SSH_AUTH_SOCK (no key files present).
+  await testAgentConnect();
+
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);
 
   console.log(`[ok] ssh-transport-smoke: ${n} assertions passed`);
+}
+
+async function testPublicKeyAuth() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-pkhome-'));
+  const sshDir = path.join(home, '.ssh');
+  fs.mkdirSync(sshDir, { recursive: true });
+  const keyPath = path.join(sshDir, 'id_ed25519');   // a default identity the transport reads
+  cp.execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyPath]);
+  const pub = fs.readFileSync(keyPath + '.pub', 'utf8');
+  const srv = await startSftpServer({ password: null, authorizedKeys: [pub], files: { 'k.txt': 'authed by public key' } });
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => null, onError: () => {},
+  });
+  try {
+    eq(await transport.remoteReadText(srv.url('/k.txt')), 'authed by public key', 'publickey (key file) auth succeeds');
+    transport.closeAll();
+  } finally {
+    await srv.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+async function testAgentConnect() {
+  let agent;
+  try { agent = cp.execSync('ssh-agent -s', { encoding: 'utf8' }); }
+  catch (_e) { console.log('[skip] ssh-agent unavailable — agent-connect path not exercised'); return; }
+  const sock = /SSH_AUTH_SOCK=([^;]+);/.exec(agent)[1];
+  const pid = /SSH_AGENT_PID=(\d+);/.exec(agent)[1];
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-agentconn-'));
+    const keyPath = path.join(dir, 'id_ed25519');
+    cp.execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', keyPath]);
+    const pub = fs.readFileSync(keyPath + '.pub', 'utf8');
+    const pem = require('ssh2').utils.parseKey(fs.readFileSync(keyPath)).getPrivatePEM();
+    await sshAgent.addKey(sock, pem, 'conn@vv', {});   // add it to the agent (exercises ssh_agent.addKey)
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-agenthome-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });   // NO key files → only the agent can authenticate
+    const srv = await startSftpServer({ password: null, authorizedKeys: [pub], files: { 'a.txt': 'authed by agent' } });
+    transport.configure({
+      homeDir: home, agentSock: sock, systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => null, onError: () => {},
+    });
+    try {
+      eq(await transport.remoteReadText(srv.url('/a.txt')), 'authed by agent', 'agent (SSH_AUTH_SOCK) auth succeeds');
+      transport.closeAll();
+    } finally {
+      await srv.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  } finally {
+    try { process.kill(parseInt(pid, 10)); } catch (_e) {}
+  }
+}
+
+async function testKeyboardInteractive() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-mfahome-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  // password auth disabled (password: null); only keyboard-interactive with the right code is accepted
+  const srv = await startSftpServer({
+    password: null,
+    keyboard: { prompts: [{ prompt: 'Verification code: ', echo: false }], verify: (a) => a[0] === '123456' },
+    files: { 'ok.txt': 'authenticated via keyboard-interactive' },
+  });
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true,
+    promptSecret: async (req) => (req.kind === 'keyboard-interactive' ? '123456' : null),
+    onError: () => {},
+  });
+  try {
+    eq(await transport.remoteReadText(srv.url('/ok.txt')), 'authenticated via keyboard-interactive',
+       'keyboard-interactive (MFA) auth succeeds with the prompted response');
+    transport.closeAll();
+  } finally {
+    await srv.close();
+  }
 }
 
 async function testProxyJump() {

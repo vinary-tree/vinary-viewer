@@ -262,7 +262,11 @@ function buildAuthCandidates(conn, resolved) {
     }
   }
   for (const kp of idFiles) cands.push({ ssh: 'publickey', produce: () => produceKeyMethod(conn, resolved, kp) });
-  cands.push({ ssh: 'keyboard-interactive', produce: async () => ({ type: 'keyboard-interactive', username }) });
+  // ssh2 skips a keyboard-interactive method whose object has no `prompt` FUNCTION (client.js) — so the
+  // multi-prompt (MFA) handler lives in the method object itself, not a separate client 'keyboard-interactive'
+  // listener (which ssh2 only wires for the bare-string shorthand).
+  cands.push({ ssh: 'keyboard-interactive',
+               produce: async () => ({ type: 'keyboard-interactive', username, prompt: makeKeyboardHandler(conn, resolved) }) });
   for (let a = 1; a <= 3; a++) cands.push({ ssh: 'password', produce: () => producePasswordMethod(conn, resolved, a) });
   return cands;
 }
@@ -375,7 +379,6 @@ async function connect(conn, resolved, inboundSock, depth) {
       opts.onStatus({ connKey: conn.connKey, host: resolved.host, state: 'ready' });
       settled = true; resolve(conn);
     });
-    client.on('keyboard-interactive', makeKeyboardHandler(conn, resolved));
     client.on('error', (err) => {
       conn.state = 'error'; conn.lastError = err; pool.delete(conn.connKey); destroyStreams(conn);
       opts.onError(errInfo(err, resolved)); fail(err);

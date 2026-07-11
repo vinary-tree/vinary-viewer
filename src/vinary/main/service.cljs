@@ -251,19 +251,23 @@
       (let [base (:base entry)]
         (-> (.remoteStat ssh-transport path)
             (.then (fn [^js st]
-                     (let [is-dir (.-isDirectory st)
-                           sig    {:size (.-size st) :mtime (.-mtime st) :dir is-dir}]
-                       (if (and is-dir (not (:poll-dirs? entry)))
-                         (stop-remote-poller! path)     ; a directory listing, and dir-polling is off → stop
-                         (do
-                           (when (and (:sig entry) (not= sig (:sig entry)))
-                             (send-open-content! path))
-                           (swap! remote-pollers update path assoc :sig sig :backoff base)
-                           (reschedule-remote-poll! path (if is-dir (max base 15000) base)))))))
+                     ;; the tab may have closed (stop-remote-poller! → dissoc) DURING this async stat — bail so a
+                     ;; stale `update` can't resurrect a zombie poller (which would leak a connection)
+                     (when (get @remote-pollers path)
+                       (let [is-dir (.-isDirectory st)
+                             sig    {:size (.-size st) :mtime (.-mtime st) :dir is-dir}]
+                         (if (and is-dir (not (:poll-dirs? entry)))
+                           (stop-remote-poller! path)     ; a directory listing, and dir-polling is off → stop
+                           (do
+                             (when (and (:sig entry) (not= sig (:sig entry)))
+                               (send-open-content! path))
+                             (swap! remote-pollers update path assoc :sig sig :backoff base)
+                             (reschedule-remote-poll! path (if is-dir (max base 15000) base))))))))
             (.catch (fn [_]
-                      (let [next (min 60000 (* 2 (:backoff entry base)))]
-                        (swap! remote-pollers update path assoc :backoff next)
-                        (reschedule-remote-poll! path next)))))))))
+                      (when (get @remote-pollers path)   ; likewise: don't resurrect a poller stopped mid-stat
+                        (let [next (min 60000 (* 2 (:backoff entry base)))]
+                          (swap! remote-pollers update path assoc :backoff next)
+                          (reschedule-remote-poll! path next))))))))))
 
 (defn- start-remote-poller! [path]
   (let [prefs (read-remote-prefs)
