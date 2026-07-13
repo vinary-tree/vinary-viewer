@@ -47,6 +47,6 @@ $$
 
 ## An embedded diagram
 
-![Architecture](../../figures/architecture.svg)
+![Architecture](../../diagrams/container-two-build.svg)
 
-*Figure — the vinary-viewer process and build topology (rendered from D2).*
+*Figure — the vinary-viewer two-build process topology (rendered from PlantUML; source `docs/diagrams/container-two-build.puml`).*

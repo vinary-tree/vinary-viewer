@@ -45,23 +45,9 @@ the app's `unified@11` world, wrapped as a single `raw` node that `app-hast-suff
 — the *exact* seam the office frontend already uses (`ir.frontend.office/html->hast`). HAST/strings are inert
 data; no plugin, processor, or `unified` instance is shared across the boundary.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-rectangle ".tex source" as F #FCE7F3
-rectangle "unified-latex\n(its own unified 10):\nparse, expand macros,\nstrip newcommand,\nwrapPars, convertToHtml" as C #FBCFE8
-rectangle "HTML string\n(a single raw node)" as R #FCE7F3
-rectangle "app (unified 11)\napp-hast-suffix:\nrehype-raw, tex-normalize,\nsanitize, slug, highlight,\nurls, images, positions, meta" as S #DBEAFE
-rectangle "common IR\n+ apply-posts\n(MathJax, figures, syntax)" as IR #E0E7FF
-rectangle "preview HTML\n+ Contents outline" as OUT #DCFCE7
-F --> C : synchronous, self-contained
-C --> R : plain string crosses the boundary
-R --> S
-S --> IR
-IR --> OUT
-@enduml
-```
+![Latex pipeline](../diagrams/flow-latex-pipeline.svg)
+
+*Diagram source: [`../diagrams/flow-latex-pipeline.puml`](../diagrams/flow-latex-pipeline.puml).*
 
 A spike confirmed a coupled single processor is unnecessary and riskier; the decoupled string path is the design.
 
@@ -142,22 +128,9 @@ A previewable document (LaTeX, Org, or Markdown) collocated with a same-stem exp
 **either** its rendered self **or** the faithful compiler-produced PDF. This is orthogonal to the existing
 Preview↔Source toggle, giving each document up to three views:
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-state "Document" as Doc {
-  state "Preview\n(rendered)" as Prev
-  state "Source\n(tree-sitter CodeMirror)" as Src
-  Prev -right-> Src : View Source
-  Src -left-> Prev : View Preview
-}
-state "PDF\n(collocated sibling,\nin-renderer pdf.js)" as Pdf
-Doc -right-> Pdf : Show PDF
-Pdf -left-> Doc : Show Document
-note bottom of Pdf : only when a same-stem\nsibling .pdf exists
-@enduml
-```
+![Doc pdf switch](../diagrams/state-doc-pdf-switch.svg)
+
+*Diagram source: [`../diagrams/state-doc-pdf-switch.puml`](../diagrams/state-doc-pdf-switch.puml).*
 
 - **Sibling detection is main-side** (`service.cljs/sibling-pdf`, `fs.existsSync` on `dirname+stem+".pdf"`),
   because the renderer has no filesystem access. When kind ∈ {latex, org, markdown} it attaches `:pdfSibling`

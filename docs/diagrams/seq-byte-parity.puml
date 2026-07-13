@@ -1,0 +1,41 @@
+@startuml seq-byte-parity
+'' PlantUML over Mermaid because this contrasts TWO producers (batch vs stream) that must yield a
+'' byte-identical result, with an explicit equality assertion note — a sequence with two phases and a
+'' concluding `==` divider expresses the parity contract precisely, in the shared palette (orange = IR,
+'' green = HTML, teal = DOM).
+!include _vv-theme.iuml
+
+title Byte-parity — the streamed render equals the batch render, byte for byte
+
+participant "source document\n(300 KiB .tex / 301 KiB .org)" as Src FS_TINT
+participant "IR lowering\n(backend.html/lower)" as IR IR_TINT
+participant "DOM\n(`.markdown-body`)" as DOM RENDERER_TINT
+
+== batch path (small docs) ==
+Src -> IR : whole document -> whole IR
+activate IR
+IR -> IR : lower(whole IR)
+IR --> DOM : one innerHTML = write() = <latex>H</latex>
+deactivate IR
+note over IR, DOM #D8F0E6: <latex>H = \mathrm{lower}(\mathrm{IR}(\mathrm{doc}))</latex>
+
+== stream path (large docs) ==
+Src -> IR : whole parse (full context)\n-> IR top-level children c_1..c_n
+activate IR
+loop each child c_i across idle frames
+  IR -> DOM : insertAdjacentHTML "beforeend"\nlower(c_i), separator = <latex>\varepsilon</latex>
+end
+deactivate IR
+note over IR, DOM #D8F0E6: streamed innerHTML\n= <latex>\mathrm{concat}(\mathrm{map}\ \mathrm{lower}\ \langle c_1..c_n\rangle)</latex>
+
+== the parity assertion ==
+note over Src, DOM #FFF6D6: **electron-smoke asserts** streamed innerHTML == batch :html,\ncharacter for character, over the 300 KiB corpus — because remark-rehype's\ninter-block whitespace `:text` leaves are emitted VERBATIM (no added separator).
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| source document |
+  |<#E67E22>&#160;&#160;&#160;&#160;| common IR lowering |
+  |<#2D9574>&#160;&#160;&#160;&#160;| rendered DOM |
+  Parity holds because the children (and their separator leaves) lower verbatim.
+endlegend
+@enduml

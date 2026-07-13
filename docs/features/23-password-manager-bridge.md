@@ -111,22 +111,9 @@ Save receives JSON on stdin:
 
 ## 4 - Security flow
 
-```mermaid
-flowchart LR
-  classDef page fill:#2b3f55,stroke:#6aa3d8,color:#f2f6fb
-  classDef main fill:#3a2f4b,stroke:#bc6ec5,color:#f8f2ff
-  classDef renderer fill:#243d34,stroke:#5faf8f,color:#f2fff8
-  classDef provider fill:#4a3527,stroke:#d19a66,color:#fff7ef
+![Password bridge](../diagrams/component-password-bridge.svg)
 
-  P[Web page form]:::page --> WP[web-preload.js]:::page
-  WP -->|form metadata / save candidate| M[vinary.main.passwords]:::main
-  R[Renderer UI]:::renderer -->|selected item id or save token| M
-  M -->|spawn argv array, no shell| C[Provider CLI]:::provider
-  C --> M
-  M -->|sanitized metadata| R
-  M -->|revealed secret only| WP
-  WP -->|DOM input/change events| P
-```
+*Diagram source: [`../diagrams/component-password-bridge.puml`](../diagrams/component-password-bridge.puml).*
 
 The invariant is:
 

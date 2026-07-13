@@ -1,0 +1,55 @@
+@startuml component-remote-backend
+'' PlantUML over Mermaid because the point is that a NEW virtual backend (ssh://) plugs into the SAME
+'' downstream pipeline as local + archive URIs — expressed by routing three URI openers into one shared
+'' content spine, concept-coloured from the palette (slate = main backend, tan = remote fs, orange = IR spine).
+!include _vv-theme.iuml
+
+title Remote files over SSH — a virtual backend that reuses the whole pipeline
+
+package "URI router  (main.service)" {
+  component "openLocal\n(file path)" as OLoc MAIN_TINT
+  component "openArchiveUri\n(vv-archive://)" as OArc MAIN_TINT
+  component "openRemoteUri\n(ssh:// · sftp://)" as ORem MAIN_FILL
+}
+
+package "SSH backend  (main-side only, secrets never leave)" {
+  component "main.ssh\nssh2 client · sftp" as Ssh MAIN_TINT
+  component "ssh_config.js\nHost/Match/Include/ProxyJump/%-tokens" as Cfg MAIN_TINT
+  component "auth\nagent · key(+passphrase) · keyboard-interactive" as Auth IPC_TINT
+  component "known_hosts\nTOFU · hard-reject on change" as KH ERROR_TINT
+  component "main.connections\nsaved connections.edn" as Conn MAIN_TINT
+}
+
+component "remote host\nfiles / directories" as Host FS_TINT
+
+package "Shared downstream (identical to local)" {
+  component "content pipeline\nclassify -> IR front-end -> IR" as Pipe IR_TINT
+  component "streaming / paging\nbounded-memory (mid-drop = partial)" as Stream RENDERER_TINT
+  component "renderers\nGUI + vv-cli/tui" as Rend RENDERER_TINT
+  component "polling refresh\n:remote :poll-seconds" as Poll FS_TINT
+}
+
+ORem --> Ssh
+Ssh --> Cfg
+Ssh --> Auth
+Ssh --> KH
+Ssh --> Conn
+Ssh --> Host
+OLoc --> Pipe
+OArc --> Pipe
+ORem --> Pipe
+Pipe --> Stream
+Stream --> Rend
+Poll ..> Ssh : re-fetch on interval
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main / SSH backend |
+  |<#B1951D>&#160;&#160;&#160;&#160;| auth prompts (cross the seam) |
+  |<#E0211D>&#160;&#160;&#160;&#160;| host-key verification |
+  |<#9F8766>&#160;&#160;&#160;&#160;| remote / local filesystem |
+  |<#E67E22>&#160;&#160;&#160;&#160;| shared IR pipeline |
+  |<#2D9574>&#160;&#160;&#160;&#160;| streaming + renderers |
+  A remote URI opens through the same renderers, streaming, paging, and refresh as a local path.
+endlegend
+@enduml

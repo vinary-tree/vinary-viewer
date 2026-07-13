@@ -1,0 +1,57 @@
+@startuml activity-ssh-auth
+'' PlantUML over Mermaid because this is a decision-centric control flow with an ordered auth cascade and a
+'' security-critical reject branch (host-key change), coloured by outcome from the shared palette — red for
+'' abort, green for open. Mermaid cannot colour by outcome nor render byte-reproducibly.
+!include _vv-theme.iuml
+
+title SSH authentication + host-key verification (main-side)
+
+start
+:TCP connect; read the server host key; <<MAIN_FILL>>
+if (host key in known_hosts?) then (present)
+  if (key matches?) then (yes)
+    :proceed; <<MAIN_TINT>>
+  else (CHANGED)
+    :**HARD REJECT** — possible MITM;\nabort, surface an error; <<ERROR_TINT>>
+    stop
+  endif
+else (unknown host)
+  :prompt trust-on-first-use\n(`vv:ssh-prompt`); <<IPC_TINT>>
+  if (user accepts?) then (yes)
+    :append the key to known_hosts; <<MAIN_TINT>>
+  else (no)
+    :abort; <<ERROR_TINT>>
+    stop
+  endif
+endif
+
+:try **ssh-agent** identities; <<MAIN_TINT>>
+if (agent auth succeeds?) then (yes)
+else (no)
+  :try **key files** from ~/.ssh/config / defaults; <<MAIN_TINT>>
+  if (key is encrypted?) then (yes)
+    :prompt passphrase (`vv:ssh-prompt`);\non success, AddKeysToAgent; <<IPC_TINT>>
+  else (no)
+  endif
+  if (key auth succeeds?) then (yes)
+  else (no)
+    :try **keyboard-interactive / password**\n(prompt each challenge); <<IPC_TINT>>
+    if (auth succeeds?) then (yes)
+    else (methods exhausted)
+      :fail — report auth error; <<ERROR_TINT>>
+      stop
+    endif
+  endif
+endif
+:authenticated -> open sftp session; <<MARKDOWN_TINT>>
+stop
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main-side SSH step |
+  |<#B1951D>&#160;&#160;&#160;&#160;| prompt across the IPC seam |
+  |<#E0211D>&#160;&#160;&#160;&#160;| reject / auth failure |
+  |<#67B11D>&#160;&#160;&#160;&#160;| authenticated |
+  Auth cascades agent -> key -> keyboard-interactive; a changed host key is a hard reject.
+endlegend
+@enduml

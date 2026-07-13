@@ -1,0 +1,46 @@
+@startuml seq-cli-render
+'' PlantUML over Mermaid because this is the one-shot CLI render pipeline as an ordered hand-off (classify ->
+'' IR front-end -> ANSI back-end -> capability-gated graphics -> stdout), shown with activation bars in the
+'' shared palette (slate = cli process, orange = IR, tan = file/stdout). Mermaid cannot phase this cleanly.
+!include _vv-theme.iuml
+
+title `vv --cli <file>` — render once to stdout (ANSI + optional sixel/kitty)
+
+participant "`vv` launcher\n(mode dispatch)" as Launch MAIN_TINT
+participant "cli.core" as Cli MAIN_FILL
+participant "classifier +\nIR front-end" as IR IR_TINT
+participant "backend.ansi" as Ansi IR_TINT
+participant "terminal.caps /\ngraphics" as Caps IR_TINT
+participant "stdout" as Out FS_TINT
+
+Launch -> Cli : `--cli` -> cli.core/main
+activate Cli
+Cli -> IR : read file -> classify kind\n-> parse into IR
+activate IR
+IR --> Cli : IR document
+deactivate IR
+Cli -> Ansi : lower IR -> ANSI text
+activate Ansi
+Ansi --> Cli : styled lines
+deactivate Ansi
+Cli -> Caps : detect terminal capabilities
+activate Caps
+Caps --> Cli : truecolor? sixel? kitty?
+deactivate Caps
+alt terminal supports graphics
+  Cli -> Caps : encode images (sixel / kitty)
+  Caps --> Cli : escape sequences
+else no graphics (e.g. piped)
+  note right of Cli #FFF6D6: images degrade to a\ntext placeholder; output stays\npipe-safe (`vv --cli x | less -R`)
+end
+Cli -> Out : write ANSI (+ graphics) and exit
+deactivate Cli
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| launcher / cli process |
+  |<#E67E22>&#160;&#160;&#160;&#160;| IR front-end / ANSI back-end / caps |
+  |<#9F8766>&#160;&#160;&#160;&#160;| stdout |
+  One-shot: read, classify, lower to ANSI, gate graphics on capability, write, exit.
+endlegend
+@enduml

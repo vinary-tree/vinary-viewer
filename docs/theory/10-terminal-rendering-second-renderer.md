@@ -12,20 +12,9 @@ shared front-ends, into the common IR; a *backend* then lowers that IR to a conc
 character grid. Everything upstream of the backend — the front-ends, the WPDA decoder, the streaming
 `StreamParser`, and the TOC/find capabilities — is reused unchanged.
 
-```plantuml
-@startuml
-skinparam shadowing false
-left to right direction
-rectangle "bytes" as B
-rectangle "Front-end\n(format → IR)" as FE
-rectangle "Common IR\n(tagged tree)" as IR
-rectangle "ir.backend.html\n→ HTML → DOM" as H #E6F4EA
-rectangle "ir.backend.ansi\n→ ANSI → tty" as A #FCE8E6
-B --> FE --> IR
-IR --> H
-IR --> A
-@enduml
-```
+![Ir two backends](../diagrams/component-ir-two-backends.svg)
+
+*Diagram source: [`../diagrams/component-ir-two-backends.puml`](../diagrams/component-ir-two-backends.puml).*
 
 Because the split is at the *backend*, adding the terminal cost only what is genuinely medium-specific: a layout
 engine that thinks in character cells and SGR colours instead of CSS boxes. The reward is that every present and
@@ -72,17 +61,17 @@ resizes it to the display size, and encodes it:
 **Sizing (aspect-preserving fit).** Given a native image `w × h` px, a column budget `C`, and a cell of `cw × ch`
 px, the fit is:
 
-$$
+```math
 \text{cols} = \min\!\left(\left\lceil \tfrac{w}{cw} \right\rceil,\; C\right),\qquad
 s = \frac{\text{cols}\cdot cw}{w},\qquad
 \text{px}_w = \operatorname{round}(w\,s),\quad \text{px}_h = \operatorname{round}(h\,s),\qquad
 \text{rows} = \left\lceil \tfrac{\text{px}_h}{ch} \right\rceil .
-$$
+```
 
-The image is downscaled to $\text{px}_w \times \text{px}_h$ **once** and shared by both encoders — kitty must not
-transmit native-resolution RGBA (a 1080p photo would be an 11 MB base64 escape). `rows` uses $\lceil\cdot\rceil$,
+The image is downscaled to $`\text{px}_w \times \text{px}_h`$ **once** and shared by both encoders — kitty must not
+transmit native-resolution RGBA (a 1080p photo would be an 11 MB base64 escape). `rows` uses $`\lceil\cdot\rceil`$,
 not rounding: a 25 px image in 20 px cells occupies 2 rows, and under-counting would let the next line overprint
-it. The default cell is $10 \times 20$ px (a $1:2$ w:h ratio, typical of monospace fonts) when the real geometry
+it. The default cell is $`10 \times 20`$ px (a $`1:2`$ w:h ratio, typical of monospace fonts) when the real geometry
 is unqueried.
 
 **Degradation is first-class.** Where the terminal has no graphics (piped output, unsupported `TERM`,
@@ -111,7 +100,7 @@ is unit-tested without a pseudo-tty.
 ### 4.1 Windowed viewport
 
 The document lowers once to a flat vector of visual lines; the viewport paints only `lines[top : top+h]`, so a
-frame costs $O(h)$ regardless of document length — the terminal analog of the GUI's windowed DOM. A streamed log
+frame costs $`O(h)`$ regardless of document length — the terminal analog of the GUI's windowed DOM. A streamed log
 uses a `:cap`-ed **ring** (older lines drop, counted in `:dropped`), keeping RSS flat; a scrolled-up reader is not
 yanked to the tail, and when old lines drop their `:top` is decremented so their view stays on the same content.
 
@@ -121,21 +110,9 @@ A TUI that leaves the terminal in raw mode / alternate screen / cursor-hidden is
 `tui.term` registers an **idempotent** `restore!` on *every* exit path, written with `fs.writeSync` because
 `process.exit` truncates async stdout, and guarded by `isTTY` + a done-flag because `setRawMode` throws off a TTY.
 
-```plantuml
-@startuml
-skinparam shadowing false
-[*] --> Active : init! (alt-screen + raw + hide cursor)
-Active --> Restored : q / SIGINT·TERM·HUP·QUIT\n/ uncaught → restore! + exit
-Active --> Suspended : SIGTSTP\n(leave! + re-raise default)
-Suspended --> Active : SIGCONT\n(enter! + repaint)
-Restored --> [*]
-note right of Restored
-  restore! is exactly-once:
-  show cursor · leave alt-screen · raw off
-  (fs.writeSync; isTTY-guarded)
-end note
-@enduml
-```
+![Tui terminal](../diagrams/state-tui-terminal.svg)
+
+*Diagram source: [`../diagrams/state-tui-terminal.puml`](../diagrams/state-tui-terminal.puml).*
 
 `process.on('exit')` does **not** fire on a signal kill, so SIGINT/TERM/HUP/QUIT get explicit handlers (exit
 `128 + signo`); SIGTSTP restores then re-raises the default suspend; SIGCONT re-enters and repaints. SIGKILL/SIGSTOP
@@ -161,7 +138,7 @@ multi-GB log streams to either surface with a working set of the open record + o
 The terminal has no canvas, so a PDF is shown as its **reflowed text**. `terminal.pdf` runs pdf.js's legacy build
 (pure JS, no canvas) to extract text items per page, which the shared, DOM-free `ir.frontend.pdf` turns into a
 fixed-layout `:page/:block/:line/:run` tree and then **reflows** (`reflow-ir`): each block becomes a `:paragraph`
-of its joined line text, and a lone heading-sized line (taller than $1.3\times$ the median line height) becomes a
+of its joined line text, and a lone heading-sized line (taller than $`1.3\times`$ the median line height) becomes a
 `:heading`. The ANSI backend then wraps it to the terminal width, and the TUI gets scroll + find + a font-size
 Contents.
 

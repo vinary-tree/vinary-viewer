@@ -1,0 +1,43 @@
+@startuml seq-diff-split-enrich
+'' PlantUML over Mermaid because the split view's DISTINGUISHING move is a round trip across the amber IPC
+'' seam to read the on-disk pre/post files — a sequence with an activation bar and a seam-crossing pull
+'' expresses that far better than a flowchart, and the palette keeps amber = IPC everywhere.
+!include _vv-theme.iuml
+
+title Split diff — enriching the hunk window with the on-disk pre/post files
+
+participant "`[Unified | Split]`\ntoggle" as Toggle APPDB_TINT
+participant "renderer\n(diff view)" as Rend RENDERER_TINT
+participant "preload seam\n`window.vv`" as Seam IPC_TINT
+participant "main.service" as Main MAIN_TINT
+participant "disk\n(pre / post files)" as FS FS_TINT
+
+== unified (no round trip) ==
+Toggle -> Rend : select Unified
+note right of Rend #D8F0E6: unified renders from the `.diff` ALONE —\nhunks + `data-*` gutters, no filesystem read
+
+== switch to split ==
+Toggle -> Rend : select Split
+Rend -> Seam : `vv:load-diff-sources`\n{old-path, new-path}
+activate Seam
+Seam -> Main : ipc invoke
+activate Main
+Main -> FS : read old + new files\n(full context beyond the hunk window)
+FS --> Main : old-text, new-text
+Main --> Seam : {old, new}
+deactivate Main
+Seam --> Rend : {old, new}
+deactivate Seam
+Rend -> Rend : align hunks over the full files\n-> old | new columns
+note over Rend #FFF6D6: the terminal (vv-cli/tui) has NO split view —\nit renders the unified ANSI diff only
+
+legend right
+  |= Colour |= Concept |
+  |<#7590DB>&#160;&#160;&#160;&#160;| view toggle (app-db) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer diff view |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main.service |
+  |<#9F8766>&#160;&#160;&#160;&#160;| on-disk pre/post files |
+  Unified is self-contained; split enriches with the files on disk.
+endlegend
+@enduml

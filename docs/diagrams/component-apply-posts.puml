@@ -1,0 +1,35 @@
+@startuml component-apply-posts
+'' PlantUML over Mermaid because this is the ordered pre-DOM string-pass pipeline (figures sized BEFORE
+'' innerHTML so there is no post-insert re-scale), concept-coloured from the palette (green = HTML surface,
+'' orange = IR lowering). Mermaid cannot reuse the shared palette nor keep byte-reproducible output.
+!include _vv-theme.iuml
+
+title apply-posts — pre-DOM string passes size figures before innerHTML (no flash)
+
+rectangle "base-pipeline\n(remark -> rehype -> sanitize -> slug ->\nhighlight -> rewrite-urls -> wrap-images ->\nsource-positions)" as PIPE MARKDOWN_TINT
+rectangle "ir-html/lower\n(IR -> HTML string)" as LOWER IR_TINT
+
+package "apply-posts  (pre-DOM string passes)" {
+  rectangle "math/render-html-math\n(MathJax SVG)" as MATH MARKDOWN_FILL
+  rectangle "mermaid/render-html-diagrams\n(Mermaid SVG + font-match)" as MERM MARKDOWN_FILL
+  rectangle "figures/scale-figures-html\n(<img> width / aspect-ratio + raster box)" as FIG MARKDOWN_FILL
+  rectangle "syntax/highlight-html-code-blocks\n(tree-sitter fenced code)" as HL MARKDOWN_FILL
+}
+
+rectangle "set-inner!  (innerHTML = html)\nfigures ALREADY sized -> no flash" as DOM RENDERER_TINT
+
+PIPE --> LOWER
+LOWER --> MATH
+MATH --> MERM
+MERM --> FIG
+FIG --> HL
+HL --> DOM
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown HTML surface / post-passes |
+  |<#E67E22>&#160;&#160;&#160;&#160;| IR lowering |
+  |<#2D9574>&#160;&#160;&#160;&#160;| final DOM write |
+  Every figure is sized in the string, before innerHTML — so nothing re-scales on insert.
+endlegend
+@enduml

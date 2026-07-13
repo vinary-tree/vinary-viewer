@@ -42,36 +42,9 @@ as Markdown/Org/LaTeX are. The IR is rendered by the **two existing back-ends wi
   `vv-diff-note → dim`. This is the terminal analog of the GUI's CSS line colouring, mirroring how `:record` +
   `level-color` were added for logs. The result: `vv-cli`/`vv-tui` render a **colored unified diff for free**.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam rectangle {
-  BackgroundColor<<pure>> #E8F0FE
-  BackgroundColor<<gui>> #E6F4EA
-  BackgroundColor<<term>> #FCE8E6
-  BorderColor #5F6368
-}
-title Diff → one model → two back-ends (unified) + one GUI-only split
+![Diff model](../diagrams/component-diff-model.svg)
 
-rectangle "`.diff`/`.patch` text" as SRC
-rectangle "vinary.diff/parse\n(pure model:\nfiles → hunks → lines)" <<pure>> as PARSE
-rectangle "ir.frontend.diff/diff->ir\n(unified IR: <h2> banners,\nclass-tagged lines)" <<pure>> as IR
-rectangle "ir.backend.html\n(verbatim tags/attrs)" <<gui>> as HTML
-rectangle "ir.backend.ansi\n(+ diff-line-style)" <<term>> as ANSI
-rectangle "vinary.diff/split-html\n(2-column, GUI-only)" <<gui>> as SPLIT
-rectangle "markdown-body\n(GUI: find, scroll-spy,\ncontext menu, Contents)" <<gui>> as MB
-rectangle "vv-cli / vv-tui" <<term>> as CLI
-
-SRC --> PARSE
-PARSE --> IR
-IR --> HTML
-IR --> ANSI
-PARSE --> SPLIT
-HTML --> MB
-SPLIT --> MB
-ANSI --> CLI
-@enduml
-```
+*Diagram source: [`../diagrams/component-diff-model.puml`](../diagrams/component-diff-model.puml).*
 
 **Why a dedicated parser rather than a tree-sitter-diff grammar?** The unified diff format is small and fully
 specified, and — critically — the **side-by-side view requires the structured model anyway** (hunks, per-side
@@ -160,23 +133,9 @@ own PDF sibling (ADR-0025), so "PDF" returns — a symmetric three-view experien
 Document↔PDF machinery** and adds no rendering code. Detection is main-side (`service.cljs/sibling-source`, from
 the pure, node-tested `file-kind/source-sibling-paths`), attaching `:sourceSibling` to the `:pdf` payload.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-title [Doc | PDF] — both directions over one machinery
+![Doc pdf switch](../diagrams/state-doc-pdf-switch.svg)
 
-state "paper.tex\n(source doc)" as TEX
-state "paper.pdf\n(PDF doc)" as PDF
-
-[*] --> TEX : open .tex
-[*] --> PDF : open .pdf
-TEX --> TEX : PDF (rep=:pdf,\nsibling in place)
-TEX --> TEX : Doc (rep=:document)
-PDF --> TEX : Doc (navigate +\nforce rep=:document)
-TEX --> PDF : PDF (navigate back /\nhistory)
-note bottom of TEX : renders the sibling PDF via the SAME pdf-view
-@enduml
-```
+*Diagram source: [`../diagrams/state-doc-pdf-switch.puml`](../diagrams/state-doc-pdf-switch.puml).*
 
 ### 6. The LaTeX-PDF sizing bug — a one-line CSS-gate fix
 

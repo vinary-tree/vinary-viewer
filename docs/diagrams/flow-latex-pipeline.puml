@@ -1,0 +1,30 @@
+@startuml flow-latex-pipeline
+'' PlantUML over Mermaid because the load-bearing idea is a BOUNDARY crossing — unified-latex runs in its own
+'' bundled unified@10 and only a plain HTML string crosses into the app's unified@11 — which the amber seam
+'' colour marks precisely. Mermaid cannot colour the boundary as a concept nor reuse the suite palette.
+!include _vv-theme.iuml
+
+title LaTeX (.tex) rendering — a string crosses the unified@10 -> unified@11 boundary
+
+rectangle ".tex source" as F MARKDOWN_TINT
+rectangle "unified-latex  (its own unified@10)\nparse -> expand macros -> strip newcommand ->\nwrapPars -> convertToHtml" as C MARKDOWN_TINT
+rectangle "HTML string\n(a single raw node)" as R IPC_TINT
+rectangle "app (unified@11) app-hast-suffix\nrehype-raw -> tex-normalize -> sanitize ->\nslug -> highlight -> urls -> images ->\nsource-positions -> metadata" as S MARKDOWN_FILL
+rectangle "common IR + apply-posts\n(MathJax, figures, syntax)" as IR IR_TINT
+rectangle "preview HTML\n+ Contents outline" as OUT RENDERER_TINT
+
+F --> C : synchronous, self-contained
+C --> R : only a plain string crosses the boundary
+R --> S
+S --> IR
+IR --> OUT
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| LaTeX front-end / HTML surface |
+  |<#B1951D>&#160;&#160;&#160;&#160;| the unified@10 -> unified@11 boundary (a raw string) |
+  |<#E67E22>&#160;&#160;&#160;&#160;| common IR |
+  |<#2D9574>&#160;&#160;&#160;&#160;| rendered preview |
+  unified-latex is fully self-contained; nothing but an HTML string reaches the app's pipeline.
+endlegend
+@enduml

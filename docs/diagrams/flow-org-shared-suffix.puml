@@ -1,0 +1,30 @@
+@startuml flow-org-shared-suffix
+'' PlantUML over Mermaid because the point is that Markdown AND Org converge on ONE shared hast suffix,
+'' concept-coloured from the palette (green = the markdown/org HTML surface, orange = IR) so the shared spine
+'' is visually obvious. Mermaid cannot reuse the suite palette.
+!include _vv-theme.iuml
+
+title Org reuses the Markdown spine — two parsers, one shared hast suffix -> IR
+
+rectangle "remark-parse -> gfm -> math\n-> remark-rehype" as MD MARKDOWN_TINT
+rectangle "uniorg-parse -> uniorg-rehype" as ORG MARKDOWN_TINT
+
+package "app-hast-suffix  (SHARED)" {
+  rectangle "rehype-raw -> rehype-sanitize ->\nrehype-slug -> rehype-highlight ->\nrewrite-urls -> wrap-images ->\nsource-positions -> collect-metadata" as SUF MARKDOWN_FILL
+}
+
+rectangle "hast -> common IR" as IR IR_TINT
+rectangle "ir-html/lower -> apply-posts\n(HTML + MathJax / Mermaid /\nfigures / tree-sitter highlight)" as OUT MARKDOWN_TINT
+
+MD --> SUF
+ORG --> SUF
+SUF --> IR
+IR --> OUT
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Markdown / Org HTML surface + shared suffix |
+  |<#E67E22>&#160;&#160;&#160;&#160;| common IR |
+  Org (`.org`) joins the Markdown pipeline at the shared hast suffix — no separate renderer.
+endlegend
+@enduml

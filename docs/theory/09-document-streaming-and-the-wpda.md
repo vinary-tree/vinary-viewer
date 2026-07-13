@@ -25,7 +25,7 @@ lowers it to HTML. Until v0.3.0 it did so on **whole documents**: read the whole
 lower the whole HTML, and replace `.markdown-body`'s innerHTML in one write. Two costs grow with file size:
 
 - **Memory is unbounded** — file, parse, and rendered HTML coexist; a large log or Markdown file freezes or
-  OOMs the renderer. The prior mitigations (the $\approx 5$ MiB log/table *paging* boundary, the PDF viewport window)
+  OOMs the renderer. The prior mitigations (the $`\approx 5`$ MiB log/table *paging* boundary, the PDF viewport window)
   are per-format and show only a *slice*.
 - **First paint waits for the whole document** — nothing renders until the entire parse completes.
 
@@ -46,9 +46,9 @@ documents keep the faster batch path, byte-for-byte (see [ADR-0018](../design-de
 | **StreamParser** | The pure `feed`/`finish` protocol (`vinary.stream.protocol`) emitting only *newly-completed* IR blocks. |
 | **Record** | A log entry = a header line plus its continuation/braced lines, up to the next depth-0 header. |
 | **WPDA** | *Weighted pushdown automaton* — recognises context-free nesting, weighted by a semiring ([theory/08 §5](08-common-document-ir.md)). |
-| **Config** | A WPDA configuration $(q,\gamma,w)$: state $q$, stack $\gamma\in\Gamma^{*}$, weight $w\in K$. |
+| **Config** | A WPDA configuration $`(q,\gamma,w)`$: state $`q`$, stack $`\gamma\in\Gamma^{*}`$, weight $`w\in K`$. |
 | **Frontier** | The current set (beam) of live configs — the streaming decoder's whole live state. |
-| **Beam / credit** | The prune width $\beta$ bounding the frontier; the outstanding-pull count ($=1$) bounding transport. |
+| **Beam / credit** | The prune width $`\beta`$ bounding the frontier; the outstanding-pull count ($`=1`$) bounding transport. |
 
 ---
 
@@ -56,18 +56,20 @@ documents keep the faster batch path, byte-for-byte (see [ADR-0018](../design-de
 
 A **StreamParser** is a pure state machine over batches of input symbols:
 
-$$\textsf{feed} : (\text{parser},\ \text{batch}) \mapsto (\text{parser}',\ \text{blocks}) \qquad
-  \textsf{finish} : \text{parser} \mapsto \text{blocks}$$
+```math
+\textsf{feed} : (\text{parser},\ \text{batch}) \mapsto (\text{parser}',\ \text{blocks}) \qquad
+  \textsf{finish} : \text{parser} \mapsto \text{blocks}
+```
 
 `feed` returns **only the blocks completed by this batch** and a successor parser carrying the still-open block;
 `finish` flushes the final open block. Two invariants make it correct and testable:
 
-- **Batch-split invariance.** For any partition of a symbol sequence $s = b_1 \frown b_2 \frown \dots \frown b_n$
+- **Batch-split invariance.** For any partition of a symbol sequence $`s = b_1 \frown b_2 \frown \dots \frown b_n`$
   into batches, folding `feed` over the batches and appending `finish` yields the **same** block sequence as
-  feeding $s$ whole. Formally, writing $\textsf{drain}$ for that fold-then-finish, $\textsf{drain}(s) =
+  feeding $`s`$ whole. Formally, writing $`\textsf{drain}`$ for that fold-then-finish, $\textsf{drain}(s) =
   \textsf{drain}(b_1,\dots,b_n)$ for every partition. (Tested exhaustively over splittings in
   `log-stream-test/streaming-across-batches-equals-whole`.)
-- **Bounded retention.** The successor parser's size is $O(\text{largest open block})$, independent of how many
+- **Bounded retention.** The successor parser's size is $`O(\text{largest open block})`$, independent of how many
   symbols have been fed (§5).
 
 Because it is pure and DOM-free, the StreamParser is fully node-testable; the DOM append lives separately in the
@@ -91,27 +93,27 @@ must stay **one** record even though an inner line looks exactly like a header. 
 requires counting balanced `{ … }` to arbitrary depth — the golden **balanced-brackets** language, which no
 finite-state counter recognises in general. This is where the **pushdown** earns its keep.
 
-`vinary.ir.grammar.log` defines the WPDA $M = (Q,\Sigma,\Gamma,\delta,q_0,Z_0,F,K)$ with a single state
-$Q=F=\{\textsf{in}\}$, per-line brace tokens $\Sigma=\{\textsf{ob},\textsf{cb}\}$ (a line that *net-opens* vs
-*net-closes* a brace level), stack alphabet $\Gamma=\{\textsf{b}\}$ (one marker per open level), and the Boolean
-semiring $K=\mathbb{B}$ for recognition. Its transition function $\delta$ (each rule reads a token, inspects the
+`vinary.ir.grammar.log` defines the WPDA $`M = (Q,\Sigma,\Gamma,\delta,q_0,Z_0,F,K)`$ with a single state
+$`Q=F=\{\textsf{in}\}`$, per-line brace tokens $`\Sigma=\{\textsf{ob},\textsf{cb}\}`$ (a line that *net-opens* vs
+*net-closes* a brace level), stack alphabet $`\Gamma=\{\textsf{b}\}`$ (one marker per open level), and the Boolean
+semiring $`K=\mathbb{B}`$ for recognition. Its transition function $`\delta`$ (each rule reads a token, inspects the
 stack top, and moves state while pushing/popping) is:
 
 | Token | Stack top | Stack action | Effect |
 |-------|-----------|--------------|--------|
-| $\textsf{ob}$ | $\varepsilon$ (empty) | push $\textsf{b}$ | open a brace level at depth 0 |
-| $\textsf{ob}$ | $\textsf{b}$ | push $\textsf{b}$ | open a deeper level |
-| $\textsf{cb}$ | $\textsf{b}$ | pop | close one level |
-| $\textsf{cb}$ | $\varepsilon$ (empty) | noop | absorb a stray close (never dies) |
+| $`\textsf{ob}`$ | $`\varepsilon`$ (empty) | push $`\textsf{b}`$ | open a brace level at depth 0 |
+| $`\textsf{ob}`$ | $`\textsf{b}`$ | push $`\textsf{b}`$ | open a deeper level |
+| $`\textsf{cb}`$ | $`\textsf{b}`$ | pop | close one level |
+| $`\textsf{cb}`$ | $`\varepsilon`$ (empty) | noop | absorb a stray close (never dies) |
 
 The last rule makes the machine **total** — a malformed line with more `}` than `{` at depth 0 is absorbed
-rather than killing the tracker. The **brace depth** of a frontier is the number of $\textsf{b}$ markers on its
-config's stack, i.e. $\textsf{depth}(F) = |\gamma|$ for the (single) config $(q,\gamma,w)\in F$.
+rather than killing the tracker. The **brace depth** of a frontier is the number of $`\textsf{b}`$ markers on its
+config's stack, i.e. $`\textsf{depth}(F) = |\gamma|`$ for the (single) config $`(q,\gamma,w)\in F`$.
 
 This grammar is **deterministic**: from any config, each token has exactly one applicable transition. Hence the
 frontier is always a *single* config — the beam never needs to branch here. The weighted machinery is still
 present (and used for PDF in Phase 3, where line/block segmentation is genuinely ambiguous and a **Tropical**
-weight $\big(\mathbb{R}\cup\{\infty\},\ \min,\ +,\ \infty,\ 0\big)$ ranks competing segmentations); for logs it
+weight $`\big(\mathbb{R}\cup\{\infty\},\ \min,\ +,\ \infty,\ 0\big)`$ ranks competing segmentations); for logs it
 collapses to plain recognition.
 
 ---
@@ -123,23 +125,27 @@ collapses to plain recognition.
 *Each line is classified (regular) and checked against the brace depth (context-free); a header at depth 0 with
 a record open commits the previous record, then the pushdown advances by the line's net-brace delta.*
 
-`vinary.ir.frontend.log-stream` combines the regular and context-free parts. For each incoming line $\ell$:
+`vinary.ir.frontend.log-stream` combines the regular and context-free parts. For each incoming line $`\ell`$:
 
 1. **Classify (regular).** `continuation-line?` matches `^(\s|\}|\]|at\s|Caused by\b|\.\.\.\s\d+\smore)` — an
    indented line, a lone closer, a stack frame, or an "… N more" line visibly belongs to the record above it.
-2. **Read depth (context-free).** Consult $\textsf{depth}(F)$ *before* applying $\ell$'s braces.
-3. **Decide the boundary.** $\ell$ starts a **new** record iff it is a header at depth 0 with a record already
+2. **Read depth (context-free).** Consult $`\textsf{depth}(F)`$ *before* applying $`\ell`$'s braces.
+3. **Decide the boundary.** $`\ell`$ starts a **new** record iff it is a header at depth 0 with a record already
    open:
-   $$\textsf{boundary}(\ell) \;=\; \big(\textsf{depth}(F)=0\big)\ \wedge\ \neg\,\textsf{continuation?}(\ell)\ \wedge\ (\textsf{open}\neq\langle\rangle).$$
-   On a boundary, the open record is emitted and $\ell$ begins the next; otherwise $\ell$ joins the open record.
-4. **Advance the pushdown.** Feed $\ell$'s net-brace delta $\textsf{nb}(\ell) = \#\{\texttt{\{}\} - \#\{\texttt{\}}\}$
-   as $|\textsf{nb}|$ tokens of $\textsf{ob}$ or $\textsf{cb}$ through the streaming primitive.
+   ```math
+   \textsf{boundary}(\ell) \;=\; \big(\textsf{depth}(F)=0\big)\ \wedge\ \neg\,\textsf{continuation?}(\ell)\ \wedge\ (\textsf{open}\neq\langle\rangle).
+   ```
+   On a boundary, the open record is emitted and $`\ell`$ begins the next; otherwise $`\ell`$ joins the open record.
+4. **Advance the pushdown.** Feed $`\ell`$'s net-brace delta $`\textsf{nb}(\ell) = \#\{\texttt{\{}\} - \#\{\texttt{\}}\}`$
+   as $`|\textsf{nb}|`$ tokens of $`\textsf{ob}`$ or $`\textsf{cb}`$ through the streaming primitive.
 
 The streaming primitive is `decode/advance-step`, **the** bounded-memory step: advance the frontier by one input
 symbol, then prune to the beam,
-$$F_i \;=\; \textsf{prune}_\beta\big(\textsf{advance}(M,\ F_{i-1},\ a_i)\big),$$
-where $\textsf{advance}$ applies $\delta$ plus a bounded $\varepsilon$-closure and $\textsf{prune}_\beta$ keeps
-the $\beta$ lowest-weight configs. `decode` is exactly the left fold of `advance-step` over the input, so
+```math
+F_i \;=\; \textsf{prune}_\beta\big(\textsf{advance}(M,\ F_{i-1},\ a_i)\big),
+```
+where $`\textsf{advance}`$ applies $`\delta`$ plus a bounded $`\varepsilon`$-closure and $`\textsf{prune}_\beta`$ keeps
+the $`\beta`$ lowest-weight configs. `decode` is exactly the left fold of `advance-step` over the input, so
 `advance-step` composes into a whole-sequence decode while never materialising more than one frontier.
 
 A completed record lowers to `div.vv-log-record` (carrying a collision-free stable `ir.meta/anchor-id`, so ids
@@ -152,28 +158,28 @@ guarded by `log-stream-test/lowers-to-nonempty-html`.
 
 ## 5 · The bounded-memory property
 
-The central guarantee. Let $F_i$ be the frontier after $i$ symbols, $\gamma_i$ its stack, $\beta$ the beam width
-and $d_{\max}$ the max stack depth (`decode/default-max-stack` $=4096$).
+The central guarantee. Let $`F_i`$ be the frontier after $`i`$ symbols, $`\gamma_i`$ its stack, $`\beta`$ the beam width
+and $`d_{\max}`$ the max stack depth (`decode/default-max-stack` $`=4096`$).
 
-> **Proposition (bounded working set).** For every $i$: $\;|F_i| \le \beta\;$ and $\;|\gamma| \le d_{\max}$ for
-> every config in $F_i$. For the deterministic log brace grammar, $|F_i| = 1$. Hence the streaming decoder's
-> live state is $O(\beta \cdot d_{\max})$ — a constant independent of the document length $N$.
+> **Proposition (bounded working set).** For every $`i`$: $`\;|F_i| \le \beta\;`$ and $`\;|\gamma| \le d_{\max}`$ for
+> every config in $`F_i`$. For the deterministic log brace grammar, $`|F_i| = 1`$. Hence the streaming decoder's
+> live state is $`O(\beta \cdot d_{\max})`$ — a constant independent of the document length $`N`$.
 
-*Proof sketch.* $|F_i|\le\beta$ is immediate: $F_i = \textsf{prune}_\beta(\cdot)$ keeps at most $\beta$ configs.
-$|\gamma|\le d_{\max}$ holds because `advance` discards any config whose push would exceed $d_{\max}$.
-Determinism of $\delta$ (§3) gives $|F_i| = |F_{i-1}| = \dots = |F_0| = 1$ for the log grammar by induction:
+*Proof sketch.* $`|F_i|\le\beta`$ is immediate: $`F_i = \textsf{prune}_\beta(\cdot)`$ keeps at most $`\beta`$ configs.
+$`|\gamma|\le d_{\max}`$ holds because `advance` discards any config whose push would exceed $`d_{\max}`$.
+Determinism of $`\delta`$ (§3) gives $`|F_i| = |F_{i-1}| = \dots = |F_0| = 1`$ for the log grammar by induction:
 each token has exactly one applicable transition, so `advance` maps one config to one config and prune is a
-no-op. $\square$
+no-op. $`\square`$
 
 Lifting to the front-end: the StreamParser retains the open record's lines plus this single config. The open
-record is bounded by the size of the **largest single record**, not by $N$ — a depth-0 header emits the previous
+record is bounded by the size of the **largest single record**, not by $`N`$ — a depth-0 header emits the previous
 record and starts a fresh one, so at most one record is ever open. `log-stream-test/bounded-memory-property`
 feeds 500+ batches and asserts the frontier stays a single config and only the last (open) record is retained.
 
-The bound extends across the whole pipeline (see the diagram): the **transport** holds $\le 2$ batches (the current
-one plus one double-buffered prefetch); **main** reads $\le 1$ batch ahead (it pauses `readline` at the batch cap —
+The bound extends across the whole pipeline (see the diagram): the **transport** holds $`\le 2`$ batches (the current
+one plus one double-buffered prefetch); **main** reads $`\le 1`$ batch ahead (it pauses `readline` at the batch cap —
 the credit-1 backpressure); and the render is **never snapshotted** back to `:doc/html`, so a re-mount re-streams
-rather than materialising the whole HTML. The *parse/transport* working set is thus $O(1)$ in $N$. (The rendered
+rather than materialising the whole HTML. The *parse/transport* working set is thus $`O(1)`$ in $`N`$. (The rendered
 **DOM** node count still tracks the streamed prefix until Phase 4 windows it — see the trade-offs in ADR-0018.)
 
 ---
@@ -219,10 +225,12 @@ scan → `reflow-ir`), giving full document
 context, and the resulting IR document's **top-level children** are committed across idle frames by the *same*
 scheduler + sink. Because the children are emitted **verbatim** — element blocks *and* the inter-block
 whitespace `:text` leaves that carry remark-rehype's exact separators — and the sink concatenates them with **no
-added separator** ($\textsf{sep}=\varepsilon$, versus $\textsf{sep}=\texttt{\textbackslash n}$ for logs), the
+added separator** ($`\textsf{sep}=\varepsilon`$, versus $`\textsf{sep}=\texttt{\textbackslash n}`$ for logs), the
 result satisfies
 
-$$\textsf{concat}\big(\textsf{map}\ \textsf{lower}\ \textsf{children}\big) \;=\; \textsf{lower}(\text{whole document}) \;=\; \text{batch } \texttt{:html},$$
+```math
+\textsf{concat}\big(\textsf{map}\ \textsf{lower}\ \textsf{children}\big) \;=\; \textsf{lower}(\text{whole document}) \;=\; \text{batch } \texttt{:html},
+```
 
 **byte for byte** (verified by the electron smoke's streamed-vs-batch `innerHTML` comparison over a 300 KiB
 corpus). The win here is **not** bounded parse memory (the text is already resident) but a **non-blocking
@@ -270,14 +278,14 @@ declarations and no capability loss.
 
 ## 8 · Complexity
 
-For a document of $N$ input symbols segmented into $R$ records:
+For a document of $`N`$ input symbols segmented into $`R`$ records:
 
 | Resource | Batch path | Stream path |
 |----------|-----------|-------------|
-| Parse **time** | $\Theta(N)$ | $\Theta(N)$ (a constant factor higher: per-block lower + post-passes + IPC) |
-| Parse/transport **space** | $\Theta(N)$ | $\Theta(\beta\,d_{\max} + L_{\max})$ — **independent of $N$** ($L_{\max}$ = largest record) |
-| Rendered **DOM** | $\Theta(N)$ | $\Theta(\text{streamed prefix}) \to \Theta(\text{viewport})$ after Phase 4 windowing |
-| **Latency to first paint** | $\Theta(N)$ | $\Theta(\text{first batch})$ |
+| Parse **time** | $`\Theta(N)`$ | $`\Theta(N)`$ (a constant factor higher: per-block lower + post-passes + IPC) |
+| Parse/transport **space** | $`\Theta(N)`$ | $`\Theta(\beta\,d_{\max} + L_{\max})`$ — **independent of $`N`$** ($`L_{\max}`$ = largest record) |
+| Rendered **DOM** | $`\Theta(N)`$ | $`\Theta(\text{streamed prefix}) \to \Theta(\text{viewport})`$ after Phase 4 windowing |
+| **Latency to first paint** | $`\Theta(N)`$ | $`\Theta(\text{first batch})`$ |
 
 Streaming trades a higher constant on total time for an **asymptotically smaller** memory bound and a
 **dramatically smaller** first-paint latency — the reason it is reserved, by threshold, for large documents.

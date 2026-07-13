@@ -1,0 +1,51 @@
+@startuml component-terminal-renderer
+'' PlantUML over Mermaid because this shows the terminal as a SECOND renderer sharing the IR + streaming
+'' spine with the GUI — one core, two back-ends — concept-coloured from the palette (orange = IR/ANSI spine,
+'' slate = Node process, teal = the renderer role). Mermaid cannot reuse the shared palette across figures.
+!include _vv-theme.iuml
+
+title Terminal previewer — vv-cli / vv-tui as a second renderer over the IR + streaming spine
+
+package "Shared spine (identical to the GUI)" {
+  component "common IR core\n(vinary.ir.*)" as IR IR_TINT
+  component "streaming\n(vinary.stream.*)" as Stream RENDERER_TINT
+  component "backend.ansi\nIR -> ANSI text" as Ansi IR_TINT
+}
+
+package "Terminal support (vinary.terminal.*)" {
+  component "caps\ndetect kitty / sixel / truecolor" as Caps IR_TINT
+  component "graphics\nkitty / sixel image encode" as Gfx IR_TINT
+  component "pdf\nheadless pdf.js reflow" as Pdf RENDERER_TINT
+  component "syntax · stream" as Syn IR_TINT
+}
+
+package "cli  (vv --cli, one-shot)" {
+  component "cli.core / cli.render\n-> stdout (pipe-friendly)" as Cli MAIN_FILL
+}
+
+package "tui  (vv --tui, interactive)" {
+  component "tui.core / term\nkeys · state · viewport" as TCore MAIN_FILL
+  component "tui.find · tui.toc\n(pure core + `--drive` seam)" as TFind MAIN_TINT
+}
+
+IR --> Ansi
+Stream --> Ansi
+Ansi --> Cli
+Ansi --> TCore
+Caps --> Gfx
+Gfx --> Cli
+Gfx --> TCore
+Pdf --> IR
+Syn --> Ansi
+TCore --> TFind
+
+note bottom of Cli #FFF6D6: the GUI (Chromium) is untouched —\nboth surfaces render the SAME IR.
+
+legend right
+  |= Colour |= Concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| IR core / ANSI back-end / terminal support |
+  |<#2D9574>&#160;&#160;&#160;&#160;| streaming / headless pdf reflow |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| Node cli / tui process |
+  A single IR feeds two back-ends: HTML for the GUI, ANSI for the terminal.
+endlegend
+@enduml

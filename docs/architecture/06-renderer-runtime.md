@@ -43,7 +43,8 @@ the React root.
 | `window.__vvds()` | Current DataScript cached document rows. |
 | `window.__vvkeymap(id)` | Development helper to select a keymap set. |
 
-Debug builds also preload re-frame-10x, re-frisk, and DevTools formatters.
+Debug builds also preload re-frame-10x and DevTools formatters (the renderer
+`:preloads` are `[devtools.preload day8.re-frame-10x.preload.react-18]`).
 
 ---
 
@@ -91,8 +92,9 @@ an older document/render cannot apply to the current view.
 
 `markdown-body` is one branch of the `vinary.ui.views/content-view` **Strategy**
 selector, which picks the renderer for the active tab by URI scheme and `:doc/kind`
-(empty → watermark, error, web view, PDF host, image, mermaid, source, View-Source,
-and so on — see [theory/05-strategy-renderer-registry.md](../theory/05-strategy-renderer-registry.md)).
+(empty → watermark, error, web view, in-renderer PDF, image, mermaid, source, View-Source,
+a **streamed body** (`ir-stream-body`) for large documents, a **diff** view, and so on —
+see [theory/05-strategy-renderer-registry.md](../theory/05-strategy-renderer-registry.md)).
 A `:doc/kind = "directory"` document selects `vinary.ui.views/dir-view`, the in-pane
 **directory browser**: a pure-Reagent detailed list (name · size · modified) over the
 document's `:doc/entries` that, like the image view, restores per-history scroll on

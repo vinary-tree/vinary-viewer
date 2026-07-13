@@ -69,18 +69,18 @@ the complete ownership set derived from all remaining tab histories.
 
 ---
 
-## 5. PDF and HTTP native views
+## 5. In-renderer PDF and the native web view
 
-PDF and HTTP/HTTPS content are main-owned native views layered over a renderer
-host element.
+PDFs render **in the renderer** via pdf.js ([ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md)) —
+canvas + text/link layers in the DOM, *not* a main-owned view. Only HTTP/HTTPS (and local `.html`) content
+uses a main-owned native web view layered over a renderer host element.
 
 | Kind | Renderer role | Main role |
 |------|---------------|-----------|
-| PDF | Mount `pdf-host`, send show/hide/bounds messages. | Own `WebContentsView`, load `file://...pdf`, reload on retained PDF change. |
-| HTTP/HTTPS | Mount web host, send show/hide/bounds/toc-goto messages. | Own web view, report navigation, headings, and active heading. |
+| PDF | Render pdf.js (canvas + text/link layers) directly in the DOM; when switching to a collocated sibling PDF, load its bytes over `vv:load-pdf-bytes` into the pdf-cache. | Read PDF bytes on request; watch a retained local PDF and re-send on change. |
+| HTTP/HTTPS · local `.html` | Mount a web host, send show/hide/bounds/toc-goto messages. | Own the native web view; report navigation, headings, and active heading. |
 
-The renderer still owns tabs and history. The native views own their own document
-scrolling.
+The renderer owns tabs and history; the web view owns its own document scrolling.
 
 ---
 
@@ -148,3 +148,34 @@ plumbing (no new IPC). The flow also maintains the persisted **trail** that powe
 6. When a child is added, removed, renamed, or changed, the depth-0 watcher re-lists
    the folder (`add`/`unlink`/`addDir`/`unlinkDir`/`change`) and the pane refreshes
    in place, preserving scroll.
+
+---
+
+## 9. Streaming a large document
+
+For a document past the per-kind size threshold, the batch flow of §1 is replaced by a bounded-memory pull
+loop ([ADR-0018](../design-decisions/0018-document-streaming-pipeline.md),
+[theory/09](../theory/09-document-streaming-and-the-wpda.md)):
+
+1. `:content/received` sees `(:size meta) ≥ threshold` (`stream.flag/enabled?`) and starts a stream controller
+   instead of a whole-document render.
+2. The renderer opens a session over `vv:stream-open`; main creates a `readline` session in
+   `content_service.js`.
+3. `stream.scheduler` pulls one batch per idle tick over `vv:stream-pull` (credit 1); `stream.transport`
+   double-buffers the next pull so main latency is hidden.
+4. `stream.protocol`'s `feed` emits newly-completed IR blocks; `stream.sink` lowers, post-processes, and
+   appends them (`insertAdjacentHTML`) — byte-identical to the batch render.
+5. On teardown (unmount / tab switch / live-refresh) the controller closes the session over
+   `vv:stream-close`, and the main session registry returns to zero (no fd leak).
+
+## 10. Remote files and terminal render
+
+- **Remote (`ssh://` / `sftp://`).** The open flow of §1 is unchanged except that `service` routes the URI to
+  `openRemoteUri`, a virtual backend (`main.ssh` / `ssh_transport.js`) that reads over SFTP and feeds the same
+  `vv:content` pipeline; large remote logs stream as in §9. Auth prompts cross the seam over `vv:ssh-prompt`;
+  live-refresh is opt-in polling. See [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md).
+- **Terminal (`vv --cli` / `--tui`).** The same front-ends and IR run without a DOM: `ir.backend.ansi` lowers
+  to a tty instead of `backend.html` to the DOM, and there is no re-frame/app-db loop — `cli.core` / `tui.*`
+  drive the render directly over the shared IR + streaming spine. See
+  [theory/10](../theory/10-terminal-rendering-second-renderer.md) and
+  [architecture/07](07-common-ir-streaming-and-terminal.md).

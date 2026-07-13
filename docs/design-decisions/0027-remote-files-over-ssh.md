@@ -49,38 +49,9 @@ Two pure, node-testable JS modules plus two CLJS glue namespaces:
 | `src/vinary/main/ssh.cljs` | wires the transport's prompts to a native host-key dialog + a renderer secret modal; owns the `vv:ssh-*` IPC channels. |
 | `src/vinary/main/connections.cljs` | `connections.edn` — non-secret host metadata (a clone of `recent.cljs`). |
 
-```plantuml
-@startuml
-skinparam backgroundColor transparent
-skinparam defaultFontName sans-serif
-skinparam componentStyle rectangle
-skinparam packageStyle rectangle
+![Remote backend](../diagrams/component-remote-backend.svg)
 
-package "RENDERER (sandboxed) — no fs, CSP blocks network" #fdeef0 {
-  [uri.cljs\nssh?/remote?/dirname/segments] as URI
-  [content-view\ndir-view · markdown-body · web-host] as CV
-  [ssh prompt modal\n(local secret state)] as MODAL
-}
-
-package "MAIN (trusted)" #eef5fc {
-  [service.cljs\nsend-remote-content! · pollers] as SVC
-  [content_service.js\nopenRemoteUri (virtual backend)] as CS
-  [ssh_transport.js\npool · auth · host-key · SFTP] as TR
-  database "~/.ssh\nconfig · known_hosts · keys" as SSHDIR #e9f5f0
-}
-
-cloud "remote host\n(sshd + SFTP)" as HOST #fbf3dd
-
-URI --> SVC : ssh:// via vv:open
-SVC --> CS : openRemoteUri(uri, kind)
-CS --> TR : remoteStat / readdir / readFile /\nreadText / createReadStream
-TR --> SSHDIR : read config / keys / known_hosts
-TR --> HOST : SFTP over SSH (pooled)
-TR ..> MODAL : vv:ssh-prompt (non-secret)
-MODAL ..> TR : vv:ssh-prompt-reply (secret, one-shot)
-CS --> CV : vv:content payload
-@enduml
-```
+*Diagram source: [`../diagrams/component-remote-backend.puml`](../diagrams/component-remote-backend.puml).*
 
 ### 2. A remote URI is a virtual backend, exactly like `vv-archive://`
 
@@ -142,35 +113,9 @@ completion; `vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (o
 
 ### 5. Authentication, host-key trust, and `~/.ssh/config`
 
-```plantuml
-@startuml
-skinparam backgroundColor transparent
-skinparam defaultFontName sans-serif
-start
-:connect (resolved host / port / user);
-:host-key verify — parse the presented key;
-if (in known_hosts?) then (exact match)
-  :accept;
-elseif (same type, different key?) then (yes)
-  :HARD REJECT — REMOTE HOST ID CHANGED; <<#ffdede>>
-  stop
-else (unknown)
-  :TOFU prompt (native dialog / terminal) — show SHA256 fingerprint;
-  if (trust?) then (yes)
-    :append to ~/.ssh/known_hosts;
-    :accept;
-  else (no)
-    :reject; <<#ffdede>>
-    stop
-  endif
-endif
-:auth chain — none (probe) then agent;
-:then key files (encrypted → prompt passphrase; AddKeysToAgent → add to agent);
-:then keyboard-interactive (MFA), then password;
-:ready → pooled connection;
-stop
-@enduml
-```
+![Ssh auth](../diagrams/activity-ssh-auth.svg)
+
+*Diagram source: [`../diagrams/activity-ssh-auth.puml`](../diagrams/activity-ssh-auth.puml).*
 
 - **Auth chain** (ssh2's async `authHandler`, first success wins): a `none` probe, then **agent**, **key
   files** (config `IdentityFile` then `~/.ssh/id_ed25519|ecdsa|rsa|dsa`; an encrypted key lazily prompts a

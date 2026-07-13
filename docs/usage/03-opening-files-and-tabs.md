@@ -9,14 +9,14 @@ watching model, and per-tab history behavior.
 
 | Entry point | Behavior |
 |-------------|----------|
-| `vv <path\|URL> …` or `vinary-viewer <path\|URL> …` | Launches Electron, opening **every** non-flag argument in its own tab (in argument order; the **first** is focused). Accepts local file paths and `file://` / `http(s)://` / archive URIs; relative paths resolve against the launch directory. Flags (leading `-`) are ignored. |
+| `vv <path\|URL> …` or `vinary-viewer <path\|URL> …` | Launches Electron, opening **every** non-flag argument in its own tab (in argument order; the **first** is focused). Accepts local file paths and `file://` / `http(s)://` / `ssh://` / `sftp://` / archive URIs; relative paths resolve against the launch directory (remote and URL arguments are kept verbatim). Flags (leading `-`) are ignored. |
 | `electron . <path\|URL> …` or `npm run start -- <path\|URL> …` | Development equivalent; same multi-argument open. |
 | `File > Open` | Native multi-file dialog. One selected file navigates the active tab; multiple selected files open one tab each. |
 | Sidebar file tree | Clicking a file dispatches `[:doc/open path]`. |
 | Markdown links | Left-click navigates the active tab; `Ctrl+click` opens a new tab. |
 | Directory path | Opening a folder (CLI arg, a folder link, a breadcrumb segment, or `Alt+Up`) lists it **in the pane** — see §6. |
 | File ▸ Open Recent | Re-open one of the last 10 opened files (the MRU), or **Clear Recent** — see §6. |
-| URI bar | Normalizes typed file paths, `file://` URIs, and HTTP/HTTPS URLs, then dispatches `[:tab/navigate uri]`. |
+| URI bar | Normalizes typed file paths, `file://` URIs, HTTP/HTTPS URLs, and `ssh://` / `sftp://` remote URIs, then dispatches `[:tab/navigate uri]`. |
 
 The renderer never reads the filesystem directly. Local opens dispatch the
 `:vv/open` effect, which calls `window.vv.open(path)`; the Electron main process
@@ -31,12 +31,20 @@ The main process classifies each local path through `vinary.main.file-kind/kind-
 | Kind | Extensions or source | Renderer |
 |------|----------------------|----------|
 | `markdown` | `.md`, `.markdown`, `.mdx` | unified/remark/rehype render, then Markdown body. |
+| `org` | `.org` | uniorg parse through the shared Markdown hast suffix, then Markdown body. |
+| `latex` | `.tex`, `.latex`, `.ltx` | unified-latex → HTML string → the shared hast suffix, then Markdown body. `.sty`/`.cls`/`.bib` stay `source`. |
 | `image` | `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`, `.ico`, `.avif` | Image preview from local file URL. |
-| `pdf` | `.pdf` | Main-owned `WebContentsView` showing Chromium's PDF viewer. |
+| `pdf` | `.pdf` | In-renderer pdf.js: each page draws to a `<canvas>` in the content pane as it scrolls into view (ADR-0013). |
 | `mermaid` | `.mmd`, `.mermaid` | Renderer-side Mermaid SVG preview. |
+| `diff` | `.diff`, `.patch` | Colored unified diff, with an optional side-by-side split view. |
 | `source` | Source files with bundled/user grammars, configured filetype mappings, plus `.d2`, `.puml`, `.dot`, and related non-Mermaid diagram-source extensions | Read-only CodeMirror 6 source view with tree-sitter highlighting when possible. |
 | `text` | Fallback | Escaped `<pre class="vv-plain">`. |
 | `directory` | any path that is a folder (detected by `vinary.main.service/directory?` *before* `kind-of`) | In-pane directory browser listing the immediate children. |
+
+A remote `ssh://` / `sftp://` URI is classified by the same rules (off its
+basename extension), then read over SFTP instead of the local filesystem — so a
+remote `.md`, `.tex`, `.pdf`, source file, or directory renders exactly as its
+local counterpart. See [08-remote-files-ssh.md](08-remote-files-ssh.md).
 
 Mermaid source files render as diagrams. Other diagram source files open as
 source text unless you embed generated SVG output in Markdown. Directories are
@@ -66,7 +74,7 @@ This split matters:
 |-------|-------|--------|
 | Tab order, active tab, per-tab history, scroll entries | re-frame `app-db` | Fast UI transitions and browser-like history. |
 | Loaded document content and render metadata | DataScript | Queryable content cache with bounded eviction. |
-| File watchers and native PDF/web views | Electron main process | Privileged OS and Electron APIs stay outside the renderer. |
+| File watchers, SSH/stream sessions, and the native web view | Electron main process | Privileged OS and Electron APIs stay outside the renderer. (PDFs render **in-renderer** via pdf.js — [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md) — so they are no longer a main-owned native view.) |
 
 ---
 

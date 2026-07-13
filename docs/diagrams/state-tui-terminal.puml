@@ -1,0 +1,31 @@
+@startuml state-tui-terminal
+'' PlantUML over Mermaid because a terminal-lifecycle STATE machine with signal-labelled transitions and an
+'' exactly-once restore note is native to PlantUML state diagrams; colours come from the shared palette
+'' (teal = active rendering, blue-violet = suspended, green = cleanly restored).
+!include _vv-theme.iuml
+
+title `vv --tui` terminal lifecycle — alt-screen setup and exactly-once restore
+
+state "Active\n(rendering)" as Active RENDERER_TINT
+state "Suspended" as Suspended APPDB_TINT
+state "Restored" as Restored MARKDOWN_TINT
+
+[*] --> Active : init!\n(alt-screen + raw + hide cursor)
+Active --> Restored : q / SIGINT·TERM·HUP·QUIT / uncaught\n-> restore! + exit
+Active --> Suspended : SIGTSTP\n(leave! + re-raise default)
+Suspended --> Active : SIGCONT\n(enter! + repaint)
+Restored --> [*]
+
+note right of Restored
+  restore! is exactly-once:
+  show cursor · leave alt-screen · raw off
+  (fs.writeSync; isTTY-guarded)
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| active (alt-screen, raw) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| suspended (SIGTSTP) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| restored (terminal handed back) |
+endlegend
+@enduml

@@ -1,0 +1,38 @@
+@startuml activity-asset-vendoring
+'' PlantUML over Mermaid because this is a control flow with a verify/fail branch and swimlane ownership
+'' (sync writes; check verifies) reused from the shared palette — tan = filesystem/fetch, slate = the Node
+'' script, red = the fail path. Mermaid cannot express the coloured lanes + banner-free byte-reproducible SVG.
+!include _vv-theme.iuml
+
+title Asset vendoring — `sync-*.mjs` pins provenance into a lockfile; `check-*.mjs` verifies it
+
+|#E4E8F1|sync (npm run assets:sync / pdfjs:sync / grammars:sync)|
+start
+:resolve the pinned upstream version\n(from the script's manifest); <<MAIN_FILL>>
+:fetch the artifact\n(npm registry / GitHub release); <<FS_FILL>>
+:copy the vendored files into `resources/**`; <<FS_TINT>>
+:write provenance to the lockfile\n(`scripts/{assets,grammars,pdfjs}.lock.json`:\nversion + sha + file list); <<MAIN_TINT>>
+stop
+
+|#F4F1E1|check (npm run assets:check / pdfjs:check / grammars:check)|
+start
+:read the committed lockfile; <<MAIN_FILL>>
+:hash the vendored files on disk; <<FS_TINT>>
+if (on-disk hashes == lockfile?) then (match)
+  :exit 0 — vendored assets verified; <<MARKDOWN_TINT>>
+  stop
+else (drift)
+  :FAIL — vendored assets differ\nfrom their pinned provenance; <<ERROR_TINT>>
+  :re-run `*:sync` or investigate; <<ERROR_FILL>>
+  stop
+endif
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| Node vendoring script |
+  |<#9F8766>&#160;&#160;&#160;&#160;| filesystem fetch / hash |
+  |<#67B11D>&#160;&#160;&#160;&#160;| verified |
+  |<#E0211D>&#160;&#160;&#160;&#160;| drift / failure |
+  Vendoring at build time keeps the runtime offline and the supply chain pinned + auditable.
+endlegend
+@enduml

@@ -34,25 +34,9 @@ Markdown and Org (sanitize → slug → highlight → URL-rewrite → image-wrap
 heading TOC, scroll-spy, figures, math, ANSI lowering — is inherited unchanged. See
 [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md) for the full design.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-rectangle ".tex file" as F #FCE7F3
-rectangle "unified-latex\n(parse, expand macros,\nconvertToHtml)\nits own unified 10" as U #FBCFE8
-rectangle "HTML string\n(a single raw node)" as R #FCE7F3
-rectangle "tex-normalize\n(math markers, center to div,\nsweep html-tag leaks)" as N #FDE68A
-rectangle "shared app suffix\n(sanitize, slug, highlight,\nsource-positions, metadata)" as S #DCFCE7
-rectangle "common IR" as IR #E0F2FE
-rectangle "preview HTML\n+ Contents outline\n+ MathJax + highlighting" as OUT #BBF7D0
-F -> U
-U -> R
-R -> N
-N -> S
-S -> IR
-IR -> OUT
-@enduml
-```
+![Latex pipeline](../diagrams/flow-latex-pipeline.svg)
+
+*Diagram source: [`../diagrams/flow-latex-pipeline.puml`](../diagrams/flow-latex-pipeline.puml).*
 
 Because unified-latex parses inside its **own** bundled `unified@10` and hands back a plain HTML string, nothing
 touches the app's `unified@11` — the string is wrapped as a `raw` node and parsed by the same `rehype-raw` the
@@ -72,22 +56,9 @@ Org **invoice** — `center`, `flushleft`, a booktabs `tabular`, `\textbf`, `\\`
 
 A document collocated with a same-stem exported PDF offers up to three views:
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-state "Document" as Doc {
-  state "Preview\n(rendered)" as Prev
-  state "Source\n(highlighted .tex)" as Src
-  Prev -right-> Src : View Source
-  Src -left-> Prev : View Preview
-}
-state "PDF\n(the faithful export)" as Pdf
-Doc -right-> Pdf : Show PDF
-Pdf -left-> Doc : Show Document
-note bottom of Pdf : only when a\nsame-stem sibling\n.pdf exists
-@enduml
-```
+![Doc pdf switch](../diagrams/state-doc-pdf-switch.svg)
+
+*Diagram source: [`../diagrams/state-doc-pdf-switch.puml`](../diagrams/state-doc-pdf-switch.puml).*
 
 - **Where the controls are.** A segmented `[Document | PDF]` control appears in the toolbar whenever a sibling
   PDF exists, and `[Preview | Source]` whenever a rendered document (not the PDF) is showing. Both are also in

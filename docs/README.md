@@ -7,10 +7,13 @@
 > losing your scroll position, your in-page search, or your theme**. It previews
 > **Markdown** (GitHub-flavoured, with heading anchors, syntax highlighting, and
 > embedded SVG figure sizing), **images**, **PDFs**, **Office/OpenDocument files**,
-> **workbooks and delimited tables**, **large logs**, **archives**, **source files**,
-> **plain text**, and **HTTP/HTTPS links**, across **multiple tabs**, with a **git
-> file tree**, an **in-page find**, a **table-of-contents scroll-spy**,
-> **navigation history**, live theme switching, and custom keybindings.
+> **Org-mode** and **LaTeX** documents, **diffs/patches**, **workbooks and delimited
+> tables**, **large logs**, **archives**, **source files**, **plain text**, and
+> **HTTP/HTTPS links**, across **multiple tabs**, with a **git file tree**, an
+> **in-page find**, a **table-of-contents scroll-spy**, **navigation history**, live
+> theme switching, and custom keybindings. Files open **locally or over `ssh://` /
+> `sftp://`**, and preview in the desktop GUI **or the terminal** (`vv --cli` for a
+> one-shot render, `vv --tui` for an interactive pager).
 
 ---
 
@@ -18,12 +21,12 @@
 
 | Field | Value |
 |-------|-------|
-| Version | **`0.2.0-dev`** — ClojureScript / re-frame / Electron rewrite (`package.json`) |
+| Version | **`0.3.0-dev`** — ClojureScript / re-frame / Electron rewrite (`package.json`) |
 | Predecessor | `0.1.0` was a *vmd-patching* tool; that codebase is **superseded** and preserved at git tag `v0.1.0` |
 | Live runtime | `src/vinary/**` (ClojureScript) + `resources/**` (`preload.js`, `public/`) |
-| Build | `shadow-cljs` two-build (`:main` → Electron main; `:renderer` → Chromium) |
+| Build | `shadow-cljs` **five builds** — GUI (`:main` → Electron main; `:renderer` → Chromium), terminal (`:cli`, `:tui`), and the DOM-free `:test` build |
 
-This suite documents the **live `0.2.0-dev` application**. Capabilities are
+This suite documents the **live `0.3.0-dev` application**. Capabilities are
 tagged so you can distinguish current behavior from intentionally future work:
 
 - **Available now** — implemented in `src/vinary/**` and `resources/**`.
@@ -110,19 +113,28 @@ Then read the **architecture pillar** for the concrete realisation:
   [`05-data-flows.md`](architecture/05-data-flows.md),
   [`06-renderer-runtime.md`](architecture/06-renderer-runtime.md).
 
-### "I want to contribute" → [`architecture/`](architecture/) + [`reference/`](reference/) + [`design-decisions/`](design-decisions/README.md)
+### "I want to contribute" → [`architecture/`](architecture/) + [`engineering/`](engineering/00-overview.md) + [`reference/`](reference/) + [`design-decisions/`](design-decisions/README.md)
 
-- Architecture as above for the lay of the land.
-- [`reference/`](reference/) — exhaustive tables you will keep open while coding:
+- Architecture as above for the lay of the land, including
+  [`architecture/07-common-ir-streaming-and-terminal.md`](architecture/07-common-ir-streaming-and-terminal.md)
+  for the concrete IR/streaming/terminal component map.
+- [`engineering/`](engineering/00-overview.md) — how the project is **built, tested,
+  released, and contributed to**: the five builds, asset vendoring, the test taxonomy,
+  lint/conventions, the release process, the doc/diagram gates, and the contribution
+  workflow (`00`…`10`).
+- [`reference/`](reference/) — the tables you keep open while coding:
   [`events-effects-subs.md`](reference/events-effects-subs.md),
   [`ipc-channels.md`](reference/ipc-channels.md),
   [`css-variables.md`](reference/css-variables.md),
   [`namespaces.md`](reference/namespaces.md).
 - [`design-decisions/`](design-decisions/README.md) — the numbered ADR-style log
-  (`0001`…`0024`) recording *why* each pivotal choice was made: rendering in the
-  renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative
-  `innerHTML` over VDOM, the IPC mediator, bounded content retention, the common
-  document IR, and the bounded-memory streaming pipeline.
+  (`0001`…`0027`) recording *why* each pivotal choice was made: rendering in the
+  renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative `innerHTML` over
+  VDOM, the IPC mediator, bounded content retention, the common document IR, the
+  streaming pipeline, the terminal second-renderer, Org/LaTeX/diff, and remote SSH.
+- [`scientific/`](scientific/00-overview.md) — how correctness is *verified*: byte-parity,
+  bounded-memory validation, semiring laws, sanitizer context-freedom, and the recorded
+  experiments (`00`…`07`).
 - [`security/threat-model.md`](security/threat-model.md) — the Electron security
   posture and recommended hardenings.
 
@@ -152,9 +164,12 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`architecture/04-state-schema-reference.md`](architecture/04-state-schema-reference.md) | architecture | DataScript schema + full `app-db` shape |
 | [`architecture/05-data-flows.md`](architecture/05-data-flows.md) | architecture | Open / refresh / find / history flows end-to-end |
 | [`architecture/06-renderer-runtime.md`](architecture/06-renderer-runtime.md) | architecture | Renderer boot order, reagent mount, dev hooks |
-| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0024` | design | Why each pivotal choice was made |
-| [`usage/01..06`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting |
-| [`features/README.md`](features/README.md) + `01`…`26` | features | One page per feature (live refresh … Org-mode rendering) |
+| [`architecture/07-common-ir-streaming-and-terminal.md`](architecture/07-common-ir-streaming-and-terminal.md) | architecture | Concrete IR / streaming / terminal component realization |
+| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0027` | design | Why each pivotal choice was made (ADRs) |
+| [`engineering/00..10`](engineering/00-overview.md) | engineering | Build system, asset vendoring, test strategy, lint, release, CI, contribution, bounded-memory |
+| [`scientific/00..07`](scientific/00-overview.md) | scientific | Byte-parity, bounded-memory validation, semiring laws, sanitizer context-freedom, experiments, methodology |
+| [`usage/01..08`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting, terminal CLI/TUI, remote SSH |
+| [`features/README.md`](features/README.md) + `01`…`30` | features | One page per feature (live refresh … LaTeX, diff, remote SSH, terminal preview) |
 | [`reference/events-effects-subs.md`](reference/events-effects-subs.md) | reference | Every re-frame event, effect, subscription |
 | [`reference/ipc-channels.md`](reference/ipc-channels.md) | reference | Every IPC channel, direction, payload |
 | [`reference/css-variables.md`](reference/css-variables.md) | reference | The `--vv-*` design tokens |

@@ -1,0 +1,29 @@
+@startuml flow-org-pipeline
+'' PlantUML over Mermaid because this is the Org front-end's linear lowering into the SHARED app suffix and
+'' IR, concept-coloured from the palette (green = Org/HTML surface, orange = IR). Mermaid cannot reuse the
+'' suite palette so a colour means the same thing across figures.
+!include _vv-theme.iuml
+
+title Org (.org) rendering — uniorg -> normalization -> shared suffix -> IR
+
+rectangle ".org file" as F MARKDOWN_TINT
+rectangle "uniorg-parse -> uniorg-rehype\n(Org -> HTML-AST)" as U MARKDOWN_TINT
+rectangle "Org normalization\n(front matter · export blocks ·\ntask lists · footnotes · math)" as N MARKDOWN_FILL
+rectangle "shared app suffix\n(sanitize / slug / highlight /\nsource-positions / metadata)" as S MARKDOWN_FILL
+rectangle "common IR\n(headings, code-blocks,\ntables, images...)" as IR IR_TINT
+rectangle "preview HTML\n+ Contents outline\n+ MathJax + highlighting" as OUT RENDERER_TINT
+
+F --> U
+U --> N
+N --> S
+S --> IR
+IR --> OUT
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| Org front-end / HTML surface |
+  |<#E67E22>&#160;&#160;&#160;&#160;| common IR |
+  |<#2D9574>&#160;&#160;&#160;&#160;| rendered preview |
+  Org normalization repairs what uniorg drops before joining the shared Markdown suffix.
+endlegend
+@enduml

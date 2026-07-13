@@ -1,0 +1,50 @@
+@startuml component-diff-model
+'' PlantUML over Mermaid because one pure model fans out to TWO rendering surfaces (unified: GUI HTML + ANSI;
+'' split: GUI-only, on-disk-enriched) and the split path crosses the amber IPC seam to main — expressed with
+'' concept-coloured components from the shared palette. Mermaid cannot colour-code the seam as a concept.
+!include _vv-theme.iuml
+
+title Diff / patch rendering — one pure model, two views (unified + split)
+
+component "`.diff` / `.patch` source\n(git format-patch, unified diff)" as Src FS_TINT
+
+package "Pure model + IR front-end" {
+  component "`vinary.diff`\npure parse: files -> hunks -> lines\n(add / del / context)" as Model IR_TINT
+  component "`ir.frontend.diff`\ndiff model -> IR nodes" as FE IR_TINT
+}
+
+package "Unified view" {
+  component "backend.html\n`div.vv-diff` + `data-*` gutters\n(GUI line numbers, ANSI-invisible)" as UHtml MARKDOWN_TINT
+  component "backend.ansi\ncoloured unified diff (vv-cli/tui)" as UAnsi IR_TINT
+}
+
+package "Split / side-by-side view  (GUI only)" {
+  component "split renderer\nold | new columns" as Split RENDERER_TINT
+}
+
+component "preload seam\n`vv:load-diff-sources`" as Seam IPC_TINT
+component "main.service\nread both on-disk files\n(pre/post images)" as Main MAIN_TINT
+
+component "`[Unified | Split]` toggle\n(toolbar + command palette)" as Toggle APPDB_TINT
+
+Src --> Model
+Model --> FE
+FE --> UHtml
+FE --> UAnsi
+Toggle --> UHtml : unified
+Toggle --> Split : split
+Split ..> Seam : request enriched sources
+Seam ..> Main
+Main ..> Split : full-file context\n(beyond the hunk window)
+
+legend right
+  |= Colour |= Concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| pure diff model / IR / ANSI |
+  |<#67B11D>&#160;&#160;&#160;&#160;| unified HTML |
+  |<#2D9574>&#160;&#160;&#160;&#160;| split renderer (renderer-side) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (on-disk enrichment) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main / filesystem |
+  |<#7590DB>&#160;&#160;&#160;&#160;| view toggle (app-db) |
+  Unified renders from the diff alone; split enriches with the on-disk pre/post files.
+endlegend
+@enduml

@@ -1,0 +1,52 @@
+@startuml component-terminal-layer
+'' PlantUML over Mermaid because this is the ADR-0019 layered decision — a pure shared spine feeding a GUI
+'' renderer AND a new terminal renderer, concept-coloured from the shared palette (orange = IR spine,
+'' green = GUI/HTML, teal = renderer surfaces, slate = the Electron-free content service).
+!include _vv-theme.iuml
+
+title Terminal preview layer (ADR-0019) — a shared spine, two renderers
+
+package "Shared spine (pure, DOM-free)" {
+  component "front-ends\nir.frontend.*" as FE IR_TINT
+  component "WPDA decoder +\nStreamParser" as WPDA IR_TINT
+  component "capabilities\nir.capability.toc" as CAP REFRAME_TINT
+}
+
+component "content_service\n(Electron-free fs / zip / office)" as CS MAIN_TINT
+
+package "GUI renderer (Electron)" {
+  component "ir.backend.html" as HTML MARKDOWN_TINT
+  component "stream.sink / scheduler" as GUISINK RENDERER_TINT
+}
+
+package "Terminal renderer (new)" {
+  component "ir.backend.ansi" as ANSI IR_TINT
+  component "terminal.{caps,syntax,\ngraphics,pdf,stream}" as TERM IR_TINT
+  component "`vv --cli`\ncli.core" as CLI MAIN_FILL
+  component "`vv --tui`\ntui.*" as TUI MAIN_FILL
+}
+
+CS --> FE
+FE --> WPDA
+FE --> CAP
+FE --> HTML
+FE --> ANSI
+WPDA --> GUISINK
+WPDA --> TERM
+ANSI --> CLI
+ANSI --> TUI
+TERM --> CLI
+TERM --> TUI
+CAP --> CLI
+CAP --> TUI
+CAP --> GUISINK
+
+legend right
+  |= Colour |= Concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| shared IR spine / ANSI |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| content_service / Node process |
+  |<#67B11D>&#160;&#160;&#160;&#160;| GUI HTML back-end |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer surfaces |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| capability (Contents outline) |
+endlegend
+@enduml

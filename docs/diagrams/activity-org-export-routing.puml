@@ -1,0 +1,31 @@
+@startuml activity-org-export-routing
+'' PlantUML over Mermaid because this is a decision flow with a nested math-vs-layout screen and an error
+'' fallback, coloured by outcome from the shared palette (green = typeset math, yellow-tan intermediates,
+'' orange = the LaTeX layout front-end). An activity diagram expresses the branch precisely.
+!include _vv-theme.iuml
+
+title Org #+BEGIN_EXPORT latex — routing math to MathJax, layout to the LaTeX front-end
+
+start
+:#+BEGIN_EXPORT latex  (or bare \begin{...} / inline macro); <<MARKDOWN_TINT>>
+if (block looks like math?\n(a math env / \[ / $$ / \(,\nand NO \begin{center}, tabular,\nitemize, \includegraphics...)) then (no — layout)
+  :render through the LaTeX front-end (ADR-0025)\n-> a real table / centered block; <<IR_TINT>>
+  stop
+else (yes — math)
+  :MathJax typeset (synchronous); <<MARKDOWN_FILL>>
+  if (error node?\ndata-mjx-error / <merror>) then (yes)
+    :highlighted `language-latex` code block; <<MARKDOWN_FILL>>
+    stop
+  else (no)
+    :MathJax SVG (.vv-math-display,\nLaTeX kept in data-tex); <<MARKDOWN_TINT>>
+    stop
+  endif
+endif
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| MathJax typeset / code fallback |
+  |<#E67E22>&#160;&#160;&#160;&#160;| LaTeX layout front-end (real table) |
+  A math screen splits genuine math (MathJax) from LaTeX layout (rendered as a document).
+endlegend
+@enduml

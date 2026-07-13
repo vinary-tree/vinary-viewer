@@ -27,9 +27,10 @@ support web browsing to cover the most common forms documentation.
 
 Vinary Viewer has been built, from the ground up, by an engineer for engineers!
 
-> Status: `0.2.0-dev`. This is the v0.2 rewrite: a standalone ClojureScript /
-> re-frame / Electron application. The old v0.1.0 vmd-patching tool is preserved
-> at git tag **`v0.1.0`**.
+> Status: `0.3.0-dev`. A standalone ClojureScript / re-frame / Electron application
+> (the v0.2 rewrite, now extended with a common document IR, bounded-memory streaming,
+> a terminal previewer, Org / LaTeX / diff rendering, and remote files over SSH). The
+> old v0.1.0 vmd-patching tool is preserved at git tag **`v0.1.0`**.
 
 ## What It Is
 
@@ -98,12 +99,16 @@ npm run dev
 | Area             | Current behavior                                                                                                                                                                   |
 |------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Markdown         | GitHub-Flavored Markdown through unified/remark/rehype, slugged headings, code highlighting, MathJax SVG math, inline Mermaid diagrams, source-position annotations, relative link/image resolution, and cached TOC metadata. |
+| Org & LaTeX      | `.org` renders through the common IR via uniorg (front matter, export blocks, task lists, math, nested `#+begin_src` highlighting); `.tex` renders via unified-latex (sections, tables, auto-scaled figures, macros), with a Document↔PDF switch beside a same-stem exported PDF. |
+| Diffs & patches  | `.diff` / `.patch` render as a colored unified diff (GUI HTML + terminal ANSI) plus a GUI-only side-by-side split enriched from the on-disk pre/post files; standard repo filetypes classify correctly. |
 | Live refresh     | Local files are watched with `chokidar`; saved content flows back into the renderer without replacing UI state.                                                                    |
 | Navigation       | Browser-like tabs with per-tab Back/Forward history, saved scroll positions, a URI bar, link hover status, and `Alt+Left` / `Alt+Right` plus mouse thumb buttons.                  |
 | Embedded figures | SVG diagrams and other images embedded in Markdown are previewed in-place; local SVGs are measured and sized so diagram text matches the document font.                            |
-| PDFs and images  | PDFs use Chromium's native PDF viewer in a main-owned view; images open in a focused image preview.                                                                                |
+| PDFs and images  | PDFs render **in the renderer** via pdf.js (canvas + text/link layers, outline-driven TOC, in-page find, zoom/fit/invert); images open in a focused image preview. (The old main-owned native PDF view was retired in ADR-0013.) |
 | Source files     | Source files open in a read-only CodeMirror 6 view, with tree-sitter highlighting from bundled/user grammars and filename/pattern filetype mappings such as `Cargo.lock` → TOML.    |
 | Web links        | HTTP and HTTPS links can open in an in-app web view whose heading outline feeds the same Contents panel model.                                                                     |
+| Remote files     | `ssh://` / `sftp://` open remote files and directories through the same renderers, streaming, paging, and refresh as local paths, using `~/.ssh/config`, agent/key/keyboard-interactive auth, and known-hosts trust-on-first-use; live-refresh is opt-in polling. Secrets stay in the main process. |
+| Terminal         | `vv --cli <file>` renders once to stdout (pipe-friendly ANSI + kitty/sixel graphics); `vv --tui <file>` is an interactive full-screen pager — a second renderer over the same common-IR / streaming spine as the GUI. |
 | Passwords        | Web-view login forms can be filled and saved through main-process provider CLIs for 1Password, LastPass, optional Bitwarden/Proton Pass, and restricted JSON adapters.             |
 | Sidebar          | Files and Contents panels provide a multi-project tree, filtering, tab mirroring, and Markdown/HTML scroll-spy outlines.                                                           |
 | Keybindings      | Built-in default, vim, and emacs keymap sets; a visual keybinding editor; live switching; command palette integration; persisted user config.                                      |
@@ -137,11 +142,15 @@ startup and live-reloaded.
 
 ## Architecture At A Glance
 
-The app has two shadow-cljs builds:
+The app has **five** shadow-cljs builds from one source tree:
 
 - `:main`: Electron main process code under `src/vinary/main`.
 - `:renderer`: Chromium renderer code under `src/vinary/renderer`,
   `src/vinary/ui`, `src/vinary/app`, and `src/vinary/input`.
+- `:cli` and `:tui`: the terminal previewers (`vv --cli` / `vv --tui`) under
+  `src/vinary/cli`, `src/vinary/tui`, and `src/vinary/terminal` — a second renderer
+  over the shared `src/vinary/ir` and `src/vinary/stream` core.
+- `:test`: the DOM-free ClojureScript unit-test build.
 
 The only renderer-to-main boundary is the `window.vv` mediator exposed by
 `contextBridge`; payloads are plain JavaScript data or EDN text. The renderer
@@ -182,15 +191,22 @@ or personal launcher paths.
 
 | Command                  | Purpose                                                                |
 |--------------------------|------------------------------------------------------------------------|
-| `npm run compile`        | Compile the Electron main and renderer builds.                         |
-| `npm run watch`          | Watch and rebuild both builds during development.                      |
+| `npm run compile`        | Compile the Electron `main` + `renderer` builds (syncs assets + pdf.js first). |
+| `npm run watch`          | Watch and rebuild both GUI builds during development.                  |
 | `npm run dev`            | Compile, then launch Electron against the workspace.                   |
 | `npm run start`          | Launch Electron against already compiled output.                       |
-| `npm run release`        | Produce release builds with the configured simple optimizations.       |
-| `npm test`               | Compile and run the ClojureScript unit test build.                     |
-| `node test/lint.js`      | Parse-check JavaScript, verify CSS braces, and verify theme variables. |
-| `npm run test:electron`  | Run the Electron smoke test.                                           |
-| `npm run grammars:check` | Validate checked-in grammar metadata.                                  |
+| `npm run release`        | Produce release builds with the configured `:simple` optimizations.    |
+| `npm run compile:cli` / `release:cli` | Build the `vv --cli` terminal renderer → `dist/cli/vv-cli.js`. |
+| `npm run compile:tui` / `release:tui` | Build the `vv --tui` terminal renderer → `dist/tui/vv-tui.js`. |
+| `npm test`               | Compile + run the CLJS unit build, then the ssh-config / ssh-transport / content-service / git-tree / cli / tui smokes. |
+| `npm run test:cli` / `test:tui` | Run the terminal CLI / TUI smoke harnesses.                    |
+| `npm run test:electron` / `test:electron:release` | Run the Electron smoke against the dev / `:simple` release build. |
+| `npm run test:extensions` / `test:extensions:sandbox` | Run the scoped-extension smoke.             |
+| `node test/lint.js`      | Parse-check JavaScript, verify CSS braces, and verify `--vv-*` theme variables. |
+| `npm run assets:sync` / `assets:check` | Vendor / verify Font Awesome + self-hosted fonts against `assets.lock.json`. |
+| `npm run pdfjs:sync` / `pdfjs:check` | Vendor / verify the pdf.js worker + data against `pdfjs.lock.json`. |
+| `npm run grammars:sync` / `grammars:check` | Vendor / validate the tree-sitter grammars against `grammars.lock.json`. |
+| `npm run graphics:sync`  | Vendor the terminal-graphics (sixel / resvg) WASM.                     |
 | `npm run screenshots`    | Regenerate the 800×600 UI screenshots headlessly (xvfb + ImageMagick). |
 
 For validation work, capture command output to a temporary log, inspect it, and
@@ -205,9 +221,13 @@ remove the log after use.
 | `src/vinary/ui`       | Reagent/re-frame UI components and views.                                                   |
 | `src/vinary/app`      | App-db defaults, navigation, commands, events, effects, subscriptions, DataScript helpers.  |
 | `src/vinary/input`    | Keymap registry, resolver logic, presets, editor events, key normalization.                 |
+| `src/vinary/ir`       | The common document IR: node/semiring/transducer/WPDA core, per-format front-ends, HTML + ANSI back-ends, and the single sanitizer. |
+| `src/vinary/stream`   | The bounded-memory streaming pipeline: the `feed`/`finish` protocol, credit-1 transport, idle scheduler, and append sink. |
+| `src/vinary/terminal`, `cli`, `tui` | The terminal previewer — ANSI/graphics/caps support, the `vv --cli` one-shot renderer, and the `vv --tui` interactive pager. |
+| `src/vinary/diff.cljs`, `grammar_catalog.cljs` | The pure unified/split diff model, and the compile-time bundled-grammar catalog. |
 | `resources/`          | Runtime preload files, static browser assets, styles, generated JS output.                  |
-| `test/`               | ClojureScript tests, JavaScript lint harnesses, and Electron smoke tests.                   |
-| `docs/`               | Usage, feature, theory, architecture, security, reference, ADR, and PlantUML documentation. |
+| `test/`               | ClojureScript unit tests, JavaScript lint + smoke harnesses, and Electron smoke tests.       |
+| `docs/`               | Usage, feature, theory, architecture, engineering, scientific, security, reference, ADR, and PlantUML documentation. |
 
 ## Documentation
 
@@ -217,7 +237,13 @@ entry points:
 - [`docs/usage/01-getting-started.md`](docs/usage/01-getting-started.md) for
   first-run usage.
 - [`docs/architecture/01-overview.md`](docs/architecture/01-overview.md) for the
-  process and state model.
+  process and state model, and
+  [`docs/architecture/07-common-ir-streaming-and-terminal.md`](docs/architecture/07-common-ir-streaming-and-terminal.md)
+  for the IR / streaming / terminal realization.
+- [`docs/engineering/00-overview.md`](docs/engineering/00-overview.md) for the build,
+  test, release, and contribution workflow; and
+  [`docs/scientific/00-overview.md`](docs/scientific/00-overview.md) for the
+  verification methodology (byte-parity, bounded memory, the recorded experiments).
 - [`docs/design-decisions/README.md`](docs/design-decisions/README.md) for the
   ADR log, including bounded content retention in ADR-0010.
 - [`docs/security/threat-model.md`](docs/security/threat-model.md) for trust

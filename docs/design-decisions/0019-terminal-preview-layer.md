@@ -35,46 +35,9 @@ capabilities are reused **verbatim**.
 | Streaming engine | `stream.scheduler` (rIC + re-frame) | **`terminal.stream/stream-records!`** (setImmediate) | — |
 | Sink / driver | `stream.sink` (`insertAdjacentHTML`) | **`tui.term` + `tui.core`** (raw ANSI) | — |
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-skinparam shadowing false
-skinparam defaultTextAlignment center
+![Terminal layer](../diagrams/component-terminal-layer.svg)
 
-package "Shared spine (pure, DOM-free)" #E8F0FE {
-  [Front-ends\nir.frontend.*] as FE
-  [WPDA decoder +\nStreamParser] as WPDA
-  [Capabilities\nir.capability.toc] as CAP
-}
-[content_service\n(Electron-free fs/zip/office)] as CS #FFF3CD
-
-package "GUI renderer (Electron)" #E6F4EA {
-  [ir.backend.html] as HTML
-  [stream.sink / scheduler] as GUISINK
-}
-package "Terminal renderer (new)" #FCE8E6 {
-  [ir.backend.ansi] as ANSI
-  [terminal.{caps,syntax,graphics,pdf,stream}] as TERM
-  [vv --cli\ncli.core] as CLI
-  [vv --tui\ntui.*] as TUI
-}
-
-CS --> FE
-FE --> WPDA
-FE --> CAP
-FE --> HTML
-FE --> ANSI
-WPDA --> GUISINK
-WPDA --> TERM
-ANSI --> CLI
-ANSI --> TUI
-TERM --> CLI
-TERM --> TUI
-CAP --> CLI
-CAP --> TUI
-CAP --> GUISINK
-@enduml
-```
+*Diagram source: [`../diagrams/component-terminal-layer.puml`](../diagrams/component-terminal-layer.puml).*
 
 The layer decomposes into sub-decisions, each embodied in code:
 

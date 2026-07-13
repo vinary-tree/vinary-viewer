@@ -1,0 +1,29 @@
+@startuml state-doc-pdf-switch
+'' PlantUML over Mermaid because this is a composite STATE machine — a Document with a Preview<->Source
+'' sub-toggle, plus a Document<->PDF switch over one machinery — native to PlantUML state diagrams and
+'' concept-coloured from the shared palette (green = rendered preview, teal = source / PDF surfaces).
+!include _vv-theme.iuml
+
+title Document <-> PDF and Preview <-> Source — two toggles over one machinery
+
+state "Document\n(LaTeX / Org / Markdown)" as Doc {
+  state "Preview\n(rendered)" as Prev MARKDOWN_TINT
+  state "Source\n(tree-sitter CodeMirror)" as Src RENDERER_TINT
+  Prev -right-> Src : View Source (Ctrl+Shift+S)
+  Src -left-> Prev : View Preview (Ctrl+Shift+D)
+}
+
+state "PDF\n(collocated same-stem sibling,\nin-renderer pdf.js)" as Pdf RENDERER_TINT
+
+Doc -right-> Pdf : Show PDF
+Pdf -left-> Doc : Show Document\n(force rep = :document)
+
+note bottom of Pdf : the PDF switch appears\nonly when a same-stem sibling\n.pdf exists; defaults per the\ncollocated-default preference
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| rendered preview |
+  |<#2D9574>&#160;&#160;&#160;&#160;| source / PDF surface |
+  Preview<->Source is always available; Document<->PDF needs a collocated sibling PDF.
+endlegend
+@enduml

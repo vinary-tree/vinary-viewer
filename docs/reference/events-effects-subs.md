@@ -178,6 +178,96 @@
 > `:tab/drop-clear` drive the CSS insertion line (`.vv-tab-drop-before` / `.vv-tab-drop-after`) shown
 > while dragging a tab.
 
+> **The 0.3 families below** (§1.16–§1.22) use a `Event | Payload | Purpose` table; the
+> `reg-event-db` / `reg-event-fx` split for each is read directly from `vinary.app.events`.
+
+### 1.16 View representation — Document↔PDF, Preview↔Source, Unified↔Split
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:tab/set-representation` | `:document` \| `:pdf` | Set the active tab's `:representation` — show the rendered document, or its collocated same-stem sibling PDF (no new tab). |
+| `:tab/toggle-representation` | — | Flip `:document` ↔ `:pdf` (toolbar segmented control / command palette). |
+| `:tab/open-representation-source` | — | From a PDF, navigate to its collocated **source** document, forcing `:representation :document`. |
+| `:tab/toggle-source` | — | Flip the tab's `:view-source?` — Preview ↔ Source (`Ctrl+Shift+D` / `Ctrl+Shift+S`). |
+| `:tab/set-diff-view` | `:unified` \| `:split` | Set a diff tab's `:diff-view`. |
+| `:tab/toggle-diff-view` | — | Flip Unified ↔ Split; entering Split requests the on-disk pre/post sources over the `vv:load-diff-sources` IPC **invoke** (there is no `reg-fx` for it), whose result returns as `[:diff/split-ready …]`. |
+| `:diff/split-ready` | `{:path :html}` | The enriched side-by-side HTML arrived → stored as `:doc/diff-split-html`. |
+| `:pdf/sibling-ready` | `{:path :bytes}` | The sibling PDF's bytes arrived (over `vv:load-pdf-bytes`) → cached for the pdf view. |
+| `:tab/reload` | — | Re-open the active tab's URI (re-read + re-render). |
+
+See [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md) / [ADR-0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md).
+
+### 1.17 Remote files over SSH
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:ssh/prompt` | `{:promptId :kind :host :user :connKey …}` | A **non-secret** auth-prompt request from main → open the SSH prompt modal. |
+| `:ssh/prompt-reply` | `{:promptId :secret}` | The user's answer; emits `[:ssh/reply …]`, which sends `vv:ssh-prompt-reply`. The secret is held in the modal's local state, **never** in app-db. |
+| `:ssh/status` | `{:connKey :host :state}` | Connection status (connecting / ready / closed). |
+| `:ssh/error` | `{:connKey :host :kind :message}` | A connection/transport error (host-key rejected, SFTP error, …). |
+| `:ssh/dismiss-error` | — | Dismiss the surfaced SSH error banner. |
+| `:connections/received` | EDN text | Persisted, **non-secret** SSH connection metadata (`connections.edn`). |
+
+See [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md) and [features/29](../features/29-remote-files-over-ssh.md).
+
+### 1.18 Native password-manager bridge
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:passwords/open` / `:passwords/close` | — | Open / close the passwords dialog. (`:passwords/open` is dispatched from the key-icon; `:passwords/close` closes it.) |
+| `:passwords/fill` | item metadata | Ask main to reveal the selected login and inject it **into the web view** — the secret never enters app-db. |
+
+The state/items/save-prompt/result pushes from main land as `[:passwords/*-received …]`; see
+[ipc-channels §2.5](./ipc-channels.md) and [features/23](../features/23-password-manager-bridge.md).
+
+### 1.19 Extensions & ad-blocking
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:extensions/open` / `:extensions/close` | — | Open / close the Settings ▸ Extensions dialog. |
+| `:extensions/install` / `:extensions/remove` | Web-Store id or URL / id | Install / uninstall a scoped extension. |
+| `:extensions/check-updates` | — | Trigger a Web-Store update check. |
+| `:extensions/action-clicked` / `:extensions/popup-close` | `{:id :popup :bounds}` / — | Open / close a browser-action popup. |
+| `:ext/install-result` / `:ext/update-result` | result object | Install / update outcome pushed from main. |
+| `:adblock/refresh` | — | Refresh the ad-block filter lists (status returns on `vv:adblock-status`). |
+
+### 1.20 Menus, dialogs, context menu & access keys
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:menu/open` / `:menu/close` / `:menu/toggle` | menu id | Open / close / toggle a top-level DOM menu. |
+| `:menu/focus` / `:menu/submenu` / `:menu/submenu-focus` | id | Keyboard focus + submenu traversal within the menu bar. |
+| `:context-menu/show` / `:context-menu/close` | `{:x :y :items}` / — | The themed right-click context menu (Copy, Go to source/preview, …). |
+| `:settings/open` / `:settings/close` | — | Open / close the Preferences dialog. |
+| `:about/open` / `:about/close` | — | Open / close the About dialog. |
+| `:access-keys/set` | bool | Show/hide the Alt-held access-key underlines in the menu bar. |
+| `:app-info/received` | app metadata map | App metadata for the About dialog. |
+
+### 1.21 Link hints, URI-bar completion & sidebar
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:hint/start` | — | Begin Vimium-style link-hint mode (`f`); emits `[:hints/collect]`. |
+| `:hints/activate` | typed label | Follow the hinted link whose label was typed. |
+| `:hints/backspace` / `:hints/cancel` | — | Edit / abort the typed hint label. |
+| `:uri-complete/set` | completion data | Address-bar path/history completion state (ghost + dropdown). |
+| `:uri-complete/clear` / `:uri-complete/clear-error` | — | Dismiss the completion popup / clear its error flag. |
+| `:sidebar/show` | bool | Show/hide the sidebar. |
+| `:sidebar/tab` | `:files` \| `:contents` | Select the sidebar panel. |
+| `:sidebar/reveal` | path | Reveal (and select) a path in the Files tree. |
+
+### 1.22 Web view, shell & app
+
+| Event | Payload | Purpose |
+| --- | --- | --- |
+| `:web/toc` | heading vector | The in-app web view's heading outline (feeds the same Contents panel model). |
+| `:web/active-heading` | heading id \| nil | The web view's scroll-spy active heading. |
+| `:ui/hover-link` | href \| nil | The hovered link, shown in the status strip. |
+| `:shell/open-path` / `:shell/open-external` | path / URL | Ask the OS to reveal a local path / open an external URL. |
+| `:clipboard/copy` | text | Copy text to the OS clipboard. |
+| `:view/devtools` | — | Toggle renderer devtools. |
+| `:app/quit` | — | Quit the application. |
+
 ---
 
 ## 2. Effects
@@ -203,6 +293,34 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
 | `:vv/save-recent` | `edn` (EDN string) | **debounced 300 ms**, then `window.vv.saveRecent(edn)` → `vv:recent-save` IPC (persists the dir→child trail + recent-files MRU to `recent.edn`) | — |
 | `:vv/http-toc-goto` | `id` | `window.vv.httpTocGoto(id)` → `vv:http-toc-goto` IPC | — |
+| `:vv/complete-path` | `input` | `window.vv.completePath(input)` ⮐ → URI-bar completion data (SFTP-aware) | `[:uri-complete/set …]` |
+| `:uri-complete/error-timeout` | `ms` | arm a timer that clears the completion error flag | `[:uri-complete/clear-error]` |
+| `:vv/save-settings` | EDN string | `window.vv.saveSettings(edn)` → `vv:settings-save` IPC | — |
+| `:vv/save-keymap` | EDN string | `window.vv.saveKeymap(edn)` → `vv:keymap-save` IPC | — |
+| `:vv/save-ext-config` | EDN string | `window.vv.saveExtConfig(edn)` → `vv:ext-config-save` (ad-block + extension prefs) | — |
+| `:pdf/cache-bytes` | `{:path :bytes}` | store a PDF's bytes in the renderer-side **pdf-cache** — the Document↔PDF switch renders a sibling PDF with no new tab | — |
+| `:pdf/evict` | `path` | drop a PDF's cached bytes once no tab history reaches it (bounded retention) | — |
+| `:jump/to-source-current` | — | jump preview → source using the IR's per-node source positions ([ADR-0021](../design-decisions/0021-bidirectional-source-preview-jump.md)) | `[:source/want-line n]` |
+| `:jump/to-preview-current` | — | jump source → preview (the reverse map) | `[:preview/want-line n]` |
+| `:source/scroll-line` / `:source/want-line` | `line` | scroll the CodeMirror source view to a line / **defer** it until the source view mounts | — |
+| `:preview/scroll-line` / `:preview/want-line` | `line` | scroll the preview to the node for a source line / defer until the preview mounts | — |
+| `:ssh/reply` | `{:promptId :secret}` | `window.vv.sshPromptReply(...)` → `vv:ssh-prompt-reply`. The **only** secret-bearing effect: one-shot, resolved into a main-side promise, never persisted or stored in app-db | — |
+| `:vv/password-state` / `:vv/password-search` | — / `url` | request provider status / search logins matching the current web origin | — |
+| `:vv/password-fill` | item metadata | reveal the item **main-side** and inject it straight into the web view — the password never enters app-db | — |
+| `:vv/password-save` / `:vv/password-dismiss-save` | `{:token :provider}` / token | save / drop a short-lived main-memory login candidate | — |
+| `:vv/ext-install` / `:vv/ext-remove` / `:vv/ext-set-enabled` | id-or-URL / id / `{:id :on}` | install / uninstall / enable-disable a scoped extension | — |
+| `:vv/ext-check-updates` | — | trigger a Web-Store update check | `[:ext/update-result …]` |
+| `:vv/ext-action-clicked` / `:vv/ext-popup-close` | `{:id :popup :bounds}` / — | open / close a browser-action popup | — |
+| `:vv/adblock-set-enabled` / `:vv/adblock-set-lists` / `:vv/adblock-refresh` | bool / keyword / — | toggle / configure / refresh the ad-blocker | — (status returns on `vv:adblock-status`) |
+| `:hints/collect` | — | scan the visible surface for link targets and assign Vimium-style hint labels | — |
+| `:hints/follow` | target | activate the hinted link | — |
+| `:vv/zoom` / `:vv/zoom-set` | direction / factor | app-window zoom (DOM views) → `vv:zoom` / `vv:zoom-set` | — (main reports `vv:zoom-changed`) |
+| `:vv/http-zoom` / `:vv/http-zoom-set` | direction / factor | zoom the **web page** inside the native web view (not the app chrome) | — |
+| `:vv/open-dialog` | — | open the native multi-file Open dialog | — |
+| `:vv/open-path` / `:vv/open-external` | path / URL | ask the OS to reveal a local path / open an external URL | — |
+| `:vv/copy` | text | copy text to the OS clipboard | — |
+| `:vv/quit` / `:vv/devtools` | — | quit the app / toggle renderer devtools | — |
+| `:devtools/re-frame-10x` | — | toggle the re-frame-10x debug panel (dev builds only) | — |
 
 ### 2.2 `vinary.input.fx` **[input]**
 
@@ -247,7 +365,7 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/tab-drop` | `app-db` | `{:over <tab-id> :after? bool}` \| nil — the tab-drag drop-line indicator |
 | `:ui/recent` | `app-db` | `{:trail {dir→child} :recent-files [...]}` (persisted recent-navigation state) |
 | `:ui/recent-files` | `app-db` | the recent-files MRU vector (`[:ui :recent :recent-files]`, capped at 10) — surfaced in File ▸ Open Recent |
-| `:ui/overlay-open?` | `app-db` | bool — OR of `:ui/menu`, `:ui/context-menu`, `:ui/settings-open?`, `:ui/about-open?`, `[:ui :kbedit :open?]`, `[:ui :palette :open?]`; true hides the native PDF/web views so a dropdown/modal isn't painted beneath them |
+| `:ui/overlay-open?` | `app-db` | bool — OR of `:ui/menu`, `:ui/context-menu`, `:ui/settings-open?`, `:ui/about-open?`, `[:ui :kbedit :open?]`, `[:ui :palette :open?]`; true hides the native **web view** so a dropdown/modal isn't painted beneath it (PDFs render in the DOM since [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md), so they need no such hiding) |
 | `:pdf/view-state` | `app-db` | `{:scale :fit :invert?}` for the active PDF (`[:ui :pdf]`; drives `pdf/update!`) |
 | `:view/zoom-percent` | `app-db` | live zoom % for the active surface (PDF scale / web-view / app-window) — shown in the zoom bar |
 | `:view/pdf-active?` | `app-db` | bool — the active view is a PDF (`= :pdf (zoom/context …)`); gates the PDF-only View-menu items (Fit, Invert PDF) |
@@ -257,14 +375,43 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:palette/state` **[input]** | `app-db` | `{:open? :source :prefix :query :items :selected}` |
 | `:history/can-back?` | `app-db` | `(and idx (pos? idx))` → bool |
 | `:history/can-forward?` | `app-db` | `(and idx (< idx (dec (count stack))))` → bool |
+| `:ui/tabs` | `app-db` | the raw tab vector (`[:ui :tabs]`) |
+| `:ui/active-tab` / `:ui/active-tab-id` | `app-db` | the active tab map / its id |
+| `:ui/active-uri` | `app-db` | the active tab's current URI — a local path **or** a virtual `ssh://` / `sftp://` / `vv-archive://` URI |
+| `:ui/active-view-source?` | `app-db` | bool — the active tab shows **Source** rather than **Preview** |
+| `:ui/active-diff-view` | `app-db` | `:unified` \| `:split` for the active diff tab |
+| `:ui/collocated-default` | `app-db` | the `collocated-default` preference (`:pdf` \| `:document`) — which face a doc with a sibling PDF opens as |
+| `:ui/settings` | `app-db` | the persisted settings map (`settings.edn`) |
+| `:ui/projects` | `app-db` | the git-rooted file trees |
+| `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents`) and its width |
+| `:ui/menu-focus` / `:ui/menu-submenu` / `:ui/menu-submenu-focus` | `app-db` | menu-bar keyboard traversal state |
+| `:ui/access-keys-active?` | `app-db` | bool — the Alt-held access-key underlines are showing |
+| `:ui/hints` | `app-db` | link-hint state `{:active? :targets :typed}` |
+| `:ui/hover-link` | `app-db` | the hovered link href (status strip) |
+| `:ui/uri-complete` | `app-db` | address-bar completion state (inline ghost + ambiguous-only dropdown) |
+| `:ui/web-history` | `app-db` | the web-URL history backing address-bar completion |
+| `:ui/app-info` | `app-db` | app metadata (About dialog) |
+| `:ui/re-frame-10x-open?` | `app-db` | bool — the dev debug panel is open |
+| `:ui/ssh-prompt` | `app-db` | the pending SSH auth prompt — **non-secret**; the typed secret lives only in the modal's local state, never here |
+| `:ui/ssh-error` | `app-db` | the surfaced SSH connection / transport error |
+| `:ui/passwords` | `app-db` | password-bridge UI state (provider status, sanitized item metadata, save prompt) — **never** a revealed password |
+| `:ui/extensions` / `:ui/extensions-open?` | `app-db` | extension runtime state / whether the Extensions dialog is open |
+| `:ui/adblock` | `app-db` | ad-block prefs + status `{:enabled? :lists :last-updated}` |
+| `:pdf/reflow?` | `app-db` | bool — **View ▸ Reflow Text** is on for the active PDF |
+| `:pdf/sibling-loaded` | `app-db` | bool — the collocated sibling PDF's bytes are cached and ready to show |
+| `:keymaps/active-id` / `:keymaps/set-rows` **[input]** | `app-db` | the active keymap id / the rows rendered by the keybinding editor |
+| `:kbedit/open?` · `:kbedit/sel` · `:kbedit/editing` · `:kbedit/capture` · `:kbedit/ctx` · `:kbedit/sets` · `:kbedit/focused` · `:kbedit/action-index` · `:kbedit/can-undo?` · `:kbedit/can-redo?` **[input]** | `app-db` | the visual keybinding editor's selection / capture / context state and its undo–redo stacks |
 
 ### 3.2 Tab/document derived subscriptions
 
 | Sub | Inputs | Output |
 | --- | --- | --- |
 | `:tabs` | `:<- [:ui/tabs]` | app-db tab vector |
-| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-path]` | `ds/active-doc` → `{:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/error :doc/stamp}` \| nil |
-| `:doc/toc` | `:<- [:ui/active-uri]` `:<- [:doc/active]` `:<- [:ui/web-toc]` | HTTP page headings from `:ui/web-toc`, else stored Markdown `:doc/toc` metadata |
+| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-path]` | `ds/active-doc` → the pulled doc entity \| nil. **The `d/pull` vector in `vinary.app.ds/active-doc` is authoritative:** `:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/entries :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta :doc/sourceable? :doc/data-url :doc/reflow-html :doc/pdf-sibling :doc/source-sibling :doc/diff-split-html :doc/streaming? :doc/stream-progress :doc/stream-note`. A **new `:doc/*` attribute is invisible to views until it is added there.** |
+| `:doc/kind` | `:<- [:doc/active]` | the active document's kind — selects the `content-view` Strategy |
+| `:doc/toc` | `:<- [:ui/active-uri]` `:<- [:doc/active]` `:<- [:ui/web-toc]` | HTTP page headings from `:ui/web-toc`, else the stored `:doc/toc` outline (Markdown/Org/LaTeX/office headings, a PDF font-size outline, or a source-code outline) |
+| `:doc/streaming?` / `:doc/stream-progress` / `:doc/stream-note` | `:<- [:doc/active]` | whether the active doc renders **incrementally**, its progress in `$`[0,1]`$`, and a user-facing status note |
+| `:doc/pdf-sibling` / `:doc/source-sibling` | `:<- [:doc/active]` | the collocated same-stem sibling PDF / source path — present iff the Document↔PDF switch is available |
 
 > Markdown TOC metadata is captured during rendering and stored on the document entity. Scroll-spy
 > active-heading detection uses a measured offset cache rather than reparsing the HTML during scroll.

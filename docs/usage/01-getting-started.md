@@ -170,14 +170,21 @@ heading does not flicker while large diagrams settle.
 | Kind | Extensions or source | Preview |
 |------|----------------------|---------|
 | Markdown | `.md`, `.markdown`, `.mdx` | Rendered GFM with slugged headings, code highlighting, MathJax SVG math, inline Mermaid diagrams, TOC metadata, and asset tracking. |
+| Org | `.org` | Emacs Org-mode rendered GitHub-style through the same pipeline, with a Contents outline and highlighted `#+begin_src` blocks. |
+| LaTeX | `.tex`, `.latex`, `.ltx` | `.tex` rendered as a formatted document (sections, styling, tables, figures, math, code) via unified-latex; `.sty`/`.cls`/`.bib` stay source. |
 | Image | `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`, `.ico`, `.avif` | Browser image preview from the local file URL. |
-| PDF | `.pdf` | Chromium's native PDF viewer in a main-owned `WebContentsView`. |
+| PDF | `.pdf` | Rendered **in the renderer** via pdf.js (ADR-0013): each page draws to a `<canvas>` inside the content pane as it scrolls into view. See [../features/11-native-pdf.md](../features/11-native-pdf.md). |
 | Mermaid | `.mmd`, `.mermaid` | Renderer-side Mermaid SVG preview with live refresh. |
+| Diff | `.diff`, `.patch` | Colored unified diff, with a side-by-side split view available. |
 | Source | Known source files, configured filetype mappings, and non-Mermaid diagram-source extensions | Read-only CodeMirror 6 view with tree-sitter highlighting when a grammar is available. |
 | Text | Fallback | Escaped preformatted text. |
+| Directory | Any folder path | In-pane directory browser listing the immediate children. |
 
 Diagram source files such as `.puml`, `.d2`, and `.dot` open as source code;
-Mermaid source files render directly.
+Mermaid source files render directly. Files on a remote host open the same way
+through `ssh://` / `sftp://` URIs — see [08-remote-files-ssh.md](08-remote-files-ssh.md).
+The same documents can also be previewed in the terminal with `vv --cli` /
+`vv --tui` — see [07-terminal-cli-tui.md](07-terminal-cli-tui.md).
 
 ---
 
@@ -190,6 +197,8 @@ Mermaid source files render directly.
 | See the keybinding system | [04-keyboard-shortcuts.md](04-keyboard-shortcuts.md) |
 | Configure settings and grammars | [05-configuration.md](05-configuration.md) |
 | Diagnose a problem | [06-troubleshooting.md](06-troubleshooting.md) |
+| Preview documents in the terminal (CLI/TUI) | [07-terminal-cli-tui.md](07-terminal-cli-tui.md) |
+| Open remote files over SSH | [08-remote-files-ssh.md](08-remote-files-ssh.md) |
 | Understand the architecture | [../architecture/01-overview.md](../architecture/01-overview.md) |
 
 ---

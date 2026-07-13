@@ -32,7 +32,7 @@ dependency), so they serve as **blueprints** rather than libraries.
 |------|------------|
 | **IR** | *Intermediate representation* — the uniform tagged tree every format parses into (`vinary.ir.node`). |
 | **HAST** | *HTML Abstract Syntax Tree* — the rehype tree model; the Markdown/office front-ends mirror it into the IR and the back-end lowers back to it. |
-| **Semiring** | An algebraic structure $(K, \oplus, \otimes, \bar{0}, \bar{1})$ (§3) whose choice tunes *what* a parse/transduction computes. |
+| **Semiring** | An algebraic structure $`(K, \oplus, \otimes, \bar{0}, \bar{1})`$ (§3) whose choice tunes *what* a parse/transduction computes. |
 | **WPDA** | *Weighted pushdown automaton* — recognises context-free nesting, weighted by a semiring (§5). |
 | **Tree transducer** | A rewrite system mapping input trees to weighted output trees (§4). |
 | **Facet** | A per-node metadata view (e.g. a PDF page's *reflowable-text* facet vs its *faithful-canvas* facet). |
@@ -44,10 +44,10 @@ dependency), so they serve as **blueprints** rather than libraries.
 The IR is a single record — `vinary.ir.node/Node` — carrying `{:kind :children :text :meta}`. A record (not a
 bare map) gives V8 hidden-class-stable field access and protocol dispatch on the transducer hot path, while the
 open `:meta` map keeps per-format facets typeless. Formally the IR is an **unranked, ordered, node-labelled
-tree**: writing $\Sigma$ for the set of kinds, a node is
+tree**: writing $`\Sigma`$ for the set of kinds, a node is
 
-$n = (k,\ \langle c_1,\dots,c_m\rangle,\ t,\ \mu)$ with $k \in \Sigma$, children $c_i$ themselves IR
-nodes, optional leaf text $t$, and metadata $\mu$.
+$`n = (k,\ \langle c_1,\dots,c_m\rangle,\ t,\ \mu)`$ with $`k \in \Sigma`$, children $`c_i`$ themselves IR
+nodes, optional leaf text $`t`$, and metadata $`\mu`$.
 
 Metadata keys (all optional): `:span {:start/:end {:line :column :offset}}` (source provenance, the analogue of
 `lling-llang`'s `SyntaxNode.Range`), `:bbox {:x :y :w :h :page}` (PDF/geometry facet), `:role` (semantic role,
@@ -63,34 +63,34 @@ scroll-spy and find-jump target a specific occurrence rather than collapsing dup
 
 ## 3 · Semirings — one algorithm, many objectives
 
-A **semiring** is a set $K$ with two associative binary operations and their identities,
+A **semiring** is a set $`K`$ with two associative binary operations and their identities,
 
-$(K,\ \oplus,\ \otimes,\ \bar{0},\ \bar{1})$,
+$`(K,\ \oplus,\ \otimes,\ \bar{0},\ \bar{1})`$,
 
-where $\oplus$ is commutative with identity $\bar{0}$, $\otimes$ has identity $\bar{1}$ and annihilator
-$\bar{0}$ (so $a \otimes \bar{0} = \bar{0}$), and $\otimes$ **distributes** over $\oplus$:
+where $`\oplus`$ is commutative with identity $`\bar{0}`$, $`\otimes`$ has identity $`\bar{1}`$ and annihilator
+$`\bar{0}`$ (so $`a \otimes \bar{0} = \bar{0}`$), and $`\otimes`$ **distributes** over $`\oplus`$:
 
-$$
+```math
 a \otimes (b \oplus c) \;=\; (a \otimes b)\ \oplus\ (a \otimes c).
-$$
+```
 
 The power of the abstraction (Goodman 1999; Mohri 2009) is that **one** parser or transducer computes an entire
-family of results by swapping $K$: $\oplus$ combines *alternative* derivations and $\otimes$ combines
+family of results by swapping $`K`$: $`\oplus`$ combines *alternative* derivations and $`\otimes`$ combines
 *sequential* steps, so recognition, best-derivation, total probability mass, and multi-objective scores all
 fall out of the same code. `vinary.ir.semiring` implements six weight types, each verified against the axioms in
 `semiring-test`:
 
-| Semiring | $\oplus$ | $\otimes$ | $\bar 0,\ \bar 1$ | Computes |
+| Semiring | $`\oplus`$ | $`\otimes`$ | $`\bar 0,\ \bar 1`$ | Computes |
 |----------|-----------|------------|--------------------|----------|
-| **Boolean** | $\lor$ | $\land$ | $\bot,\ \top$ | recognition ("is there *any* valid derivation?") |
-| **Tropical** | $\min$ | $+$ | $+\infty,\ 0$ | best / lowest-cost derivation (Viterbi in $-\log$) |
-| **Log** | $-\log(e^{-a}+e^{-b})$ | $+$ | $+\infty,\ 0$ | total mass in $-\log$ space (log-sum-exp) |
-| **Probability** | $+$ | $\times$ | $0,\ 1$ | total probability mass |
+| **Boolean** | $`\lor`$ | $`\land`$ | $`\bot,\ \top`$ | recognition ("is there *any* valid derivation?") |
+| **Tropical** | $`\min`$ | $`+`$ | $`+\infty,\ 0`$ | best / lowest-cost derivation (Viterbi in $`-\log`$) |
+| **Log** | $`-\log(e^{-a}+e^{-b})`$ | $`+`$ | $`+\infty,\ 0`$ | total mass in $`-\log`$ space (log-sum-exp) |
+| **Probability** | $`+`$ | $`\times`$ | $`0,\ 1`$ | total probability mass |
 | **Product** | componentwise | componentwise | componentwise | two objectives at once |
 | **Lexicographic** | ordered-pair min | componentwise | componentwise | primary objective, tie-broken |
 
-**Boolean** and **Tropical** are additionally **idempotent** ($a \oplus a = a$), which induces the *natural
-order* $a \preceq b \iff a \oplus b = a$ that `best-parse` uses to select the optimum. Directed HTML lowering
+**Boolean** and **Tropical** are additionally **idempotent** ($`a \oplus a = a`$), which induces the *natural
+order* $`a \preceq b \iff a \oplus b = a`$ that `best-parse` uses to select the optimum. Directed HTML lowering
 uses the Boolean semiring (a single derivation); ambiguous PDF/log segmentation uses Tropical (rank by cost).
 
 ---
@@ -102,14 +102,14 @@ Vogler 2009). A transduction maps an input IR tree to a set of weighted output t
 `(state, input-kind[, arity])` and its right-hand side is an *output pattern* that (a) builds output nodes,
 (b) recursively transduces chosen input children at chosen states, and (c) — via `:all` — recurses over **all**
 children of an unranked node (documents are unranked). A derivation's weight is the firing rule's weight
-$\otimes$ the product of its children's weights; alternative derivations form the $\oplus$-set:
+$`\otimes`$ the product of its children's weights; alternative derivations form the $`\oplus`$-set:
 
-$$
+```math
 w(\text{output}) \;=\; w_{\text{rule}} \;\otimes\; \bigotimes_{i} w(\text{child}_i).
-$$
+```
 
-Transductions **compose exactly**: `compose-transduce` realises $(\tau_1 ; \tau_2)$ by transducing with
-$\tau_1$ and then transducing each output with $\tau_2$, multiplying weights. A **deterministic** lowering
+Transductions **compose exactly**: `compose-transduce` realises $`(\tau_1 ; \tau_2)`$ by transducing with
+$`\tau_1`$ and then transducing each output with $`\tau_2`$, multiplying weights. A **deterministic** lowering
 — one rule per kind under the Boolean semiring — yields exactly one output; that is how `vinary.ir.backend.html`
 lowers the IR to HAST, which a single `rehype-stringify` then serialises. Because the Markdown/office
 front-ends preserve each element's tag and properties verbatim, `HAST -> IR -> HAST` round-trips **losslessly**,
@@ -124,14 +124,14 @@ Fixed-layout inputs (a PDF page's positioned glyph runs; a log's physical lines)
 logical structure — runs into lines, lines into blocks — and that segmentation is genuinely **ambiguous**
 (multi-column layouts, multi-line records). The IR carries two interchangeable weighted recognisers for it:
 
-- A **weighted pushdown automaton** $P=(Q,\Sigma,\Gamma,q_0,Z_0,F,\Delta,\rho)$ (`vinary.ir.wpda`) with a
+- A **weighted pushdown automaton** $`P=(Q,\Sigma,\Gamma,q_0,Z_0,F,\Delta,\rho)`$ (`vinary.ir.wpda`) with a
   streaming decoder (`vinary.ir.decode`) whose `legal-next`/`advance` drive one input symbol at a time under a
-  bounded $\varepsilon$-closure — the pushdown analogue of grammar-constrained generation. It recognises
-  context-free nesting that no finite-state machine can (e.g. balanced brackets, $a^n b^n$).
+  bounded $`\varepsilon`$-closure — the pushdown analogue of grammar-constrained generation. It recognises
+  context-free nesting that no finite-state machine can (e.g. balanced brackets, $`a^n b^n`$).
 - An **Earley recogniser over a lattice** (`vinary.ir.earley`; Earley 1970) whose *Scan* step follows lattice
   edges rather than a single string position, intersecting a CFG with a hypothesis **DAG**. It emits a
   **packed parse forest** (`vinary.ir.forest`) — shared structure representing exponentially many parses
-  compactly — from which `best-parse` extracts the $\oplus$-optimal derivation (Viterbi over the forest).
+  compactly — from which `best-parse` extracts the $`\oplus`$-optimal derivation (Viterbi over the forest).
 
 For PDF the line/block grouping decision carries a Tropical *vertical-misalignment* cost, so the forest ranks
 alternative segmentations while a deterministic greedy baseline handles the common single-column case; the

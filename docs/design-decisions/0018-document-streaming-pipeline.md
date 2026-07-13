@@ -32,7 +32,7 @@ The whole-unit model has two structural costs that grow with file size:
 
 1. **Memory is unbounded.** The whole file, its whole parse, and its whole rendered HTML coexist in memory.
    A multi-hundred-MiB log or a giant Markdown file freezes or OOMs the renderer. The existing ad-hoc
-   mitigations — the $\approx 5$ MiB log/table **paging** boundary in `content_service.js`, the PDF
+   mitigations — the $`\approx 5`$ MiB log/table **paging** boundary in `content_service.js`, the PDF
    `IntersectionObserver` window — are per-format bandages, not a general answer, and paging shows only a
    *slice* of the document rather than the whole thing.
 2. **First paint waits for the whole document.** Nothing renders until the entire file is parsed and lowered,
@@ -68,7 +68,7 @@ The concrete sub-decisions:
    threshold; otherwise
    the exact current batch path runs, byte-for-byte. Small/medium documents therefore render identically to
    before. `stream.flag/enabled?` is the single gate (mirroring the retired `ir.flag` pattern); the per-kind
-   threshold aligns logs with the existing $\approx 5$ MiB paging boundary, so large logs **stream** instead of paging.
+   threshold aligns logs with the existing $`\approx 5`$ MiB paging boundary, so large logs **stream** instead of paging.
 
 2. **A universal pull-cursor transport (credit ~1 = backpressure).** `stream.transport` opens a main-process
    *session* over `vv:stream-{open,pull,close}` and pulls one batch at a time; the outstanding-pull credit of
@@ -141,7 +141,7 @@ parser. (PDF-reflow streaming is gated by the reflow toggle + the flag in `conte
 
 - **Arbitrarily large logs without OOM/freeze — the headline win (bounded byte-stream).** For logs/text the
   working set is bounded end-to-end: the parser retains only the open record + a single WPDA config; the
-  transport holds $\le 2$ batches; main reads $\le 1$ ahead. The parse never materialises the whole document.
+  transport holds $`\le 2`$ batches; main reads $`\le 1`$ ahead. The parse never materialises the whole document.
   This generalises the ad-hoc paging into one mechanism and renders the *whole* file progressively rather than
   a paged slice.
 - **Responsiveness for every large doc (progressive block-commit).** Markdown/PDF-reflow can't be bounded-parse

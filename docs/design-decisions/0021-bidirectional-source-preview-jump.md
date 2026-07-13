@@ -24,23 +24,9 @@ components), so a jump that switches views must defer its scroll until the desti
 Reuse the existing source positions bidirectionally, plus the existing deferred-scroll pattern
 (`renderer.scroll` `want!`→`apply!`), so a jump that toggles the pane lands after the destination remounts.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
+![Source preview jump](../diagrams/flow-source-preview-jump.svg)
 
-rectangle "Preview (markdown-body)\nnodes carry data-vv-source-*" as PREV #E0F2FE
-rectangle "Source (CodeMirror 6)\ncursor ↔ line via line-info-at" as SRC #E0F2FE
-
-PREV -down-> J1 : right-click →\n"Go to source"
-rectangle ":source/goto-line line" as J1 #FEF3C7
-J1 -> SRC : view-source? on →\ndefer want-source-line! ;\nconsumed on create-source-view mount →\nscroll-source-to-line!
-
-SRC -down-> J2 : right-click →\n"Go to preview"
-rectangle ":preview/goto-line line" as J2 #FEF3C7
-J2 -> PREV : view-source? off →\ndefer want-preview-line! ;\nconsumed on markdown-body mount →\nscroll-preview-to-line!
-@enduml
-```
+*Diagram source: [`../diagrams/flow-source-preview-jump.puml`](../diagrams/flow-source-preview-jump.puml).*
 
 - **`renderer/source_nav.cljs`** (new, content-agnostic — works for Markdown, Org, and any format that stamps
   `data-vv-source-*`): the pure `nearest-line-index` (a binary search — the *reverse* of `toc/active-heading`)

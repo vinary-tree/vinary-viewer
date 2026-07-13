@@ -39,40 +39,100 @@ is an address for an archive member that has not been extracted to disk.
 
 ## 2. Renderer to main
 
+Two transport shapes cross the seam. A **send** channel is fire-and-forget
+(`ipcRenderer.send`); an **invoke** channel is a request/response Promise
+(`ipcRenderer.invoke`) and is marked *(invoke)* below. The tables enumerate every
+channel exposed by `resources/preload.js` (this list is authoritative and complete).
+
+### 2.1 Content, open, and paging
+
 | Channel | `window.vv` API | Payload | Main owner | Purpose |
 |---------|-----------------|---------|------------|---------|
-| `vv:open` | `open(path)` | string path | `vinary.main.service` | Read, classify, send content, send tree, ensure watcher. |
+| `vv:open` | `open(path)` | string path/URI | `vinary.main.service` | Read, classify, send content, send tree, ensure watcher/poller. Accepts local, `ssh://`/`sftp://`, and `vv-archive://` paths. |
 | `vv:close` | `close(path)` | string path | `vinary.main.service` | Close an individual watcher path. Kept for compatibility; retained sync is authoritative. |
-| `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained local path set. |
-| `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a Markdown document. |
-| `vv:content-page` | `contentPage(request)` | page request map | `vinary.main.service` | Fetch one bounded page of a large log or delimited-table preview. (Accepts `ssh://` paths.) |
-| `vv:load-remote-asset` | `loadRemoteAsset(req)` | `{uri, relativeTo}` | `vinary.main.service` | Fetch a remote asset's bytes over SFTP → a `data:` URL (remote Markdown/Office relative images). |
+| `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained path set. |
+| `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a document. |
+| `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
+| `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
+| `vv:load-pdf-bytes` *(invoke)* | `loadPdfBytes(path)` | string path | `content_service` | Load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch; no new tab). |
+| `vv:load-diff-sources` *(invoke)* | `loadDiffSources(req)` | request map | `content_service` | Resolve a diff's referenced source files from disk/SFTP for the enriched side-by-side view. |
+| `vv:load-remote-asset` *(invoke)* | `loadRemoteAsset(req)` | `{uri, relativeTo}` | `content_service` | Fetch a remote asset's bytes over SFTP → a `data:` URL (remote Markdown/Office relative images). |
+
+### 2.2 Document streaming (credit-1 pull cursor)
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
+| `vv:stream-open` *(invoke)* | `streamOpen(req)` | `{path, kind, …}` | `content_service` | Open a bounded-memory stream session (creates a read cursor); returns a session id + first batch. |
+| `vv:stream-pull` *(invoke)* | `streamPull(req)` | `{id}` | `content_service` | Pull the next batch (credit-1 backpressure); returns `{batch, done, error, partial}`. |
+| `vv:stream-close` *(invoke)* | `streamClose(req)` | `{id}` | `content_service` | Close the session and release its fd. |
+
+### 2.3 Web view (browserized HTTP/HTTPS)
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
+| `vv:http-show` | `httpShow(url, bounds, tabId)` | `{url, bounds, tabId}` | `vinary.main.web` | Show the HTTP/HTTPS web view for a tab. |
+| `vv:http-hide` | `httpHide()` | none | `vinary.main.web` | Hide the web view. |
+| `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web` | Reposition the web view. |
+| `vv:http-snapshot` *(invoke)* | `httpSnapshot()` | none | `vinary.main.web` | Capture a page snapshot (paired with `vv:http-snapshot-ready`). |
+| `vv:http-toc-goto` | `httpTocGoto(id)` | heading id | `vinary.main.web` | Ask the web preload to scroll to a heading. |
+| `vv:http-scroll` | `httpScroll(kind)` | page/edge key | `vinary.main.web` | Forward page/edge scroll keys to the native web view when visible. |
+| `vv:http-zoom` / `vv:http-zoom-set` | `httpZoom(dir)` / `httpZoomSet(f)` | dir / factor | `vinary.main.web` | Adjust / set the web view's zoom factor. |
+
+### 2.4 SSH/SFTP remote files and connections
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
 | `vv:ssh-prompt-reply` | `sshPromptReply(promptId, secret)` | `{promptId, secret}` | `vinary.main.ssh` | The typed SSH secret — the **only** secret-bearing channel; one-shot, never persisted. |
 | `vv:ssh-close-connection` | `sshCloseConnection(connKey)` | connKey string | `vinary.main.ssh` | Close a pooled SSH connection. |
 | `vv:connections-request` | `requestConnections()` | none | `vinary.main.connections` | Push current `connections.edn`. |
 | `vv:connections-save` | `saveConnections(edn)` | EDN string | `vinary.main.connections` | Persist non-secret SSH connection metadata. |
-| `vv:keymap-request` | `requestKeymap()` | none | `vinary.main.config` | Push current `keybindings.edn`. |
-| `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `vinary.main.config` | Persist keybinding registry. |
+
+### 2.5 Configuration and persistence
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
+| `vv:keymap-request` / `vv:keymap-save` | `requestKeymap()` / `saveKeymap(edn)` | none / EDN | `vinary.main.config` | Push / persist `keybindings.edn`. |
+| `vv:settings-request` / `vv:settings-save` | `requestSettings()` / `saveSettings(edn)` | none / EDN | `vinary.main.settings` | Push / persist `settings.edn`. |
+| `vv:recent-request` / `vv:recent-save` | `requestRecent()` / `saveRecent(edn)` | none / EDN | `vinary.main.recent` | Push / persist `recent.edn` (trail + MRU). |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars` | Push grammar registry. |
-| `vv:settings-request` | `requestSettings()` | none | `vinary.main.settings` | Push current `settings.edn`. |
-| `vv:settings-save` | `saveSettings(edn)` | EDN string | `vinary.main.settings` | Persist settings. |
-| `vv:recent-request` | `requestRecent()` | none | `vinary.main.recent` | Push current `recent.edn`. |
-| `vv:recent-save` | `saveRecent(edn)` | EDN string | `vinary.main.recent` | Persist recent-navigation state (trail + MRU). |
-| `vv:pdf-show` | `pdfShow(path, bounds)` | `{path, bounds}` | `vinary.main.pdf` | Show native PDF view. |
-| `vv:pdf-hide` | `pdfHide()` | none | `vinary.main.pdf` | Hide PDF view. |
-| `vv:pdf-bounds` | `pdfBounds(bounds)` | `{bounds}` | `vinary.main.pdf` | Reposition PDF view. |
-| `vv:http-show` | `httpShow(url, bounds)` | `{url, bounds}` | `vinary.main.web` | Show HTTP/HTTPS web view. |
-| `vv:http-hide` | `httpHide()` | none | `vinary.main.web` | Hide web view. |
-| `vv:http-bounds` | `httpBounds(bounds)` | `{bounds}` | `vinary.main.web` | Reposition web view. |
-| `vv:http-toc-goto` | `httpTocGoto(id)` | heading id | `vinary.main.web` | Ask web preload to scroll to a heading. |
+
+### 2.6 Extensions and ad-blocking
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
+| `vv:ext-config-request` / `vv:ext-config-save` | `requestExtConfig()` / `saveExtConfig(edn)` | none / EDN | `vinary.main.ext-config` | Push / persist `extensions.edn`. |
+| `vv:ext-state-request` | `extState()` | none | `vinary.main.extensions` | Push extension runtime state. |
+| `vv:ext-install` / `vv:ext-remove` / `vv:ext-set-enabled` | `extInstall(id)` / `extRemove(id)` / `extSetEnabled(id, on)` | id / `{id,on}` | `vinary.main.extensions` | Install / remove / toggle an extension. |
+| `vv:ext-check-updates` | `extCheckUpdates()` | none | `vinary.main.extensions` | Check for extension updates. |
+| `vv:ext-action-clicked` / `vv:ext-popup-close` | `extActionClicked(id,popup,bounds)` / `extPopupClose()` | `{id,popup,bounds}` / none | `vinary.main.ext-popup` | Open / close an extension action popup. |
+| `vv:adblock-set-enabled` / `vv:adblock-set-lists` / `vv:adblock-refresh` | `adblockSetEnabled(on)` / `adblockSetLists(kw)` / `adblockRefresh()` | on / kw / none | `vinary.main.adblock` | Toggle, choose lists, or refresh ad-block filters. |
+
+### 2.7 Password-manager bridge
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
+| `vv:password-state-request` | `passwordState()` | none | `vinary.main.passwords` | Push provider/status metadata (never revealed secrets). |
+| `vv:password-search` | `passwordSearch(url)` | url | `vinary.main.passwords` | Search saved logins for a URL. |
+| `vv:password-fill` | `passwordFill(item)` | item metadata | `vinary.main.passwords` | Fill the selected login into the web view. |
+| `vv:password-save` / `vv:password-dismiss-save` | `passwordSave(payload)` / `passwordDismissSave(token)` | payload / token | `vinary.main.passwords` | Save a new login / dismiss a save prompt. |
+
+### 2.8 Shell, window, and app lifecycle
+
+| Channel | `window.vv` API | Payload | Main owner | Purpose |
+|---------|-----------------|---------|------------|---------|
 | `vv:open-dialog` | `openDialog()` | none | main UI/dialog service | Show native open dialog. |
-| `vv:clipboard-write` | `copyText(text)` | string | main shell service | Write clipboard text. |
-| `vv:open-path` | `openPath(path)` | string | main shell service | Open a local path externally. |
-| `vv:open-external` | `openExternal(url)` | string | main shell service | Open external URL in the OS browser. |
+| `vv:clipboard-write` | `copyText(text)` | string | `vinary.main.shell` | Write clipboard text. |
+| `vv:open-path` / `vv:open-external` | `openPath(path)` / `openExternal(url)` | string | `vinary.main.shell` | Open a local path / external URL via the OS. |
 | `vv:app-info-request` | `requestAppInfo()` | none | main app info | Push app metadata. |
 | `vv:quit` | `quit()` | none | main app lifecycle | Quit application. |
-| `vv:devtools` | `toggleDevtools()` | none | main window | Toggle DevTools. |
-| `vv:zoom` | `zoom(dir)` | direction | main window | Adjust Electron zoom. |
+| `vv:devtools` | `toggleDevtools()` | none | `vinary.main.shell` | Toggle DevTools. |
+| `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | dir / factor | `vinary.main.window` | Adjust / set the app-renderer (DOM) zoom. |
+
+> **Retired PDF shims.** `pdfShow` / `pdfHide` / `pdfBounds` (channels `vv:pdf-show`,
+> `vv:pdf-hide`, `vv:pdf-bounds`) remain exposed by the preload as **no-ops with no
+> main-process listener** — the native PDF `WebContentsView` was retired for
+> in-renderer pdf.js ([ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md)). They
+> are kept only for recoverability and carry no runtime behavior.
 
 ---
 

@@ -30,32 +30,9 @@ Move **all** figure geometry into the shared pre-DOM string post-pass `apply-pos
 Mermaid, so sizes are **baked into the HTML string before it is inserted**. Figures render at their final size
 on first paint — no post-insert mutation, no flash — and re-renders/streaming reuse the memoized geometry.
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
+![Apply posts](../diagrams/component-apply-posts.svg)
 
-rectangle "base-pipeline\n(remark→rehype→sanitize→slug→highlight→\nrewrite-urls→wrap-images→source-positions)" as PIPE #E0F2FE
-rectangle "ir-html/lower\n(IR → HTML string)" as LOWER #E0F2FE
-
-package "apply-posts  (pre-DOM string passes)" #FEF3C7 {
-  rectangle "math/render-html-math\n(MathJax SVG)" as MATH #FDE68A
-  rectangle "mermaid/render-html-diagrams\n(Mermaid SVG + FONT-MATCH)" as MERM #FDE68A
-  rectangle "figures/scale-figures-html\n(<img> width/aspect-ratio + raster box)" as FIG #FCA5A5
-  rectangle "syntax/highlight-html-code-blocks\n(tree-sitter fenced code)" as HL #FDE68A
-}
-
-rectangle "set-inner!  (innerHTML = html)\nfigures ALREADY sized → no flash" as DOM #BBF7D0
-
-PIPE --> LOWER
-LOWER --> MATH
-MATH --> MERM
-MERM --> FIG
-FIG --> HL
-HL --> DOM
-@enduml
-```
+*Diagram source: [`../diagrams/component-apply-posts.puml`](../diagrams/component-apply-posts.puml).*
 
 The enabling insight: **the runtime container width (`avail`) is only a cap, and CSS `max-width:100%` already
 enforces the column cap.** So the font-matched width `D = docFont · viewBoxWidth / dominantFontSize` can be
@@ -79,7 +56,7 @@ computed with no live layout — off an off-DOM `DOMParser` document — and sta
 
 ### Which `font-size` declarations count
 
-The font-matched width $D = f_{doc} \cdot w_{vb} / f_{svg}$ is only as good as $f_{svg}$, the figure's
+The font-matched width $`D = f_{doc} \cdot w_{vb} / f_{svg}`$ is only as good as $`f_{svg}`$, the figure's
 **dominant font size**. `parse-svg-meta` derives it by counting `font-size` occurrences across the SVG source
 and taking the most frequent — but a size is a candidate **only when it is absolute**.
 
@@ -97,11 +74,11 @@ One asymmetry matters, because SVG spells `font-size` two ways and the two disag
 
 `parse-svg-meta` therefore captures the separator (`=` vs `:`) and applies the unitless rule accordingly.
 Two further guards: candidates below `2` px-equivalent are ignored (a sub-2-unit "font" cannot draw a glyph,
-and it is the direction that explodes the figure, since $f_{svg} \to 0 \Rightarrow D \to \infty$), and ties
+and it is the direction that explodes the figure, since $`f_{svg} \to 0 \Rightarrow D \to \infty`$), and ties
 break toward the **smaller** size, which is both deterministic — ClojureScript map order is unspecified above
 eight keys — and the right default, since body labels are smaller and more numerous than titles.
 
-When no absolute size survives, $f_{svg} = 0$ and `target-width` falls back to the natural viewBox width,
+When no absolute size survives, $`f_{svg} = 0`$ and `target-width` falls back to the natural viewBox width,
 CSS-capped to the column.
 
 ### Byte-parity
@@ -121,10 +98,10 @@ across renders and **zero style/attribute mutations after first paint** (the dir
 - The one behavioral delta: for a narrow column + small-natural-width + small-native-font SVG, the old code fell
   back to natural width while the new scheme fills the column (CSS-capped). Acceptable / arguably better.
 - **The column cap hides sizing bugs.** Because `max-width:100%` silently clamps any over-wide figure, a bad
-  $f_{svg}$ does not overflow — it renders as "full column, magnified text", which reads as intentional. The
+  $`f_{svg}`$ does not overflow — it renders as "full column, magnified text", which reads as intentional. The
   first instance: `parse-svg-meta` originally counted `font-size` values unit-blind, so d2's markdown-label
   stylesheet (`1em`, `1.25em`, `0.875em`, `0.85em` — all rounding to `1`) outvoted the real `16px` text labels
-  and drove $D = 15 \cdot 671 / 1 = 10065\text{px}$ on a 671-unit viewBox. Sizing must be validated against the
+  and drove $`D = 15 \cdot 671 / 1 = 10065\text{px}`$ on a 671-unit viewBox. Sizing must be validated against the
   *pre-clamp* width, which is what `figures_test`'s `svg-style` assertions do. A sweep of 173 project SVGs
   showed exactly one file affected.
 - **Files:** `src/vinary/renderer/figures.cljs` (`target-width`, `svg-style`, `doc-font-px`, `stamp-svg!`,

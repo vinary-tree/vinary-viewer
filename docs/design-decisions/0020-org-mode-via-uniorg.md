@@ -20,28 +20,9 @@ Add an **Org input frontend** that parses `.org` → hast via **uniorg** (`unior
 runs the **exact same** post-parse suffix as the Markdown pipeline and the **same** `hast->ir`. Org is a new
 *front-end* over the existing spine — no new document engine.
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
+![Org shared suffix](../diagrams/flow-org-shared-suffix.svg)
 
-rectangle "remark-parse → gfm → math\n→ remark-rehype" as MD #E0F2FE
-rectangle "uniorg-parse → uniorg-rehype" as ORG #FDE68A
-
-package "app-hast-suffix  (SHARED)" #DCFCE7 {
-  rectangle "rehype-raw → rehype-sanitize →\nrehype-slug → rehype-highlight →\nrewrite-urls → wrap-images →\nsource-positions → collect-metadata" as SUF #BBF7D0
-}
-
-rectangle "ir-md/hast->ir\n(hast → common IR)" as IR #E0F2FE
-rectangle "ir-html/lower → apply-posts\n(HTML + MathJax/Mermaid/figures/\ntree-sitter fenced highlight)" as OUT #E0F2FE
-
-MD --> SUF
-ORG --> SUF
-SUF --> IR
-IR --> OUT
-@enduml
-```
+*Diagram source: [`../diagrams/flow-org-shared-suffix.puml`](../diagrams/flow-org-shared-suffix.puml).*
 
 - **`renderer/markdown_pipeline.cljs`**: the shared 8-plugin hast suffix is factored into `app-hast-suffix`,
   reused by both `base-pipeline` (Markdown) and the new **`org-pipeline`** (`uniorg-parse` → `uniorg-rehype` →

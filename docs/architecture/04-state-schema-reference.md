@@ -11,7 +11,7 @@ owns cached document content, and main owns OS/native resources.
 |-------|------|--------------|
 | re-frame `app-db` | Tabs, active tab, per-tab histories, saved scroll entries, sidebar state, settings UI, keybinding UI, find state, TOC active heading, command palette state. | Loaded document text/html. |
 | DataScript | Cached content entities keyed by `:doc/path`. | Tab identity, active tab, history stacks. |
-| Main process atoms/native objects | Watchers, asset watchers, PDF view, web view, config watchers. | Renderer UI state. |
+| Main process atoms/native objects | File/asset watchers, the native web view, SSH sessions, stream sessions, config watchers. | Renderer UI state. (The native PDF view was retired in [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md); PDFs now render in the renderer with pdf.js.) |
 
 ---
 
@@ -31,16 +31,27 @@ are scalar cardinality-one fields.
 
 | Attribute | Type | Meaning |
 |-----------|------|---------|
-| `:doc/path` | string | Absolute local file path; identity attribute. |
-| `:doc/kind` | string | `markdown`, `image`, `pdf`, `source`, `text`, or `directory`. |
-| `:doc/text` | string | Raw text for Markdown/source/text. Omitted for binary image/PDF and directories. |
-| `:doc/html` | string | Rendered Markdown HTML or escaped text HTML. |
-| `:doc/toc` | vector | Render-time Markdown heading metadata. |
-| `:doc/assets` | vector | Embedded local asset paths referenced by Markdown. |
-| `:doc/entries` | vector | Immediate children of a directory document; each is `{:name :path :dir? :size :mtime :symlink}`. Present only when `:doc/kind = "directory"`. Pulled by `active-doc` and rendered in-pane by the directory browser. |
+| `:doc/path` | string | Identity attribute. An absolute **local** path, or a **virtual URI** — `ssh://` / `sftp://` (remote, [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)) or `vv-archive://` (inside an archive). Retained-path ownership keys off this value. |
+| `:doc/kind` | string | The classified content kind, selecting the renderer Strategy: `markdown`, `org`, `latex`, `source`, `text`, `image`, `pdf`, `directory`, `office`, `table`, `log`, `archive`, `html`, or `diff`. |
+| `:doc/text` | string | Raw text for text-bearing kinds (Markdown/Org/LaTeX/source/text/diff). Omitted for binary image/PDF and directories. |
+| `:doc/html` | string | Rendered HTML (Markdown/Org/LaTeX/office/diff) or escaped text HTML. |
+| `:doc/toc` | vector | Render-time heading/outline metadata (Markdown/Org/office headings, a PDF font-size outline, or a source-code outline). |
+| `:doc/assets` | vector | Embedded local asset paths referenced by the document. |
+| `:doc/meta` | map | Load metadata; notably `{:size n}`, which gates whether the doc streams. |
+| `:doc/entries` | vector | Immediate children of a directory document; each is `{:name :path :dir? :size :mtime :symlink}`. Present only when `:doc/kind = "directory"`. |
+| `:doc/sheets` | vector | Worksheet/table pages of a workbook or delimited table (paged view). |
+| `:doc/page` / `:doc/paged?` | number / boolean | Current page, and whether a large log/table is served in pages. |
+| `:doc/data-url` | string | A `data:` URL for a raster/remote image rendered inline. |
+| `:doc/reflow-html` | string | Reflowed-prose HTML of a PDF's extracted text (View ▸ Reflow Text). |
+| `:doc/sourceable?` / `:doc/source-sibling` | boolean / string | Whether a Preview↔Source toggle exists, and the collocated source path a PDF can switch to. |
+| `:doc/pdf-sibling` | string | Path of a collocated same-stem `.pdf` a document can switch to (Document↔PDF switch, [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)/[0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md)). |
+| `:doc/diff-split-html` | string | The GUI-only, on-disk-enriched side-by-side (split) rendering of a diff. |
+| `:doc/streaming?` / `:doc/stream-progress` / `:doc/stream-note` | boolean / number / string | Whether the doc renders incrementally, its progress in `[0,1]`, and a user-facing status note. |
 | `:doc/error` | string | Read/render error message. |
 | `:doc/stamp` | number | Content timestamp used to ignore stale async render results. |
 
+The authoritative attribute list is the `d/pull` vector in `active-doc`
+(`vinary.app.ds`) — a new `:doc/*` attribute is invisible to views until added there.
 DataScript rejects `nil`; absence is represented by omitting an attribute, and
 clearing is represented by retraction.
 
@@ -117,11 +128,18 @@ Important slices:
  :hist {:stack [{:uri "/abs/path/previous.md" :scroll 220}
                 {:uri "/abs/path/current.md" :scroll 0}]
         :idx 1}
- :view-source? false}
+ :view-source? false        ; Preview (false) vs Source (true) — the Ctrl+Shift+S / Ctrl+Shift+D toggle
+ :representation :document  ; :document vs :pdf — the Document↔PDF switch (initial value per the
+                            ;   :collocated-default preference when a same-stem sibling .pdf exists)
+ :diff-view :unified}       ; :unified vs :split — the [Unified | Split] toggle (diff documents only)
 ```
 
-The tab's current `:uri` mirrors the current history entry. Local URI paths are
-also the retained paths used for watcher/cache ownership.
+The tab's current `:uri` mirrors the current history entry, and may be a **virtual
+URI** (`ssh://`, `sftp://`, `vv-archive://`) as well as a local path; local URI
+paths are also the retained paths used for watcher/cache ownership. The per-tab
+`:view-source?`, `:representation`, and `:diff-view` keys select *which face* of the
+same document is shown — preview vs. source, rendered document vs. exported PDF, and
+unified vs. side-by-side diff, respectively.
 
 ---
 

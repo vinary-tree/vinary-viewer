@@ -1,0 +1,27 @@
+@startuml component-ir-two-backends
+'' PlantUML over Mermaid because the whole point is ONE IR feeding TWO back-ends, concept-coloured from the
+'' shared _vv-theme palette (orange = IR/ANSI, green = HTML surface) so the colours match every other figure.
+!include _vv-theme.iuml
+
+title One IR, two back-ends — the GUI and the terminal render the same tree
+
+left to right direction
+
+rectangle "bytes" as B FS_TINT
+rectangle "front-end\n(format -> IR)" as FE IR_TINT
+rectangle "common IR\n(tagged tree)" as IR IR_TINT
+rectangle "ir.backend.html\n-> HTML -> DOM" as H MARKDOWN_TINT
+rectangle "ir.backend.ansi\n-> ANSI -> tty" as A IR_TINT
+
+B --> FE
+FE --> IR
+IR --> H
+IR --> A
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| input bytes |
+  |<#E67E22>&#160;&#160;&#160;&#160;| IR core / ANSI back-end |
+  |<#67B11D>&#160;&#160;&#160;&#160;| HTML back-end (GUI) |
+endlegend
+@enduml

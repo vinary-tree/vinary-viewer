@@ -1,0 +1,26 @@
+@startuml flow-source-preview-jump
+'' PlantUML over Mermaid because this is a bidirectional jump with two reified commands and deferred,
+'' consumed-on-mount hand-offs — concept-coloured from the palette (green = preview, teal = source,
+'' blue-violet = the app-db jump commands). Mermaid cannot colour the commands as a distinct concept.
+!include _vv-theme.iuml
+
+title Bidirectional "Go to source" / "Go to preview" — two reified jump commands
+
+rectangle "Preview (markdown-body)\nnodes carry data-vv-source-*" as PREV MARKDOWN_TINT
+rectangle "Source (CodeMirror 6)\ncursor <-> line via line-info-at" as SRC RENDERER_TINT
+rectangle ":source/goto-line line" as J1 APPDB_TINT
+rectangle ":preview/goto-line line" as J2 APPDB_TINT
+
+PREV --> J1 : right-click ->\n"Go to source"
+J1 --> SRC : view-source? ON -> defer want-source-line! ;\nconsumed on create-source-view mount ->\nscroll-source-to-line!
+SRC --> J2 : right-click ->\n"Go to preview"
+J2 --> PREV : view-source? OFF -> defer want-preview-line! ;\nconsumed on markdown-body mount ->\nscroll-preview-to-line!
+
+legend right
+  |= Colour |= Concept |
+  |<#67B11D>&#160;&#160;&#160;&#160;| preview (markdown-body) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| source (CodeMirror 6) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| reified jump command (app-db, deferred) |
+  The jump target is deferred and consumed on the destination view's mount.
+endlegend
+@enduml

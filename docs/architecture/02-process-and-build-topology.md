@@ -1,6 +1,6 @@
 # 02 · Process & Build Topology
 
-> **Scope.** How vinary-viewer is *built and laid out across processes*: the two **shadow-cljs**
+> **Scope.** How vinary-viewer is *built and laid out across processes*: the **five** **shadow-cljs**
 > builds (targets, outputs, init functions, devtools, and the renderer's deliberate Node stubbing),
 > the **deps.edn** library stack, the **package.json** scripts and JS dependencies, *why* main uses
 > runtime `require` while the renderer stubs Node, and the **dev hot-reload** loop. Read
@@ -22,29 +22,53 @@ vinary-viewer ships as a standard Electron app: one **MAIN** (Node) process and 
 
 ---
 
-## 2. The two shadow-cljs builds
+## 2. The five shadow-cljs builds
 
-`shadow-cljs.edn` defines exactly two builds under `:builds`. They share the source paths from
-`deps.edn` (`["src" "resources"]`) but compile to different targets.
+`shadow-cljs.edn` defines **five** builds under `:builds`: the two app processes (`:main`, `:renderer`),
+a DOM-free unit-test build (`:test`), and the two headless terminal previewers (`:cli`, `:tui`). They
+share the source paths from `deps.edn` (`["src" "resources" "test"]`) but compile to different targets.
+
+![Five builds](../diagrams/container-five-builds.svg)
+
+*Diagram source: [`../diagrams/container-five-builds.puml`](../diagrams/container-five-builds.puml).*
 
 ```clojure
-;; shadow-cljs.edn
+;; shadow-cljs.edn — the current shape (comments abridged)
 {:deps {:aliases []}
- :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]   ; Java 26: some deps touch sun.misc.Unsafe
+ ;; Java 26 needs this for some deps that touch sun.misc.Unsafe (matches LightningBug).
+ :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]
  :builds
  {:main {:target    :node-script
          :main      vinary.main.core/main
-         :output-to "dist/main/main.js"}
+         :output-to "dist/main/main.js"
+         ;; :simple (not the :node-script default :advanced) — advanced property-renaming silently
+         ;; renames un-^js-hinted Electron interop and crashes main (ADR-0016). :simple still minifies.
+         :release   {:compiler-options {:optimizations :simple}}}
   :renderer {:target     :browser
              :output-dir "resources/public/js"
              :asset-path "js"
              :modules    {:main {:init-fn vinary.renderer.core/init}}
              :devtools   {:after-load vinary.renderer.core/reload
                           :preloads   [devtools.preload
-                                       day8.re-frame-10x.preload.react-18
-                                       re-frisk.preload]}
-             :compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}
-             :js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false}}}}}
+                                       day8.re-frame-10x.preload.react-18]}
+             ;; trace is a dev-only re-frame-10x feature; in :release it defaults to goog.DEBUG (false)
+             :dev {:compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}}
+             :release {:compiler-options {:optimizations :simple}}
+             ;; MathJax 4's SVG output statically imports its DEFAULT font via Node's #default-font/*
+             ;; subpath import, which shadow's bundler can't resolve; point it at the Modern font we render
+             ;; with so the browser bundle resolves AND the default matches the :fontData we pass.
+             :js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false
+                                    "#default-font/svg/default.js"
+                                    {:target :npm :require "@mathjax/mathjax-modern-font/cjs/svg/default.js"}}}}
+  ;; Unit tests for the pure, DOM-free logic (node). Run: shadow-cljs compile test && node dist/test/test.js
+  :test {:target :node-test :output-to "dist/test/test.js" :ns-regexp "-test$"}
+  ;; vv-cli — headless terminal document renderer (Node). Reuses the IR front-ends + WPDA/streaming core +
+  ;; content_service.js reader (all Electron-free), lowering to ANSI via ir.backend.ansi. :simple like :main.
+  :cli {:target :node-script :main vinary.cli.core/main :output-to "dist/cli/vv-cli.js"
+        :release {:compiler-options {:optimizations :simple}}}
+  ;; vv-tui — interactive raw-ANSI terminal viewer (Node); streams huge docs via the same WPDA core.
+  :tui {:target :node-script :main vinary.tui.core/main :output-to "dist/tui/vv-tui.js"
+        :release {:compiler-options {:optimizations :simple}}}}}
 ```
 
 ### 2.1 `:main` — the Electron main process
@@ -54,6 +78,7 @@ vinary-viewer ships as a standard Electron app: one **MAIN** (Node) process and 
 | `:target` | `:node-script` | Emit a Node-runnable script. shadow-cljs uses **`:js-provider :require`** for this target, so `require("electron")` and Node built-ins stay **runtime requires** resolved by the Electron runtime — they are *not* bundled. |
 | `:main` | `vinary.main.core/main` | The function invoked when the script runs. |
 | `:output-to` | `dist/main/main.js` | The single emitted file; also `package.json`'s `"main"`. |
+| `:release` | `{:compiler-options {:optimizations :simple}}` | **Not** the `:node-script` default `:advanced`. Advanced property-renaming silently renames un-`^js`-hinted Electron interop (e.g. `.toggleDevTools`) and crashes the main process in a *release* build only ([ADR-0016](../design-decisions/0016-main-process-simple-optimization.md)); `:simple` still minifies and dead-code-eliminates. |
 
 There is **no `:devtools`** block on `:main` (a Node script needs no hot-reload-after-load hook for
 the page). The main build is intentionally minimal.
@@ -66,9 +91,10 @@ the page). The main build is intentionally minimal.
 | `:output-dir` | `resources/public/js` | Where the bundle and its `cljs-runtime` land. |
 | `:asset-path` | `js` | URL prefix the bundle uses to load its own split modules. |
 | `:modules {:main {:init-fn vinary.renderer.core/init}}` | — | One module named `main` → `resources/public/js/main.js`; `init` runs on load. |
-| `:devtools {:after-load … :preloads …}` | — | Hot-reload calls `vinary.renderer.core/reload` after each recompile; the preloads install `binaryage/devtools`, **re-frame-10x** (React-18 preload), and **re-frisk**. |
-| `:compiler-options {:closure-defines …}` | `re_frame.trace…/trace_enabled? = true` | Enables re-frame tracing (required by re-frame-10x). |
-| **`:js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false}}`** | — | **The renderer is denied Node.** These modules resolve to `false` (empty), so the renderer bundle *cannot* reach the filesystem. All IO crosses the preload seam. |
+| `:devtools {:after-load … :preloads …}` | — | Hot-reload calls `vinary.renderer.core/reload` after each recompile; the preloads install `binaryage/devtools` and **re-frame-10x** (React-18 preload). (`re-frisk.preload` was **dropped**.) |
+| `:dev {:compiler-options {:closure-defines …}}` | `re_frame.trace…/trace_enabled? = true` | Enables re-frame tracing (required by re-frame-10x) **only in dev**; in `:release` it defaults to `goog.DEBUG` (false). |
+| `:release {:compiler-options {:optimizations :simple}}` | — | Same rationale as `:main` (advanced property-renaming breaks the re-frame / DataScript / unified-remark interop); `:simple` still minifies and strips devtools. |
+| **`:js-options {:resolve {"fs" false "fs/promises" false "path" false "url" false, "#default-font/svg/default.js" {…}}}`** | — | **The renderer is denied Node** — `fs`/`path`/`url` resolve to `false` so the bundle cannot reach the filesystem (all IO crosses the preload seam). The extra `#default-font/svg/default.js` entry re-points MathJax 4's default-font subpath import — which shadow's bundler cannot resolve — at `@mathjax/mathjax-modern-font`, the font the renderer actually typesets with. |
 
 > **Why stub `fs`/`path`/`url` in the renderer?** Two reasons. (1) **Security**: with
 > `nodeIntegration: false` the renderer has no `require` anyway; the stubs ensure that even a
@@ -77,7 +103,24 @@ the page). The main build is intentionally minimal.
 > Together they enforce the [thin-main/smart-renderer](./01-overview.md#4-the-thesis-thin-main-smart-renderer)
 > boundary at build time.
 
-### 2.3 Why main uses runtime `require` but the renderer does not
+### 2.3 The `test`, `cli`, and `tui` builds
+
+Three further Node builds share the same `src`/`resources`/`test` roots:
+
+| Build | Target | Output | Entry | Purpose |
+| --- | --- | --- | --- | --- |
+| `:test` | `:node-test` | `dist/test/test.js` | (ns-regexp `-test$`) | Runs the pure, DOM-free unit tests (IR, streaming, WPDA, nav, diff, file-kind, …) under Node. |
+| `:cli` | `:node-script` | `dist/cli/vv-cli.js` | `vinary.cli.core/main` | `vv-cli` — a headless one-shot terminal renderer (pipe-friendly). |
+| `:tui` | `:node-script` | `dist/tui/vv-tui.js` | `vinary.tui.core/main` | `vv-tui` — a full-screen interactive raw-ANSI viewer. |
+
+`:cli` and `:tui` are the **second renderer** (ADR-0019): they reuse the IR front-ends, the WPDA/streaming
+core, and the Electron-free `content_service.js` reader, lowering to ANSI via `ir.backend.ansi` instead of to
+HTML. Both take `:simple` release optimization for the same interop-preservation reason as `:main`
+([ADR-0016](../design-decisions/0016-main-process-simple-optimization.md)). They require **no** `renderer`/`main`
+namespace, so the GUI is untouched. The realization of these layers is documented in
+[07 · Common IR, Streaming & Terminal](./07-common-ir-streaming-and-terminal.md).
+
+### 2.4 Why main uses runtime `require` but the renderer does not
 
 | Build | Module strategy | Effect |
 | --- | --- | --- |
@@ -91,7 +134,7 @@ the markdown pipeline live in the renderer.**
 
 ## 3. The ClojureScript dependency stack (`deps.edn`)
 
-`deps.edn` paths: `["src" "resources"]`. `core.async` arrives transitively via shadow-cljs. The
+`deps.edn` paths: `["src" "resources" "test"]`. `core.async` arrives transitively via shadow-cljs. The
 `:jvm-opts ["--sun-misc-unsafe-memory-access=allow"]` accommodates Java 26 (matching the sibling
 LightningBug tooling baseline).
 
@@ -100,7 +143,7 @@ LightningBug tooling baseline).
 | `org.clojure/clojure` | Clojure (build/macros) | `1.12.2` |
 | `org.clojure/clojurescript` | ClojureScript compiler | `1.12.42` |
 | `thheller/shadow-cljs` | Build tool (compiles both builds) | `3.2.0` |
-| `reagent/reagent` | React wrapper (hiccup → React 19) | `2.0.0-alpha2` |
+| `reagent/reagent` | React wrapper (hiccup → React 19) | `2.0.1` |
 | `re-frame/re-frame` | Event/effect/state/view loop | `1.4.3` |
 | `re-com/re-com` | UI component library | `2.27.1` |
 | `com.andrewmcveigh/cljs-time` | Time utilities (**required by re-com**) | `0.5.2` |
@@ -124,32 +167,65 @@ LightningBug tooling baseline).
 
 ## 4. JavaScript dependencies & scripts (`package.json`)
 
-`name: "vinary-viewer"`, `version: "0.2.0-dev"`, `license: "Apache-2.0"`, `"main": "dist/main/main.js"`.
+`name: "vinary-viewer"`, `version: "0.3.0-dev"`, `license: "Apache-2.0"`, `"main": "dist/main/main.js"`.
 
 ### 4.1 Scripts
 
-| Script | Command | Purpose |
+The `~26` scripts fall into build, asset-sync, launch, and test groups. Each app build is prefixed by
+**asset-sync** steps that vendor local copies of fonts, pdf.js, tree-sitter grammars, and graphics WASM
+(no CDN); the terminal builds sync grammars + graphics WASM instead of pdf.js + fonts.
+
+| Group | Script → Command | Purpose |
 | --- | --- | --- |
-| `compile` | `shadow-cljs compile main renderer` | One-shot compile of both builds. |
-| `watch` | `shadow-cljs watch main renderer` | Recompile-on-save for both builds (hot reload). |
-| `release` | `shadow-cljs release main renderer` | Optimized production build. |
-| `start` | `electron .` | Launch Electron against `dist/main/main.js`. |
-| `dev` | `shadow-cljs compile main renderer && electron .` | Compile once, then launch. |
+| Build (GUI) | `compile` → `assets:sync && pdfjs:sync && shadow-cljs compile main renderer` | One-shot compile of the two app builds. |
+| | `watch` → `… && shadow-cljs watch main renderer` | Recompile-on-save (hot reload). |
+| | `release` → `… && shadow-cljs release main renderer` | Optimized (`:simple`) production build. |
+| | `dev` → `… && shadow-cljs compile main renderer && electron .` | Compile once, then launch. |
+| Build (terminal) | `compile:cli` / `release:cli` → `grammars:sync && graphics:sync && shadow-cljs {compile,release} cli` | Build `vv-cli`. |
+| | `compile:tui` / `release:tui` → `… shadow-cljs {compile,release} tui` | Build `vv-tui`. |
+| Assets | `assets:sync` / `assets:check` | Vendor + verify self-hosted fonts and Font Awesome (`scripts/sync-assets.mjs`). |
+| | `pdfjs:sync` / `pdfjs:check` | Vendor + verify the pdf.js legacy build + cmaps/fonts/wasm. |
+| | `grammars:sync` / `grammars:check` | Vendor + verify bundled tree-sitter grammars. |
+| | `graphics:sync` | Vendor the terminal graphics WASM (resvg). |
+| Launch | `start` → `electron .` | Launch Electron against `dist/main/main.js`. |
+| | `screenshots` / `screenshots:display` | Headless (xvfb) / on-display screenshot capture. |
+| Test | `test` | Compile+run the node unit tests, the SSH/content-service/git-tree smokes, then `test:cli` + `test:tui`. |
+| | `test:cli` / `test:tui` | Build the terminal targets and run their smokes (+ `graphics-smoke`). |
+| | `test:electron` / `test:electron:release` | Electron smoke against a dev / a **release** build (the release gate catches `:advanced`-only crashes). |
+| | `test:extensions` / `test:extensions:sandbox` | Extension-runtime smokes. |
 
 ### 4.2 Runtime dependencies (`dependencies`)
 
-| Package | Role | Process bundled into |
-| --- | --- | --- |
-| `chokidar` `^5.0.0` | Filesystem watcher for retained local files and Markdown assets | MAIN (`require`) |
-| `react`, `react-dom` `^19.2.7` | React 19 runtime (reagent renders onto it) | RENDERER (bundled) |
-| `unified` `^11.0.5` | Pluggable text-processing engine | RENDERER (bundled) |
-| `remark-parse` `^11` | Markdown → mdast | RENDERER |
-| `remark-gfm` `^4.0.1` | GitHub-Flavoured Markdown (tables, tasklists, …) | RENDERER |
-| `remark-rehype` `^11.1.2` | mdast → hast | RENDERER |
-| `rehype-slug` `^6.0.0` | Stable heading `id`s (used by find + TOC) | RENDERER |
-| `rehype-highlight` `^7.0.2` | Syntax-highlight code blocks (highlight.js classes) | RENDERER |
-| `rehype-stringify` `^10.0.1` | hast → HTML string | RENDERER |
-| `rxjs` `^7.8.2` | Reactive streams (available; auxiliary) | RENDERER |
+Grouped by concern. "Bundled" = compiled into `main.js` by shadow; "require" = external runtime `require`
+in a Node build; "vendored" = shipped as a file and loaded off the Closure path at runtime (dynamic
+`import()` / `fetch`), never bundled.
+
+| Package | Version | Role | Where |
+| --- | --- | --- | --- |
+| `react`, `react-dom` | `^19.2.7` | React 19 runtime (reagent renders onto it) | RENDERER (bundled) |
+| `unified` | `^11.0.5` | Pluggable text-processing engine (the IR/Markdown pipeline) | RENDERER (bundled) |
+| `remark-parse` / `remark-gfm` / `remark-rehype` | `^11` / `^4.0.1` / `^11.1.2` | Markdown → mdast → hast (GFM tables/tasklists) | RENDERER |
+| `remark-math` | `^6.0.0` | `$…$` / `$$…$$` math nodes for MathJax | RENDERER |
+| `rehype-raw` / `rehype-sanitize` | `^7.0.0` / `^6.0.0` | Parse raw HTML in Markdown, then apply the GitHub sanitize allowlist | RENDERER |
+| `rehype-slug` / `rehype-highlight` / `rehype-stringify` | `^6` / `^7.0.2` / `^10.0.1` | Stable heading ids, code highlighting, hast → HTML string | RENDERER |
+| `uniorg-parse` / `uniorg-rehype` | `^3.2.2` / `^2.2.0` | Org (`.org`) → hast, reused through the common IR (ADR-0020) | RENDERER |
+| `@unified-latex/unified-latex-{to-hast,util-macros,util-parse}` | `^1.8.4` | LaTeX (`.tex`) → hast + macro preprocessing (ADR-0025) | RENDERER |
+| `@mathjax/src` / `@mathjax/mathjax-modern-font` | `^4.1.3` | MathJax 4 SVG typesetting + its Modern font (see the `#default-font` resolve, §2.2) | RENDERER |
+| `mermaid` | `^11.16.0` | Mermaid diagrams (fences + `.mmd`/`.mermaid`) → SVG | RENDERER |
+| `@codemirror/{state,view,language,commands}` | `^6` | Read-only source preview editor | RENDERER |
+| `pdfjs-dist` | `5.4.149` | In-renderer PDF rendering **and** headless terminal text extraction | RENDERER + terminal (**vendored** legacy build, ADR-0013/0019) |
+| `web-tree-sitter` | `0.25.9` | Tree-sitter runtime for source highlighting + code outlines | RENDERER + terminal (grammars **vendored**) |
+| `@f1r3fly-io/tree-sitter-rholang-js-with-comments` | `1.1.9` | Bundled Rholang grammar | RENDERER + terminal |
+| `@resvg/resvg-wasm` | `^2.6.2` | SVG → RGBA (terminal graphics; figure sizing) | RENDERER + terminal (**vendored** WASM) |
+| `sixel` | `^0.16.0` | Sixel image encoding for the terminal | terminal (`vv-cli`/`vv-tui`) |
+| `chokidar` | `^5.0.0` | Filesystem watcher for retained local files and Markdown assets | MAIN (require) |
+| `ssh2` | `^1.17.0` | SSH/SFTP remote-file client, main-process only (ADR-0027) | MAIN + terminal (require) |
+| `mammoth` / `papaparse` / `fast-xml-parser` | `^1.12.0` / `^5.5.4` / `^5.9.3` | docx → HTML, delimited-table parse, ODF/XML parse | MAIN + terminal (`content_service.js`) |
+| `tar-stream` / `yauzl` | `^3.2.0` / `^3.4.0` | tar / zip archive readers (virtual `vv-archive://`) | MAIN + terminal |
+| `pngjs` / `jpeg-js` / `omggif` | `^7.0.0` / `^0.4.4` / `^1.0.10` | Raster image decoders (terminal graphics; asset probing) | MAIN + terminal |
+| `@ghostery/adblocker-electron` | `2.18.0` | Native ad-blocking for the web view (ADR-0014) | MAIN (require) |
+| `electron-chrome-web-store` | `0.13.0` | Scoped Chrome-extension runtime (ADR-0015) | MAIN (require) |
+| `rxjs` | `^7.8.2` | Reactive streams (available; auxiliary) | RENDERER |
 
 > **Note: sanitized raw HTML.** The unified chain runs `rehype-raw` + `rehype-sanitize` (GitHub's
 > allowlist), so **raw HTML embedded inside Markdown is parsed and then sanitized** before the output tree
@@ -160,10 +236,13 @@ LightningBug tooling baseline).
 
 ### 4.3 Dev dependencies (`devDependencies`)
 
-| Package | Role |
-| --- | --- |
-| `electron` `^42.5.0` | The Electron runtime. |
-| `shadow-cljs` `3.2.0` | The JS-side shadow-cljs CLI (mirrors the Clojure dep). |
+| Package | Version | Role |
+| --- | --- | --- |
+| `electron` | `^42.5.0` | The Electron runtime. |
+| `shadow-cljs` | `3.2.0` | The JS-side shadow-cljs CLI (mirrors the Clojure dep). |
+| `@fontsource-variable/fira-code` | `^5.2.7` | Self-hosted monospace font, vendored into `resources` by `assets:sync`. |
+| `@fontsource-variable/noto-sans` | `^5.2.10` | Self-hosted UI font, vendored by `assets:sync`. |
+| `@fortawesome/fontawesome-free` | `^7.3.0` | Self-hosted icon set (no CDN; ADR-0011), vendored by `assets:sync`. |
 
 ---
 
@@ -171,9 +250,12 @@ LightningBug tooling baseline).
 
 | Process | Build | Source roots | Emitted artifact | Loaded by |
 | --- | --- | --- | --- | --- |
-| MAIN | `:main` `:node-script` | `vinary.main.*` | `dist/main/main.js` | Electron (`package.json` main) |
+| MAIN | `:main` `:node-script` | `vinary.main.*` (+ `content_service.js`, `ssh_*.js`) | `dist/main/main.js` | Electron (`package.json` main) |
 | preload | (plain JS, not a shadow build) | `resources/preload.js` | itself | `webPreferences.preload` |
-| RENDERER | `:renderer` `:browser` | `vinary.renderer.*`, `vinary.app.*`, `vinary.ui.*` | `resources/public/js/main.js` (+ `cljs-runtime/`) | `resources/public/index.html` `<script src="js/main.js">` |
+| RENDERER | `:renderer` `:browser` | `vinary.renderer.*`, `vinary.app.*`, `vinary.ui.*`, `vinary.ir.*`, `vinary.stream.*`, `vinary.input.*` | `resources/public/js/main.js` (+ `cljs-runtime/`) | `resources/public/index.html` `<script src="js/main.js">` |
+| CLI | `:cli` `:node-script` | `vinary.cli.*`, `vinary.terminal.*`, `vinary.ir.*` (+ `content_service.js`) | `dist/cli/vv-cli.js` | `vv-cli` launcher / `node dist/cli/vv-cli.js` |
+| TUI | `:tui` `:node-script` | `vinary.tui.*`, `vinary.terminal.*`, `vinary.ir.*` (+ `content_service.js`) | `dist/tui/vv-tui.js` | `vv-tui` launcher / `node dist/tui/vv-tui.js` |
+| (tests) | `:test` `:node-test` | `*-test` namespaces | `dist/test/test.js` | `node dist/test/test.js` |
 
 `resources/public/index.html` loads the renderer:
 

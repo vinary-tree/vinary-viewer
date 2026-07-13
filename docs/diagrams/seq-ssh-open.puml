@@ -1,0 +1,65 @@
+@startuml seq-ssh-open
+'' PlantUML over Mermaid because this is a full round trip with an auth sub-negotiation and a host-key
+'' decision, shown with `==` phase dividers, activation bars, and a red reject note — a sequence expresses
+'' the SSH handshake precisely; Mermaid cannot phase-divide nor colour the reject path as a concept.
+!include _vv-theme.iuml
+
+title Opening `ssh://user@host/path` — resolve, verify, authenticate, read, refresh
+
+participant "renderer /\nvv-cli" as Rend RENDERER_TINT
+participant "preload seam" as Seam IPC_TINT
+participant "main.ssh" as Ssh MAIN_TINT
+participant "~/.ssh/config\n+ agent / keys" as Cfg MAIN_TINT
+participant "remote host\n(sshd)" as Host FS_TINT
+
+== open ==
+Rend -> Seam : `vv:open` ssh://user@host/path
+Seam -> Ssh : openRemoteUri
+activate Ssh
+Ssh -> Cfg : resolve Host/Match/Include\nProxyJump / %-tokens
+
+== host-key verification ==
+Ssh -> Host : TCP connect; read host key
+Host --> Ssh : host public key
+alt key in known_hosts and matches
+  Ssh -> Ssh : proceed
+else unknown host
+  Ssh -> Seam : `vv:ssh-prompt` (trust on first use?)
+  Seam -> Rend : TOFU dialog
+  Rend --> Ssh : accept -> append to known_hosts
+else key CHANGED
+  note over Ssh #F5E1E0: **hard reject** — possible MITM;\nabort the connection
+end
+
+== authentication ==
+Ssh -> Cfg : try agent -> key file -> keyboard-interactive
+opt encrypted key / password needed
+  Ssh -> Seam : `vv:ssh-prompt` (passphrase / password)
+  Seam -> Rend : secret dialog
+  Rend --> Ssh : secret (stays main-side; AddKeysToAgent)
+end
+Ssh -> Host : authenticate
+Host --> Ssh : success
+
+== read + render (identical to local) ==
+Ssh -> Host : sftp read path
+Host --> Ssh : bytes (large -> stream bounded-memory)
+Ssh --> Seam : `vv:content` {kind, ...}
+deactivate Ssh
+Seam --> Rend : same IR pipeline + renderers
+
+== live refresh (opt-in polling) ==
+loop every :remote :poll-seconds
+  Ssh -> Host : re-stat / re-read
+  Ssh --> Rend : `vv:content` if changed
+end
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer / vv-cli |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam / prompts |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main.ssh + config/agent |
+  |<#9F8766>&#160;&#160;&#160;&#160;| remote host |
+  Secrets are entered and held main-side; they never enter app-db or config.
+endlegend
+@enduml

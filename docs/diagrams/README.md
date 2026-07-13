@@ -34,10 +34,16 @@ Each command writes `<name>.svg` next to (or, with `-o`, under) the correspondin
 The `-tsvg` flag selects SVG output; SVG is the canonical format because it is theme-crisp at any zoom
 and embeds cleanly in Markdown.
 
-**Pinned toolchain.** The committed SVGs are produced by **PlantUML `1.2026.5`** with **Graphviz
-`14.1.5`**. Re-rendering with this pair reproduces all 50 SVGs **byte-for-byte**, so `git status` stays
-clean unless a `.puml` actually changed; a different PlantUML may re-flow layouts or reject syntax this
-suite relies on (see the syntax notes in §2).
+**Pinned toolchain.** The reference SVGs are produced by **PlantUML `1.2026.5`** with **Graphviz
+`14.1.5`**. Re-rendering with this pair reproduces the byte-for-byte SVGs, so `git status` stays clean
+unless a `.puml` actually changed; a different PlantUML may re-flow layouts or reject syntax this suite
+relies on (see the syntax notes in §2).
+
+> **Toolchain-version caveat.** Only **Graphviz-laid** kinds (component, class, state) depend on the
+> Graphviz version; **sequence, activity, and deployment** diagrams do not use Graphviz and re-render
+> byte-identically on any Graphviz. A workstation with a *different* Graphviz (e.g. `15.x`) will re-flow the
+> Graphviz-laid diagrams on re-render even when their `.puml` is unchanged — so **render only the `.puml`
+> you actually changed** and do not bulk re-render, or the diff will fill with spurious SVG churn.
 
 ### Render-time regression gates
 
@@ -224,7 +230,7 @@ The general rationale:
 1. **Colour-by-concept.** PlantUML lets us bind a fill colour to an arbitrary concept via `!define`
    macros in a shared include, so the same purple always means "DataScript". Mermaid's `classDef`
    styling is per-diagram and cannot be shared as cleanly across many files.
-2. **Byte-reproducible output.** Re-rendering the suite with the pinned toolchain reproduces all 50
+2. **Byte-reproducible output.** Re-rendering the suite with the pinned toolchain reproduces the
    SVGs byte-for-byte, which makes an SVG diff meaningful in review: a changed figure means a changed
    source. Mermaid's output is not byte-reproducible.
 3. **LaTeX in labels.** PlantUML typesets `<latex>…</latex>` and `<math>…</math>` through the bundled
@@ -305,6 +311,35 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `state-tab-lifecycle.puml` | state | `features/02-multi-tab-previews.md` |
 | `system-context.puml` | C4 system context | `architecture/01-overview.md` |
 | `usecase-features.puml` | use-case | `README.md` |
+
+### 0.3.0 additions — common IR · streaming · terminal · Org/LaTeX/diff · SSH · engineering & scientific pillars
+
+| Diagram (`.puml`) | Kind | Embedded by (doc) |
+|---|---|---|
+| `component-ir-pipeline.puml` | component | `architecture/07-common-ir-streaming-and-terminal.md` · `scientific/00-overview.md` |
+| `component-ir-two-backends.puml` | component | `theory/10-terminal-rendering-second-renderer.md` |
+| `state-tui-terminal.puml` | state | `theory/10-terminal-rendering-second-renderer.md` |
+| `component-terminal-layer.puml` | component | `design-decisions/0019-terminal-preview-layer.md` |
+| `component-terminal-renderer.puml` | component | `features/30-terminal-preview.md` · `architecture/07-…` · `engineering/05-terminal-build-and-launch.md` |
+| `seq-cli-render.puml` | sequence | `features/30-terminal-preview.md` · `usage/07-terminal-cli-tui.md` |
+| `component-diff-model.puml` | component | `features/28-diff-rendering.md` · `design-decisions/0026-…` |
+| `seq-diff-split-enrich.puml` | sequence | `features/28-diff-rendering.md` |
+| `component-remote-backend.puml` | component | `features/29-remote-files-over-ssh.md` · `architecture/07-…` · `design-decisions/0027-…` |
+| `seq-ssh-open.puml` | sequence | `features/29-remote-files-over-ssh.md` · `usage/08-remote-files-ssh.md` |
+| `activity-ssh-auth.puml` | activity | `features/29-…` · `usage/08-remote-files-ssh.md` · `design-decisions/0027-…` |
+| `component-password-bridge.puml` | component | `features/23-password-manager-bridge.md` |
+| `flow-org-shared-suffix.puml` | flow | `design-decisions/0020-org-mode-via-uniorg.md` |
+| `flow-org-pipeline.puml` | flow | `features/26-org-mode.md` |
+| `activity-org-export-routing.puml` | activity | `features/26-org-mode.md` |
+| `flow-latex-pipeline.puml` | flow | `design-decisions/0025-…` · `features/27-latex-rendering.md` |
+| `state-doc-pdf-switch.puml` | state | `design-decisions/0025-…` · `design-decisions/0026-…` · `features/27-latex-rendering.md` |
+| `flow-source-preview-jump.puml` | flow | `design-decisions/0021-bidirectional-source-preview-jump.md` |
+| `component-apply-posts.puml` | component | `design-decisions/0022-pre-dom-figure-sizing.md` |
+| `container-five-builds.puml` | C4 container / build | `architecture/02-process-and-build-topology.md` · `engineering/01-build-system.md` |
+| `component-test-taxonomy.puml` | component | `engineering/03-test-strategy.md` · `engineering/08-ci-and-validation-discipline.md` |
+| `activity-asset-vendoring.puml` | activity | `engineering/02-asset-vendoring.md` |
+| `seq-byte-parity.puml` | sequence | `scientific/01-byte-parity-verification.md` |
+| `activity-inkloss-experiment.puml` | activity | `scientific/05-mathjax-inkloss-experiment.md` |
 
 ### Keeping this table honest
 

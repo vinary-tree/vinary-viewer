@@ -1,0 +1,49 @@
+@startuml container-five-builds
+'' PlantUML over Mermaid because: five artifact rectangles need per-build fill colours drawn from the shared
+'' _vv-theme palette (one colour = one process kind across the whole suite), a single shadow-cljs driver
+'' fanning out to all five, and grouping by process family. Mermaid subgraphs cannot colour-code by concept
+'' nor keep the output byte-reproducible.
+!include _vv-theme.iuml
+
+title vinary-viewer — one source tree, FIVE shadow-cljs builds (0.3.0-dev)
+
+skinparam rectangle {
+  BorderThickness 1.6
+  FontColor #1A1A1A
+}
+
+rectangle "shadow-cljs\n(`shadow-cljs.edn`)\nrelease -> `:optimizations :simple`" as Build REFRAME_TINT
+
+package "GUI application" {
+  rectangle "**main**  (:node-script)\n`vinary.main.core/main`\n-> `dist/main/main.js`\nElectron main / Node IO" as Main MAIN_FILL
+  rectangle "**renderer**  (:browser)\n`vinary.renderer.core/init`\n-> `resources/public/js/main.js`\nChromium UI (fs/path/url -> false)" as Rend RENDERER_FILL
+}
+
+package "Terminal previewers (a second renderer over the IR)" {
+  rectangle "**cli**  (:node-script)\n`vinary.cli.core/main`\n-> `dist/cli/vv-cli.js`\n`vv --cli` — one-shot ANSI" as Cli IR_FILL
+  rectangle "**tui**  (:node-script)\n`vinary.tui.core/main`\n-> `dist/tui/vv-tui.js`\n`vv --tui` — interactive pager" as Tui IR_FILL
+}
+
+package "Verification" {
+  rectangle "**test**  (:node-test)\nns-regexp `-test$`\n-> `dist/test/test.js`\nDOM-free cljs unit build" as Test REFRAME_FILL
+}
+
+Build --> Main
+Build --> Rend
+Build --> Cli
+Build --> Tui
+Build --> Test
+
+Main ..> Rend : loads via the\npreload IPC seam
+Cli ..> Test  : covered by
+Tui ..> Test  : covered by
+
+legend right
+  |= Colour |= Concept |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| shadow-cljs build / test machinery |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main process / Node IO |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer / Chromium GUI |
+  |<#E67E22>&#160;&#160;&#160;&#160;| terminal previewer (IR + ANSI back-end) |
+  All five compile from one `src/vinary` tree; `install.sh` builds the GUI + both terminal modes.
+endlegend
+@enduml

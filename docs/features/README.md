@@ -2,8 +2,10 @@
 
 This pillar documents every user-facing capability of **vinary-viewer** (`vv`): a reactive
 ClojureScript / [re-frame](https://day8.github.io/re-frame/) / [Electron](https://www.electronjs.org/)
-desktop previewer for Markdown, images, PDFs, source text, and in-app web links,
-with **live refresh** as files are edited.
+desktop previewer for Markdown, Org-mode, and LaTeX documents, images, PDFs, diffs,
+Office / table / log / archive files, source code, and in-app web links — opened
+**locally or over `ssh://` / `sftp://`**, in the desktop GUI **or the terminal** — with
+**live refresh** as files are edited.
 
 Each feature has its own page following a fixed template:
 
@@ -51,6 +53,9 @@ Each feature has its own page following a fixed template:
 | 25 | **Content previews (office · tables · logs · archives)** | Available now | Office documents render as sanitized HTML, spreadsheets/CSV as a table with sheet tabs, logs with severity tinting, and archives as an in-pane listing — all parsed in main, bounded and paged for huge inputs. | Open a `.docx` / `.xlsx` / `.csv` / `.log` / `.zip` / `.tar` file. | [25-content-previews.md](25-content-previews.md) |
 | 26 | **Org-mode (.org) documents** | Available now | Emacs Org files render GitHub-style through the common IR via uniorg — front matter, a Contents outline, nested `#+begin_src` highlighting, math, task lists, and a tree-sitter-org View Source. | Open a `.org` file. | [26-org-mode.md](26-org-mode.md) |
 | 27 | **LaTeX (.tex) documents** | Available now | LaTeX renders as a formatted document via unified-latex — sections, styling, tables, figures, MathJax math, and a macro preprocessor — with a Document↔PDF switch when a same-stem exported PDF sits beside it. Embedded LaTeX in Org invoices renders too. | Open a `.tex` file (try one with a sibling `.pdf`). | [27-latex-rendering.md](27-latex-rendering.md) |
+| 28 | **Diff / patch rendering** | Available now | `.diff` / `.patch` files render as a colored unified diff (GUI HTML + terminal ANSI) and a GUI-only side-by-side split enriched with the on-disk pre/post files; standard repo filetypes (Makefile, `.gitignore`, …) classify correctly. | Open a `.diff` / `.patch` file; toggle `[Unified \| Split]`. | [28-diff-rendering.md](28-diff-rendering.md) |
+| 29 | **Remote files over SSH** | Available now | Open remote files and directories over `ssh://` / `sftp://` through the same renderers, streaming, paging, and refresh as a local path — with `~/.ssh/config` + agent/key/keyboard-interactive auth, known-hosts trust-on-first-use, and opt-in polling refresh. Secrets stay main-side. | Type or pass `ssh://user@host/path`; authenticate at the prompt. | [29-remote-files-over-ssh.md](29-remote-files-over-ssh.md) |
+| 30 | **Terminal preview (CLI / TUI)** | Available now | A second renderer over the shared IR: `vv --cli` renders once to stdout (pipe-friendly ANSI + kitty/sixel graphics), `vv --tui` is an interactive full-screen pager (in-page find, Contents outline, scrolling). | `vv --cli README.md \| less -R`, or `vv --tui README.md`. | [30-terminal-preview.md](30-terminal-preview.md) |
 
 ---
 
@@ -109,9 +114,15 @@ Owned by this pillar:
 - [`object-watermark.puml`](../diagrams/object-watermark.puml) — the watermark emblem pipeline.
 - [`seq-toc.puml`](../diagrams/seq-toc.puml) — scroll-spy TOC extract / spy / scroll.
 - [`object-history-stack.puml`](../diagrams/object-history-stack.puml) — the history stack evolving.
-- [`component-native-pdf.puml`](../diagrams/component-native-pdf.puml) — native PDF runtime.
+- [`component-native-pdf.puml`](../diagrams/component-native-pdf.puml) — the **superseded** main-owned PDF `WebContentsView` (historical; retired by [ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md) for the in-renderer pdf.js pipeline shown in `seq-pdf-render.puml`).
 - [`component-diagram-rendering-planned.puml`](../diagrams/component-diagram-rendering-planned.puml) — «planned».
 - [`component-source-preview.puml`](../diagrams/component-source-preview.puml) — read-only source preview.
 - [`component-grammar-registry.puml`](../diagrams/component-grammar-registry.puml) — bundled/user grammar registry.
 - [`component-keybindings-inprogress.puml`](../diagrams/component-keybindings-inprogress.puml) — now available.
 - [`seq-instant-overlay-snapshot.puml`](../diagrams/seq-instant-overlay-snapshot.puml) — instant, flash-free overlay compositing over the web view (features 19 + 22).
+- [`component-password-bridge.puml`](../diagrams/component-password-bridge.puml) — the password-manager secret flow, main-side only (feature 23).
+- [`flow-org-pipeline.puml`](../diagrams/flow-org-pipeline.puml) + [`activity-org-export-routing.puml`](../diagrams/activity-org-export-routing.puml) — Org rendering + the math-vs-layout export routing (feature 26).
+- [`flow-latex-pipeline.puml`](../diagrams/flow-latex-pipeline.puml) + [`state-doc-pdf-switch.puml`](../diagrams/state-doc-pdf-switch.puml) — LaTeX rendering + the Document↔PDF / Preview↔Source switch (feature 27).
+- [`component-diff-model.puml`](../diagrams/component-diff-model.puml) + [`seq-diff-split-enrich.puml`](../diagrams/seq-diff-split-enrich.puml) — the diff model → unified + on-disk-enriched split (feature 28).
+- [`component-remote-backend.puml`](../diagrams/component-remote-backend.puml), [`seq-ssh-open.puml`](../diagrams/seq-ssh-open.puml), [`activity-ssh-auth.puml`](../diagrams/activity-ssh-auth.puml) — the SSH virtual backend, open round-trip, and auth cascade (feature 29).
+- [`component-terminal-renderer.puml`](../diagrams/component-terminal-renderer.puml) + [`seq-cli-render.puml`](../diagrams/seq-cli-render.puml) — the terminal second renderer + the one-shot CLI render (feature 30).

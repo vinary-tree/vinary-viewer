@@ -1,0 +1,30 @@
+@startuml activity-inkloss-experiment
+'' PlantUML over Mermaid because this is the scientific method as a control flow — hypothesis, measure,
+'' observe, intervene, re-measure, confirm — with the failure state coloured red and the resolved state
+'' green, from the shared palette. Mermaid cannot colour by outcome nor render byte-reproducibly.
+!include _vv-theme.iuml
+
+title MathJax inline ink-loss — a reproducible experiment (hypothesis -> fix -> re-measurement)
+
+start
+:**Hypothesis.** MathJax 4 defaults `linebreaks.inline` ON;\ntypesetting off-DOM through liteAdaptor, it has no\ncontainer to measure, so it splits inline math into\none `<svg>` per break opportunity, and\n`svg:not(:root){overflow:hidden}` clips the first viewBox; <<RENDERER_FILL>>
+:**Method.** Render a corpus of 154 files /\n1743 inline-math occurrences; count occurrences that\nsplit into multiple `<svg>` and those losing >50% ink; <<RENDERER_TINT>>
+:**Observation.** 385 occurrences split;\n35 lost >50% of their ink;\n`\implies` / `\iff` rendered completely invisible\n(a gap of the right width, no ink, no error); <<ERROR_TINT>>
+:**Intervention.** Set `linebreaks: {inline: false}`\n(each expression is rendered once, cached, injected as a\nstatic SVG into a column it cannot reflow into); <<MARKDOWN_TINT>>
+:**Re-measurement.** Same corpus:\n0 occurrences split, 0 lost ink;\ndisplay math byte-identical before/after; <<MARKDOWN_FILL>>
+if (split = 0 and ink-loss = 0?) then (yes)
+  :**Conclusion.** Hypothesis confirmed;\nregression pinned by the electron smoke\n(fails on any CSP console message); <<MARKDOWN_TINT>>
+  stop
+else (no)
+  :derive a new hypothesis and repeat; <<ERROR_FILL>>
+  stop
+endif
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| MathJax rendering / measurement |
+  |<#E0211D>&#160;&#160;&#160;&#160;| observed defect |
+  |<#67B11D>&#160;&#160;&#160;&#160;| fix confirmed |
+  Recorded in `CHANGELOG.txt`; written up in `scientific/05-mathjax-inkloss-experiment.md`.
+endlegend
+@enduml

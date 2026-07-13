@@ -432,6 +432,104 @@ so Org reuses the whole shared spine. *See ADR-0020/0024 and
 
 ---
 
+## Vocabulary added in 0.3.0 (common IR · streaming · terminal · Org/LaTeX/diff · remote SSH)
+
+Alphabetized. The mathematical foundations (semiring, transducer, WPDA, Earley) are cited with DOIs in
+[`theory/08 §7`](theory/08-common-document-ir.md) and [`theory/09 §11`](theory/09-document-streaming-and-the-wpda.md);
+these entries define the term and point to the page that develops it.
+
+**anchor-id** — A collision-free, stable identifier `ir.meta` attaches to each IR node, so DOM ids do not
+churn as a streamed document grows. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**ANSI (back-end)** — The escape-sequence encoding the terminal renderer emits: SGR colour/style codes plus,
+where the terminal supports them, kitty/sixel graphics. `ir.backend.ansi` is the tty counterpart of
+`backend.html`. *First introduced in `theory/10-terminal-rendering-second-renderer.md`.*
+
+**beam / beam width $`\beta`$** — The prune width bounding the WPDA streaming decoder's frontier;
+$`\textsf{prune}_\beta`$ keeps the $`\beta`$ lowest-weight configs. *First introduced in
+`theory/09-document-streaming-and-the-wpda.md`.*
+
+**CLI (`vv --cli`)** — The one-shot terminal renderer: reads a file, lowers it through the common IR to ANSI,
+writes to stdout, and exits (pipe-friendly). *First introduced in
+`theory/10-terminal-rendering-second-renderer.md`; usage in `usage/07-terminal-cli-tui.md`.*
+
+**content-visibility** — The CSS property (`content-visibility: auto`) the streamed body sets per block so the
+browser skips layout/paint for off-screen blocks — bounding *render* cost while keeping every node in the
+live DOM. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**credit-based backpressure (credit 1)** — The demand protocol bounding the stream transport: the renderer
+holds one outstanding pull, and main pauses `readline` at the batch cap, so a bounded number of batches are
+ever in flight. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**diff (unified / split)** — Two renderings of a `.diff`/`.patch`: *unified* (one column of add/del/context
+lines; GUI HTML **and** terminal ANSI) and *split* / side-by-side (two columns, GUI-only, enriched with the
+on-disk pre/post files). *First introduced in `features/28-diff-rendering.md`; ADR-0026.*
+
+**Earley (over lattice)** — A general context-free parser; vinary-viewer runs Earley over a lattice with a
+packed parse forest and a semiring-weighted **Viterbi** best-parse (`ir.earley` / `ir.forest`). *First
+introduced in `theory/08-common-document-ir.md`.*
+
+**frontier** — The current beam of live WPDA **configurations** — the streaming decoder's whole live state; a
+config is $`(q, \gamma, w)`$ (state, stack, weight). *First introduced in
+`theory/09-document-streaming-and-the-wpda.md`.*
+
+**hunk** — A contiguous change region in a unified diff, headed by an `@@ … @@` range line. *First introduced
+in `features/28-diff-rendering.md`.*
+
+**IR (common document intermediate representation)** — The one tagged tree (`vinary.ir.node/Node`) every
+format parses into, lowered to HTML (GUI) or ANSI (terminal) through one weighted-transducer core and one
+sanitizer. *First introduced in `theory/08-common-document-ir.md`; ADR-0017.*
+
+**kitty / sixel graphics** — Two terminal image protocols the CLI/TUI use (via `terminal.graphics`) to draw
+raster images inline where supported; otherwise images degrade to a text placeholder. *First introduced in
+`theory/10-terminal-rendering-second-renderer.md`.*
+
+**known_hosts / TOFU (trust-on-first-use)** — SSH host-key verification: a presented host key is checked
+against `~/.ssh/known_hosts`; an unknown host prompts once and is appended on accept; a **changed** key is a
+hard reject. *First introduced in `features/29-remote-files-over-ssh.md`; ADR-0027.*
+
+**reflow (PDF)** — An opt-in view (View ▸ Reflow Text) rendering a PDF's extracted text as reflowable prose
+through the page/block/line/run IR facet, augmenting — never replacing — the faithful canvas render. *First
+introduced in `features/11-native-pdf.md`.*
+
+**semiring** — An algebra $`(K, \oplus, \otimes, \bar0, \bar1)`$ whose choice tunes what a weighted parse
+computes (recognition, best-parse, total mass). Implemented: Boolean, Tropical, Log, Probability, Product,
+Lexicographic. *First introduced in `theory/08-common-document-ir.md`; laws in `scientific/03-semiring-algebraic-laws.md`.*
+
+**SSH / SFTP (`ssh://`, `sftp://`)** — The remote **virtual backend**: a remote URI opens through the same
+pipeline, renderers, streaming, and refresh as a local path, main-side only. *First introduced in
+`features/29-remote-files-over-ssh.md`; ADR-0027.*
+
+**ssh-agent** — The running key-agent the SSH backend tries first for authentication (before key files and
+keyboard-interactive); on decrypting a key file it may `AddKeysToAgent`. *First introduced in
+`features/29-remote-files-over-ssh.md`.*
+
+**StreamParser** — The pure `feed`/`finish` protocol (`vinary.stream.protocol`) that emits only
+newly-completed IR blocks and retains only the open block — the node-testable heart of streaming. *First
+introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**tropical semiring** — The semiring $`(\mathbb{R} \cup \{\infty\},\ \min,\ +,\ \infty,\ 0)`$; ranking
+competing segmentations by least cost is a shortest-path (Viterbi) over it. *First introduced in
+`theory/08-common-document-ir.md`.*
+
+**TUI (`vv --tui`)** — The interactive terminal previewer: a full-screen pager with in-page find, a Contents
+outline, and scrolling, over the same IR/streaming spine as the GUI. *First introduced in
+`theory/10-terminal-rendering-second-renderer.md`; usage in `usage/07-terminal-cli-tui.md`.*
+
+**Viterbi (best-parse)** — The $`\oplus`$-optimal derivation extracted from the packed parse forest — the
+max-weight (or, in the tropical semiring, least-cost) parse. *First introduced in
+`theory/08-common-document-ir.md`.*
+
+**weighted tree transducer** — The IR's transformation model (`ir.transducer`): a tree-to-tree map carrying
+semiring weights, with exact composition. *First introduced in `theory/08-common-document-ir.md`.*
+
+**WPDA (weighted pushdown automaton)** — A pushdown automaton whose transitions carry semiring weights;
+recognizes context-free nesting (e.g. balanced braces) that no finite-state machine can. `ir.grammar.log`
+specializes it to keep a multi-line JSON log entry one record. *First introduced in
+`theory/09-document-streaming-and-the-wpda.md`.*
+
+---
+
 ## Symbols and notation
 
 | Symbol | Reads as | Meaning / where used |

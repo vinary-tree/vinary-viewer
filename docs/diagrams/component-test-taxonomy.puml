@@ -1,0 +1,47 @@
+@startuml component-test-taxonomy
+'' PlantUML over Mermaid because this is a concept-coloured layered map (blue = the DOM-free unit build,
+'' slate = Node smoke harnesses, teal = the Electron smoke, tan = fixtures) reusing the shared _vv-theme
+'' palette so a colour means the same thing here as everywhere else in the suite.
+!include _vv-theme.iuml
+
+title Test taxonomy — the DOM-free unit build, the JS smoke harnesses, and the fixtures
+
+package "shadow-cljs `:node-test` build  (`dist/test/test.js`, ns `*-test`)" {
+  component "ir/*_test\nsemiring · transducer · wpda ·\nparity · frontends" as TIr IR_TINT
+  component "stream/*_test\nprotocol · flag · log-stream\n(bounded-memory, batch-split)" as TStream RENDERER_TINT
+  component "renderer/*_test\nfigures · source-nav · find" as TRend RENDERER_TINT
+  component "tui/*_test · terminal/*_test\nviewport · keys · ansi" as TTui IR_TINT
+  component "app/*_test\nnav · uri · history · ds" as TApp APPDB_TINT
+}
+
+package "JS smoke harnesses (Node / Electron)" {
+  component "electron-smoke\n(+ :release variant)" as SElec RENDERER_TINT
+  component "cli-smoke · tui-smoke" as SCli MAIN_TINT
+  component "ssh-config-smoke\nssh-transport-smoke" as SSsh MAIN_TINT
+  component "content-service-smoke\ngit-tree-smoke" as SSvc MAIN_TINT
+  component "extensions-smoke\ngraphics-smoke" as SExt MAIN_TINT
+}
+
+package "Fixtures" {
+  component "test/fixtures/*\nssh-server · smoke.pdf ·\next-probe · sample docs" as Fix FS_TINT
+}
+
+component "test/lint.js\nJS parse · CSS braces · `--vv-*` theme completeness" as Lint KEYMAP_TINT
+
+SElec ..> Fix
+SCli ..> Fix
+SSsh ..> Fix
+SSvc ..> Fix
+SExt ..> Fix
+
+legend right
+  |= Colour |= Concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| IR / terminal unit tests |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer unit / Electron smoke |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db unit tests |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| Node smoke harnesses |
+  |<#9F8766>&#160;&#160;&#160;&#160;| fixtures |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| lint gate |
+  `npm test` runs the unit build + ssh/content/git/cli/tui smokes; `test:electron*` drive the app.
+endlegend
+@enduml

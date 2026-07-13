@@ -17,6 +17,7 @@ these files; the renderer receives plain EDN text or plain data over the
 | `window.edn` | Available | Main-window geometry: position, size, and maximized state. |
 | `filetypes.edn` | Available | Filename and pattern mappings to source grammar ids. |
 | `connections.edn` | Available | Non-secret SSH connection metadata (host aliases, last path, recent-remote MRU). **Never** holds passwords, passphrases, or keys. |
+| `extensions.edn` | Available | Ad-block enable state and filter lists, plus installed scoped-extension state. |
 | `grammars/<lang>/grammar.wasm` | Available | Optional tree-sitter grammar for a source language. |
 | `grammars/<lang>/highlights.scm` | Available | Optional highlight query for that grammar. |
 

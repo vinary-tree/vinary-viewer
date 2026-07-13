@@ -1,0 +1,66 @@
+@startuml component-ir-pipeline
+'' PlantUML over Mermaid because this is the full concept-coloured IR dataflow — EVERY front-end into one
+'' core into TWO back-ends (HTML for the GUI, ANSI for the terminal) through one sanitizer — and the colours
+'' must match every other figure (orange = IR core, green = HTML surface, teal = renderer facet, amber =
+'' sanitizer/seam). Only PlantUML shares the `_vv-theme` palette macros across files.
+!include _vv-theme.iuml
+
+title Common document IR — all front-ends -> one weighted core -> HTML + ANSI back-ends
+
+package "Format front-ends  (parse -> IR)" {
+  component "markdown\n(rehype HAST)" as FMd MARKDOWN_TINT
+  component "org / latex\n(uniorg / unified-latex)" as FOrg MARKDOWN_TINT
+  component "office\n(docx / ODF HTML)" as FOf MARKDOWN_TINT
+  component "source\n(web-tree-sitter)" as FSrc RENDERER_TINT
+  component "pdf\n(pdf.js text runs)" as FPdf RENDERER_TINT
+  component "table · log · archive · diff" as FData RENDERER_TINT
+}
+
+package "Common IR core  (DOM-free, node-tested)" {
+  component "node / meta\n{kind, children, text, meta}\nspan · bbox · role · anchor-id" as Node IR_TINT
+  component "semiring\n(K, +, x, 0, 1)" as Sem IR_TINT
+  component "transducer\nweighted tree transducer\n(exact composition)" as TT IR_TINT
+  component "wpda / decode · earley / forest\n(weighted segmentation, streaming)" as Auto IR_TINT
+}
+
+package "Back-ends + capability" {
+  component "backend.html\nIR -> HAST -> rehype-stringify" as BHtml MARKDOWN_TINT
+  component "backend.ansi\nIR -> ANSI + sixel/kitty" as BAnsi IR_TINT
+  component "backend.sanitize\none GitHub allowlist (context-free)" as San IPC_TINT
+  component "capability.toc\noutline -> :doc/toc" as Toc REFRAME_TINT
+}
+
+component "GUI `.markdown-body`\n(innerHTML)" as GUI RENDERER_FILL
+component "terminal stdout / TUI\n(vv-cli / vv-tui)" as Term IR_FILL
+
+FMd --> Node
+FOrg --> Node
+FOf --> Node
+FSrc --> Node
+FPdf --> Node
+FData --> Node
+
+Sem --> TT
+Sem --> Auto
+Node --> TT
+FPdf ..> Auto : ambiguous run->line->block
+
+TT --> BHtml
+TT --> BAnsi
+BHtml --> San : one sanitizer
+BAnsi --> San
+Node --> Toc
+
+BHtml --> GUI
+BAnsi --> Term
+
+legend right
+  |= Colour |= Concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| common IR core / ANSI back-end |
+  |<#67B11D>&#160;&#160;&#160;&#160;| HTML surface (markdown/office/org) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer-side facet / GUI |
+  |<#B1951D>&#160;&#160;&#160;&#160;| sanitizer / trust boundary |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame capability (:doc/toc) |
+  One IR, two back-ends: the GUI and the terminal are two renderers over the same spine.
+endlegend
+@enduml

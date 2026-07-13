@@ -33,19 +33,9 @@ highlighting, ANSI lowering, and progressive streaming — is inherited unchange
 [ADR-0020](../design-decisions/0020-org-mode-via-uniorg.md) and
 [ADR-0024](../design-decisions/0024-org-export-blocks-front-matter-and-math.md) for the full design.
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-rectangle ".org file" as F #FDE68A
-rectangle "uniorg-parse →\nuniorg-rehype\n(Org → HTML-AST)" as U #FDE68A
-rectangle "Org normalization\n(front matter · export blocks ·\ntask lists · footnotes · math)" as N #FEF3C7
-rectangle "shared app suffix\n(sanitize / slug / highlight /\nsource-positions / metadata)" as S #DCFCE7
-rectangle "common IR\n(headings, code-blocks,\ntables, images…)" as IR #E0F2FE
-rectangle "preview HTML\n+ Contents outline\n+ MathJax + highlighting" as OUT #BBF7D0
-F -> U -> N -> S -> IR -> OUT
-@enduml
-```
+![Org pipeline](../diagrams/flow-org-pipeline.svg)
+
+*Diagram source: [`../diagrams/flow-org-pipeline.puml`](../diagrams/flow-org-pipeline.puml).*
 
 ### Why normalization is needed
 
@@ -80,27 +70,9 @@ invoice whose entire body is a `#+BEGIN_EXPORT latex` block used to render as a 
 So a non-`html` export block renders as a fenced code block in that backend's language. For `latex` specifically
 the block is first **attempted as math**:
 
-```plantuml
-@startuml
-skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-start
-:#+BEGIN_EXPORT latex;
-if (block looks like math?\n(a math env / \\[ / $$,\nand no \\begin{center},\ntabular, itemize, \\includegraphics…)) then (no)
-  #FDE68A:highlighted <code>language-latex</code> block;
-  stop
-else (yes)
-  :MathJax typeset (synchronous);
-  if (error node?\n<code>data-mjx-error</code> / <code>&lt;merror&gt;</code>) then (yes)
-    #FDE68A:highlighted <code>language-latex</code> block;
-    stop
-  else (no)
-    #BBF7D0:MathJax SVG\n(<code>.vv-math-display</code>, LaTeX kept in <code>data-tex</code>);
-    stop
-  endif
-endif
-@enduml
-```
+![Org export routing](../diagrams/activity-org-export-routing.svg)
+
+*Diagram source: [`../diagrams/activity-org-export-routing.puml`](../diagrams/activity-org-export-routing.puml).*
 
 Two gates, because MathJax fails in two different ways:
 

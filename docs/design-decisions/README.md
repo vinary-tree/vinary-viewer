@@ -90,7 +90,8 @@ The next free number is **0028**.
 
 ## How the ADRs relate
 
-These twelve decisions reinforce one another into a coherent reactive architecture:
+These decisions reinforce one another into a coherent reactive architecture. The **foundational
+twelve** (0001–0012) establish the reactive core:
 
 - **0001** sets the platform (modern Electron), which **enables** the contextBridge seam in **0009** and
   the in-renderer rendering in **0002**.
@@ -114,5 +115,32 @@ These twelve decisions reinforce one another into a coherent reactive architectu
   trail, and the native PDF/web overlays yield to DOM menus/dialogs. It reuses the **0009** mediator seam
   for the new `recent.edn` and adds no content IPC.
 
-For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md) and the
-theory pillar under [`docs/theory/`](../theory/).
+The **later fifteen** (0013–0027) build capability on that core without disturbing it:
+
+- **0013** retires the main-owned native PDF view for **in-renderer pdf.js**, folding PDFs into the same
+  renderer Strategy (**0002**) as every other document.
+- **0014** and **0015** harden the web view — native ad/tracker blocking, and a GPL-free, *scoped* Chrome
+  extension runtime (password managers + ad-blocker-class only).
+- **0016** pins every release build to Closure `:simple`, not `:advanced`, so un-hinted Electron/interop
+  calls survive optimization.
+- **0017** is the pivot of the 0.3 cycle: one **common document IR** every format parses into, lowered to
+  HTML through a single sanitizer — the spine **0018**–**0027** all build on.
+- **0018** streams large documents in bounded memory over that IR (WPDA-segmented); **0023** gives streaming
+  a pre-estimated scrollbar and steady rAF/idle pacing; **0022** sizes figures pre-DOM so nothing re-scales
+  on insert.
+- **0019** adds the **terminal previewer** (`vv-cli` / `vv-tui`) as a *second renderer* over the same IR +
+  streaming spine — HTML for the GUI, ANSI for the tty.
+- **0020** and **0024** bring **Org-mode** through the IR (uniorg + the shared hast suffix), rendering what
+  uniorg drops (export blocks, front matter, math); **0025** brings **LaTeX** (`.tex`) via unified-latex plus
+  the Document↔PDF switch; **0026** brings **diff/patch** rendering (unified + split) and standard repo
+  filetypes.
+- **0021** adds bidirectional "Go to source" / "Go to preview" jumps over the IR's per-node source positions.
+- **0027** opens **remote files over SSH** (`ssh://` / `sftp://`) as a virtual backend that reuses the entire
+  pipeline — renderers, streaming, paging, refresh — main-side, with secrets never leaving the main process.
+
+Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
+core, which is why they compose without conflict.
+
+For the broader picture see [`docs/architecture/01-overview.md`](../architecture/01-overview.md), the
+theory pillar under [`docs/theory/`](../theory/), and the concrete realization in
+[`docs/architecture/07-common-ir-streaming-and-terminal.md`](../architecture/07-common-ir-streaming-and-terminal.md).
