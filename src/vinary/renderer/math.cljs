@@ -9,10 +9,16 @@
    Latin-Modern-derived MathJax Modern font, used for BOTH the browser renderer and :node-test — no separate es5
    `tex-svg.js` script, no async load — MathJax 4's dynamic font chunks are preloaded synchronously at engine
    build (see mj-engine!). Only the SAFE TeX package configurations are imported: base ams amscd
-   boldsymbol newcommand configmacros noerrors noundefined. The
+   boldsymbol newcommand configmacros noerrors noundefined textmacros. The
    dangerous html(\\href)/require/autoload packages are NEVER imported, so they are not in the module graph at
    all — author TeX cannot emit active markup (\\href{javascript:…}) into the SVG, which is injected
-   post-sanitize (the one MathJax vector the HTML sanitizer can't see)."
+   post-sanitize (the one MathJax vector the HTML sanitizer can't see).
+
+   textmacros is what makes the CONTENT of \\text{} parse as text — see safe-packages. It is required for
+   GitHub parity: GitHub's MathJax loads it, and without it this previewer disagrees with the publishing
+   target in both directions at once (mangling `\\text{a\\_b}` into a literal backslash, while silently
+   accepting `\\text{a_b}` that GitHub rejects). A previewer that is MORE permissive than its target hides
+   real errors, which is the worse failure."
   (:require [clojure.string :as str]
             [goog.string :as gstr]
             ;; the single sanitize schema — for `tex-attempt-class`, the marker the Org frontend stamps on a
@@ -72,7 +78,9 @@
             ["@mathjax/src/cjs/input/tex/newcommand/NewcommandConfiguration.js" :as newcommand-config]
             ["@mathjax/src/cjs/input/tex/configmacros/ConfigMacrosConfiguration.js" :as configmacros-config]
             ["@mathjax/src/cjs/input/tex/noerrors/NoErrorsConfiguration.js" :as noerrors-config]
-            ["@mathjax/src/cjs/input/tex/noundefined/NoUndefinedConfiguration.js" :as noundefined-config]))
+            ["@mathjax/src/cjs/input/tex/noundefined/NoUndefinedConfiguration.js" :as noundefined-config]
+            ;; textmacros — the text-mode parser for the CONTENT of \text{}/\texttt{}/… (see safe-packages).
+            ["@mathjax/src/cjs/input/tex/textmacros/TextMacrosConfiguration.js" :as textmacros-config]))
 
 (def ^:private max-cache-entries 512)
 
@@ -91,13 +99,25 @@
 ;; ---- the single MathJax TeX→SVG engine (browser + node), built from the shadow-bundled js/ source ----
 (def ^:private safe-packages
   ;; NO html/require/autoload — see the ns docstring. Adding amscd (\begin{CD}) + boldsymbol to the standard set.
-  #js ["base" "ams" "amscd" "boldsymbol" "newcommand" "configmacros" "noerrors" "noundefined"])
+  ;;
+  ;; textmacros parses the CONTENT of \text{}/\texttt{}/… . \text itself is base (BaseMethods.HBox); what base
+  ;; lacks without textmacros is the `internalMath` hook (ParseUtil.internalMath delegates to
+  ;; options.internalMath if installed — only TextMacrosConfiguration installs it). Without the hook \text{}
+  ;; content is near-literal, so `\text{a\_b}` renders a LITERAL BACKSLASH; with it, `\_` is an underscore and
+  ;; `_`/`^` correctly become math-mode-only errors. GitHub's MathJax loads textmacros, so omitting it made this
+  ;; previewer disagree with the publishing target in BOTH directions — silently accepting `\text{a_b}` that
+  ;; GitHub rejects, while mangling the `\_` that GitHub renders. Safe by the same test as the rest of this list:
+  ;; it pulls in no html/require/autoload (only internal MathJax modules), and defaults to a restricted
+  ;; `packages: ["text-base"]` inside \text{}. Its one autoload touchpoint (CheckAutoload, for \color inside
+  ;; \text) merely reads packageData and no-ops when autoload is absent — which here it always is.
+  #js ["base" "ams" "amscd" "boldsymbol" "newcommand" "configmacros" "noerrors" "noundefined" "textmacros"])
 
 ;; Reference each package-configuration module so its import (and thus its package registration) is retained.
 ;; Each config self-registers with MathJax's ConfigurationHandler when its module initialises.
 (def ^:private loaded-configs
   #js [base-config ams-config amscd-config boldsymbol-config
-       newcommand-config configmacros-config noerrors-config noundefined-config])
+       newcommand-config configmacros-config noerrors-config noundefined-config
+       textmacros-config])
 
 ;; Reference each dynamic-font module so its dynamicSetup side effect is retained (shadow-cljs would otherwise
 ;; elide these side-effect-only imports). The glyph data is installed into the font instance in mj-engine!.

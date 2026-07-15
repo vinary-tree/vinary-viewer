@@ -187,3 +187,51 @@
     (is (= "``" (math/strip-math-fence "``")) "empty inner → not stripped to blank")
     (is (= "x`y" (math/strip-math-fence "``x`y``")) "double-backtick fence stripped, inner backtick kept")
     (is (= "a`b" (math/strip-math-fence "`a`b`")) "unbalanced middle backtick is inner content")))
+
+;; ── Text mode: the content of \text{}, and parity with GitHub ───────────────────────────────────────────────
+;;
+;; \text is base (BaseMethods.HBox), but the parser for its CONTENT is a hook: ParseUtil.internalMath delegates
+;; to options.internalMath only if something installed it — and only textmacros does. Without textmacros the
+;; content stays near-literal, so `\text{a\_b}` draws a LITERAL BACKSLASH, while `\text{a_b}` — which GitHub
+;; REJECTS with "'_' allowed only in math mode" — renders happily. That is the worst possible split: this
+;; previewer disagreed with the publishing target in BOTH directions at once, mangling correct source and
+;; green-lighting broken source. Being more permissive than the target is not leniency; it hides real errors.
+;;
+;; These assertions read the codepoints MathJax actually drew (data-c is the glyph's hex codepoint), so they are
+;; font- and metric-independent — a font bump cannot make them lie, and a structural "contains <svg>" check
+;; cannot see this defect at all.
+
+(defn- glyphs
+  "The characters MathJax actually drew, in order — decoded from each glyph's data-c hex codepoint."
+  [html]
+  (->> (re-seq #"data-c=\"([0-9A-Fa-f]+)\"" (or html ""))
+       (map (fn [[_ hex]] (js/String.fromCodePoint (js/parseInt hex 16))))
+       (str/join)))
+
+(deftest text-mode-escaped-underscore-renders-an-underscore
+  (testing "`\\text{a\\_b}` draws an underscore and NO backslash — the escape is expanded, not shown"
+    (doseq [tex ["\\text{a\\_b}" "\\text{phonetic\\_cost} \\le 0"]]
+      (let [g (glyphs (math/render-tex tex false))]
+        (is (str/includes? g "_") (str tex ": expected an underscore glyph, drew " (pr-str g)))
+        (is (not (str/includes? g "\\"))
+            (str tex ": drew a LITERAL BACKSLASH " (pr-str g)
+                 " — the textmacros internalMath hook is not installed"))))))
+
+(deftest text-mode-bare-underscore-is-an-error
+  (testing "`\\text{a_b}` is invalid LaTeX and GitHub rejects it, so this previewer must too"
+    (doseq [tex ["\\text{a_b}" "\\text{phonetic_cost} \\le 0"]]
+      (is (math/tex-error? (math/render-tex tex false))
+          (str tex ": expected a MathJax error node ('_' allowed only in math mode)")))))
+
+(deftest math-mode-escaped-underscore-is-untouched
+  (testing "in MATH mode `\\_` is correct and a bare `_` would subscript — textmacros must not disturb this"
+    (doseq [tex ["\\mathrm{a\\_b}" "\\mathrm{match\\_count}(g)"]]
+      (let [g (glyphs (math/render-tex tex false))]
+        (is (str/includes? g "_") (str tex ": expected an underscore glyph, drew " (pr-str g)))
+        (is (not (str/includes? g "\\")) (str tex ": drew a literal backslash " (pr-str g)))))))
+
+(deftest textmacros-does-not-disturb-the-other-packages
+  (testing "adding textmacros must not regress the rest of safe-packages"
+    (is (not (math/tex-error? (math/render-tex "\\llbracket x \\rrbracket" false))) "the configured macros")
+    (is (not (math/tex-error? (math/render-tex "\\boldsymbol{x}" false))) "boldsymbol")
+    (is (not (math/tex-error? (math/render-tex "\\begin{CD} A @>>> B \\end{CD}" true))) "amscd")))
