@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('vv', {
   toggleDevtools: () => ipcRenderer.send('vv:devtools'),
   zoom: (dir) => ipcRenderer.send('vv:zoom', dir),
   zoomSet: (f) => ipcRenderer.send('vv:zoom-set', f),
+  requestZoom: () => ipcRenderer.send('vv:zoom-request'),   // boot pull: seed the zoom bar with the restored factor
   httpZoom: (dir) => ipcRenderer.send('vv:http-zoom', dir),
   httpZoomSet: (f) => ipcRenderer.send('vv:http-zoom-set', f),
 

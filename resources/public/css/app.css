@@ -63,8 +63,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 @keyframes vv-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 .vv-error { color: var(--vv-error); }
 .vv-empty { color: var(--vv-fg-dim); }
-/* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter) */
-.vv-image-view img { display: block; width: 100%; max-width: none; height: auto; }
+/* directly-opened image/SVG: fill the content width (the .vv-content padding is the L/R gutter). The backdrop
+   only shows through where the image is transparent, so it makes transparent-SVG diagrams legible on any theme
+   while leaving opaque photos visually unchanged. */
+.vv-image-view img { display: block; width: 100%; max-width: none; height: auto; background: var(--vv-figure-bg, #fafafa); }
 
 /* ── diff (.diff/.patch): a colored UNIFIED view + a side-by-side SPLIT view, both rendered through
    markdown-body (so in-page find / scroll-spy / the themed context menu / the Contents outline all work). The
@@ -132,7 +134,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-web-snap { display: block; width: 100%; height: 100%; }
 /* rendered diagram (SVG from d2/plantuml/mermaid/graphviz) */
 .vv-diagram { display: flex; justify-content: center; }
-.vv-diagram svg { max-width: 100%; height: auto; }
+.vv-diagram svg { max-width: 100%; height: auto; background: var(--vv-figure-bg, #fafafa); }
 
 /* read-only source view (CodeMirror 6 + tree-sitter highlighting) */
 .vv-source { height: 100%; font-size: var(--vv-code-font-size); }
@@ -622,7 +624,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body .vv-mermaid svg { max-width: 100%; height: auto; }
 .vv-mermaid-view { padding: 24px; overflow: auto; }
 .vv-mermaid-view .vv-mermaid { max-width: 100%; overflow-x: auto; text-align: center; }
-.vv-mermaid-view .vv-mermaid svg { max-width: 100%; height: auto; }
+.vv-mermaid-view .vv-mermaid svg { max-width: 100%; height: auto; background: var(--vv-figure-bg, #fafafa); }
 .vv-math-error, .vv-mermaid-error { color: var(--vv-error); background: var(--vv-bg2);
   border: 1px solid var(--vv-error); border-radius: 4px; padding: 12px; overflow: auto; }
 .markdown-body .vv-plain { white-space: pre-wrap; color: var(--vv-fg); }
@@ -638,6 +640,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   width: fit-content; max-width: 100%;
   margin: 16px auto;
   border: 1px solid var(--vv-border);
+  background: var(--vv-figure-bg, #fafafa);   /* legible backdrop behind embedded figures & mermaid (transparent SVGs) */
   overflow: auto; }
 /* The wrapper's border blocks margin-collapse and would otherwise trap the inner element's residual
    margin / inline baseline gap inside the frame — zero it so the outline sits flush against the picture. */

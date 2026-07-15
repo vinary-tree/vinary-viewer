@@ -514,6 +514,12 @@ function installIpc(state) {
       node: process.versions.node
     });
   });
+  // the zoom bar's boot-pull (fix for the "% resets to 100 after restart" bug): reply with the live factor,
+  // exactly as src/vinary/main/shell.cljs does. Count calls so the regression test can assert it auto-fires.
+  ipcMain.on('vv:zoom-request', (event) => {
+    state.zoomRequests = (state.zoomRequests || 0) + 1;
+    event.sender.send('vv:zoom-changed', { context: 'window', factor: event.sender.getZoomFactor() });
+  });
   ipcMain.on('vv:open-dialog', () => {
     state.openDialogs += 1;
   });
@@ -592,6 +598,7 @@ function installIpc(state) {
 async function main() {
   const state = {
     openDialogs: 0,
+    zoomRequests: 0,   // vv:zoom-request boot-pull calls (Bug-1 restart-% regression)
     pdfShow: null,
     pdfBounds: null,
     pdfHidden: false,
@@ -739,6 +746,27 @@ async function main() {
   await dispatchWindowKey(win, 'Escape');
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed');
   console.log('[ok] zoom bar present + View PDF-only items hidden without a PDF');
+
+  // Regression (Bug 1) — the zoom bar (:window-zoom) must seed from the REAL zoom factor at boot. On relaunch
+  // Chromium restores the actual per-host zoom, but :window-zoom is ephemeral (default 1.0) and was only ever
+  // written in reaction to a zoom action — so the bar wrongly read 100% until the first zoom. The renderer now
+  // issues window.vv.requestZoom() right after wiring onZoomChanged (mirrors requestSettings); main replies on
+  // vv:zoom-changed with getZoomFactor(). (preload.js + src/vinary/main/shell.cljs + renderer/core.cljs)
+  assert.strictEqual(await evalIn(win, `typeof window.vv.requestZoom`), 'function',
+    'preload must expose window.vv.requestZoom for the boot-pull');
+  assert.ok(state.zoomRequests >= 1, `renderer must auto-issue the zoom boot-pull at startup (got ${state.zoomRequests})`);
+  // reproduce the exact bug: the factor is restored to 1.5 while app-db shows the 1.0 default → bar reads 100.
+  win.webContents.setZoomFactor(1.5);
+  win.webContents.send('vv:zoom-changed', { context: 'window', factor: 1.0 });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-zoom-input')?.value === '100'`), 'zoom bar shows the stale 100% (bug state)');
+  const zoomReqBefore = state.zoomRequests;
+  await evalIn(win, `window.vv.requestZoom()`);
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-zoom-input')?.value === '150'`), 'boot-pull recovers the true 150% scale');
+  assert.strictEqual(state.zoomRequests, zoomReqBefore + 1, 'requestZoom() must reach the main handler');
+  win.webContents.setZoomFactor(1.0);                                   // restore 1.0 so later layout tests measure unzoomed
+  win.webContents.send('vv:zoom-changed', { context: 'window', factor: 1.0 });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-zoom-input')?.value === '100'`), 'zoom reset to 100 for subsequent tests');
+  console.log('[ok] zoom bar seeds :window-zoom from the real factor at boot (restart-% regression)');
 
   // B4 / B5 — the mode-line indicator is removed, and #app clips overflow so a tall view adds no second
   // window-level scrollbar beside the content scroller
@@ -1495,6 +1523,11 @@ async function main() {
   assert.strictEqual(markdownFeatureLayout.mermaidSvg.maxWidth, '', 'inline Mermaid max-width must be stripped so font-match can up-scale');
   assert.ok(/px$/.test(markdownFeatureLayout.mermaidSvg.width), `inline Mermaid must carry a font-matched px width (got: ${markdownFeatureLayout.mermaidSvg.width})`);
   assert.ok(markdownFeatureLayout.mermaidSvg.aspectRatio, 'inline Mermaid must carry an aspect-ratio');
+  // Regression (Bug 2) — rendered diagrams get a #fafafa backdrop (--vv-figure-bg) so transparent-SVG ink stays
+  // legible on any theme; the embedded mermaid rides the shared figure/mermaid frame rule.
+  const mermaidBackdrop = await evalIn(win, `getComputedStyle(document.querySelector('.markdown-body .vv-mermaid')).backgroundColor`);
+  assert.strictEqual(mermaidBackdrop, 'rgb(250, 250, 250)', `embedded mermaid must carry the #fafafa diagram backdrop (got ${mermaidBackdrop})`);
+  console.log('[ok] embedded mermaid carries the #fafafa diagram backdrop');
   state.lastCopiedText = null;
   await evalIn(win, `(() => {
     const walker = document.createTreeWalker(document.querySelector('.markdown-body'), NodeFilter.SHOW_TEXT);
@@ -1680,6 +1713,12 @@ async function main() {
   assert.ok(fig.leftGap > 4 && fig.rightGap > 4, `figure has real side gaps (centered, not full-width): L=${fig.leftGap} R=${fig.rightGap}`);
   assert.ok(Math.abs(fig.leftGap - fig.rightGap) <= 2, `raw <img> figure is centered (leftGap≈rightGap): ${fig.leftGap} vs ${fig.rightGap}`);
   console.log('[ok] raw <img> block figures are centered');
+
+  // Regression (Bug 2) — the block-figure frame carries the #fafafa backdrop (--vv-figure-bg) so a transparent
+  // embedded SVG diagram reads on any theme (the backdrop only shows through the transparent areas).
+  const figureBackdrop = await evalIn(win, `getComputedStyle(document.querySelector('.markdown-body > a.vv-figure-link')).backgroundColor`);
+  assert.strictEqual(figureBackdrop, 'rgb(250, 250, 250)', `block figure frame must carry the #fafafa backdrop (got ${figureBackdrop})`);
+  console.log('[ok] block figures carry the #fafafa diagram backdrop (transparent-SVG legibility)');
 
   const sourceDocPath = path.join(ROOT, 'test', 'fixtures', 'source-copy.toml');
   state.contentByPath.set(sourceDocPath, {

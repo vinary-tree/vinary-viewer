@@ -8,6 +8,7 @@
   --vv-bg2: #efeae9;            /* panels, <pre>, table zebra (bg2) */
   --vv-bg-code: #e8e3e3;        /* inline code background; hover (cblk-bg) */
   --vv-bg-quote: #edf2e9;       /* blockquote background (head2-bg, faint green) */
+  --vv-figure-bg: #fafafa;      /* readable backdrop behind diagrams/figures so transparent-SVG ink stays legible */
 
   /* text */
   --vv-fg: #655370;             /* base foreground (muted purple-grey) */

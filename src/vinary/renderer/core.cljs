@@ -114,7 +114,10 @@
       (.onConnections vv (fn [text] (rf/dispatch [:connections/received text])))
       (when (.-requestConnections vv) (.requestConnections vv)))
     (when (.-onZoomChanged vv)
-      (.onZoomChanged vv (fn [p] (rf/dispatch [:view/zoom-changed p]))))
+      (.onZoomChanged vv (fn [p] (rf/dispatch [:view/zoom-changed p])))
+      ;; boot pull (mirrors requestSettings et al.): the actual zoom is restored by Chromium per-host persistence,
+      ;; but :window-zoom would sit at its 1.0 default until the first zoom action — seed it from the real factor now.
+      (when (.-requestZoom vv) (.requestZoom vv)))
     (when (.-onAppInfo vv)
       (.onAppInfo vv (fn [payload] (rf/dispatch [:app-info/received (js->clj payload :keywordize-keys true)])))
       (when (.-requestAppInfo vv) (.requestAppInfo vv)))))

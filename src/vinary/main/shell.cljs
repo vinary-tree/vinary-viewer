@@ -53,4 +53,10 @@
          (fn [_e f]
            (when-let [^js c (wc)]
              (.setZoomFactor c (max 0.4 (min 3.0 (js->clj f))))
+             (.send c "vv:zoom-changed" (clj->js {:context "window" :factor (.getZoomFactor c)})))))
+    ;; boot pull (renderer asks once its listener is attached): report the (Chromium-restored) window zoom so the
+    ;; zoom bar seeds from the true factor instead of the app-db default of 1.0 → 100%.
+    (.on ipcMain "vv:zoom-request"
+         (fn [_e]
+           (when-let [^js c (wc)]
              (.send c "vv:zoom-changed" (clj->js {:context "window" :factor (.getZoomFactor c)})))))))
