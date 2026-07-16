@@ -10,7 +10,10 @@
    DOM), so it is fully unit-testable with synthetic items."
   (:require [clojure.string :as str]
             [vinary.ir.node :as node]
-            [vinary.ir.semiring :as sr]))
+            [vinary.ir.semiring :as sr]
+            [vinary.ir.lattice :as lattice]
+            [vinary.ir.earley :as earley]
+            [vinary.ir.forest :as forest]))
 
 ;; ---- item normalization ----
 (defn normalize-item
@@ -75,6 +78,63 @@
           (> (js/Math.abs (- (line-y (peek cur)) (line-y l))) threshold) (recur more [l] (conj blocks cur))
           :else        (recur more (conj cur l) blocks))))))
 
+;; ---- weighted-optimal block segmentation (lattice ∩ CFG → Viterbi forest) ----
+;; The greedy `group-blocks` splits at a single global vertical-gap threshold (1.6×median), which mis-segments
+;; multi-column pages, tables, and figure captions. `group-blocks-weighted` instead builds a LATTICE of
+;; candidate blocks — one Tropical-costed edge per span [i,j) — parses the trivial `Blocks → Block+` grammar
+;; against it, and takes the Viterbi-best partition (ir.forest/viterbi-parse). The block cost balances abnormal
+;; vertical gaps AND horizontal (column) spread against a per-block penalty λ, so the GLOBAL optimum separates
+;; paragraphs and columns a local threshold cannot. This activates the weighted substrate (ir.{lattice,earley,
+;; forest}) for its intended purpose: genuinely ambiguous segmentation (plan G1). Bounded (candidate span ≤
+;; `max-block-span`, page ≤ `max-weighted-lines`); above the bound, or for ≤2 lines, it falls back to greedy.
+(def ^:private max-block-span    30)   ; longest candidate block (a paragraph rarely exceeds this) — bounds edges
+(def ^:private max-weighted-lines 120) ; above this a page is dense enough that the O(n·span) parse isn't worth it
+
+(defn- line-x [line] (apply min (map :x line)))
+
+(defn- block-cost
+  "Tropical cost of grouping lines [i,j) into ONE block: excess vertical gap above the typical line spacing
+   `typ` (a paragraph break inside a block is penalized) + β·horizontal spread (mixing columns is penalized) +
+   a per-block penalty λ (so the optimizer neither shatters into singletons nor fuses everything)."
+  [linev i j typ lambda beta]
+  (let [sub (subvec linev i j)
+        ys  (mapv line-y sub)
+        xs  (mapv line-x sub)
+        excess (reduce + 0.0 (map (fn [a b] (max 0.0 (- (js/Math.abs (- a b)) typ))) ys (rest ys)))
+        spread (if (> (count xs) 1) (- (apply max xs) (apply min xs)) 0.0)]
+    (+ excess (* beta spread) lambda)))
+
+(defn group-blocks-weighted
+  "Weighted-optimal line→block segmentation via the lattice/Earley/forest substrate (see the section comment).
+   Returns the same [[line…]…] shape as `group-blocks`. `opts` may override :block-penalty (λ) and
+   :column-weight (β). Falls back to the greedy `group-blocks` for ≤2 lines or a page over max-weighted-lines."
+  ([lines] (group-blocks-weighted lines {}))
+  ([lines opts]
+   (let [linev (vec lines)
+         n     (count linev)]
+     (if (or (<= n 2) (> n max-weighted-lines))
+       (group-blocks lines)
+       (let [ys     (mapv line-y linev)
+             gaps   (vec (sort (map (fn [a b] (js/Math.abs (- a b))) ys (rest ys))))
+             typ    (if (seq gaps) (nth gaps (quot (count gaps) 2)) 0)
+             ;; λ = 0.6·typ makes the additive vertical term split at gap > 1.6·typ — identical to the greedy
+             ;; baseline for single-column (which it thus subsumes); the non-additive β·column-spread term is
+             ;; what lets the GLOBAL optimum separate columns a per-gap threshold cannot.
+             lambda (get opts :block-penalty (* 0.6 (max typ 1)))
+             beta   (get opts :column-weight 0.5)
+             one    (sr/tropical 0)
+             edges  (for [i (range n), j (range (inc i) (inc (min n (+ i max-block-span))))]
+                      {:from i :to j :label [i j] :weight (sr/tropical (block-cost linev i j typ lambda beta))})
+             lat    (lattice/from-edges (inc n) edges)
+             prods  (into [{:lhs :S :rhs [:Bs] :weight one}
+                           {:lhs :Bs :rhs [:B :Bs] :weight one}
+                           {:lhs :Bs :rhs [:B] :weight one}]
+                          (map (fn [{:keys [label]}] {:lhs :B :rhs [label] :weight one})) edges)
+             chart  (earley/parse (earley/grammar :S prods one) lat)]
+         (if-let [[tree _] (forest/viterbi-parse chart)]
+           (->> (tree-seq :children :children tree) (keep :terminal) (mapv (fn [[i j]] (subvec linev i j))))
+           (group-blocks lines)))))))   ; not recognized (shouldn't happen) → greedy fallback
+
 ;; ---- IR construction ----
 (defn- run->ir  [page it]   (node/leaf :run (:str it) {:bbox {:x (:x it) :y (:y it) :w (:w it) :h (:h it) :page page} :font (:font it)}))
 (defn- line->ir [page line]
@@ -90,7 +150,7 @@
   [page-num items]
   (if (empty? items)
     (node/node :page [] {:page page-num})
-    (node/node :page (mapv #(block->ir page-num %) (group-blocks (group-lines items))) {:page page-num})))
+    (node/node :page (mapv #(block->ir page-num %) (group-blocks-weighted (group-lines items))) {:page page-num})))
 
 (defn doc->ir
   "A seq of [page-num normalized-items] → a :document of :page nodes."

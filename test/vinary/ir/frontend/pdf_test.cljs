@@ -69,3 +69,22 @@
       (is (= [:heading :paragraph] (mapv node/kind (node/children r))))
       (is (= "Chapter One" (node/text-content (first (node/children r)))))
       (is (= "Line one. Line two. Line three. Line four." (node/text-content (second (node/children r))))))))
+
+;; ── weighted-optimal block segmentation (lattice ∩ CFG → Viterbi forest) — Phase 7 / ADR-0029 ──
+(defn- ln [s x y h] [{:str s :x x :y y :w 50 :h h :font "F"}])   ; a one-run line at (x,y)
+
+(deftest weighted-block-segmentation
+  (testing "uniform line spacing → a single block (no abnormal gap to split at)"
+    (is (= 1 (count (pdf/group-blocks-weighted [(ln "a" 50 700 10) (ln "b" 50 686 10) (ln "c" 50 672 10)])))))
+  (testing "a large vertical gap splits into two blocks — the global optimum matches the greedy baseline"
+    (let [blocks (pdf/group-blocks-weighted [(ln "H" 50 700 20) (ln "a" 50 640 10) (ln "b" 50 626 10) (ln "c" 50 612 10)])]
+      (is (= 2 (count blocks)))
+      (is (= 1 (count (first blocks))) "the heading is its own block")
+      (is (= 3 (count (second blocks))) "the three body lines coalesce")))
+  (testing "the partition is a CONTIGUOUS cover — every line appears exactly once, in order"
+    (let [lines  (mapv (fn [i] (ln (str i) 50 (- 700 (* i 14)) 10)) (range 6))
+          blocks (pdf/group-blocks-weighted lines)]
+      (is (= 6 (reduce + (map count blocks))) "no line dropped or duplicated")
+      (is (= (mapv first lines) (mapv first (apply concat blocks))) "reading order preserved")))
+  (testing "≤2 lines and huge pages fall back to the greedy baseline (bounded cost)"
+    (is (= 1 (count (pdf/group-blocks-weighted [(ln "only" 50 700 10)]))))))
