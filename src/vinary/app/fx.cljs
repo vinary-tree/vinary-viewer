@@ -68,7 +68,9 @@
 (rf/reg-fx
  :markdown/render
  (fn [{:keys [text path stamp on-done]}]
-   (-> (md/render-ir text (md/dir-of path) stamp)   ; base-dir resolves relative URLs → file://
+   ;; the common IR IS the render path (ADR-0017/0029): remark-parse + remark-gfm (micromark) → mdast → hast →
+   ;; IR → the shared app-hast-suffix + apply-posts. base-dir resolves relative URLs → file://.
+   (-> (md/render-ir text (md/dir-of path) stamp)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
@@ -86,7 +88,7 @@
 (rf/reg-fx
  :org/render
  (fn [{:keys [text path stamp on-done]}]
-   (-> (md/render-org-ir text (md/dir-of path) stamp)
+   (-> (md/render-org-ir text (md/dir-of path) stamp)    ; the proven uniorg pipeline (the sole Org path)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "org render error: " (.-message e))}]))))))
 
