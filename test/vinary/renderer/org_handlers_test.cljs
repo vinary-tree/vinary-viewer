@@ -63,6 +63,12 @@
   (testing "targets <<t>> and radio targets <<<r>>> become visible text (no leaked <<…>>)"
     (is (= "see t and a radio here" (pipeline/org-preprocess "see <<t>> and a <<<radio>>> here")))))
 
+(deftest gap-i-source-positions
+  (testing "trackPosition + the patched uniorg-rehype h() stamp data-vv-source-* on Org preview nodes (the
+            fine-grained source⇄preview jump Markdown has). Requires patches/uniorg-rehype+2.2.0.patch applied."
+    (async done (check "* A Heading\n\nsome paragraph text\n"
+                       (fn [h] (is (re-find #"data-vv-source-start-line" h))) done))))
+
 (deftest gap-preprocessor-skips-verbatim
   (testing "a macro inside a #+begin_src verbatim block is NOT expanded"
     (let [out (pipeline/org-preprocess "#+begin_src text\n{{{title}}}\n#+end_src\nout {{{title}}}")]

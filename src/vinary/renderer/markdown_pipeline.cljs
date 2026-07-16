@@ -690,7 +690,10 @@
         preamble     (atom [])    ; per-call, like front-matter: #+LATEX_HEADER lines for the LaTeX macro expander
         todo-seq     (atom {})]   ; per-call: a document's #+TODO:/#+SEQ_TODO: keyword→state sequence
     (-> (unified)
-        (.use uniorg-parse)
+        ;; trackPosition → orgast nodes carry source positions; the patched uniorg-rehype `h()` copies them onto
+        ;; the hast elements (patches/uniorg-rehype+2.2.0.patch), so the shared source-positions plugin stamps
+        ;; data-vv-source-* and Org gains the fine-grained source⇄preview jump Markdown has.
+        (.use uniorg-parse #js {:trackPosition true})
         (.use uniorg-rehype #js {:handlers         (org-handlers front-matter preamble todo-seq)
                                  :footnotesSection org-footnotes-section})
         (.use (org-front-matter front-matter))

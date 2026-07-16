@@ -22,6 +22,7 @@
   },
   "main": "dist/main/main.js",
   "scripts": {
+    "postinstall": "patch-package",
     "compile": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile main renderer",
     "watch": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs watch main renderer",
     "release": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs release main renderer",
@@ -97,6 +98,7 @@
     "@fontsource-variable/noto-sans": "^5.2.10",
     "@fortawesome/fontawesome-free": "^7.3.0",
     "electron": "^42.5.0",
+    "patch-package": "^8.0.1",
     "shadow-cljs": "3.2.0"
   }
 }
