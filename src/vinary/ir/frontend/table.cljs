@@ -6,7 +6,11 @@
    DOM-free."
   (:require [vinary.ir.node :as node]))
 
-(defn- cell->ir [v] (node/leaf :cell (if (nil? v) "" (str v))))
+;; The cell's value MUST live in a :text-kind child, not the :cell node's own :text field: the IR→HAST
+;; back-end only emits a leaf's text for :text nodes, so a bare `:cell` leaf would lower to an empty <td>
+;; (the value would vanish) — the same leaf-vs-element trap the log-line front-end documents. text-content
+;; still concatenates the value, so the ANSI back-end and the data-test are unaffected.
+(defn- cell->ir [v] (node/node :cell [(node/leaf :text (if (nil? v) "" (str v)))]))
 (defn- row->ir  [cells] (node/node :row (mapv cell->ir cells)))
 (defn rows->ir  "A seq of rows (each a seq of cell values) → a :table node." [rows]
   (node/node :table (mapv row->ir rows)))
