@@ -50,7 +50,7 @@
    no DOM, so the GUI's MathJax/figure post-passes never run: math stays a `code.math-*` span and a
    `#+BEGIN_EXPORT latex` block stays a `language-latex` code block — which is precisely the GUI's fallback."
   [text base-dir]
-  (pipeline->ir pipeline/org-pipeline text base-dir))
+  (pipeline->ir pipeline/org-pipeline (pipeline/org-preprocess text) base-dir))
 
 (defn latex->ir
   "LaTeX text → Promise<IR> via the shared DOM-free tex-processor (renderer.latex converts LaTeX → an HTML string

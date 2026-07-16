@@ -614,6 +614,64 @@
   [metadata base-dir cache-token]
   (app-hast-suffix (unified) metadata base-dir cache-token (tex-normalize)))
 
+;; ── Org source preprocessor (runs BEFORE uniorg-parse) ────────────────────────────────────────────────────
+;; uniorg-parse implements NONE of: macros ({{{…}}}), inline src (src_lang{…}), inline babel (call_x(…)), or
+;; targets (<<…>>); it leaves them as literal text and even MANGLES `src_lang` into `src`+<sub>. Emacs expands
+;; macros as a source pre-pass (org-macro-expand), so we do the same: a line-oriented source→source rewrite that
+;; leaves #+begin_…/#+end_ verbatim blocks untouched. This is a PREPROCESSOR, not a parser — each regex matches
+;; exactly one delimited token (the same tokens Org's own element grammar recognizes), not the language.
+(def ^:private re-org-macro-def      #"(?i)^[ \t]*#\+MACRO:[ \t]+(\S+)[ \t]+(.*?)[ \t]*$")
+(def ^:private re-org-verbatim-begin #"(?i)^[ \t]*#\+begin_(?:src|example|export|verse)\b")
+(def ^:private re-org-verbatim-end   #"(?i)^[ \t]*#\+end_(?:src|example|export|verse)\b")
+(def ^:private re-org-macro-call     #"\{\{\{([A-Za-z][-\w]*)(?:\(([^)]*)\))?\}\}\}")
+(def ^:private re-org-inline-src     #"\bsrc_[-\w]+(?:\[[^\]]*\])?\{([^}]*)\}")
+(def ^:private re-org-inline-call    #"\bcall_[-\w]+(?:\[[^\]]*\])?\(([^)]*)\)(?:\[[^\]]*\])?")
+(def ^:private re-org-radio-target   #"<<<([^<>\n]+?)>>>")
+(def ^:private re-org-target         #"<<([^<>\n]+?)>>")
+
+(defn- org-keyword-value [lines k]
+  (some (fn [l] (second (re-find (re-pattern (str "(?i)^[ \\t]*#\\+" k ":[ \\t]+(.*?)[ \\t]*$")) l))) lines))
+
+(defn- expand-org-macro
+  "Expand ONE {{{name(args)}}} call: a built-in ({{{title}}} etc.) from the document keywords, else a
+   #+MACRO:-defined template with $1..$n substituted, else empty (Emacs drops an unknown macro)."
+  [builtins defs name args]
+  (let [name (str/lower-case name)
+        argv (if (seq args) (mapv str/trim (str/split args #",")) [])]
+    (cond
+      (contains? builtins name) (get builtins name "")
+      (contains? defs name)     (reduce (fn [t i] (str/replace t (str "$" (inc i)) (nth argv i ""))) (get defs name) (range (count argv)))
+      :else                     "")))
+
+(defn- preprocess-org-line [line builtins defs]
+  (-> line
+      (str/replace re-org-macro-call  (fn [m] (expand-org-macro builtins defs (nth m 1) (nth m 2))))
+      (str/replace re-org-inline-src  (fn [m] (str "~" (nth m 1) "~")))   ; inline src CONTENT → inline code
+      (str/replace re-org-inline-call (fn [m] (str "~" (nth m 0) "~")))   ; babel call → inline code (verbatim)
+      (str/replace re-org-radio-target (fn [m] (nth m 1)))                ; <<<radio>>> → visible text
+      (str/replace re-org-target       (fn [m] (nth m 1)))))              ; <<target>>  → visible text
+
+(defn org-preprocess
+  "Expand Org macros and rewrite inline src/babel/targets in the SOURCE before uniorg parses (uniorg implements
+   none of them). Line-oriented; leaves #+begin_…/#+end_ verbatim blocks untouched. Built-in macros
+   ({{{title}}}/{{{author}}}/{{{date}}}/{{{email}}}) read the document's #+TITLE/#+AUTHOR/#+DATE/#+EMAIL."
+  [src]
+  (let [lines (str/split-lines (str src))
+        defs  (into {} (keep (fn [l] (when-let [m (re-find re-org-macro-def l)] [(str/lower-case (nth m 1)) (nth m 2)])) lines))
+        builtins {"title"  (or (org-keyword-value lines "TITLE") "")
+                  "author" (or (org-keyword-value lines "AUTHOR") "")
+                  "date"   (or (org-keyword-value lines "DATE") "")
+                  "email"  (or (org-keyword-value lines "EMAIL") "")}]
+    (->> lines
+         (reduce (fn [{:keys [in? out]} l]
+                   (cond
+                     in?                               {:in? (not (re-find re-org-verbatim-end l)) :out (conj out l)}
+                     (re-find re-org-verbatim-begin l) {:in? true  :out (conj out l)}
+                     :else                             {:in? false :out (conj out (preprocess-org-line l builtins defs))}))
+                 {:in? false :out []})
+         :out
+         (str/join "\n"))))
+
 (defn org-pipeline
   "The Org (.org) counterpart of `base-pipeline`: uniorg-parse (Emacs Org → uniorg AST) → uniorg-rehype (→ hast,
    emitting <pre><code class=\"language-X\"> for #+begin_src X and raw-HTML nodes for #+begin_export html) →

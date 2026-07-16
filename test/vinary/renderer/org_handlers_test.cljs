@@ -43,3 +43,28 @@
                        (fn [h]
                          (is (str/includes? h "an inline task"))
                          (is (not (re-find #"<h(?:1[0-5]|[7-9])[ >]" h)) "no invalid <h7..15>")) done))))
+
+;; ─────────────── the source preprocessor (gaps a–d): uniorg implements none, so we expand first ───────────────
+(deftest gap-a-macro-expansion
+  (testing "built-in {{{title}}} and user #+MACRO: expand in the pre-pass; unknown macros drop"
+    (let [out (pipeline/org-preprocess "#+TITLE: Foo\n#+MACRO: greet Hi $1!\n{{{title}}} / {{{greet(World)}}} / {{{nope}}}")]
+      (is (str/includes? out "Foo / Hi World! / "))
+      (is (not (str/includes? out "{{{"))))))
+
+(deftest gap-b-inline-src
+  (testing "src_lang{code} → inline code (uniorg would mangle the underscore into a subscript)"
+    (is (= "before ~print(1)~ after" (pipeline/org-preprocess "before src_python{print(1)} after")))))
+
+(deftest gap-c-babel-call
+  (testing "call_x(args) → inline code"
+    (is (= "run ~call_fn(1,2)~ now" (pipeline/org-preprocess "run call_fn(1,2) now")))))
+
+(deftest gap-d-targets
+  (testing "targets <<t>> and radio targets <<<r>>> become visible text (no leaked <<…>>)"
+    (is (= "see t and a radio here" (pipeline/org-preprocess "see <<t>> and a <<<radio>>> here")))))
+
+(deftest gap-preprocessor-skips-verbatim
+  (testing "a macro inside a #+begin_src verbatim block is NOT expanded"
+    (let [out (pipeline/org-preprocess "#+begin_src text\n{{{title}}}\n#+end_src\nout {{{title}}}")]
+      (is (re-find #"#\+begin_src text\n\{\{\{title\}\}\}\n#\+end_src" out) "src body untouched")
+      (is (not (re-find #"out \{\{\{title\}\}\}" out)) "outside the block IS expanded"))))

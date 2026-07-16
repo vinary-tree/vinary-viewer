@@ -124,7 +124,7 @@
    only the parse prefix differs. See `stream-blocks*`."
   ([text base-dir] (org-stream-blocks text base-dir nil))
   ([text base-dir cache-token]
-   (stream-blocks* pipeline/org-pipeline text base-dir cache-token)))
+   (stream-blocks* pipeline/org-pipeline (pipeline/org-preprocess text) base-dir cache-token)))
 
 (defn latex-stream-blocks
   "Progressive-commit streaming for LaTeX (.tex) — the same progressive-paint engine, IR, and per-block
@@ -163,7 +163,8 @@
    Promise<{:html :ir :toc :assets}>."
   ([^String text base-dir] (render-org-ir text base-dir nil))
   ([^String text base-dir cache-token]
-   (let [metadata (atom {:toc [] :assets #{}})
+   (let [text     (pipeline/org-preprocess text)     ; expand {{{macros}}} / inline src / babel / targets first
+         metadata (atom {:toc [] :assets #{}})
          captured (atom nil)]
      (-> (pipeline/org-pipeline metadata base-dir cache-token)
          (.use (pipeline/capture-hast captured))
