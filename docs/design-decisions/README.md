@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0028**.
+The next free number is **0030**.
 
 ---
 
@@ -85,6 +85,8 @@ The next free number is **0028**.
 | [0025](0025-latex-rendering-via-unified-latex.md) | LaTeX (.tex) rendering via unified-latex, and the Document↔PDF switch | Accepted |
 | [0026](0026-diff-rendering-side-by-side-and-repo-filetypes.md) | Diff (.diff/.patch) rendering + side-by-side, standard repo filetypes, reverse PDF↔source switch | Accepted |
 | [0027](0027-remote-files-over-ssh.md) | Opening remote files & directories over SSH (ssh2, virtual URIs, polling refresh) | Accepted |
+| [0028](0028-composable-rendering-features.md) | Composable rendering features (native deterministic recognizers) — explored, then reversed | Superseded |
+| [0029](0029-mature-parsers-shared-ir-features.md) | Mature parsers + a shared IR/feature layer (reverses 0028); Org gap-closing; backend parity gate; weighted PDF reflow; HTML facet | Accepted |
 
 ---
 
