@@ -294,28 +294,41 @@
                   (if (attr-of attrs "checked") :checked :unchecked))))))
         (node/preorder item)))
 
+(defn- ->ordinal
+  "Parse an ordered-list `start` / list-item `value` attribute to an int, or nil when absent/non-numeric."
+  [x] (when (some? x) (let [n (js/parseInt x 10)] (when-not (js/isNaN n) n))))
+
 (defn- list->lines [n opts indent width]
   (let [ordered? (= "ol" (:tag (node/node-meta n)))
+        start    (or (->ordinal (attr n "start")) 1)          ; <ol start=N> — the SAME :attrs the HTML backend emits
         items    (filter #(= :list-item (node/kind %)) (node/children n))]
-    (mapcat (fn [idx item]
-              (let [state  (checkbox-state item)
-                    box    (case state :checked "☑ " :unchecked "☐ " nil "")
-                    ;; an ordered task list keeps its ordinal AND gains a box; an unordered one swaps the
-                    ;; bullet for the box (a bullet plus a box reads as noise)
-                    marker (str (cond ordered?    (str (inc idx) ". ")
-                                      (some? state) ""
-                                      :else       "• ")
-                                box)
-                    m-ind  (str indent (emit-span {:text marker :style {:fg :gray}} opts))
-                    mw     (display-width marker)
-                    cont   (str indent (apply str (repeat mw " ")))
-                    inner  (max 4 (- width mw (count indent)))
-                    ;; render the item's content unprefixed (inline runs, nested lists, etc.), then prefix line 0
-                    ;; with the marker and every continuation line with the aligned indent — robust to the
-                    ;; source-positions <span> wrapper and to nested blocks / loose <p> items alike
-                    body   (remove str/blank? (mapcat #(block->lines % opts "" inner) (node/children item)))]
-                (map-indexed (fn [i ln] (str (if (zero? i) m-ind cont) ln)) body)))
-            (range) items)))
+    ;; Thread the running ordinal so `start` and a per-item `value` (Org `[@n]`) drive BOTH backends off ONE IR
+    ;; source (the node :attrs), instead of the terminal re-deriving ordinals as (inc idx) and diverging from the
+    ;; GUI's <ol start>/<li value>. Plain lists (no start/value) are unchanged: start 1, +1 per item.
+    (first
+     (reduce
+      (fn [[lines ord] item]
+        (let [ord    (or (->ordinal (attr item "value")) ord)   ; a per-item value overrides AND resets the run
+              state  (checkbox-state item)
+              box    (case state :checked "☑ " :unchecked "☐ " nil "")
+              ;; an ordered task list keeps its ordinal AND gains a box; an unordered one swaps the bullet for
+              ;; the box (a bullet plus a box reads as noise)
+              marker (str (cond ordered?     (str ord ". ")
+                                (some? state) ""
+                                :else        "• ")
+                          box)
+              m-ind  (str indent (emit-span {:text marker :style {:fg :gray}} opts))
+              mw     (display-width marker)
+              cont   (str indent (apply str (repeat mw " ")))
+              inner  (max 4 (- width mw (count indent)))
+              ;; render the item's content unprefixed (inline runs, nested lists, etc.), then prefix line 0 with
+              ;; the marker and every continuation line with the aligned indent — robust to the source-positions
+              ;; <span> wrapper and to nested blocks / loose <p> items alike
+              body   (remove str/blank? (mapcat #(block->lines % opts "" inner) (node/children item)))]
+          [(into lines (map-indexed (fn [i ln] (str (if (zero? i) m-ind cont) ln)) body))
+           (inc ord)]))
+      [[] start]
+      items))))
 
 (defn- blockquote->lines [n opts indent width]
   (let [inner (str indent (emit-span {:text "│ " :style {:fg :green}} opts))
