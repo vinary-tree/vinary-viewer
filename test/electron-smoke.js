@@ -3069,8 +3069,9 @@ async function main() {
   console.log('[ok] streamed org is BYTE-IDENTICAL to the batch render (same progressive engine as markdown)');
 
   // ── LaTeX streaming parity (ADR-0025): a >256 KiB .tex must stream byte-identically to its batch render. Same
-  //    whole-parse + progressive-paint engine; only the block provider (latex-stream-blocks) differs. \section
-  //    lowers to <h3> (unified-latex), not <h2>. ─────────────────────────────────────────────────────────────
+  //    whole-parse + progressive-paint engine; only the block provider (latex-stream-blocks) differs. For a full
+  //    `\begin{document}`, renderer.latex-structure numbers each \section into an <h2> (an explicit slug id +
+  //    prepended number) — the stream runs the SAME whole-document restructure, so parity holds. ──────────────
   const texBig = createLargeLatexFixtures();
   assert.ok(texBig.size > 256 * 1024, `latex fixture (${texBig.size} B) must exceed the 256 KiB stream threshold`);
   const texStamp = Date.now();
@@ -3080,21 +3081,24 @@ async function main() {
   state.contentByPath.set(texBig.batchPath, { ...(await contentService.openUri(texBig.batchPath)), stamp: texStamp });
   win.webContents.send('vv:open-files', { paths: [texBig.batchPath], 'focus-first': true });
   await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
-    return b && b.querySelectorAll('h3').length >= ${texBig.sections} && !document.querySelector('.vv-content .vv-stream-progress'); })()`),
+    return b && b.querySelectorAll('h2').length >= ${texBig.sections} && !document.querySelector('.vv-content .vv-stream-progress'); })()`),
     'batch latex renders whole (no stream progress strip)', 40000);
   await delay(400);
   const texBatchHtml = await evalIn(win, `document.querySelector('.vv-content .markdown-body').innerHTML`);
-  const texBatchH3 = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h3').length`);
+  const texBatchSections = await evalIn(win, `document.querySelectorAll('.vv-content .markdown-body h2').length`);
   const texBatchHas = await evalIn(win, `(() => {
     const b = document.querySelector('.vv-content .markdown-body');
     return { math: b.querySelectorAll('.vv-math-inline svg').length,
              tables: b.querySelectorAll('table').length,
              bold: b.querySelectorAll('b, strong').length };
   })()`);
-  assert.ok(texBatchHas.math >= texBatchH3, `batch latex typeset inline MathJax in every section (${texBatchHas.math})`);
-  assert.ok(texBatchHas.tables >= texBatchH3, `batch latex rendered a tabular in every section (${texBatchHas.tables})`);
-  assert.ok(texBatchHas.bold >= texBatchH3, `batch latex rendered \\textbf in every section (${texBatchHas.bold})`);
-  console.log(`[ok] batch latex reference rendered (${texBatchH3} sections, ${(texBig.size / 1024).toFixed(0)} KiB; ${texBatchHas.math} math, ${texBatchHas.tables} tables)`);
+  assert.ok(texBatchHas.math >= texBatchSections, `batch latex typeset inline MathJax in every section (${texBatchHas.math})`);
+  assert.ok(texBatchHas.tables >= texBatchSections, `batch latex rendered a tabular in every section (${texBatchHas.tables})`);
+  assert.ok(texBatchHas.bold >= texBatchSections, `batch latex rendered \\textbf in every section (${texBatchHas.bold})`);
+  const firstTexH2 = (texBatchHtml.match(/<h2[^>]*>[\s\S]*?<\/h2>/) || ['<no h2>'])[0];
+  assert.ok(/id="user-content-1-section-0"/.test(firstTexH2) && /1 Section 0/.test(firstTexH2),
+    `restructure numbered the first \\section (1 Section 0) with a clobber-prefixed slug id — got: ${firstTexH2.slice(0, 140)}`);
+  console.log(`[ok] batch latex reference rendered (${texBatchSections} numbered sections, ${(texBig.size / 1024).toFixed(0)} KiB; ${texBatchHas.math} math, ${texBatchHas.tables} tables)`);
 
   win.webContents.send('vv:settings', '{:stream? true}');
   await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.settings['stream?'])`), 'streaming re-enabled for the streamed latex render');
@@ -3102,9 +3106,9 @@ async function main() {
   win.webContents.send('vv:open-files', { paths: [texBig.streamPath], 'focus-first': true });
   await waitFor(() => evalIn(win, `(() => {
     const streaming = Boolean(document.querySelector('.vv-content .vv-stream-progress'));
-    return streaming && document.querySelectorAll('.vv-content .markdown-body h3').length > 0;
+    return streaming && document.querySelectorAll('.vv-content .markdown-body h2').length > 0;
   })()`), 'latex streams — progress strip + first blocks paint', 30000);
-  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h3').length >= ${texBatchH3}
+  await waitCalm(win, `document.querySelectorAll('.vv-content .markdown-body h2').length >= ${texBatchSections}
     && (() => { const p = document.querySelector('.vv-content .vv-stream-progress'); return p && p.classList.contains('vv-stream-progress-done'); })()`,
     'streamed latex converges to the whole document', 60000);
   await delay(600);
@@ -3158,6 +3162,66 @@ async function main() {
     assert.strictEqual(streamReflow, batchReflow, 'streamed PDF reflow must be byte-identical to the batch reflow');
     console.log('[ok] streamed PDF reflow is byte-identical to the batch reflow (progressive extracted-text commit)');
   }
+
+  // ── Part 3: a standalone .tex renders its STRUCTURE in the LaTeX preview (numbering, refs, cites, bib, front
+  // matter) — the full DOM pipeline (renderer.latex-structure → tex-normalize → MathJax → the vv-* CSS). No PDF
+  // sibling, so the doc opens showing its own LaTeX preview (the restructured HTML in .markdown-body).
+  const standaloneTex = path.join(ROOT, 'test', 'standalone.tex');
+  const standaloneSrc = [
+    '\\documentclass{article}', '\\usepackage{amsthm,amsmath,xcolor}',
+    '\\newtheorem{theorem}{Theorem}', '\\newtheorem{definition}[theorem]{Definition}',
+    '\\definecolor{redcopy}{rgb}{0.78,0.08,0.08}', '\\newcommand{\\rc}[1]{\\textcolor{redcopy}{#1}}',
+    '\\newcommand{\\rSet}{\\rc{\\mathsf{Set}}}', '\\title{Standalone Paper}', '\\author{Test Author}', '\\date{2026}',
+    '\\begin{document}', '\\maketitle',
+    '\\begin{abstract}', 'An abstract citing \\cite{knuth}.', '\\end{abstract}', '\\tableofcontents',
+    '\\section{First}\\label{sec:first}',
+    'Body with math $\\rSet$, ref \\S\\ref{sec:second}, eq \\eqref{eq:e}, and cite \\cite{knuth}.',
+    '\\begin{equation}\\label{eq:e}', 'x = y', '\\end{equation}',
+    '\\begin{definition}[A widget]\\label{def:w}', 'See Definition~\\ref{def:w}.', '\\end{definition}',
+    '\\section{Second}\\label{sec:second}', 'Done.',
+    '\\begin{thebibliography}{9}', '\\bibitem{knuth} D. Knuth. The Art. 1968.', '\\end{thebibliography}',
+    '\\end{document}',
+  ].join('\n');
+  state.contentByPath.set(standaloneTex, { path: standaloneTex, kind: 'latex', text: standaloneSrc, meta: { size: standaloneSrc.length } });
+  await evalIn(win, `window.__vvopen(${JSON.stringify(standaloneTex)})`);
+  win.webContents.send('vv:content', { path: standaloneTex, kind: 'latex', text: standaloneSrc, stamp: Date.now(), meta: { size: standaloneSrc.length } });
+  await waitFor(() => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body');
+    return Boolean(b) && Boolean(b.querySelector('h2') && b.querySelector('[id="user-content-vv-bibliography"] li') && b.querySelector('svg')); })()`),
+    'the standalone .tex renders its restructured LaTeX preview (with math typeset)', 15000);
+  const tex = await evalIn(win, `(() => {
+    const b = document.querySelector('.vv-content .markdown-body');
+    const h2s = Array.from(b.querySelectorAll('h2')).map(h => ({ id: h.id, t: h.textContent.trim() }));
+    const bibLi = b.querySelector('[id="user-content-vv-bibliography"] li');
+    const citeLink = b.querySelector('a[href="#user-content-vv-bib-knuth"]');
+    const tocLink = b.querySelector('[id="user-content-vv-toc"] a');
+    const thm = Array.from(b.querySelectorAll('strong')).map(s => s.textContent.trim()).find(t => /^Definition 1\\b/.test(t));
+    return {
+      title: b.querySelector('[id="user-content-vv-doc-header"] h1')?.textContent.trim(),
+      abstract: h2s.some(h => h.t === 'Abstract') && Boolean(b.querySelector('[id="user-content-vv-abstract"]')),
+      sec1: h2s.find(h => /^1\\s+First/.test(h.t)) || null,
+      sec2: h2s.find(h => /^2\\s+Second/.test(h.t)) || null,
+      bibMark: bibLi?.textContent.trim().slice(0, 3), bibId: bibLi?.id,
+      cite: Boolean(citeLink), citeText: citeLink?.textContent.trim(),
+      toc: tocLink?.getAttribute('href'),
+      thm: thm || null,
+      refResolved: /Definition\\s*1/.test(b.textContent),
+      mathRendered: Boolean(b.querySelector('.vv-math-inline svg, .vv-math-display svg, svg')),
+      leaks: /\\\\cite|\\\\ref\\{|\\\\label|texorpdfstring|\\\\maketitle/.test(b.textContent),
+    };
+  })()`);
+  assert.strictEqual(tex.title, 'Standalone Paper', 'the \\title renders inside the <section id=vv-doc-header> block');
+  assert.strictEqual(tex.abstract, true, 'the abstract renders under an Abstract heading, in a <section id=vv-abstract>');
+  assert.ok(tex.sec1 && tex.sec1.id === 'user-content-1-first', 'section 1 is a numbered heading with a (clobber-prefixed) slug id');
+  assert.ok(tex.sec2 && tex.sec2.id === 'user-content-2-second', 'section 2 is numbered 2 with its own id');
+  assert.strictEqual(tex.bibMark, '[1]', 'the bibliography entry is enumerated [1]');
+  assert.strictEqual(tex.bibId, 'user-content-vv-bib-knuth', 'the bib entry carries the clobber-prefixed anchor id (a <li>)');
+  assert.ok(tex.cite && tex.citeText === '1', 'the \\cite renders as a link whose text is the bib number');
+  assert.strictEqual(tex.toc, '#user-content-1-first', 'the table of contents links to the numbered section anchor');
+  assert.ok(/^Definition 1 \(A widget\)/.test(tex.thm || ''), 'the definition env gets a numbered <strong> header');
+  assert.strictEqual(tex.refResolved, true, '\\ref{def:w} resolved to the definition number (Definition 1)');
+  assert.strictEqual(tex.mathRendered, true, 'the inline math (a red \\rSet) typeset via MathJax');
+  assert.strictEqual(tex.leaks, false, 'no structural LaTeX macro leaks into the rendered preview');
+  console.log('[ok] Part 3: a standalone .tex renders numbered sections, refs, cites, a bibliography + front matter');
 
   // ── Collocated document GROUP: the [Preview ▾ | Source ▾] combo (replaces the old [Doc | PDF] switch) ──
   // A .tex collocated with an exported .pdf. Its group = {latex, pdf}. By the collocated-default :pdf preference it

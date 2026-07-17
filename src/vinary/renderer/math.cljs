@@ -74,6 +74,7 @@
             ["@mathjax/src/cjs/input/tex/base/BaseConfiguration.js" :as base-config]
             ["@mathjax/src/cjs/input/tex/ams/AmsConfiguration.js" :as ams-config]
             ["@mathjax/src/cjs/input/tex/amscd/AmsCdConfiguration.js" :as amscd-config]
+            ["@mathjax/src/cjs/input/tex/color/ColorConfiguration.js" :as color-config]
             ["@mathjax/src/cjs/input/tex/boldsymbol/BoldsymbolConfiguration.js" :as boldsymbol-config]
             ["@mathjax/src/cjs/input/tex/newcommand/NewcommandConfiguration.js" :as newcommand-config]
             ["@mathjax/src/cjs/input/tex/configmacros/ConfigMacrosConfiguration.js" :as configmacros-config]
@@ -99,6 +100,9 @@
 ;; ---- the single MathJax TeX→SVG engine (browser + node), built from the shadow-bundled js/ source ----
 (def ^:private safe-packages
   ;; NO html/require/autoload — see the ns docstring. Adding amscd (\begin{CD}) + boldsymbol to the standard set.
+  ;; color (\textcolor[rgb]{…}) is added for the LaTeX previewer: latex-structure/sanitize-math! resolves a
+  ;; document's \definecolor named colours to the rgb spec MathJax's color package understands (it never sees the
+  ;; .tex preamble). Its ColorConfiguration imports only internal MathJax modules — safe by the same test as amscd.
   ;;
   ;; textmacros parses the CONTENT of \text{}/\texttt{}/… . \text itself is base (BaseMethods.HBox); what base
   ;; lacks without textmacros is the `internalMath` hook (ParseUtil.internalMath delegates to
@@ -110,12 +114,12 @@
   ;; it pulls in no html/require/autoload (only internal MathJax modules), and defaults to a restricted
   ;; `packages: ["text-base"]` inside \text{}. Its one autoload touchpoint (CheckAutoload, for \color inside
   ;; \text) merely reads packageData and no-ops when autoload is absent — which here it always is.
-  #js ["base" "ams" "amscd" "boldsymbol" "newcommand" "configmacros" "noerrors" "noundefined" "textmacros"])
+  #js ["base" "ams" "amscd" "color" "boldsymbol" "newcommand" "configmacros" "noerrors" "noundefined" "textmacros"])
 
 ;; Reference each package-configuration module so its import (and thus its package registration) is retained.
 ;; Each config self-registers with MathJax's ConfigurationHandler when its module initialises.
 (def ^:private loaded-configs
-  #js [base-config ams-config amscd-config boldsymbol-config
+  #js [base-config ams-config amscd-config color-config boldsymbol-config
        newcommand-config configmacros-config noerrors-config noundefined-config
        textmacros-config])
 

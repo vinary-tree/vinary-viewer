@@ -630,6 +630,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body span.todo { color: var(--vv-error); font-weight: 600; }
 .markdown-body span.done { color: var(--vv-comment); font-weight: 600; }
 
+/* Standalone-LaTeX (.tex) document structure — the shapes renderer.latex-structure emits for a full document
+   (title block, abstract, table of contents, bibliography). GitHub's sanitize schema strips any non-whitelisted
+   class from EVERY element but keeps an id — clobber-prefixed to `user-content-…` — so these hooks are ids, the
+   same `user-content-` convention the engine's own section anchors + TOC/cite links already resolve against. */
+.markdown-body section[id="user-content-vv-doc-header"] { text-align: center; margin: 0.2em 0 1.2em; }
+.markdown-body section[id="user-content-vv-doc-header"] h1 { border: none; margin: 0.1em 0 0.15em; }
+.markdown-body section[id="user-content-vv-doc-header"] p { color: var(--vv-fg-dim); margin: 0.1em 0; }
+.markdown-body section[id="user-content-vv-abstract"] { margin: 0 auto 1.4em; max-width: 44em; }
+/* Table of contents — an unbulleted list of section links. */
+.markdown-body ul[id="user-content-vv-toc"] { list-style: none; padding-left: 0; margin: 0.4em 0 1.6em; }
+.markdown-body ul[id="user-content-vv-toc"] li { margin: 0.12em 0; }
+.markdown-body ul[id="user-content-vv-toc"] a { text-decoration: none; }
+.markdown-body ul[id="user-content-vv-toc"] a:hover { text-decoration: underline; }
+/* Bibliography — a vertically-aligned hanging list: each [n] mark hangs at the left margin and the entry body
+   wraps aligned after it (the requested enumeration), the marks lining up down the page. */
+.markdown-body ul[id="user-content-vv-bibliography"] { list-style: none; padding-left: 0; margin: 0.6em 0 1em; }
+.markdown-body ul[id="user-content-vv-bibliography"] li { padding-left: 2.4em; text-indent: -2.4em; margin: 0.4em 0; }
+
 /* MathJax ships its own stylesheet, and two of its rules are load-bearing: `overflow: visible` on the rendered
    <svg> (without it the UA's `svg:not(:root){overflow:hidden}` clips every glyph reaching past the viewBox) and
    `stroke-width: 3` on glyph paths. It also carries the clip rule that hides the <mjx-assistive-mml> screen-
