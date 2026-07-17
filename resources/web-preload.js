@@ -11,9 +11,29 @@ function headingEls() {
 
 let headingCache = [];
 
+// A GitHub-style heading slug: lowercase, drop punctuation, spaces -> hyphens, deduped per document with a
+// -N suffix (the same dedup github-slugger/rehype-slug use). This aligns HTML heading ids with the shared
+// slug policy every other format uses (readable anchors, not the old vv-h-<i> namespace) so the Contents
+// outline and in-page anchors line up. This preload is SANDBOXED (contextIsolation, nodeIntegration:false —
+// see main/web.cljs), so it cannot require the ESM-only github-slugger; this self-contained slug matches it
+// for the common ASCII case, and web-preload stays self-consistent (outline + scroll-spy + click share it)
+// regardless of any exotic-unicode drift. An existing DOM id is always preferred over a generated one.
+function slugify(text) {
+  return String(text || '').toLowerCase().trim()
+    .replace(/[^\wÀ-￿\- ]+/g, '')   // keep word chars, non-ASCII letters, hyphen, space
+    .replace(/ +/g, '-');
+}
+
 function refreshHeadings() {
+  const seen = Object.create(null);
   headingCache = headingEls().map(function (h, i) {
-    if (!h.id) h.id = 'vv-h-' + i;
+    if (!h.id) {
+      let s = slugify(h.textContent) || ('section-' + (i + 1));
+      const base = s;
+      while (seen[s] !== undefined) { seen[base] = (seen[base] || 0) + 1; s = base + '-' + seen[base]; }
+      seen[s] = 0;
+      h.id = s;
+    }
     return { level: parseInt(h.tagName.slice(1), 10),
              text: (h.textContent || '').trim().slice(0, 200),
              id: h.id,
