@@ -45,15 +45,57 @@
             (node/preorder n))
       (first (remove str/blank? (str/split-lines (str/trim (node/text-content n)))))))
 
-(defn outline
-  "A Contents outline for source code: the top-level declaration nodes → [{:level 1 :text :id :line}], where
-   :id is `L<start-line>` for CodeMirror line navigation. Source files previously had no Contents outline."
+;; ── LaTeX: outline the document's SECTIONS, not its preamble definitions ──────────────────────────────────
+;; The generic decl outline above would capture tree-sitter-latex's top-level PREAMBLE nodes — `class_include`
+;; (\documentclass) and the `*_definition` family (new_command / theorem / color / counter / label / …), which
+;; match `class`/`definition` — while MISSING the real sectioning nodes (they nest inside the `document`
+;; environment, and are not "decl" kinds). For a LaTeX document we instead recurse for the sectioning commands
+;; and use each one's `text` field (the title), matching what the rendered-HTML preview outline shows.
+(def ^:private section-level
+  {:part 1 :chapter 1 :section 1 :subsection 2 :subsubsection 3 :paragraph 4 :subparagraph 5})
+
+(def ^:private latex-marker-kinds
+  ;; node kinds no code grammar has → treat the tree as LaTeX (so we outline sections, never preamble defs)
+  (into #{:class_include :new_command_definition} (keys section-level)))
+
+(defn- latex-doc? [ir]
+  (boolean (some #(contains? latex-marker-kinds (node/kind %)) (node/preorder ir))))
+
+(defn- section-title
+  "A sectioning node's title: the text of its first DIRECT :curly_group child (the `text` field — the sectioning
+   command precedes it, the section body follows), else the node's first non-blank source line."
+  [n]
+  (or (some (fn [c] (when (= :curly_group (node/kind c))
+                      (let [t (str/trim (node/text-content c))] (when (seq t) t))))
+            (node/children n))
+      (first (remove str/blank? (str/split-lines (str/trim (node/text-content n)))))))
+
+(defn- latex-outline
+  "LaTeX Contents outline: every sectioning node (preorder, so nested subsections are found) → its title +
+   nesting level. Preamble definitions are excluded (they are not sectioning kinds)."
   [ir]
   (into []
-        (comp (filter decl?)
-              (keep (fn [n]
-                      (let [line (get-in (node/node-meta n) [:span :start :line])
-                            nm   (decl-name n)]
-                        (when (and line nm)
-                          {:level 1 :text (str nm) :id (str "L" line) :line line})))))
-        (node/children ir)))
+        (keep (fn [n]
+                (when-let [level (section-level (node/kind n))]
+                  (let [line (get-in (node/node-meta n) [:span :start :line])
+                        nm   (section-title n)]
+                    (when (and line nm)
+                      {:level level :text (str nm) :id (str "L" line) :line line})))))
+        (node/preorder ir)))
+
+(defn outline
+  "A Contents outline over the source IR. For a LaTeX document → its SECTIONS (\\part/\\chapter/\\section/…) with
+   nesting levels, NOT the preamble macro/theorem/colour definitions (see latex-outline). For every other
+   language → the top-level declaration nodes (functions/classes/…). :id is `L<start-line>` for CodeMirror line
+   navigation. Source files previously had no Contents outline."
+  [ir]
+  (if (latex-doc? ir)
+    (latex-outline ir)
+    (into []
+          (comp (filter decl?)
+                (keep (fn [n]
+                        (let [line (get-in (node/node-meta n) [:span :start :line])
+                              nm   (decl-name n)]
+                          (when (and line nm)
+                            {:level 1 :text (str nm) :id (str "L" line) :line line})))))
+          (node/children ir))))

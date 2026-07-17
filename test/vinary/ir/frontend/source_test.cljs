@@ -48,3 +48,27 @@
   (testing "error / missing nodes are flagged in metadata"
     (let [ir (source/tree->ir #js {:rootNode (ts "module" 0 3 0 [(ts "ERROR" 0 3 0 [] :error true)])} "xyz")]
       (is (true? (get-in (first (node/children ir)) [:meta :error?]))))))
+
+;; A sectioning node as tree-sitter-latex shapes it: a `command` child, then the `text` field (curly_group
+;; title), then any body/nested sections.
+(defn- sec-node [kind line title & kids]
+  (node/node kind
+             (into [(node/leaf :command_name (str "\\" (name kind)))
+                    (node/node :curly_group [(node/leaf :word title)])]
+                   kids)
+             {:span {:start {:line line}}}))
+
+(deftest latex-outline-sections-not-preamble
+  (testing "a LaTeX source tree outlines its SECTIONS (with nesting levels), NOT the preamble \\documentclass /
+            \\newcommand definitions the generic decl outline would otherwise capture (the .tex Contents bug)"
+    (let [ir (node/node :document
+               [(node/node :class_include [(node/node :curly_group [(node/leaf :word "article")])] {:span {:start {:line 1}}})
+                (node/node :new_command_definition [(node/leaf :word "\\x")] {:span {:start {:line 2}}})
+                (sec-node :section 3 "Intro"
+                          (sec-node :subsection 4 "Milner"))
+                (sec-node :section 5 "Recap")]
+               {:root-type "source_file"})]
+      (is (= [{:level 1 :text "Intro"  :id "L3" :line 3}
+              {:level 2 :text "Milner" :id "L4" :line 4}
+              {:level 1 :text "Recap"  :id "L5" :line 5}]
+             (source/outline ir))))))
