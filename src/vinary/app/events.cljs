@@ -224,15 +224,17 @@
 ;; (The :vv/ir migration flag + :ir/set-enabled toggle are RETIRED — the common IR is now the unconditional
 ;;  render path for Markdown and office; see ADR-0017 and vinary.ir.flag.)
 
-;; Set a document's Contents outline (:doc/toc) out of band — used by the source-code view, which derives a
-;; code outline from its tree-sitter parse (common IR) after mounting, and by any other format whose outline
-;; is computed in its own view rather than at :content/rendered.
+;; Set a document's SOURCE-view Contents outline (:doc/source-toc) out of band — the source-code view derives it
+;; from its tree-sitter parse (common IR) after mounting. Kept SEPARATE from the preview's :doc/toc (written at
+;; :content/rendered): the two use different id-spaces (source = `L<line>` for CodeMirror nav, preview = rehype
+;; slug ids for DOM nav), so writing the same attr clobbered whichever rendered last and left the inactive view's
+;; Contents un-navigable. The :doc/toc sub selects between them by the active view.
 (rf/reg-event-fx
  :toc/set
  (fn [_ [_ path toc]]
    (let [snap (ds/snapshot)]
      (when-let [eid (ds/eid-for-path snap path)]
-       {:fx [[:ds/transact [[:db/add eid :doc/toc (vec (or toc []))]]]]}))))
+       {:fx [[:ds/transact [[:db/add eid :doc/source-toc (vec (or toc []))]]]]}))))
 
 (defn content-error-tx
   "Create/update a document error transaction for path, even if no content entity exists yet."

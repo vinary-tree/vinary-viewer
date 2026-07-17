@@ -45,57 +45,107 @@
             (node/preorder n))
       (first (remove str/blank? (str/split-lines (str/trim (node/text-content n)))))))
 
-;; ── LaTeX: outline the document's SECTIONS, not its preamble definitions ──────────────────────────────────
-;; The generic decl outline above would capture tree-sitter-latex's top-level PREAMBLE nodes — `class_include`
-;; (\documentclass) and the `*_definition` family (new_command / theorem / color / counter / label / …), which
-;; match `class`/`definition` — while MISSING the real sectioning nodes (they nest inside the `document`
-;; environment, and are not "decl" kinds). For a LaTeX document we instead recurse for the sectioning commands
-;; and use each one's `text` field (the title), matching what the rendered-HTML preview outline shows.
-(def ^:private section-level
-  {:part 1 :chapter 1 :section 1 :subsection 2 :subsubsection 3 :paragraph 4 :subparagraph 5})
+;; ── markup Contents: outline a document's HEADINGS (Markdown / Org / LaTeX), not its blocks or preamble ─────
+;; The decl outline above is for CODE. Markup formats carry headings, not declarations; each markup grammar
+;; shapes them differently, so we extract per grammar — but every branch emits the same
+;; {:level :text :id "L<line>" :line} entry the code outline, the ANSI/HTML backends, and the rendered-HTML
+;; preview toc all use (one outline contract, format-specialized extraction). :id = `L<start-line>` drives
+;; CodeMirror line nav (syntax/scroll-source-to-line!). A prior LaTeX-only fix auto-detected LaTeX via the
+;; `:section`/`:paragraph` kinds — which tree-sitter-markdown AND tree-sitter-org ALSO emit — so it mis-outlined
+;; every Markdown/Org source view (each `:section`/`:paragraph` became a raw-source-line entry). We now detect by
+;; the explicit grammar language, or (no language) by format-UNIQUE kinds only.
 
-(def ^:private latex-marker-kinds
-  ;; node kinds no code grammar has → treat the tree as LaTeX (so we outline sections, never preamble defs)
-  (into #{:class_include :new_command_definition} (keys section-level)))
+(defn- start-line [n] (get-in (node/node-meta n) [:span :start :line]))
 
-(defn- latex-doc? [ir]
-  (boolean (some #(contains? latex-marker-kinds (node/kind %)) (node/preorder ir))))
+(defn- child-text
+  "Trimmed text-content of `n`'s first DIRECT child whose kind ∈ `kinds`, else nil."
+  [n kinds]
+  (some (fn [c] (when (contains? kinds (node/kind c))
+                  (let [t (str/trim (node/text-content c))] (when (seq t) t))))
+        (node/children n)))
 
-(defn- section-title
-  "A sectioning node's title: the text of its first DIRECT :curly_group child (the `text` field — the sectioning
-   command precedes it, the section body follows), else the node's first non-blank source line."
-  [n]
-  (or (some (fn [c] (when (= :curly_group (node/kind c))
-                      (let [t (str/trim (node/text-content c))] (when (seq t) t))))
-            (node/children n))
-      (first (remove str/blank? (str/split-lines (str/trim (node/text-content n)))))))
-
-(defn- latex-outline
-  "LaTeX Contents outline: every sectioning node (preorder, so nested subsections are found) → its title +
-   nesting level. Preamble definitions are excluded (they are not sectioning kinds)."
-  [ir]
+(defn- markup-outline
+  "Outline the heading-like nodes of `ir` (preorder, so nested headings are found): keep those matching
+   `heading?`, with entry level = (`level` n) and title = (`title` n). Drops any node without a start line or a
+   non-blank title."
+  [ir heading? level title]
   (into []
         (keep (fn [n]
-                (when-let [level (section-level (node/kind n))]
-                  (let [line (get-in (node/node-meta n) [:span :start :line])
-                        nm   (section-title n)]
-                    (when (and line nm)
-                      {:level level :text (str nm) :id (str "L" line) :line line})))))
+                (when (heading? n)
+                  (let [line (start-line n)
+                        lvl  (level n)
+                        nm   (title n)]
+                    (when (and line lvl nm)
+                      {:level lvl :text nm :id (str "L" line) :line line})))))
         (node/preorder ir)))
 
-(defn outline
-  "A Contents outline over the source IR. For a LaTeX document → its SECTIONS (\\part/\\chapter/\\section/…) with
-   nesting levels, NOT the preamble macro/theorem/colour definitions (see latex-outline). For every other
-   language → the top-level declaration nodes (functions/classes/…). :id is `L<start-line>` for CodeMirror line
-   navigation. Source files previously had no Contents outline."
+;; Markdown (tree-sitter-markdown): atx level from the `atx_h{1..6}_marker` child, setext level from the
+;; `setext_h{1,2}_underline` child; title from the `inline` (atx) / `paragraph` (setext) content child.
+(def ^:private atx-marker-level
+  {:atx_h1_marker 1 :atx_h2_marker 2 :atx_h3_marker 3 :atx_h4_marker 4 :atx_h5_marker 5 :atx_h6_marker 6})
+(def ^:private setext-underline-level {:setext_h1_underline 1 :setext_h2_underline 2})
+
+(defn- md-heading? [n] (contains? #{:atx_heading :setext_heading} (node/kind n)))
+(defn- md-level [n]
+  (some #(or (atx-marker-level (node/kind %)) (setext-underline-level (node/kind %))) (node/children n)))
+(defn- md-title [n] (child-text n #{:inline :paragraph}))
+(defn- markdown-outline [ir] (markup-outline ir md-heading? md-level md-title))
+
+;; Org (tree-sitter-org): headline level = the length of its `stars` child, title = its `item` child.
+(defn- org-heading? [n] (= :headline (node/kind n)))
+(defn- org-level [n]
+  (some (fn [c] (when (= :stars (node/kind c)) (max 1 (count (str/trim (node/text-content c))))))
+        (node/children n)))
+(defn- org-title [n] (child-text n #{:item}))
+(defn- org-outline [ir] (markup-outline ir org-heading? org-level org-title))
+
+;; LaTeX (tree-sitter-latex): level from the sectioning node's kind, title from its `:curly_group` text field
+;; (the sectioning command precedes it, the body follows), else the node's first non-blank source line. The
+;; preamble `*_definition` family / `class_include` are excluded — they are not sectioning kinds.
+(def ^:private section-level
+  {:part 1 :chapter 1 :section 1 :subsection 2 :subsubsection 3 :paragraph 4 :subparagraph 5})
+(defn- latex-heading? [n] (contains? section-level (node/kind n)))
+(defn- latex-level [n] (section-level (node/kind n)))
+(defn- latex-title [n]
+  (or (child-text n #{:curly_group})
+      (first (remove str/blank? (str/split-lines (str/trim (node/text-content n)))))))
+(defn- latex-outline [ir] (markup-outline ir latex-heading? latex-level latex-title))
+
+;; LaTeX-UNIQUE node kinds (Markdown/Org emit neither `:curly_group` nor these) → detect LaTeX for the
+;; no-language fallback WITHOUT the shared `:section`/`:paragraph`/`:part`/`:chapter` kinds that mis-detected
+;; Markdown & Org.
+(def ^:private latex-detect-kinds
+  #{:class_include :new_command_definition :subsection :subsubsection :subparagraph :curly_group})
+
+(defn- code-outline
+  "Code Contents outline: top-level declaration nodes (functions/classes/…) → line-anchored entries."
   [ir]
-  (if (latex-doc? ir)
-    (latex-outline ir)
-    (into []
-          (comp (filter decl?)
-                (keep (fn [n]
-                        (let [line (get-in (node/node-meta n) [:span :start :line])
-                              nm   (decl-name n)]
-                          (when (and line nm)
-                            {:level 1 :text (str nm) :id (str "L" line) :line line})))))
-          (node/children ir))))
+  (into []
+        (comp (filter decl?)
+              (keep (fn [n]
+                      (let [line (start-line n)
+                            nm   (decl-name n)]
+                        (when (and line nm)
+                          {:level 1 :text (str nm) :id (str "L" line) :line line})))))
+        (node/children ir)))
+
+(defn- has-kind? [ir pred] (boolean (some pred (node/preorder ir))))
+
+(defn outline
+  "A Contents outline over the source IR, emitting {:level :text :id \"L<line>\" :line} entries (the shape the
+   backends + the rendered-HTML preview toc share). Markup → its HEADINGS (Markdown atx/setext · Org headlines ·
+   LaTeX \\part/\\chapter/\\section/…, nested); code → its top-level declarations. Dispatch by `lang` (the grammar's
+   language, threaded from syntax/parse-outline); with no/unknown `lang`, auto-detect by format-UNIQUE node kinds
+   — never the `:section`/`:paragraph` kinds Markdown, Org, and LaTeX share (checking Markdown's and Org's unique
+   heading kinds before the LaTeX-unique set keeps the three disjoint). :id = `L<start-line>` for CodeMirror nav."
+  ([ir] (outline ir nil))
+  ([ir lang]
+   (case (some-> lang name str/lower-case)
+     ("markdown" "md" "gfm" "mdx") (markdown-outline ir)
+     "org"                         (org-outline ir)
+     ("latex" "tex")               (latex-outline ir)
+     (cond
+       (has-kind? ir md-heading?)                                   (markdown-outline ir)
+       (has-kind? ir org-heading?)                                  (org-outline ir)
+       (has-kind? ir #(contains? latex-detect-kinds (node/kind %))) (latex-outline ir)
+       :else                                                        (code-outline ir)))))

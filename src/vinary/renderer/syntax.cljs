@@ -370,7 +370,10 @@
   [text path]
   (if-let [grammar (grammar-for path)]
     (-> (load-grammar grammar)
-        (.then (fn [loaded] (source-fe/outline (source-fe/tree->ir (parse-tree loaded text) (or text "")))))
+        ;; thread the grammar's language so `outline` dispatches deterministically (markup → headings, code →
+        ;; declarations) rather than guessing from node kinds Markdown/Org/LaTeX share
+        (.then (fn [loaded] (source-fe/outline (source-fe/tree->ir (parse-tree loaded text) (or text ""))
+                                               (or (:language grammar) (:id grammar)))))
         (.catch (fn [_] [])))
     (js/Promise.resolve [])))
 

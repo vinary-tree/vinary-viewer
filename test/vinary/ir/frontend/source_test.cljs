@@ -72,3 +72,52 @@
               {:level 2 :text "Milner" :id "L4" :line 4}
               {:level 1 :text "Recap"  :id "L5" :line 5}]
              (source/outline ir))))))
+
+;; Markdown as tree-sitter-markdown shapes it: nested `section` nodes, each holding an `atx_heading` (a
+;; `atx_h{1..6}_marker` child → level, an `inline` child → title) or `setext_heading` (a `setext_h{1,2}_underline`
+;; child → level, a `paragraph` child → title) followed by `paragraph` blocks. THE REGRESSION: a prior LaTeX-only
+;; auto-detect fired on the `:section`/`:paragraph` kinds Markdown ALSO emits and outlined every block (the README
+;; Contents became a raw-source-line dump). The source Contents must list only the headings.
+(deftest markdown-outline-headings
+  (let [ir (node/node :document
+             [(node/node :section
+                [(node/node :atx_heading
+                            [(node/leaf :atx_h1_marker "#") (node/leaf :inline "Vinary Viewer")]
+                            {:span {:start {:line 1}}})
+                 (node/leaf :paragraph "A reactive desktop previewer for Git repositories…")
+                 (node/node :section
+                   [(node/node :atx_heading
+                               [(node/leaf :atx_h2_marker "##") (node/leaf :inline "What It Is")]
+                               {:span {:start {:line 5}}})
+                    (node/leaf :paragraph "Vinary Viewer is a local-first desktop previewer…")])])
+              (node/node :section
+                [(node/node :setext_heading
+                            [(node/leaf :paragraph "Screenshots") (node/leaf :setext_h1_underline "-----")]
+                            {:span {:start {:line 9}}})])]
+             {:root-type "document"})
+        expected [{:level 1 :text "Vinary Viewer" :id "L1" :line 1}
+                  {:level 2 :text "What It Is"    :id "L5" :line 5}
+                  {:level 1 :text "Screenshots"   :id "L9" :line 9}]]
+    (testing "explicit grammar language → atx + setext headings only (nested levels), no :section/:paragraph blocks"
+      (is (= expected (source/outline ir "markdown"))))
+    (testing "no language → auto-detected by the Markdown-unique atx/setext kinds (never the shared :section/:paragraph)"
+      (is (= expected (source/outline ir))))))
+
+;; Org as tree-sitter-org shapes it: `section` > `headline` (a `stars` child → level = its length, an `item` child
+;; → title) + body. Org ALSO emits `:section`/`:paragraph`, so it hit the same regression.
+(deftest org-outline-headlines
+  (let [ir (node/node :document
+             [(node/node :section
+                [(node/node :headline [(node/leaf :stars "*") (node/leaf :item "Overview")]
+                            {:span {:start {:line 1}}})
+                 (node/leaf :paragraph "intro body")
+                 (node/node :section
+                   [(node/node :headline [(node/leaf :stars "**") (node/leaf :item "Design")]
+                               {:span {:start {:line 4}}})])])]
+             {:root-type "document"})
+        expected [{:level 1 :text "Overview" :id "L1" :line 1}
+                  {:level 2 :text "Design"   :id "L4" :line 4}]]
+    (testing "explicit language → headlines only, level from the stars length"
+      (is (= expected (source/outline ir "org"))))
+    (testing "no language → auto-detected by the Org-unique :headline kind"
+      (is (= expected (source/outline ir))))))

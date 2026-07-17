@@ -151,15 +151,27 @@
 (rf/reg-sub :ui/web-toc (fn [db _] (get-in db [:ui :web-toc])))
 (rf/reg-sub :pdf/reflow? (fn [db _] (boolean (get-in db [:ui :pdf :reflow?]))))
 
-;; the Contents/TOC outline of the active document: the web view's headings for an HTTP page, else the
-;; Markdown headings captured during rendering
+;; the Contents/TOC outline of the active document: the web view's headings for an HTTP page; else, in the
+;; SOURCE view, the tree-sitter source outline (:doc/source-toc — `L<line>` ids for CodeMirror nav) when present;
+;; else the preview's rendered headings (:doc/toc — rehype slug ids for DOM nav). Selecting by active view keeps
+;; the two id-spaces from clobbering each other, so each view's Contents both displays AND navigates correctly.
+(defn active-toc
+  "Select the Contents outline for the active view (pure — the :doc/toc sub is this over its inputs). HTTP page →
+   the web view's headings; else source-active with a source outline present → the SOURCE outline (`L<line>` ids);
+   else the PREVIEW outline (slug ids). The two outlines live in separate attrs so neither clobbers the other;
+   this picks the one whose id-space matches the active view. Falling back to the preview outline (not blank) when
+   the source outline has not arrived avoids an empty Contents flash on source-view mount."
+  [http? source? web-toc preview-toc source-toc]
+  (cond
+    http?                          (vec (or web-toc []))
+    (and source? (seq source-toc)) (vec source-toc)
+    :else                          (vec (or preview-toc []))))
+
 (rf/reg-sub
  :doc/toc
- :<- [:ui/active-uri] :<- [:doc/active] :<- [:ui/web-toc]
- (fn [[active-uri doc web-toc] _]
-   (if (uri/http? active-uri)
-     (vec (or web-toc []))
-     (vec (or (:doc/toc doc) [])))))
+ :<- [:ui/active-uri] :<- [:doc/active] :<- [:ui/web-toc] :<- [:ui/active-view-source?]
+ (fn [[active-uri doc web-toc source?] _]
+   (active-toc (uri/http? active-uri) source? web-toc (:doc/toc doc) (:doc/source-toc doc))))
 
 ;; the active document streams (bounded-memory incremental render) rather than rendering whole
 (rf/reg-sub :doc/streaming? :<- [:doc/active] (fn [doc _] (boolean (:doc/streaming? doc))))
