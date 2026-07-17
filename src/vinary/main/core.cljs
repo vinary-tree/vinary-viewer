@@ -8,6 +8,7 @@
             ["fs" :as fs]
             [vinary.main.service :as service]
             [vinary.main.startup :as startup]
+            [vinary.main.daemon :as daemon]
             [vinary.main.profile :as profile]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
@@ -37,6 +38,11 @@
 ;; shell IPC handlers) register ONCE for the whole app; re-running them for a second window throws (e.g. "Cannot
 ;; register preload script with existing ID"). They configure the SHARED web session, so all windows share them.
 (defonce ^:private services-inited? (atom false))
+
+;; `--daemon` = resident mode: boot the process but open NO initial window and stay alive when all windows close,
+;; so a systemd user service can keep it warm at login and each `vv <file>` (second-instance) opens instantly.
+(def ^:private daemon?
+  (boolean (some #{"--daemon"} (js->clj js/process.argv))))
 
 (defn- active-window
   "The window a global action (menu, focus-follows) targets: the focused window, else the most recent."
@@ -208,8 +214,15 @@
          (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
            (create-window! (seq args)))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
-                                (create-window! (initial-args)))))
-  (.on app "activate" (fn [] (when (empty? @windows) (create-window!))))
+                                ;; the resident-server socket (systemd-independent): a `vv <file>` client connects
+                                ;; and sends paths; we open them in a new window of this warm process. `args` are
+                                ;; already cwd-resolved by the client — normalise via doc-uris (identity resolver).
+                                (daemon/listen! (fn [args] (create-window! (startup/doc-uris (into ["_" "_"] args) identity))))
+                                ;; a daemon opens no window (it stays resident and warm); a normal launch opens
+                                ;; its command-line files
+                                (when-not daemon? (create-window! (initial-args))))))
+  (.on app "activate" (fn [] (when (and (empty? @windows) (not daemon?)) (create-window!))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
+  ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
-       (fn [] (when-not (= js/process.platform "darwin") (.quit app)))))))
+       (fn [] (when-not (or daemon? (= js/process.platform "darwin")) (.quit app)))))))

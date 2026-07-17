@@ -48,8 +48,43 @@ lever: shrink the boot bundle (code-split) and/or avoid re-paying it per open (w
 daemon eval's the bundle once at login, so `window→eval` (and a V8 snapshot) become non-issues for warm opens —
 confirming the plan's reframing. (3) The 7 pre-open `init!` round-trips add ~235 ms before the file even opens.
 
+## Phase 2 — warm daemon (single-instance + Unix socket)
+**Hypothesis.** A resident process (`electron "$REPO" --daemon`) that opens *no* window at start but stays alive
+across `window-all-closed` lets each `vv <file>` open a window in the already-warm process instead of a fresh
+cold start, so the per-open cost drops even before any window pool (Phase 3).
+
+**Change.** `app.requestSingleInstanceLock()` makes the first process the primary; it also listens on a
+systemd-independent Unix socket (`$XDG_RUNTIME_DIR/vinary-viewer.sock`, `vinary.main.daemon`). The `vv` launcher
+is now a thin node client (`scripts/vv-open.mjs`) that sends resolved paths over the socket — and starts
+`--daemon` itself if none is reachable (no systemd required; a systemd user unit, if present, merely keeps it
+warm at login). Session-global services (`extensions`/`web`/`adblock`/passwords/shell) register once behind a
+`services-inited?` guard; `grammars/init!` gained the same guard so a 2nd window can't re-register its handler.
+
+**Measurement.** One resident `--daemon`, then N socket opens of a math `.md`, headless xvfb, this machine,
+medians (`tmp/warm-measure.mjs`; `window→rendered` uses the same per-window marks as the cold baseline):
+
+| metric | cold (fresh process) | warm daemon, 1st window | warm daemon, 2nd+ window |
+|---|---:|---:|---:|
+| `window → rendered` (per-window cost) | ~1275 ms | ~876 ms | **~697 ms** |
+| perceived open (`client → rendered`) | ~1450 ms † | ~935 ms | **~729 ms** |
+
+† the cold figure is `entry→rendered`; the real `vv`-process cold start is *higher* still — it also pays the
+Electron-binary load + main-process V8 init that precede the profiler's `entry` mark, all of which the socket
+client skips entirely.
+
+**Analysis.** Even with **no window pool yet**, the warm daemon roughly **halves** the open (~1275 → ~697 ms
+per-window; ~1450 → ~729 ms perceived). Three effects compound: (1) the main-process/app init (~115 ms
+`entry→ready`, plus the un-profiled pre-`entry` binary+V8 bootstrap) is paid once at login, not per open;
+(2) the 7 pre-open `init!` round-trips (~235 ms) collapse because the session services are already initialized
+(guarded) and their data is cached; (3) Chromium's on-disk **code cache** makes the 2nd+ renderer's 11 MB
+bundle *compile* far cheaper than the very first (876 → ~697 ms). The residual ~697 ms is dominated by the
+per-window bundle **eval** (each `BrowserWindow` still spawns its own renderer and re-evals the bundle) plus the
+file read+render — exactly what **Phase 3's pre-booted window pool** removes (attach the file to an
+already-evaluated renderer). **Kept.**
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (entry→rendered) | kept? |
 |---|---|---|---|---|---|
 | — | baseline | — | all | ~1450 ms | — |
+| 1 | a resident warm process halves per-open cost | single-instance + Unix-socket daemon (Phase 2) | math.md (warm 2nd+) | ~1450 → **~729 ms** perceived (~1275 → ~697 ms window→rendered) | ✅ |
 | … | | | | | |

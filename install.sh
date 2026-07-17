@@ -48,7 +48,8 @@ REPO="$REPO"
 case "\${1:-}" in
   --cli)        shift; exec node "\$REPO/dist/cli/vv-cli.js" "\$@" ;;
   --tui)        shift; exec node "\$REPO/dist/tui/vv-tui.js" "\$@" ;;
-  --gui)        shift; exec "\$REPO/node_modules/.bin/electron" "\$REPO" "\$@" ;;
+  --gui)        shift ;;
+  --no-daemon)  shift; exec "\$REPO/node_modules/.bin/electron" "\$REPO" "\$@" ;;  # fresh process, bypass the daemon
   -h|--help)    cat <<'USAGE'
 vinary-viewer — preview Markdown, PDFs, images, diagrams & source
 
@@ -56,20 +57,56 @@ Usage:
   vv [--gui] [files…]   open in the desktop GUI (default), one tab per file/URL
   vv --cli  <file>      render a document to the terminal  (pipe-friendly:  vv --cli x.md | less)
   vv --tui  <file>      interactively page a document       (scroll · / find · t contents · q quit)
+  vv --no-daemon [files…]   open in a fresh process (do not reuse the warm daemon)
   vv --help | --version
 
 Mode options:  vv --cli --help   ·   vv --tui --help
 USAGE
                 exit 0 ;;
-  -V|--version) echo "vinary-viewer $VERSION" ;;
-  *)            exec "\$REPO/node_modules/.bin/electron" "\$REPO" "\$@" ;;
+  -V|--version) echo "vinary-viewer $VERSION"; exit 0 ;;
 esac
+# GUI (default): hand the files to the warm resident process over its Unix socket (a new window opens with no
+# cold start). The client is systemd-INDEPENDENT — it starts the daemon itself if none is running. systemd, if
+# present, merely keeps a --daemon warm at login (see the user unit below). --no-daemon (above) bypasses all this.
+exec node "\$REPO/scripts/vv-open.mjs" "\$@"
 EOF
 chmod +x "$BIN/vinary-viewer"
 ln -sf "$BIN/vinary-viewer" "$BIN/vv"
 echo "    vv [files…]    -> GUI (default)"
 echo "    vv --cli FILE  -> render to the terminal"
 echo "    vv --tui FILE  -> interactive terminal viewer"
+
+# ---- optional: a systemd user service to keep the warm daemon up at login ------------------------
+# The daemon does NOT require systemd (the `vv` launcher starts it over the socket on demand); this unit just
+# keeps it warm from login on systemd systems so even the first open is instant. On non-systemd systems this is
+# simply skipped — nothing else changes.
+if command -v systemctl >/dev/null 2>&1; then
+  UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/vinary-viewer.service" <<EOF
+[Unit]
+Description=vinary-viewer warm document-viewer daemon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$REPO/node_modules/.bin/electron $REPO --daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+  systemctl --user daemon-reload 2>/dev/null || true
+  if systemctl --user enable --now vinary-viewer.service 2>/dev/null; then
+    echo "    systemd: vinary-viewer.service enabled (warm daemon at login)"
+  else
+    echo "    systemd: unit installed; enable with 'systemctl --user enable --now vinary-viewer.service'"
+  fi
+else
+  echo "    (no systemd — the daemon starts on demand via 'vv'; no service needed)"
+fi
 
 # ---- migrate off v0.1.0 (the vmd-patching tool) -------------------------------------------------
 # v0.1.0 patched the system `vmd` npm package, set ~/.vmdrc styles.extra, and installed a vmd() shell
