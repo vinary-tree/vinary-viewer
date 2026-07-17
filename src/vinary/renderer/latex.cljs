@@ -25,6 +25,7 @@
             ["@unified-latex/unified-latex-to-hast"        :refer [convertToHtml wrapPars]]
             ["@unified-latex/unified-latex-util-macros"    :refer [listNewcommands expandMacrosExcludingDefinitions]]
             ["@unified-latex/unified-latex-util-to-string" :refer [toString]]
+            ["@unified-latex/unified-latex-util-visit"     :refer [visit]]
             [vinary.renderer.latex-structure :as structure]
             [clojure.string :as str]
             [goog.object :as gobj]
@@ -99,13 +100,41 @@
                              (contains? newcommand-defs (.-content n)))))))
   ast)
 
+(defn- deglue!
+  "Insert an empty `{}` group between an args-less control-WORD macro (`\\mid`, `\\to`, …) and a directly-following
+   letter, so unified-latex's `toString` cannot glue them into one undefined control word when `expand-fixpoint`
+   reparses its output. After expansion, `\\mid` sits directly before the `a` of an expanded `\\out{a}{0}` (body
+   `#1\\,!\\,(#2)`); `toString([\\mid \"a\"])` serialises as `\\mida` — an UNDEFINED control sequence MathJax's
+   noundefined package paints red. The boundary exists in the AST (`\\mid` node + `\"a\"` node) but is lost only in
+   the serialisation, so this runs before each `toString`. The inserted group is invisible in math/text; the pass is
+   idempotent (next round the macro is followed by a group, not a letter) and minimal (digits already terminate a
+   control word, and macros WITH args or already followed by a space/group are untouched)."
+  [^js ast]
+  (visit ast
+         (fn [^js node _]
+           (when (array? node)
+             ;; back-to-front, so a splice never shifts an index still to be checked
+             (loop [i (- (.-length node) 2)]
+               (when (>= i 0)
+                 (let [^js cur (aget node i) ^js nxt (aget node (inc i))]
+                   (when (and cur (= "macro" (.-type cur)) (not (.-args cur))
+                              (re-matches #"[A-Za-z]+" (or (.-content cur) ""))
+                              nxt (= "string" (.-type nxt))
+                              (re-find #"^[A-Za-z]" (or (.-content nxt) "")))
+                     (.splice node (inc i) 0 #js {:type "group" :content #js []})))
+                 (recur (dec i)))))
+           ;; the visitor MUST return nil — a numeric return (e.g. from .splice) is read as an Index → re-traversal
+           nil)
+         #js {:includeArrays true}))
+
 (defn- expand-fixpoint
   "Expand user macros to a FIXPOINT (guarded), so a macro that expands into another macro (`\\rSet`→`\\rc`→
    `\\textcolor`) fully resolves — not just one level, which would leak a half-expanded red literal into the math.
    Each round REPARSES the source fresh (mandatory: `expandMacros*` mutates its input and crashes if re-invoked
-   on reused body objects) with the merged preamble+body `\\newcommand` signatures, then runs
+   on reused body objects) with the merged preamble+body `\\newcommand` signatures, runs
    `expandMacrosExcludingDefinitions` (which leaves each `\\newcommand`'s own body intact so the next round can
-   still harvest it). Converges when `toString` stabilises; the guard bounds a pathological/recursive macro.
+   still harvest it), then `deglue!`s so a control word left adjacent to a letter is not reparsed as one undefined
+   command. Converges when `toString` stabilises; the guard bounds a pathological/recursive macro.
 
    Harvesting the preamble specs separately (Org `#+LATEX_HEADER:` lines via `:preamble`) lets those macros expand
    in the body WITHOUT rendering the preamble's other content (`\\usepackage`, `\\setmainfont`, `\\backgroundsetup{…
@@ -119,6 +148,7 @@
                       (.parse (getParser #js {:macros (macro-signature-record specs)}) src)
                       (parse src))]
         (expandMacrosExcludingDefinitions ast (.map specs (fn [^js s] #js {:name (.-name s) :body (.-body s)})))
+        (deglue! ast)
         (let [now (toString ast)]
           (if (or (= now prev) (>= guard 8))
             ast

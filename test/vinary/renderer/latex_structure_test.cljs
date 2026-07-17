@@ -123,6 +123,15 @@
       (is (re-find #"inline-math\">[^<]*\[1\]" h) "the in-math \\cite is a plain [1] inside the math span")
       (is (not (re-find #"<a[^>]*>1</a>[^<]*</span>" h)) "…not an <a> anchor frozen into the math"))))
 
+(deftest macro-glue-on-reparse
+  (testing "a control-word macro left adjacent to a letter by expansion is NOT reparsed into one undefined command:
+            \\out{a}{0}\\mid\\out{a}{0} keeps \\mid separate (deglue!'s empty {} group), never the red \\mida"
+    (let [h (latex/latex->html
+             (str "\\newcommand{\\out}[2]{#1!(#2)}\n\\begin{document}\n"
+                  "$\\out{a}{0}\\mid\\out{a}{0}$\n\\end{document}"))]
+      (is (not (re-find #"\\mida" h)) "\\mid is never glued into the undefined control word \\mida")
+      (is (re-find #"\\mid(?:\{\}|[^A-Za-z])" h) "the \\mid relation survives, separated from the following letter"))))
+
 ;; ── a guarded oracle over the real paper (skipped when the file is absent, so the suite never depends on it) ──
 (def ^:private real-doc "/home/dylon/Workspace/f1r3fly.io/publications/knotted-topoi/knotted-topoi.tex")
 
@@ -131,7 +140,8 @@
     (testing "the real knotted-topoi.tex renders with every structural macro resolved and a numbered bibliography"
       (let [h (latex/latex->html (.readFileSync fs real-doc "utf8"))]
         (doseq [pat [#"\\re\b" #"\\rc\b" #"\\quo\b" #"\\cite" #"\\ref\{" #"\\eqref" #"\\label"
-                     #"\\maketitle" #"\\tableofcontents" #"texorpdfstring" #"html-tag|html-attr" #"\(\?\)"]]
+                     #"\\maketitle" #"\\tableofcontents" #"texorpdfstring" #"html-tag|html-attr" #"\(\?\)"
+                     #"\\mida"]]   ; a control word glued to a letter on reparse (\mid + expanded \out{a})
           (is (not (re-find pat h)) (str "no leak of " pat)))
         (is (<= 25 (count (re-seq #"<li id=\"vv-bib-" h))) "the bibliography is a numbered list of ~30 entries")
         (is (re-find #"id=\"vv-doc-header\"" h) "the title block renders")

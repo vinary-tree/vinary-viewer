@@ -3171,11 +3171,13 @@ async function main() {
     '\\documentclass{article}', '\\usepackage{amsthm,amsmath,xcolor}',
     '\\newtheorem{theorem}{Theorem}', '\\newtheorem{definition}[theorem]{Definition}',
     '\\definecolor{redcopy}{rgb}{0.78,0.08,0.08}', '\\newcommand{\\rc}[1]{\\textcolor{redcopy}{#1}}',
-    '\\newcommand{\\rSet}{\\rc{\\mathsf{Set}}}', '\\title{Standalone Paper}', '\\author{Test Author}', '\\date{2026}',
+    '\\newcommand{\\rSet}{\\rc{\\mathsf{Set}}}', '\\newcommand{\\out}[2]{#1!(#2)}',
+    '\\title{Standalone Paper}', '\\author{Test Author}', '\\date{2026}',
     '\\begin{document}', '\\maketitle',
     '\\begin{abstract}', 'An abstract citing \\cite{knuth}.', '\\end{abstract}', '\\tableofcontents',
     '\\section{First}\\label{sec:first}',
-    'Body with math $\\rSet$, ref \\S\\ref{sec:second}, eq \\eqref{eq:e}, and cite \\cite{knuth}.',
+    // $\out{a}{0}\mid\out{a}{0}$: after expansion \mid sits before the expanded a — must NOT glue into \mida
+    'Body with math $\\rSet$, a process $\\out{a}{0}\\mid\\out{a}{0}$, ref \\S\\ref{sec:second}, eq \\eqref{eq:e}, and cite \\cite{knuth}.',
     '\\begin{equation}\\label{eq:e}', 'x = y', '\\end{equation}',
     '\\begin{definition}[A widget]\\label{def:w}', 'See Definition~\\ref{def:w}.', '\\end{definition}',
     '\\section{Second}\\label{sec:second}', 'Done.',
@@ -3207,6 +3209,7 @@ async function main() {
       refResolved: /Definition\\s*1/.test(b.textContent),
       mathRendered: Boolean(b.querySelector('.vv-math-inline svg, .vv-math-display svg, svg')),
       leaks: /\\\\cite|\\\\ref\\{|\\\\label|texorpdfstring|\\\\maketitle/.test(b.textContent),
+      mathSources: Array.from(b.querySelectorAll('[data-tex]')).map(e => e.getAttribute('data-tex') || ''),
     };
   })()`);
   assert.strictEqual(tex.title, 'Standalone Paper', 'the \\title renders inside the <section id=vv-doc-header> block');
@@ -3221,7 +3224,13 @@ async function main() {
   assert.strictEqual(tex.refResolved, true, '\\ref{def:w} resolved to the definition number (Definition 1)');
   assert.strictEqual(tex.mathRendered, true, 'the inline math (a red \\rSet) typeset via MathJax');
   assert.strictEqual(tex.leaks, false, 'no structural LaTeX macro leaks into the rendered preview');
-  console.log('[ok] Part 3: a standalone .tex renders numbered sections, refs, cites, a bibliography + front matter');
+  // deglue: \out{a}{0}\mid\out{a}{0} — the \mid must survive as a relation, never glued into the undefined \mida
+  assert.ok(tex.mathSources.length > 0, 'the typeset math stashes its LaTeX source in data-tex');
+  assert.ok(!tex.mathSources.some((t) => /\\mida/.test(t)),
+    `no control word glued to a letter into the undefined \\mida — sources: ${JSON.stringify(tex.mathSources)}`);
+  assert.ok(tex.mathSources.some((t) => /\\mid(?:\{\}|[^A-Za-z]|$)/.test(t)),
+    'the \\mid relation survives, separated from the following letter');
+  console.log('[ok] Part 3: a standalone .tex renders numbered sections, refs, cites, a bibliography + front matter (no \\mida glue)');
 
   // ── Collocated document GROUP: the [Preview ▾ | Source ▾] combo (replaces the old [Doc | PDF] switch) ──
   // A .tex collocated with an exported .pdf. Its group = {latex, pdf}. By the collocated-default :pdf preference it
