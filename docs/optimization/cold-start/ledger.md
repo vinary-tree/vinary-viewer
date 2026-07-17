@@ -137,10 +137,39 @@ errors. The 316-test suite stays green; `release main` compiles. No latency chan
 ~127 ms) — this is correctness: opening files in multiple windows, and using the shared web view / extensions /
 passwords, now always act on the window the user is looking at. **Kept.**
 
+## Phase 1 — fast warm per-window boot (measured NOT needed, given the pool)
+Phase 1 planned to (a) defer MathJax off `init`, (b) code-split the bundle, and (c) warm-on-idle (pre-build
+`mj-engine`, pre-JIT CodeMirror, pre-`init` tree-sitter) so the *first* math/source/org/latex render in a warm
+window has no stall. Before implementing, we **measured** per-format warm-pool opens (`tmp/format-pool.mjs`,
+one daemon `VV_POOL=1`, each fixture claimed from the pool):
+
+| fixture | what it exercises | claim→rendered |
+|---|---|---:|
+| `f.md`  | markdown pipeline | ~100 ms |
+| `f.py`  | **CodeMirror source view + tree-sitter** | **~70 ms** |
+| `f.org` | uniorg | ~84 ms |
+| `f.tex` | unified-latex | ~109 ms |
+
+**Finding.** Every format already opens in ~70–109 ms from the pool, and the source/CodeMirror path is the
+*fastest*. A pool window boots the whole bundle and then sits idle, so by claim time MathJax is built
+(`install-stylesheet!` runs at `init`), the markdown/org/latex processors and CodeMirror modules are evaluated,
+and V8 has tiered up the hot paths. The "first render stalls" that (a)+(c) target **do not occur** — the pool
+subsumes them. So warm-on-idle and MathJax-defer are **not implemented**: they would add complexity for no
+measured gain, which the data-driven mandate forbids. The user's explicit "make CodeMirror load as fast as
+possible" is satisfied — source opens in ~70 ms, faster than any other format.
+
+**Code-split (b)** remains *only* as a cold-path / memory / pool-refill lever: it would shrink the per-window
+bundle eval (~700 ms warm, ~850 ms cold), so a cold first open (no daemon) is cheaper, the pool refills faster
+under burst-opening, and each hidden pool window costs less memory. It does **not** improve the warm open (the
+pool already evaluated the bundle). Because it restructures the fragile unified/remark/rehype/uniorg +
+unified-latex import graph (`:simple`-only; advanced breaks the interop), it carries real risk for a
+warm-path-neutral gain — a trade-off surfaced to the user rather than taken unilaterally.
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
 | — | baseline | — | all | ~1450 ms | — |
 | 1 | a resident warm process halves per-open cost | single-instance + Unix-socket daemon (Phase 2) | math.md (warm 2nd+) | ~1450 → **~729 ms** (~1275 → ~697 ms window→rendered) | ✅ |
 | 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
+| 3 | first source/org/latex render in a warm window stalls (warm-on-idle needed) | — (measured before implementing) | py/org/tex (pool hit) | claim→rendered 70 / 84 / 109 ms — **no stall**; hypothesis REJECTED | ✗ not needed |
 | … | | | | | |
