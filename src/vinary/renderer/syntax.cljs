@@ -388,6 +388,16 @@
       (.dispatch view #js {:effects   (.scrollIntoView EditorView pos #js {:y "start"})
                            :selection #js {:anchor pos}}))))
 
+(defn viewport-top-line
+  "The 1-based document line at the top of `view`'s viewport — the anchor for the source-view Contents scroll-spy
+   (the analog of a pixel scrollTop for the DOM preview spy). `.lineBlockAtHeight` maps the scroller's scrollTop
+   (a document-relative height) to the line block currently at the viewport top. nil when `view` is absent."
+  [^js view]
+  (when view
+    (let [block (.lineBlockAtHeight view (.-scrollTop (.-scrollDOM view)))
+          doc   (.. view -state -doc)]
+      (.-number (.lineAt doc (.-from block))))))
+
 (defn create-source-view
   "Mount a read-only CodeMirror view of text in parent. If grammar (a {:wasm-url :scm-url}) is given,
    asynchronously load the tree-sitter grammar and reconfigure with highlighting. Returns the view."

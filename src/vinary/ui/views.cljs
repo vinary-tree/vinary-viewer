@@ -608,18 +608,53 @@
 
 (defn source-view
   "A read-only CodeMirror 6 view of a source file, highlighted via web-tree-sitter when a grammar is
-   registered for its extension. Re-created on live-refresh (text change)."
+   registered for its extension. Re-created on live-refresh (text change). Drives the Contents scroll-spy: as the
+   editor scrolls, the source-toc section at the viewport top is marked :ui/active-heading — the same highlight
+   the preview uses, but measured in editor LINES instead of DOM pixel offsets (the source Contents ids are
+   `L<line>`, not host-DOM element ids, and the CodeMirror `.cm-scroller` scrolls internally, not `.vv-content`)."
   [_text _path]
-  (let [node (atom nil) view (atom nil) path* (atom nil)]
-    (letfn [(build! [this]
+  (let [node (atom nil) view (atom nil) path* (atom nil)
+        toc*    (atom nil)        ; the current source Contents outline (L<line> ids), read by the scroll-spy
+        last*   (atom ::none)     ; last-dispatched active id — skip redundant dispatches on every scroll frame
+        pending? (atom false)     ; rAF throttle (mirrors renderer.toc/spy-pending)
+        detach* (atom nil)]       ; the scroll-listener remover, for teardown
+    (letfn [(spy! []
+              ;; the source analog of renderer.toc/spy!: mark the section at/above the editor viewport top. Reuses
+              ;; the pure toc/active-heading with the entry :line as its :offset and the viewport-top line as the
+              ;; scroll position (a ~2-line reading margin). Dispatches only on change (local last*, no app-db read).
+              (when (and @view (seq @toc*) (not @pending?))
+                (reset! pending? true)
+                (js/requestAnimationFrame
+                 (fn []
+                   (reset! pending? false)
+                   (when-let [v @view]
+                     (let [top    (syntax/viewport-top-line v)
+                           hs     (->> @toc* (mapv (fn [e] {:id (:id e) :offset (:line e)})) (sort-by :offset))
+                           active (toc/active-heading hs top 2)]
+                       (when (not= active @last*)
+                         (reset! last* active)
+                         (rf/dispatch [:toc/active-heading active]))))))))
+            (build! [this]
               (let [[_ text path] (r/argv this)]
                 (reset! path* path)
                 (reset! view (syntax/create-source-view @node text (syntax/grammar-for path)))
-                ;; derive a code Contents outline from the tree-sitter parse (common IR) -> sidebar :doc/toc
+                ;; follow the editor's own scroller so the Contents highlight tracks scrolling (rAF-throttled)
+                (let [scroller (.-scrollDOM ^js @view)
+                      handler  (fn [_] (spy!))]
+                  (.addEventListener scroller "scroll" handler #js {:passive true})
+                  (reset! detach* (fn [] (.removeEventListener scroller "scroll" handler))))
+                ;; derive a code Contents outline from the tree-sitter parse (common IR) -> sidebar :doc/toc, then
+                ;; set the initial highlight once it is ready
                 (-> (syntax/parse-outline text path)
-                    (.then (fn [toc] (rf/dispatch [:toc/set path toc])))
+                    (.then (fn [toc]
+                             (rf/dispatch [:toc/set path toc])
+                             (reset! toc* toc)
+                             (spy!)))
                     (.catch (fn [_] nil)))))
-            (destroy! [] (when @view (.destroy ^js @view) (reset! view nil)))
+            (destroy! []
+              (when @detach* (@detach*) (reset! detach* nil))
+              (reset! toc* nil) (reset! last* ::none)
+              (when @view (.destroy ^js @view) (reset! view nil)))
             (on-ctx [^js e]
               (.preventDefault e)
               (.stopPropagation e)

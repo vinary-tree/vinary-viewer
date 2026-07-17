@@ -3131,7 +3131,11 @@ async function main() {
   // Source shows the .tex source in place; the tab URI never changes.
   const texPath = path.join(ROOT, 'test', 'paper.tex');
   const texSiblingPdf = path.join(ROOT, 'test', 'paper.pdf');
-  const texContent = '\\documentclass{article}\\begin{document}\\section{Intro}Hello \\textbf{world}.\\end{document}\n';
+  // three sections spread over many lines so the source Contents scroll-spy has distinct sections to track
+  const texFiller = (tag) => Array.from({ length: 30 }, (_, i) => `${tag} filler line ${i}.`).join('\n');
+  const texContent = '\\documentclass{article}\n\\begin{document}\n\\section{Intro}\n' + texFiller('Intro')
+    + '\n\\section{Methods}\n' + texFiller('Methods') + '\n\\section{Results}\n' + texFiller('Results')
+    + '\n\\end{document}\n';
   const texGroup = [{ path: texPath, kind: 'latex' }, { path: texSiblingPdf, kind: 'pdf' }];
   // register BOTH representations (each carries the full :siblings group); the default-facet load fetches the PDF
   // in place via the harness's vv:open auto-responder.
@@ -3154,6 +3158,19 @@ async function main() {
   assert.deepStrictEqual(combo.labels, ['Preview', 'Source'], 'both the Preview and Source buttons are present');
   assert.ok((combo.uri || '').includes('paper.tex'), 'the tab stays on the primary .tex — the facet switch is IN-PLACE (no navigation)');
   console.log('[ok] a collocated .tex+PDF group shows the [Preview | Source] combo and opens the PDF in place (flush)');
+  // the Preview combo's menu must open DIRECTLY ADJACENT to the button (no dead-zone gap) — a gap fires the
+  // .vv-combo mouseleave and closes the menu before the cursor reaches an option (the reported bug).
+  await evalIn(win, `(() => { const c=[...document.querySelectorAll('.vv-combo')].find(x=>x.querySelector('.vv-combo-main')?.textContent.trim()==='Preview'); c.querySelector('.vv-combo-caret').click(); return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-combo-menu'))`), 'the Preview combo menu opens', 4000);
+  const menuGeom = await evalIn(win, `(() => {
+    const c=[...document.querySelectorAll('.vv-combo')].find(x=>x.querySelector('.vv-combo-menu'));
+    const mr=c.querySelector('.vv-combo-menu').getBoundingClientRect(), cr=c.getBoundingClientRect();
+    return { gap: Math.round(mr.top - cr.bottom), opts: [...c.querySelectorAll('.vv-combo-opt')].map(o=>o.textContent.trim()) };
+  })()`);
+  assert.ok(menuGeom.gap <= 0, 'the combo menu opens flush against the button (no dead-zone gap that would close it on hover-to-option); menu.top - combo.bottom = ' + menuGeom.gap + 'px');
+  assert.deepStrictEqual(menuGeom.opts, ['PDF', 'LaTeX'], 'the Preview menu lists both representations (PDF, LaTeX)');
+  console.log('[ok] the combo menu opens flush against the button (survives hover-to-option) + lists its files');
+  await evalIn(win, `(() => { const c=[...document.querySelectorAll('.vv-combo')].find(x=>x.querySelector('.vv-combo-menu')); if(c) c.querySelector('.vv-combo-caret').click(); return true; })()`); // close the menu
   // click Source (its main region) → the .tex source shows in place; the flush gutter is dropped
   await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')).find(x => x.textContent.trim() === 'Source'); if (b) b.click(); })()`);
   await waitFor(
@@ -3163,6 +3180,23 @@ async function main() {
   const stillTex = await evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && t.uri; })()`);
   assert.ok((stillTex || '').includes('paper.tex'), 'Source is shown IN PLACE — the tab URI is unchanged (no history navigation)');
   console.log('[ok] the [Preview | Source] combo switches facets in place (tab URI unchanged)');
+
+  // the Contents panel FOLLOWS the source view's active section on scroll (line-based scroll-spy). Reveal Contents,
+  // then click a deep section: the editor scrolls there AND the section is highlighted — previously navigation
+  // worked but nothing highlighted (the DOM/pixel preview spy can't see the CodeMirror scroller or L<line> ids).
+  await evalIn(win, `(() => { const r=document.querySelector('.vv-sidebar-rail'); if(r) r.click(); const t=[...document.querySelectorAll('.vv-sidebar-tab')].find(x=>x.textContent.includes('Contents')); if(t) t.click(); return true; })()`);
+  // wait until the SOURCE Contents (L<line> ids) has replaced the preview toc AND the spy has highlighted its
+  // first section — i.e. parse-outline finished and the initial spy ran (otherwise a click hits a preview slug id)
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-toc-item').length >= 3 && Boolean(document.querySelector('.vv-toc-item.vv-toc-active'))`), 'the .tex Source Contents + active section (spy running)', 10000);
+  const tocActiveIndex = `(() => { const its=[...document.querySelectorAll('.vv-toc-item')]; const a=document.querySelector('.vv-toc-item.vv-toc-active'); return a ? its.indexOf(a) : -1; })()`;
+  // click the MIDDLE section (reachable to the viewport top; the LAST section can't reach the top in a short doc,
+  // exactly like the preview spy) → it scrolls the editor there AND the Contents highlights it
+  await evalIn(win, `document.querySelectorAll('.vv-toc-item')[1].click()`);
+  await waitFor(() => evalIn(win, `${tocActiveIndex} === 1`), 'clicking a source section scrolls the editor there AND highlights it in Contents', 8000);
+  // scroll back to the first section → the highlight follows
+  await evalIn(win, `document.querySelectorAll('.vv-toc-item')[0].click()`);
+  await waitFor(() => evalIn(win, `${tocActiveIndex} === 0`), 'the source Contents highlight follows to another section', 8000);
+  console.log('[ok] the Contents panel highlights + follows the source view active section on scroll');
 
   // a lone PDF (no collocated source / alternate) shows NO view-switch buttons — nothing meaningful to toggle
   const lonePdf = path.join(ROOT, 'test', 'lonely.pdf');

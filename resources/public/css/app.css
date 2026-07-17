@@ -403,7 +403,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-combo-main:hover:not(.vv-combo-active), .vv-combo-plain:hover:not(.vv-combo-active),
 .vv-combo-caret:hover:not(.vv-combo-active) { background: var(--vv-bg-code); color: var(--vv-head1); }
 .vv-combo-active { background: var(--vv-accent, var(--vv-head1)); color: var(--vv-bg1); }
-.vv-combo-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; margin: 0; padding: 4px 0;
+/* top:100% (NOT a gap) so the menu is a directly-adjacent descendant of .vv-combo — moving the cursor from the
+   caret onto an option never leaves .vv-combo's subtree, so its :on-mouse-leave close doesn't fire. A gap here is
+   a dead zone that closes the menu before you reach it. The border/shadow + inner padding keep it visually distinct. */
+.vv-combo-menu { position: absolute; top: 100%; left: 0; z-index: 30; margin: 0; padding: 4px 0;
   list-style: none; min-width: 120px; background: var(--vv-bg2); border: 1px solid var(--vv-dialog-border);
   border-radius: 6px; box-shadow: var(--vv-shadow-menu, 0 6px 20px rgba(0,0,0,0.4)); }
 .vv-combo-opt { padding: 3px 12px; cursor: pointer; font-size: 12px; color: var(--vv-fg); white-space: nowrap; }
