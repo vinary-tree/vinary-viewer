@@ -76,8 +76,13 @@
   (.send wc "vv:grammars" (pr-str {:grammars @user-grammars
                                     :filetypes @user-filetypes})))
 
+(defonce ^:private inited (atom false))
+
 (defn init! [^js wc]
   (load-user!)
   (load-filetypes!)
-  (push! wc)
-  (.on ipcMain "vv:grammars-request" (fn [^js e] (push! (.-sender e)))))
+  (push! wc)                 ; per-window initial push (each new window gets the registry)
+  ;; register the request handler ONCE for the whole app — multi-window would otherwise stack duplicate
+  ;; listeners and push the registry once per open window on every request
+  (when (compare-and-set! inited false true)
+    (.on ipcMain "vv:grammars-request" (fn [^js e] (push! (.-sender e))))))

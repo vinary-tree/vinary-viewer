@@ -63,7 +63,7 @@ function launch(fixture) {
     // Force X11 so Electron renders INTO the xvfb display instead of the host Wayland compositor (otherwise the
     // windows appear on the real screen and outlive the xvfb-run wrapper). Mirrors test/electron-smoke.js.
     const env = { ...process.env, VV_PROFILE: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
-      ELECTRON_OZONE_PLATFORM_HINT: 'x11', GDK_BACKEND: 'x11', XDG_SESSION_TYPE: 'x11' };
+      VV_OZONE: 'x11', ELECTRON_OZONE_PLATFORM_HINT: 'x11', GDK_BACKEND: 'x11', XDG_SESSION_TYPE: 'x11' };
     delete env.WAYLAND_DISPLAY;
     const child = spawn(cmd, args, { env, detached: true });   // own process group → kill the whole tree
     groups.add(child.pid);

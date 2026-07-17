@@ -3,17 +3,23 @@
    (Copy file path / name), window zoom / devtools / quit, and the app-info (name + version) push for the
    About dialog. The sandboxed renderer can't touch dialog/clipboard/app directly, so these cross the IPC
    seam; the opened paths come back over vv:open-files."
-  (:require ["electron" :refer [ipcMain dialog clipboard app shell]]
+  (:require ["electron" :refer [ipcMain dialog clipboard app shell BrowserWindow]]
             ["fs" :as fs]
             ["path" :as path]))
 
 (defonce ^:private win*   (atom nil))
 (defonce ^:private inited (atom false))
 
+(defn- cur-win
+  "The window a shell action targets — the FOCUSED window (multi-instance: the one the user triggered the menu/
+   zoom/devtools from), falling back to the last-registered window."
+  ^js []
+  (or (.getFocusedWindow BrowserWindow) @win*))
+
 ;; ^js return tag → the un-hinted interop callers (e.g. (.toggleDevTools (wc))) get an inferred extern, so
 ;; advanced compilation can't rename the method to a non-existent one. (Belt-and-suspenders with the :main
 ;; build's :simple optimization; see shadow-cljs.edn.)
-(defn- wc ^js [] (some-> ^js @win* .-webContents))
+(defn- wc ^js [] (some-> ^js (cur-win) .-webContents))
 
 (defn- app-info []
   (let [pkg (try (js/JSON.parse (.readFileSync fs (path/join js/__dirname ".." ".." "package.json") "utf8"))
@@ -28,13 +34,14 @@
     (reset! inited true)
     ;; multi-file Open dialog → the chosen paths come back over vv:open-files (no invoke/handle needed)
     (.on ipcMain "vv:open-dialog"
-         (fn [_e]
-           (when-let [^js w @win*]
+         (fn [^js e]
+           (when-let [^js w (cur-win)]
              (-> (.showOpenDialog dialog w (clj->js {:title "Open file(s)"
                                                      :properties ["openFile" "multiSelections"]}))
                  (.then (fn [^js r]
-                          (when (and (not (.-canceled r)) (wc))
-                            (.send (wc) "vv:open-files" (clj->js {:paths (vec (.-filePaths r))})))))))))
+                          ;; reply to the window that requested Open (its own tabs), not a global one
+                          (when-let [^js sender (and (not (.-canceled r)) (.-sender e))]
+                            (.send sender "vv:open-files" (clj->js {:paths (vec (.-filePaths r))})))))))))
     (.on ipcMain "vv:clipboard-write"  (fn [_e text] (.writeText clipboard (str text))))
     (.on ipcMain "vv:open-path"        (fn [_e p]   (.openPath shell (str p))))      ; dir → file manager
     (.on ipcMain "vv:open-external"    (fn [_e url] (.openExternal shell (str url)))) ; http → system browser

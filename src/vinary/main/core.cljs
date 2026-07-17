@@ -28,7 +28,20 @@
 (def ^js app (.-app electron))
 (def ^js BrowserWindow (.-BrowserWindow electron))
 
-(defonce main-window (atom nil))
+;; Every live app window. The app is SINGLE-INSTANCE (see `main`): the first process owns the lock and stays
+;; resident; each subsequent `vv <file>` hands its argv to it via Electron's `second-instance`, which opens the
+;; file in a NEW window of the already-warm process — no second cold start.
+(defonce windows (atom []))
+
+;; Process/session-level services (shared-web-session extensions + ad-block, the web view, password autofill, the
+;; shell IPC handlers) register ONCE for the whole app; re-running them for a second window throws (e.g. "Cannot
+;; register preload script with existing ID"). They configure the SHARED web session, so all windows share them.
+(defonce ^:private services-inited? (atom false))
+
+(defn- active-window
+  "The window a global action (menu, focus-follows) targets: the focused window, else the most recent."
+  ^js []
+  (or (.getFocusedWindow BrowserWindow) (peek @windows)))
 
 (defn renderer-index [] (path/join js/__dirname ".." ".." "resources" "public" "index.html"))
 (defn preload-path  [] (path/join js/__dirname ".." ".." "resources" "preload.js"))
@@ -40,7 +53,11 @@
   []
   (startup/doc-uris (js->clj js/process.argv) #(.resolve path %)))
 
-(defn create-window! []
+(defn create-window!
+  "Open a new app window showing `args` (canonical doc uris, e.g. from `initial-args`/a second-instance argv);
+   nil/empty opens an empty window."
+  ([] (create-window! nil))
+  ([args]
   (let [win (BrowserWindow.
               (clj->js (merge {:backgroundColor "#292b2e"
                                :autoHideMenuBar true
@@ -82,23 +99,26 @@
              (ssh/init! win)                            ; SSH/SFTP transport prompts + vv:ssh-* channels
              ;; open every file/URI named on the command line, each in its own tab (first focused);
              ;; reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx)
-             (when-let [args (seq (initial-args))]
+             (when-let [paths (seq args)]
                (profile/mark! "open-sent")
                (.send (.-webContents win) "vv:open-files"
-                      (clj->js {:paths (vec args) :focus-first true})))))
-    (.on win "closed" (fn [] (reset! main-window nil)))
+                      (clj->js {:paths (vec paths) :focus-first true})))))
+    (.on win "closed" (fn [] (swap! windows (fn [ws] (vec (remove #(= % win) ws))))))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
-    ;; extension runtime + ad-blocking on the web session (before the lazy web view's first load)
-    (let [prefs (ext-config/load-config)]
-      (ext-popup/init! win)
-      (extensions/init! win prefs)
-      (adblock/init! win (:adblock prefs)))
-    (web/init! win)
-    (passwords/init! win)
-    (shell/init! win)
-    (reset! main-window win)
+    ;; process/session-level services register ONCE (see `services-inited?`) — extension runtime + ad-blocking on
+    ;; the shared web session, the web view, password autofill, and the shell IPC handlers. They bind to the first
+    ;; window; because the web session is shared, every window's web view inherits the extensions + ad-block.
+    (when (compare-and-set! services-inited? false true)
+      (let [prefs (ext-config/load-config)]
+        (ext-popup/init! win)
+        (extensions/init! win prefs)
+        (adblock/init! win (:adblock prefs)))
+      (web/init! win)
+      (passwords/init! win)
+      (shell/init! win))
+    (swap! windows conj win)
     (profile/mark! "window")
-    win))
+    win)))
 
 (defn- report-crash!
   "Log the full stack (terminal/logs) and show a COPYABLE error dialog. Electron's default
@@ -143,6 +163,12 @@
     nil)
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
+  ;; SINGLE-INSTANCE: the first process becomes the resident app; a subsequent `vv <file>` fails the lock and
+  ;; hands its argv to the primary via `second-instance` (below), which opens the file in a NEW window of the
+  ;; already-warm process — no second cold start. A non-primary exits immediately without booting anything.
+  (if-not (.requestSingleInstanceLock app)
+    (.quit app)
+    (do
   ;; register the privileged vv-remote:// scheme BEFORE app 'ready' — the web view loads it to live-render remote
   ;; HTML, and main serves each vv-remote:// URL's bytes over SFTP (vinary.main.web). standard+secure so the
   ;; page's relative assets resolve and it runs in a secure context, exactly like an http(s) page.
@@ -155,6 +181,10 @@
   ;; switches (disable-partial-raster, ui-disable-partial-swap). NOTE: those two do NOT fix the NVIDIA +
   ;; Wayland scroll-band; the actual band fix is disable-hardware-acceleration? below (remove the GPU process).
   (doseq [sw startup/chromium-switches] (.appendSwitch (.-commandLine app) sw))
+  ;; VV_OZONE overrides the Ozone platform (e.g. VV_OZONE=x11) — an escape hatch for headless/xvfb runs (so the
+  ;; window renders into an X server instead of the host Wayland compositor) and users who want a specific backend.
+  (when-let [oz (.. js/process -env -VV_OZONE)]
+    (.appendSwitch (.-commandLine app) "ozone-platform" oz))
   ;; NVIDIA + Wayland scroll-band fix that KEEPS the GPU process (best performance): GPU-rasterized tiles
   ;; go through the broken Vulkan-on-Wayland presentation that paints a duplicated scroll-band; disabling
   ;; GPU rasterization (already software-blocklisted here, so no loss) makes tiles software-rasterized and
@@ -171,8 +201,15 @@
   (service/init!)
   ;; remove Electron's default application menu — vinary-viewer draws its own themed menu bar, and its
   ;; keybindings own the accelerators (so the default menu's Ctrl+R/W/etc. don't double-fire)
-  (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil) (create-window!))))
-  (.on app "activate" (fn [] (when (nil? @main-window) (create-window!))))
+  ;; a second `vv <file>` invocation: its argv/cwd arrive here (its own process then exits). Open the files in a
+  ;; NEW window of this warm process. `wd` is the second instance's working directory — resolve its relative paths.
+  (.on app "second-instance"
+       (fn [_e ^js argv ^js wd]
+         (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
+           (create-window! (seq args)))))
+  (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
+                                (create-window! (initial-args)))))
+  (.on app "activate" (fn [] (when (empty? @windows) (create-window!))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   (.on app "window-all-closed"
-       (fn [] (when-not (= js/process.platform "darwin") (.quit app)))))
+       (fn [] (when-not (= js/process.platform "darwin") (.quit app)))))))
