@@ -165,6 +165,45 @@ pool already evaluated the bundle). Because it restructures the fragile unified/
 unified-latex import graph (`:simple`-only; advanced breaks the interop), it carries real risk for a
 warm-path-neutral gain — a trade-off surfaced to the user rather than taken unilaterally.
 
+## Phase 1/4 — code-split + V8 snapshot: feasibility investigation (the "go further" scope)
+The user opted to pursue the full split (mathjax/codemirror/org/latex) **and** a V8 startup snapshot. Investigating
+each against the actual architecture surfaced hard walls and a decisive data point — recorded here so the
+reasoning is not re-attempted blindly (per the "document what does not work" mandate).
+
+**Wall 1 — the 4-way split can't be done without re-architecting to async boundaries.** shadow-cljs `:modules`
+code-splitting only removes bytes from the boot module if the split namespaces are reached **exclusively through
+async loadables**; any *static* `ns/var` reference from a boot-reachable namespace pulls the whole namespace
+back into the boot module. But:
+- `renderer.markdown-pipeline` (the DOM-free hub, **shared by `:renderer` + `:cli` + `:tui` + `:test`**)
+  statically calls `math/render-html-math`, `math/render-tex-blocks`, and `latex/latex->html` — math and LaTeX
+  render *inside* the synchronous pipeline, so mathjax + unified-latex can't leave it without making the
+  pipeline async (which would break the node targets that bundle it whole).
+- `renderer.syntax` (CodeMirror) is called from **synchronous** source-view handlers in `ui/views`
+  (`pos-at-coords`, `line-info-at`, `viewport-top-line`, `selection-start`) and sync fx in `app/fx`
+  (`scroll-source-to-line!`, `current-viewport-line`) — these return values to synchronous DOM events and
+  can't await a module load.
+
+**Wall 2 — a V8 snapshot of the renderer bundle is not viable as built.** The `:browser` bundle ends with a
+top-level `vinary.renderer.core.init();` (runs at eval, touches `document`) and bootstraps
+`goog.global = window / self`. `@electron/mksnapshot` runs the script in a **bare V8** (no `window`/`document`),
+so it breaks immediately. A snapshot would need a dedicated *define-but-don't-run* build variant plus
+browser-global shims — a separate, fragile build, and it only speeds bundle **eval** (login-start + pool
+refill + non-daemon cold), never a warm open.
+
+**Decisive data point — splitting CodeMirror is neutral-to-negative for the daemon+pool architecture.** The pool
+already opens source in **~70 ms** (the fastest format — Phase 1 table above). If CodeMirror were split out:
+- a **pool** window either preloads it on idle (→ same memory, no boot benefit) or does not (→ a source open
+  then pays a chunk-load stall, **regressing** the ~70 ms);
+- only a **non-daemon cold markdown** open (no source, no daemon) would benefit — a narrow case, since a
+  speed-sensitive user runs the daemon.
+
+So the daemon+pool (already shipped) is the measured-optimal cold-start solution; the split/snapshot trade real
+complexity + risk (and a possible warm-source regression) for cold-path-only, often-nil gains. The clean way to
+lazy-load CodeMirror *if wanted anyway* is the **Lightning Bug** pattern (`../lightning-bug/`): encapsulate the
+whole editor behind an imperative-handle boundary and ship it as an ESM module with
+`:keep-as-import #{"@codemirror/*"}`, so the host never statically references CodeMirror internals and the chunk
+loads on demand. Surfaced to the user rather than implemented, given the nil warm-path benefit.
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
