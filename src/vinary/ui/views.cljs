@@ -941,7 +941,15 @@
         dv      @(rf/subscribe [:ui/active-diff-view])         ; :unified | :split (diff docs only)
         sib-loaded @(rf/subscribe [:pdf/sibling-loaded])      ; sibling-PDF paths whose bytes are cached
         reflow? @(rf/subscribe [:pdf/reflow?])
-        stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))]   ; streaming on → reflow streams too
+        stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))   ; streaming on → reflow streams too
+        ;; is a source (code) view showing? (the `source` kind, or a previewable doc toggled to view-source).
+        ;; The prose reading gutter frames a code editor — its gutter/background never reach the edges, reading
+        ;; as "not filling" — so drop the gutter edge-to-edge like the web/PDF views. Mirrors the source-view
+        ;; arms of the render cond below.
+        src?    (or (= "source" (:doc/kind doc))
+                    (and vs? (:doc/text doc)
+                         (or (:doc/sourceable? doc)
+                             (#{"markdown" "mermaid" "source" "org" "latex" "diff"} (:doc/kind doc)))))]
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
                    ;; A true PDF OR a previewable doc currently showing its collocated sibling PDF (rep=:pdf) both
@@ -950,6 +958,7 @@
                    ;; padding and the pages fell down-and-right, outside the visible bounds.
                    (or (= "pdf" (:doc/kind doc))
                        (and (= :pdf rep) (:doc/pdf-sibling doc))) "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
+                   src?                                            "vv-content-source"    ; code editor: edge-to-edge
                    :else                                           nil)
       ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
       ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri

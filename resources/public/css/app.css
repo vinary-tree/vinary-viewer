@@ -26,6 +26,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-content.vv-content-web { padding: 0; overflow: hidden; }
 /* PDF view: edge-to-edge (drop the reading gutter) but KEEP overflow:auto for vertical page scrolling */
 .vv-content.vv-content-pdf-flush { padding: 0; }
+/* source (code) view: drop the prose reading gutter so the CodeMirror editor + its line-number gutter fill
+   edge-to-edge (the gutter's --vv-bg2 otherwise floats inset, reading as "not filling"). Keep overflow:auto. */
+.vv-content.vv-content-source { padding: 0; }
 
 /* in-renderer PDF view (pdf.js): pages render to <canvas> inside the scrolling .vv-content, with a
    transparent text layer (real selection/find/copy) + a link layer overlaid — parity with markdown. */
