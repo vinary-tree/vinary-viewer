@@ -82,9 +82,43 @@ per-window bundle **eval** (each `BrowserWindow` still spawns its own renderer a
 file read+render — exactly what **Phase 3's pre-booted window pool** removes (attach the file to an
 already-evaluated renderer). **Kept.**
 
+## Phase 3a — warm window pool
+**Hypothesis.** The residual ~697 ms of a warm-daemon open is the per-window bundle **eval** — each new
+`BrowserWindow` spawns its own renderer and re-evaluates the 11 MB bundle. If the process keeps a small pool of
+**pre-booted, hidden, fully-warmed** windows (bundle already evaluated, `init!`s already run), a real open can
+just *attach* the file to one and show it, skipping the eval entirely — leaving only the file read + render.
+
+**Change.** `create-window!` was split into `wire-window!` (build + load + per-window `init!`s + session
+services, `show?` toggles visible/hidden) and `open-files!` (send `vv:open-files` to an already-loaded
+renderer). A pool of hidden windows (`pool`, target `VV_POOL`, default 1; `VV_POOL=0` disables) is pre-booted
+after `whenReady` (and refilled after each claim). `claim-window!` pops a warm window, attaches the files,
+`show`s it, and refills; if the pool is empty it falls back to a cold `create-window!`. Pool windows live only
+in `pool` (never `windows`) so `active-window`/menus never target a hidden one; a claim moves it into `windows`.
+The daemon pre-warms the pool at startup and serves every socket open from it.
+
+**Measurement.** One `--daemon` (`VV_POOL=1`), then N socket opens of a math `.md`, headless xvfb, medians
+(`tmp/pool-measure.mjs`). `claim→rendered` = a new `claim` mark (pool hit) to the content node appearing:
+
+| metric | cold | warm daemon, no pool | **warm pool (claimed)** |
+|---|---:|---:|---:|
+| open cost to content | ~1275 ms (window→rendered) | ~697 ms (window→rendered) | **~101 ms** (claim→rendered) |
+| perceived (`client→rendered`) | ~1450 ms † | ~729 ms | **~127 ms** |
+
+All 4 opens were served from the pool (`claims 4/4`), and the pool refilled each time (5 window boots = 1
+initial + 4 refills). The ~101 ms residual is just the file read + `vv:open`→`vv:content` IPC + the format
+render — no bundle eval, no `init!` round-trips.
+
+**Analysis.** The pool removes the last big per-open cost: **~1450 → ~127 ms perceived, ~11×** faster, into
+near-instant territory. The bundle eval is paid once per pool slot (in the background, off the open's critical
+path) instead of once per open. Idle cost is `VV_POOL` hidden renderers (default 1 — a few hundred MB), tunable
+down to 0. This is the payoff of the daemon+pool architecture; Phase 1 (code-split + warm-on-idle) will make
+each pool boot cheaper and pre-JIT CodeMirror so the first source/math render in a claimed window is instant too.
+**Kept.**
+
 ## Experiments
-| # | hypothesis | change | fixture | before → after (entry→rendered) | kept? |
+| # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
 | — | baseline | — | all | ~1450 ms | — |
-| 1 | a resident warm process halves per-open cost | single-instance + Unix-socket daemon (Phase 2) | math.md (warm 2nd+) | ~1450 → **~729 ms** perceived (~1275 → ~697 ms window→rendered) | ✅ |
+| 1 | a resident warm process halves per-open cost | single-instance + Unix-socket daemon (Phase 2) | math.md (warm 2nd+) | ~1450 → **~729 ms** (~1275 → ~697 ms window→rendered) | ✅ |
+| 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
 | … | | | | | |

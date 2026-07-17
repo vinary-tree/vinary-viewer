@@ -44,6 +44,19 @@
 (def ^:private daemon?
   (boolean (some #{"--daemon"} (js->clj js/process.argv))))
 
+;; ── warm window pool ────────────────────────────────────────────────────────────────────────────────────────
+;; Pre-booted, fully-wired HIDDEN windows. A real open CLAIMS one and shows it instantly — the per-window bundle
+;; eval (~700 ms even in the warm process) was already paid at boot — then the pool refills in the background.
+;; Pool windows live ONLY in `pool` (never `windows`), so `active-window` and global menu actions never target a
+;; hidden one. `booting` counts windows loading toward the pool so a refill doesn't overshoot the target.
+(defonce ^:private pool (atom []))
+(defonce ^:private booting (atom 0))
+(def ^:private pool-target
+  ;; how many warm windows to keep ready. Default 1 (small memory footprint); VV_POOL=N tunes it, VV_POOL=0
+  ;; disables the pool entirely (every open cold-creates — the pre-pool behaviour).
+  (let [v (some-> js/process .-env .-VV_POOL js/parseInt)]
+    (if (and (number? v) (not (js/isNaN v)) (>= v 0)) v 1)))
+
 (defn- active-window
   "The window a global action (menu, focus-follows) targets: the focused window, else the most recent."
   ^js []
@@ -59,13 +72,23 @@
   []
   (startup/doc-uris (js->clj js/process.argv) #(.resolve path %)))
 
-(defn create-window!
-  "Open a new app window showing `args` (canonical doc uris, e.g. from `initial-args`/a second-instance argv);
-   nil/empty opens an empty window."
-  ([] (create-window! nil))
-  ([args]
+(defn- open-files!
+  "Send `args` (canonical doc uris) to an already-loaded window's renderer, each in its own tab (first focused).
+   Reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx). No-op if empty."
+  [^js win args]
+  (when-let [paths (seq args)]
+    (profile/mark! "open-sent")
+    (.send (.-webContents win) "vv:open-files"
+           (clj->js {:paths (vec paths) :focus-first true}))))
+
+(defn- wire-window!
+  "Build a fully-wired app window (nav lockdown, per-window init!s, session services once). `show?` starts it
+   visible (a normal open) or hidden (a pool window). `on-ready` runs with the window AFTER did-finish-load +
+   the init!s — it opens the requested files (visible) or hands the window to the pool (hidden). Returns the win."
+  [show? on-ready]
   (let [win (BrowserWindow.
-              (clj->js (merge {:backgroundColor "#292b2e"
+              (clj->js (merge {:show show?
+                               :backgroundColor "#292b2e"
                                :autoHideMenuBar true
                                :webPreferences {:contextIsolation true
                                                 :nodeIntegration false
@@ -74,12 +97,13 @@
                                                 :backgroundThrottling false
                                                 :preload (preload-path)}}
                               ;; restore last position/size (clamped on-screen); defaults to 1280×860
-                              (window/options))))]
+                              (window/options))))
+        wc  (.-webContents win)]
     ;; profiling: propagate VV_PROFILE into the renderer via a ?profile=1 search param (it has no process.env),
     ;; and forward the renderer's `[vv-profile]` console marks to main's stdout (a renderer console.log does not
     ;; otherwise reach it) so scripts/profile-cold-start.mjs sees main + renderer marks on one stream
     (when profile/on?
-      (.on (.-webContents win) "console-message"
+      (.on wc "console-message"
            (fn [& args]
              (let [msg (first (filter string? args))]   ; signature varies by Electron version; find the message
                (when (and msg (re-find #"\[vv-profile\]" msg)) (js/console.log msg))))))
@@ -89,31 +113,29 @@
     ;; Lock the app frame to its bundled index.html. Now that markdown renders (sanitized) raw HTML, a stray
     ;; top-frame navigation must never hand the privileged window.vv bridge to another origin. Real links open
     ;; in the isolated web view or externally (never here), and new-window requests are denied outright.
-    (.on (.-webContents win) "will-navigate"
-         (fn [^js e ^js url] (when-not (= url (.getURL (.-webContents win))) (.preventDefault e))))
-    (.setWindowOpenHandler (.-webContents win) (fn [_] #js {:action "deny"}))
+    (.on wc "will-navigate"
+         (fn [^js e ^js url] (when-not (= url (.getURL wc)) (.preventDefault e))))
+    (.setWindowOpenHandler wc (fn [_] #js {:action "deny"}))
     (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
-    (.once (.-webContents win) "did-finish-load"
+    (.once wc "did-finish-load"
            (fn []
              (profile/mark! "did-finish-load")
-             (config/init! (.-webContents win))
-             (settings/init! (.-webContents win))
-             (recent/init! (.-webContents win))
-             (ext-config/init! (.-webContents win))
-             (grammars/init! (.-webContents win))
-             (connections/init! (.-webContents win))   ; persisted (non-secret) SSH connection metadata
-             (ssh/init! win)                            ; SSH/SFTP transport prompts + vv:ssh-* channels
-             ;; open every file/URI named on the command line, each in its own tab (first focused);
-             ;; reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx)
-             (when-let [paths (seq args)]
-               (profile/mark! "open-sent")
-               (.send (.-webContents win) "vv:open-files"
-                      (clj->js {:paths (vec paths) :focus-first true})))))
-    (.on win "closed" (fn [] (swap! windows (fn [ws] (vec (remove #(= % win) ws))))))
+             (config/init! wc)
+             (settings/init! wc)
+             (recent/init! wc)
+             (ext-config/init! wc)
+             (grammars/init! wc)
+             (connections/init! wc)   ; persisted (non-secret) SSH connection metadata
+             (ssh/init! win)          ; SSH/SFTP transport prompts + vv:ssh-* channels
+             (on-ready win)))
+    ;; drop a closed window from BOTH registries (a pool window can be closed before it is ever claimed)
+    (.on win "closed" (fn []
+                        (swap! windows (fn [ws] (vec (remove #(= % win) ws))))
+                        (swap! pool    (fn [ps] (vec (remove #(= % win) ps))))))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
     ;; process/session-level services register ONCE (see `services-inited?`) — extension runtime + ad-blocking on
     ;; the shared web session, the web view, password autofill, and the shell IPC handlers. They bind to the first
-    ;; window; because the web session is shared, every window's web view inherits the extensions + ad-block.
+    ;; window (pool or visible); because the web session is shared, every window's web view inherits them.
     (when (compare-and-set! services-inited? false true)
       (let [prefs (ext-config/load-config)]
         (ext-popup/init! win)
@@ -122,9 +144,46 @@
       (web/init! win)
       (passwords/init! win)
       (shell/init! win))
-    (swap! windows conj win)
     (profile/mark! "window")
-    win)))
+    win))
+
+(declare refill-pool!)
+
+(defn create-window!
+  "Cold-open a NEW visible window showing `args` (canonical doc uris; nil/empty → an empty window). This pays a
+   full per-window boot; prefer `claim-window!`, which reuses a pre-warmed pool window when one is ready."
+  ([] (create-window! nil))
+  ([args]
+   (let [win (wire-window! true (fn [win] (open-files! win args)))]
+     (swap! windows conj win)
+     win)))
+
+(defn- boot-pool-window!
+  "Pre-boot one hidden, fully-warmed window into the pool (no file). `booting` is held until it lands in `pool`."
+  []
+  (swap! booting inc)
+  (wire-window! false (fn [win] (swap! booting dec) (swap! pool conj win))))
+
+(defn- refill-pool!
+  "Top the warm pool back up to `pool-target` (counting windows still booting), one hidden window per slot."
+  []
+  (dotimes [_ (max 0 (- pool-target (+ (count @pool) @booting)))]
+    (boot-pool-window!)))
+
+(defn- claim-window!
+  "Open `args` in a pre-warmed pool window — instant, no bundle eval — else cold-create one. Refills the pool
+   afterward so the next open is warm too."
+  [args]
+  (if-let [win (peek @pool)]
+    (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
+        (swap! windows conj win)                    ; it is now a real, tracked window
+        (profile/mark! "claim")
+        (open-files! win args)
+        (.show win)
+        (.focus win)
+        (refill-pool!))
+    (do (create-window! args)
+        (refill-pool!))))
 
 (defn- report-crash!
   "Log the full stack (terminal/logs) and show a COPYABLE error dialog. Electron's default
@@ -212,16 +271,19 @@
   (.on app "second-instance"
        (fn [_e ^js argv ^js wd]
          (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
-           (create-window! (seq args)))))
+           (claim-window! (seq args)))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
                                 ;; the resident-server socket (systemd-independent): a `vv <file>` client connects
-                                ;; and sends paths; we open them in a new window of this warm process. `args` are
+                                ;; and sends paths; we open them in a warm pool window of this process. `args` are
                                 ;; already cwd-resolved by the client — normalise via doc-uris (identity resolver).
-                                (daemon/listen! (fn [args] (create-window! (startup/doc-uris (into ["_" "_"] args) identity))))
-                                ;; a daemon opens no window (it stays resident and warm); a normal launch opens
-                                ;; its command-line files
-                                (when-not daemon? (create-window! (initial-args))))))
-  (.on app "activate" (fn [] (when (and (empty? @windows) (not daemon?)) (create-window!))))
+                                (daemon/listen! (fn [args] (claim-window! (startup/doc-uris (into ["_" "_"] args) identity))))
+                                ;; a daemon opens no window (it stays resident and pre-warms the pool); a normal
+                                ;; launch claims a window for its command-line files (cold the very first time,
+                                ;; then refills the pool so every subsequent open is instant)
+                                (if daemon?
+                                  (refill-pool!)
+                                  (claim-window! (initial-args))))))
+  (.on app "activate" (fn [] (when (and (empty? @windows) (not daemon?)) (claim-window! nil))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
