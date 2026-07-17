@@ -55,9 +55,9 @@
         active @(rf/subscribe [:ui/active-tab-id])]
     [:div.vv-tabs
      [:div.vv-tab-list
-       (for [{:keys [id view-source?] tab-uri :uri} tabs]
+       (for [{:keys [id facet] tab-uri :uri} tabs]
          ^{:key id} [tab-item {:id id :uri tab-uri :active? (= id active)
-                                :horizontal? true :view-source? view-source?}])]
+                                :horizontal? true :view-source? (= :source (:type facet))}])]
      [:button.vv-tab-new {:type "button"
                           :title "New Tab"
                           :aria-label "New Tab"

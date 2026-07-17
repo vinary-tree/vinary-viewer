@@ -72,9 +72,9 @@
         active @(rf/subscribe [:ui/active-tab-id])]
     (if (seq tabs)
       [:div.vv-vtabs
-       (for [{:keys [id view-source?] tab-uri :uri} tabs]
+       (for [{:keys [id facet] tab-uri :uri} tabs]
          ^{:key id} [tabs-ui/tab-item {:id id :uri tab-uri :active? (= id active)
-                                        :horizontal? false :view-source? view-source?}])]
+                                        :horizontal? false :view-source? (= :source (:type facet))}])]
       [:div.vv-sidebar-empty "No open tabs"])))
 
 (defn- resize-handle

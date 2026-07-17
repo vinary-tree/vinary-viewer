@@ -24,12 +24,17 @@
    :can-back? (can-back? db) :can-forward? (can-forward? db)})
 
 (defn retained-file-paths
-  "Every local file path still reachable from any open tab history. This is the ownership set for
-   main-process file watchers and the renderer content cache."
+  "Every path still reachable from any open tab — its history uris (as local file paths) PLUS each tab's active +
+   MRU facet paths (already in :doc/path form). This is the ownership set for main-process file watchers and the
+   renderer content cache. The facet paths are load-bearing: a facet's file is shown IN-PLACE and is NOT a history
+   entry, so without retaining it the first eviction pass would retract/unwatch the just-loaded sibling doc."
   [db]
   (->> (tabs db)
-       (mapcat #(get-in % [:hist :stack]))
-       (keep (comp uri/file-path :uri))
+       (mapcat (fn [t]
+                 (concat (keep (comp uri/file-path :uri) (get-in t [:hist :stack]))
+                         (keep :path [(:facet t)])
+                         (vals (:facet-mru t)))))
+       (remove nil?)
        distinct
        vec))
 
@@ -97,7 +102,9 @@
         (if (= uri (:uri (get stack idx)))
           (assoc t :uri uri)
           (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0})]
-            (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})))))))
+            ;; a new destination is a new document → clear the in-place facet so it gets a fresh default
+            (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
+                (dissoc :facet :facet-mru))))))))
 
 (defn nav-tab
   "Point the tab with `id` at uri, pushing a history entry (a repeat just refreshes the uri) — like
@@ -114,7 +121,8 @@
                              (if (= uri (:uri (get stack idx)))
                                (assoc t :uri uri)
                                (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0})]
-                                 (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))}))))
+                                 (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
+                                     (dissoc :facet :facet-mru)))))
                            t))
                        ts)))
     db))
@@ -128,7 +136,8 @@
       (let [entry (get stack idx')]
         [(update-active db (fn [t] (-> (capture-scroll t scroll)
                                        (assoc :uri (:uri entry))
-                                       (assoc-in [:hist :idx] idx'))))
+                                       (assoc-in [:hist :idx] idx')
+                                       (dissoc :facet :facet-mru))))  ; back/forward lands on a different doc
          (:uri entry) (:scroll entry 0)]))))
 
 (defn reorder
@@ -157,27 +166,24 @@
          (:uri closing)
          (boolean (some #(= (:uri %) (:uri closing)) ts'))]))))
 
-(defn view-source? [db] (boolean (:view-source? (active-tab db))))
-(defn toggle-source
-  ([db]    (toggle-source db (active-id db)))
-  ([db id] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (update % :view-source? not) %) ts)))))
-
-;; ---- Document↔PDF representation (only meaningful when the active doc has a collocated sibling PDF) ----
-;; A tab's :representation is the user's EXPLICIT choice (:document / :pdf); nil means "follow the configured
-;; collocated-default preference". The effective representation is resolved in the :ui/active-representation sub,
-;; which also accounts for whether a sibling PDF actually exists.
-(defn representation [db] (:representation (active-tab db)))
-(defn set-representation
-  ([db rep]    (set-representation db (active-id db) rep))
-  ([db id rep] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (assoc % :representation rep) %) ts)))))
-
-(defn effective-representation
-  "Resolve which representation to show. Only :pdf when a sibling PDF exists AND either the tab explicitly chose
-   it (`tab-rep`) or the persisted `pref-default` is :pdf; otherwise :document. Pure so the sub + tests share it."
-  [tab-rep has-sibling? pref-default]
-  (if has-sibling?
-    (or tab-rep (if (= pref-default :document) :document :pdf))
-    :document))
+;; ---- per-tab view FACET: which collocated representation is showing + as which type (:preview/:source) ----
+;; A tab's :facet is {:path :type}; nil = follow the default (see vinary.app.facet/default-facet). :facet-mru
+;; remembers the last file chosen per type ({:preview p :source p}) so a combo button's MAIN region re-activates
+;; it. This uniform facet replaces the old :view-source? / :representation axes; the derivations (options, active,
+;; show?) live in vinary.app.facet. Facet switches are IN-PLACE (no history push — set-facet below), so the tab
+;; keeps its identity; navigation to a DIFFERENT uri clears the facet (a new doc gets a fresh default).
+(defn facet     [db] (:facet (active-tab db)))
+(defn facet-mru [db] (:facet-mru (active-tab db)))
+(defn set-facet
+  "Show `path` as `type` (:preview/:source) on the target tab, and remember it as that type's MRU. IN-PLACE — no
+   history entry (the tab's uri/identity is unchanged; only the shown facet changes)."
+  ([db path type]    (set-facet db (active-id db) path type))
+  ([db id path type] (update-in db [:ui :tabs]
+                                (fn [ts] (mapv #(if (= (:id %) id)
+                                                  (-> % (assoc :facet {:path path :type type})
+                                                        (assoc-in [:facet-mru type] path))
+                                                  %)
+                                               ts)))))
 
 ;; ---- Diff unified⇄split view (per-tab; only meaningful for a .diff/.patch doc) ----
 ;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the default (:unified —

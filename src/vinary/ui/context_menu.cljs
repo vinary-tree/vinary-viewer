@@ -28,8 +28,7 @@
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
 (defn items-for
-  ([target vs? previewable?] (items-for target vs? previewable? nil))
-  ([{:keys [kind path uri text source-location source-line math-tex] :as target} vs? previewable? rep-ctx]
+  [{:keys [kind path uri text source-location source-line math-tex] :as target} vs? previewable?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -79,17 +78,13 @@
     ;; a tab (right-clicked in either the horizontal strip or the vertical Tabs panel)
     :tab  (tab-items target)
     ;; the active markdown document (right-clicked in the content pane, not on a link)
-    :doc  [;; Document↔PDF switch first, when the doc has a collocated exported PDF
-           (when (:sibling? rep-ctx)
-             {:label (if (= :pdf (:rep rep-ctx)) "Show Document" "Show PDF")
-              :event [:tab/toggle-representation]})
-           ;; the Preview↔Source toggle only applies to the document representation, not the PDF
-           (when (not= :pdf (:rep rep-ctx))
-             {:label (source-label vs?) :event [:tab/toggle-source]})
+    ;; the active document (right-clicked in the content pane): its Preview↔Source toggle (facet-aware — a no-op
+    ;; when there is no other facet to switch to, e.g. a lone PDF)
+    :doc  [{:label (source-label vs?) :event [:tab/toggle-source]}
            :sep
            {:label "Copy file path"       :event [:clipboard/copy path]}
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
-    nil)))
+    nil))
 
 (defn- act! [event] (rf/dispatch [:context-menu/close]) (rf/dispatch event))
 
@@ -117,9 +112,7 @@
           ;; markdown/org qualify. LaTeX (like the PDF representation) offers the whole-pane Preview↔Source
           ;; toggle instead — its unified-latex positions map to generated HTML, not the .tex, so no line jump.
           previewable? (contains? #{"markdown" "org"} @(rf/subscribe [:doc/kind]))
-          rep-ctx {:sibling? (some? @(rf/subscribe [:doc/pdf-sibling]))
-                   :rep      @(rf/subscribe [:ui/active-representation])}
-          items (vec (remove nil? (items-for target vs? previewable? rep-ctx)))
+          items (vec (remove nil? (items-for target vs? previewable?)))
           focused @focus]
       (when (not= @last-menu m)
         (reset! last-menu m)

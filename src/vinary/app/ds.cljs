@@ -65,6 +65,5 @@
   (when-let [eid (eid-for-path db path)]
     (d/pull db [:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/source-toc :doc/assets :doc/entries
                 :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta
-                :doc/sourceable? :doc/data-url :doc/reflow-html :doc/pdf-sibling
-                :doc/source-sibling :doc/diff-split-html
+                :doc/sourceable? :doc/data-url :doc/reflow-html :doc/siblings :doc/diff-split-html
                 :doc/streaming? :doc/stream-progress :doc/stream-note] eid)))

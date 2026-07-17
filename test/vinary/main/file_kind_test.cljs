@@ -3,6 +3,7 @@
    service dispatches on. Guards the new Org (.org) classification and a few neighboring kinds so the Org arm
    can't accidentally shadow or be shadowed."
   (:require [cljs.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [vinary.main.file-kind :as fk]))
 
 (def ^:private never-source (constantly false))
@@ -37,25 +38,27 @@
     (is (= "source" (fk/kind-of always-source "/a/main.rs")))
     (is (= "image" (fk/kind-of never-source "/a/pic.svg")))))
 
-(deftest pdf-sibling-path-computation
-  (testing "the same-stem .pdf candidate path (the pure half of the Document↔PDF sibling detection)"
-    (is (= "/a/paper.pdf"      (fk/pdf-sibling-path "/a/paper.tex"))    "a .tex → same-stem .pdf")
-    (is (= "/a/invoice.pdf"    (fk/pdf-sibling-path "/a/invoice.org"))  "an .org → same-stem .pdf")
-    (is (= "/a/notes.pdf"      (fk/pdf-sibling-path "/a/notes.md"))     "a .md → same-stem .pdf")
-    (is (= "/dir.v2/paper.pdf" (fk/pdf-sibling-path "/dir.v2/paper.tex")) "a dotted DIRECTORY name is not mistaken for the extension"))
-  (testing "no sibling candidate when there is no stem to swap, or the doc is itself a PDF"
-    (is (nil? (fk/pdf-sibling-path "/a/README"))    "an extensionless path has no stem swap")
-    (is (nil? (fk/pdf-sibling-path "/a/paper.pdf"))  "a .pdf never siblings itself")
-    (is (nil? (fk/pdf-sibling-path "/a/paper.PDF"))  "…case-insensitively")))
-
-(deftest source-sibling-paths-computation
-  (testing "the reverse: a .pdf → its candidate previewable-source companions (checked in preference order)"
-    (is (= ["/a/paper.tex" "/a/paper.latex" "/a/paper.ltx" "/a/paper.md" "/a/paper.markdown" "/a/paper.org"]
-           (fk/source-sibling-paths "/a/paper.pdf")))
-    (is (= ["/d.v2/x.tex" "/d.v2/x.latex" "/d.v2/x.ltx" "/d.v2/x.md" "/d.v2/x.markdown" "/d.v2/x.org"]
-           (fk/source-sibling-paths "/d.v2/x.PDF")) "case-insensitive on the .pdf extension")
-    (is (nil? (fk/source-sibling-paths "/a/paper.tex")) "only a .pdf has source siblings")
-    (is (nil? (fk/source-sibling-paths "/a/README")) "no extension → no candidates")))
+(deftest group-candidate-paths-computation
+  (testing "same-directory, same-stem candidates for a document GROUP — the file itself first, one per group ext"
+    (let [cands (fk/group-candidate-paths "/a/paper.tex")
+          s     (set cands)]
+      (is (= "/a/paper.tex" (first cands)) "the file itself is first")
+      (is (every? #(str/starts-with? % "/a/paper.") cands) "all share the directory + stem")
+      (is (contains? s "/a/paper.pdf") "includes the same-stem .pdf")
+      (is (contains? s "/a/paper.org") "includes a same-stem .org")
+      (is (contains? s "/a/paper.md")  "includes a same-stem .md")
+      (is (= 1 (count (filter #{"/a/paper.tex"} cands))) "the file's own candidate is not duplicated")))
+  (testing "the same relationship holds for a .pdf (it siblings its authored sources)"
+    (let [s (set (fk/group-candidate-paths "/a/paper.pdf"))]
+      (is (contains? s "/a/paper.tex"))
+      (is (contains? s "/a/paper.org"))))
+  (testing "a dotted DIRECTORY name is not mistaken for the extension"
+    (is (= "/dir.v2/x.tex" (first (fk/group-candidate-paths "/dir.v2/x.tex"))))
+    (is (contains? (set (fk/group-candidate-paths "/dir.v2/x.tex")) "/dir.v2/x.pdf")))
+  (testing "an extensionless path has no stem to swap → just itself"
+    (is (= ["/a/README"] (fk/group-candidate-paths "/a/README"))))
+  (testing "group-kinds is the exact set of collocatable representation kinds"
+    (is (= #{"pdf" "markdown" "org" "latex" "mermaid" "diff"} fk/group-kinds))))
 
 (deftest kind-of-diff
   (testing ".diff/.patch classify as \"diff\" — ahead of the source arm, so they render (colored + side-by-side)"

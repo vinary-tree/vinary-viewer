@@ -318,11 +318,15 @@ async function testRemote() {
     const src = await content.openRemoteUri(srv.url('/sub/a.txt'), 'source');
     assert.strictEqual(src.kind, 'source', 'the grammar-aware CLJS kind is honored (source, not sniffed text)');
 
-    // Document↔PDF siblings over remote (both directions)
+    // collocated document GROUP over remote (both directions): each member advertises the full :siblings group
     const texWithPdf = await content.openRemoteUri(srv.url('/paper.tex'), 'latex');
-    assert.ok(texWithPdf.pdfSibling && texWithPdf.pdfSibling.endsWith('/paper.pdf'), 'a remote .tex advertises its collocated .pdf');
+    assert.ok(Array.isArray(texWithPdf.siblings)
+              && texWithPdf.siblings.some(s => s.kind === 'pdf' && s.path.endsWith('/paper.pdf')),
+              'a remote .tex advertises its collocated .pdf in its siblings group');
     const pdfWithSrc = await content.openRemoteUri(srv.url('/paper.pdf'), 'pdf');
-    assert.ok(pdfWithSrc.sourceSibling && pdfWithSrc.sourceSibling.endsWith('/paper.tex'), 'a remote .pdf advertises its collocated source');
+    assert.ok(Array.isArray(pdfWithSrc.siblings)
+              && pdfWithSrc.siblings.some(s => s.kind === 'latex' && s.path.endsWith('/paper.tex')),
+              'a remote .pdf advertises its collocated source in its siblings group');
 
     // remote diff on-disk enrichment (resolve a referenced file over SFTP, walking ancestors)
     const diffSrcs = await content.loadRemoteDiffSources(srv.url('/change.diff'), ['src/greet.js']);
@@ -367,7 +371,7 @@ async function testRemote() {
     assert.ok(sawPartial, 'a dropped remote stream is flagged partial (truncation is visible, not a silent EOF)');
     content.streamClose({ sessionId: sd.sessionId });
 
-    console.log('[ok] remote SSH: openRemoteUri + Doc↔PDF siblings + diff/asset + streaming/paging + mid-stream-drop partial');
+    console.log('[ok] remote SSH: openRemoteUri + collocated group siblings + diff/asset + streaming/paging + mid-stream-drop partial');
   } finally {
     transport.closeAll();
     if (!srvClosed) await srv.close();

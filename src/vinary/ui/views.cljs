@@ -936,10 +936,8 @@
   (let [doc     @(rf/subscribe [:doc/active])
         tabs    @(rf/subscribe [:ui/tabs])
         uri     @(rf/subscribe [:ui/active-uri])
-        vs?     @(rf/subscribe [:ui/active-view-source?])
-        rep     @(rf/subscribe [:ui/active-representation])   ; :document | :pdf (only :pdf when a sibling exists)
+        vs?     @(rf/subscribe [:ui/active-view-source?])      ; showing the active facet as source? (facet type = :source)
         dv      @(rf/subscribe [:ui/active-diff-view])         ; :unified | :split (diff docs only)
-        sib-loaded @(rf/subscribe [:pdf/sibling-loaded])      ; sibling-PDF paths whose bytes are cached
         reflow? @(rf/subscribe [:pdf/reflow?])
         stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))   ; streaming on → reflow streams too
         ;; is a source (code) view showing? (the `source` kind, or a previewable doc toggled to view-source).
@@ -952,12 +950,9 @@
                              (#{"markdown" "mermaid" "source" "org" "latex" "diff"} (:doc/kind doc)))))]
     [:div.vv-content
      {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
-                   ;; A true PDF OR a previewable doc currently showing its collocated sibling PDF (rep=:pdf) both
-                   ;; render the pdf.js canvas, which supplies its own gutter — drop the prose reading gutter so the
-                   ;; pages sit flush at the top-left. Without the sibling arm a .tex→PDF preview kept the 32×45
-                   ;; padding and the pages fell down-and-right, outside the visible bounds.
-                   (or (= "pdf" (:doc/kind doc))
-                       (and (= :pdf rep) (:doc/pdf-sibling doc))) "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
+                   ;; the pdf.js canvas (a real PDF, or a PDF FACET of a collocated group — both are just a pdf doc
+                   ;; entity now) supplies its own gutter → drop the prose reading gutter so pages sit flush.
+                   (= "pdf" (:doc/kind doc))       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
                    src?                                            "vv-content-source"    ; code editor: edge-to-edge
                    :else                                           nil)
       ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
@@ -976,14 +971,10 @@
                                    [web-host (if (uri/remote? (:doc/path doc))
                                                (media/remote->vv-remote-url (:doc/path doc))
                                                (media/path->file-url (:doc/path doc)))]
-       ;; Document↔PDF representation switch: a doc collocated with an exported PDF, currently showing :pdf →
-       ;; render that sibling PDF in place (bytes are loaded byte-only into pdf-cache; a brief note until ready).
-       ;; Placed above :doc/error / :doc/streaming? so the faithful PDF shows regardless of the doc's own state.
-       (and (= :pdf rep) (:doc/pdf-sibling doc))
-       (if (contains? sib-loaded (:doc/pdf-sibling doc))
-         ^{:key (str "sibling-pdf:" (:doc/pdf-sibling doc))}
-         [pdf-view (:doc/pdf-sibling doc) (:doc/stamp doc)]
-         [:div.vv-empty "Loading PDF…"])
+       ;; an in-place FACET whose file is still being fetched (its vv:open is in flight, so no doc entity is cached
+       ;; yet) — the resolved content path exists but the doc doesn't. Placed above the kind branches (they read
+       ;; (:doc/kind doc), nil for an absent doc).
+       (and (nil? doc) uri)        [:div.vv-empty "Loading…"]
        (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
        ;; a large streamable doc renders as a bounded-memory INCREMENTAL stream (ir-stream-body drives it from
        ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
@@ -1067,51 +1058,69 @@
 (defn- seg-button [active? label title on-click]
   [:button.vv-seg-btn {:class (when active? "vv-seg-active") :title title :on-click on-click} label])
 
-(defn view-switch-toolbar
-  "Contextual segmented controls in the toolbar: [Doc | PDF] when the active doc has a collocated PDF (a source
-   doc's exported PDF, switched in-place) OR is itself a PDF collocated with a source (\"Doc\" navigates to the
-   rendered source); [Unified | Split] for a diff's layout; and [Preview | Source] when a previewable document
-   (not the PDF) is showing. All also live in the tab right-click menu and the command palette; the toolbar makes
-   them discoverable. Renders nothing otherwise."
+(defn combo-button
+  "A split/combo toolbar button (modeled on the zoom caret): a MAIN region that runs `on-main`, plus — for ≥2
+   `options` — a vertical divider + down-caret that opens a menu of the type's files. A single option renders as a
+   plain button (no divider/caret/menu). Local open-state closes on mouse-leave or on a pick (`:on-mouse-down` +
+   preventDefault so the click lands before blur). `active?` highlights the button when its type is the shown one;
+   the currently-shown file's menu row is checked."
+  [_props]
+  (let [open? (r/atom false)]
+    (fn [{:keys [label active? title mode on-main options on-select]}]
+      (if (= mode :plain)
+        [:button.vv-combo-plain {:class (when active? "vv-combo-active") :title title :on-click on-main} label]
+        [:div.vv-combo {:on-mouse-leave #(reset! open? false)}
+         [:button.vv-combo-main {:class (when active? "vv-combo-active") :title title :on-click on-main} label]
+         [:button.vv-combo-caret {:class (when active? "vv-combo-active") :title "Choose the file to show"
+                                  :aria-haspopup "menu" :on-click #(swap! open? not)} "▾"]
+         (when @open?
+           [:ul.vv-combo-menu {:role "menu"}
+            (for [{:keys [path] opt-label :label opt-active? :active?} options]
+              ^{:key path}
+              [:li.vv-combo-opt {:role "menuitem"
+                                 :class (when opt-active? "vv-combo-opt-sel")
+                                 :on-mouse-down (fn [^js e] (.preventDefault e) (reset! open? false) (on-select path))}
+               opt-label])])]))))
+
+(defn view-switch
+  "The [Preview ▾ | Source ▾] combo pair for a document with collocated representations. Each button is plain (one
+   option) or a combo (several); a type with no options is omitted. Driven entirely by the :view/switch VM
+   (vinary.app.facet/view-model). MAIN region → activate the type's main target; a menu pick → show that file."
   []
-  (let [kind       @(rf/subscribe [:doc/kind])
-        sibling    @(rf/subscribe [:doc/pdf-sibling])       ; a source doc's exported PDF → in-place switch
-        source-sib @(rf/subscribe [:doc/source-sibling])    ; a PDF's collocated source → navigate-to switch
-        rep        @(rf/subscribe [:ui/active-representation])
-        dv         @(rf/subscribe [:ui/active-diff-view])
-        vs?        @(rf/subscribe [:ui/active-view-source?])
-        id         @(rf/subscribe [:ui/active-tab-id])
-        diff?      (= "diff" kind)
-        previewable? (contains? #{"markdown" "org" "latex" "mermaid" "diff"} kind)]
+  (let [{:keys [active-type preview source]} @(rf/subscribe [:view/switch])
+        id  @(rf/subscribe [:ui/active-tab-id])
+        btn (fn [type {:keys [mode main-path options]} label]
+              (when (not= mode :hidden)
+                [combo-button {:label     label
+                               :active?   (= type active-type)
+                               :title     (str "Show the " label)
+                               :mode      mode
+                               :on-main   #(when main-path (rf/dispatch [:tab/activate-facet-type id type]))
+                               :options   options
+                               :on-select (fn [path] (rf/dispatch [:tab/set-facet id path type]))}]))]
+    [:div.vv-combo-group {:role "group" :aria-label "View"}
+     (btn :preview preview "Preview")
+     (btn :source source "Source")]))
+
+(defn view-switch-toolbar
+  "The toolbar's view controls: the [Preview ▾ | Source ▾] combo — shown only when the active document has
+   something to toggle (facet/show-view-switch?: a source to view, or ≥2 previews; a lone PDF or office file shows
+   nothing) — plus the orthogonal [Unified | Split] control for a diff's layout. Renders nothing otherwise."
+  []
+  (let [show? (:show? @(rf/subscribe [:view/switch]))
+        kind  @(rf/subscribe [:doc/kind])
+        vs?   @(rf/subscribe [:ui/active-view-source?])
+        dv    @(rf/subscribe [:ui/active-diff-view])
+        id    @(rf/subscribe [:ui/active-tab-id])]
     [:<>
-     ;; [Doc | PDF] — a source doc with an exported PDF (switched in-place), or a PDF with a collocated source
-     ;; (where "Doc" navigates the tab to the rendered source, which itself offers "PDF" to return).
-     (cond
-       sibling
-       [:div.vv-seg {:role "group" :aria-label "Representation"}
-        [seg-button (= rep :document) "Doc" "Show the rendered document"
-         #(rf/dispatch [:tab/set-representation id :document])]
-        [seg-button (= rep :pdf) "PDF" "Show the collocated exported PDF"
-         #(rf/dispatch [:tab/set-representation id :pdf])]]
-       source-sib
-       [:div.vv-seg {:role "group" :aria-label "Representation"}
-        [seg-button false "Doc" "Open the collocated source document"
-         #(rf/dispatch [:tab/open-representation-source id])]
-        [seg-button true "PDF" "Showing this PDF" (fn [] nil)]])
+     (when show? [view-switch])
      ;; [Unified | Split] — a diff's layout (hidden while viewing the raw source text)
-     (when (and diff? (not vs?))
+     (when (and (= "diff" kind) (not vs?))
        [:div.vv-seg {:role "group" :aria-label "Diff layout"}
         [seg-button (= dv :unified) "Unified" "Show the unified (single-column) diff"
          #(when (not= dv :unified) (rf/dispatch [:tab/set-diff-view id :unified]))]
         [seg-button (= dv :split) "Split" "Show the side-by-side diff"
-         #(when (not= dv :split) (rf/dispatch [:tab/set-diff-view id :split]))]])
-     ;; [Preview | Source] — a previewable document showing its rendered self (never over a PDF)
-     (when (and previewable? (not= rep :pdf))
-       [:div.vv-seg {:role "group" :aria-label "View"}
-        [seg-button (not vs?) "Preview" "Show the rendered preview"
-         #(when vs? (rf/dispatch [:tab/toggle-source id]))]
-        [seg-button vs? "Source" "Show the source text"
-         #(when-not vs? (rf/dispatch [:tab/toggle-source id]))]])]))
+         #(when (not= dv :split) (rf/dispatch [:tab/set-diff-view id :split]))]])]))
 
 (defn uri-bar
   "Browser-style nav row: back / forward / reload + the address bar. The input shows the active tab's

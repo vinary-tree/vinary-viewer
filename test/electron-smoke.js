@@ -571,9 +571,6 @@ function installIpc(state) {
   // SSH remote files: capture the (secret) prompt reply for assertions; serve remote assets from the fixture.
   ipcMain.on('vv:ssh-prompt-reply', (_event, payload) => { state.sshReply = payload; });
   ipcMain.handle('vv:load-remote-asset', (_event, req) => contentService.loadRemoteAsset(req.uri, req.relativeTo));
-  // a collocated sibling PDF's bytes (byte-only load, no tab) for the Document↔PDF switch — the smoke stages
-  // real PDF bytes in state.siblingPdfBytes so a .tex→PDF preview (and its flush layout) can be exercised.
-  ipcMain.handle('vv:load-pdf-bytes', () => state.siblingPdfBytes || null);
   ipcMain.handle('vv:complete-path', (_event, input) => ({
     input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
   }));
@@ -3127,58 +3124,59 @@ async function main() {
     console.log('[ok] streamed PDF reflow is byte-identical to the batch reflow (progressive extracted-text commit)');
   }
 
-  // ── Document↔PDF sizing (ADR-0026 Part 0) + reverse PDF→source switch (Part 1) ──
-  // A .tex collocated with an exported .pdf. Its default representation is :pdf (collocated-default), so it opens
-  // showing the sibling PDF. The bug: content-view only applied vv-content-pdf-flush for kind "pdf", so a sibling
-  // PDF under a "latex" doc kept the 32×45 reading gutter and the pages fell down-and-right. Assert the flush class
-  // is now present, then toggle to "Doc" (the rendered .tex) and back.
-  state.siblingPdfBytes = fs.readFileSync(pdfFixture);   // a Buffer, matching the real vv:load-pdf-bytes handler
+  // ── Collocated document GROUP: the [Preview ▾ | Source ▾] combo (replaces the old [Doc | PDF] switch) ──
+  // A .tex collocated with an exported .pdf. Its group = {latex, pdf}. By the collocated-default :pdf preference it
+  // opens showing the sibling PDF IN PLACE (a facet load — no navigation), and the PDF surface drops the reading
+  // gutter (vv-content-pdf-flush). The toolbar shows Preview (a combo: PDF + LaTeX) and Source (LaTeX). Clicking
+  // Source shows the .tex source in place; the tab URI never changes.
   const texPath = path.join(ROOT, 'test', 'paper.tex');
   const texSiblingPdf = path.join(ROOT, 'test', 'paper.pdf');
   const texContent = '\\documentclass{article}\\begin{document}\\section{Intro}Hello \\textbf{world}.\\end{document}\n';
-  // register the .tex content so the reverse "Doc" navigation (Part 1) can load it
-  state.contentByPath.set(texPath, { path: texPath, kind: 'latex', text: texContent, pdfSibling: texSiblingPdf, meta: { size: texContent.length } });
+  const texGroup = [{ path: texPath, kind: 'latex' }, { path: texSiblingPdf, kind: 'pdf' }];
+  // register BOTH representations (each carries the full :siblings group); the default-facet load fetches the PDF
+  // in place via the harness's vv:open auto-responder.
+  state.contentByPath.set(texPath, { path: texPath, kind: 'latex', text: texContent, siblings: texGroup, meta: { size: texContent.length } });
+  state.contentByPath.set(texSiblingPdf, { path: texSiblingPdf, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), siblings: texGroup });
   await evalIn(win, `window.__vvopen(${JSON.stringify(texPath)})`);
-  win.webContents.send('vv:content', { path: texPath, kind: 'latex', text: texContent, pdfSibling: texSiblingPdf, stamp: Date.now(), meta: { size: texContent.length } });
-  // the doc has a collocated PDF → the [Doc | PDF] switch appears and, by the collocated-default :pdf preference,
-  // the PDF surface shows (representation :pdf). The flush class is applied from (rep=:pdf AND pdf-sibling), so it
-  // is present immediately — independent of whether the sibling bytes have finished loading.
+  win.webContents.send('vv:content', { path: texPath, kind: 'latex', text: texContent, siblings: texGroup, stamp: Date.now(), meta: { size: texContent.length } });
+  // the default facet (collocated-default :pdf) loads + shows the sibling PDF in place → the flush class appears
+  // once the PDF facet's doc entity resolves (its bytes arrive via the facet vv:open round-trip).
   await waitFor(
-    () => evalIn(win, `Array.from(document.querySelectorAll('.vv-seg-btn')).some(b => b.textContent.trim() === 'PDF')`),
-    'the [Doc | PDF] switch appears for a .tex with a collocated PDF', 8000
+    () => evalIn(win, `document.querySelector('.vv-content')?.classList.contains('vv-content-pdf-flush') && Boolean(document.querySelector('.vv-content .vv-pdf-doc'))`),
+    'a .tex with a collocated PDF opens showing the PDF in place (flush gutter)', 15000
   );
-  const flush = await evalIn(win, `(() => ({
-    hasFlush: document.querySelector('.vv-content').classList.contains('vv-content-pdf-flush'),
-    seg: Array.from(document.querySelectorAll('.vv-seg-btn')).map(b => b.textContent.trim())
+  const combo = await evalIn(win, `(() => ({
+    group: Boolean(document.querySelector('.vv-combo-group')),
+    labels: Array.from(document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')).map(b => b.textContent.trim()),
+    uri: (() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && t.uri; })()
   }))()`);
-  assert.ok(flush.seg.includes('Doc') && flush.seg.includes('PDF'), 'the [Doc | PDF] switch is offered for a doc with a collocated PDF');
-  assert.strictEqual(flush.hasFlush, true, 'a .tex showing its sibling PDF must get vv-content-pdf-flush (Part 0 fix: pages sit flush at top-left, not offset down-and-right by the 32×45 reading gutter)');
-  console.log('[ok] a .tex→PDF preview drops the reading gutter (vv-content-pdf-flush) — Part 0 fix');
-  // "Doc" → the rendered .tex; the flush class is dropped (the document view keeps its reading gutter)
-  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Doc'); if (b) b.click(); })()`);
+  assert.ok(combo.group, 'the [Preview | Source] combo is shown for a doc with a collocated group');
+  assert.deepStrictEqual(combo.labels, ['Preview', 'Source'], 'both the Preview and Source buttons are present');
+  assert.ok((combo.uri || '').includes('paper.tex'), 'the tab stays on the primary .tex — the facet switch is IN-PLACE (no navigation)');
+  console.log('[ok] a collocated .tex+PDF group shows the [Preview | Source] combo and opens the PDF in place (flush)');
+  // click Source (its main region) → the .tex source shows in place; the flush gutter is dropped
+  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')).find(x => x.textContent.trim() === 'Source'); if (b) b.click(); })()`);
   await waitFor(
-    () => evalIn(win, `(() => { const b = document.querySelector('.vv-content .markdown-body'); return Boolean(b) && /world/.test(b.textContent) && !document.querySelector('.vv-content').classList.contains('vv-content-pdf-flush'); })()`),
-    'the "Doc" side renders the .tex and restores the reading gutter', 8000
+    () => evalIn(win, `(() => { const s = document.querySelector('.vv-content .vv-source .cm-line'); return Boolean(s) && !document.querySelector('.vv-content').classList.contains('vv-content-pdf-flush'); })()`),
+    'clicking Source shows the .tex source in place (gutter restored)', 8000
   );
-  console.log('[ok] [Doc | PDF] toggles a .tex between its render and the collocated PDF');
+  const stillTex = await evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && t.uri; })()`);
+  assert.ok((stillTex || '').includes('paper.tex'), 'Source is shown IN PLACE — the tab URI is unchanged (no history navigation)');
+  console.log('[ok] the [Preview | Source] combo switches facets in place (tab URI unchanged)');
 
-  // reverse (Part 1): open the .pdf itself with a collocated source sibling → "Doc" NAVIGATES to the source.
-  const pdfWithSource = path.join(ROOT, 'test', 'paper.pdf');
-  state.contentByPath.set(texPath, { path: texPath, kind: 'latex', text: texContent, pdfSibling: pdfWithSource, meta: { size: texContent.length } });
-  await evalIn(win, `window.__vvopen(${JSON.stringify(pdfWithSource)})`);
-  win.webContents.send('vv:content', { path: pdfWithSource, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), sourceSibling: texPath, stamp: Date.now() });
+  // a lone PDF (no collocated source / alternate) shows NO view-switch buttons — nothing meaningful to toggle
+  const lonePdf = path.join(ROOT, 'test', 'lonely.pdf');
+  const loneGroup = [{ path: lonePdf, kind: 'pdf' }];
+  state.contentByPath.set(lonePdf, { path: lonePdf, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), siblings: loneGroup });
+  await evalIn(win, `window.__vvopen(${JSON.stringify(lonePdf)})`);
+  win.webContents.send('vv:content', { path: lonePdf, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), siblings: loneGroup, stamp: Date.now() });
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas.vv-pdf-canvas'))`),
-    'the opened PDF renders', 15000
+    'the lone PDF renders', 15000
   );
-  const revSeg = await evalIn(win, `Array.from(document.querySelectorAll('.vv-seg-btn')).map(b => b.textContent.trim())`);
-  assert.ok(revSeg.includes('Doc') && revSeg.includes('PDF'), 'an opened PDF with a collocated source offers [Doc | PDF] (Part 1)');
-  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Doc'); if (b) b.click(); })()`);
-  await waitFor(
-    () => evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && (t.uri || '').includes('paper.tex'); })()`),
-    'the PDF\'s "Doc" navigates the tab to the collocated source (.tex)', 8000
-  );
-  console.log('[ok] opening a PDF collocated with a source offers [Doc | PDF]; "Doc" opens the rendered source');
+  const loneHasCombo = await evalIn(win, `Boolean(document.querySelector('.vv-combo-group')) || document.querySelectorAll('.vv-combo-main, .vv-combo-plain').length > 0`);
+  assert.strictEqual(loneHasCombo, false, 'a lone PDF (no collocated source) shows NO Preview/Source buttons');
+  console.log('[ok] a lone PDF shows no view-switch buttons (nothing to toggle)');
 
   // The CSP is a security control, not advice: a blocked resource is a bug, and it only ever surfaced as one
   // more red line among the re-frame warnings. Injecting MathJax's stylesheet tripped `font-src` this way.

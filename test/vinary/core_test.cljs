@@ -338,17 +338,16 @@
     (testing "reorder moves a tab to an insertion gap"
       (is (= ["/c" "/a" "/b"] (mapv :uri (nav/tabs (nav/reorder db 2 0)))) "c → front")
       (is (= ["/a" "/c" "/b"] (mapv :uri (nav/tabs (nav/reorder db 2 1)))) "c → gap 1"))
-    (testing "view-source toggles per tab"
-      (is (false? (nav/view-source? db)))
-      (is (true?  (nav/view-source? (nav/toggle-source db))))
-      (is (false? (nav/view-source? (nav/toggle-source (nav/toggle-source db))))))))
+    (testing "the view facet is stored on the active tab"
+      (is (nil? (nav/facet db)))
+      (is (= {:path "/c" :type :source} (nav/facet (nav/set-facet db "/c" :source)))))))
 
 (deftest nav-duplicate-and-blank-tabs
   (testing "duplicate inserts immediately after the source tab and preserves tab state"
     (let [db0  (-> empty-tabs
                    (nav/add-tab "/a.md")
                    (nav/nav-active "/b.md" 42)
-                   (nav/toggle-source 0))
+                   (nav/set-facet 0 "/b.md" :source))
           db1  (nav/duplicate-tab db0 0)
           tabs (nav/tabs db1)]
       (is (= [0 1] (mapv :id tabs)))
@@ -356,7 +355,7 @@
       (is (= 1 (nav/active-id db1)))
       (is (= 2 (get-in db1 [:ui :next-tab-id])))
       (is (= (:hist (first tabs)) (:hist (second tabs))))
-      (is (true? (:view-source? (second tabs))))))
+      (is (= {:path "/b.md" :type :source} (:facet (second tabs))) "duplicate preserves the view facet")))
   (testing "duplicating an inactive tab still inserts next to that tab"
     (let [db0  (-> empty-tabs
                    (nav/add-tab "/a.md")

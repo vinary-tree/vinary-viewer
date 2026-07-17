@@ -51,9 +51,8 @@
         :find {:visible? false :query "" :count 0 :idx 0}
         ;; in-renderer PDF view-state (zoom scale / fit mode / dark-invert); fit + invert persist in settings.edn
         :pdf {:scale 1.0 :fit :width :invert? false}
-        ;; paths of collocated sibling PDFs whose bytes are loaded into pdf-cache (Document↔PDF switch); a doc's
-        ;; :representation lives on its tab (vinary.app.nav), the preferred default in [:ui :settings :collocated-default]
-        :pdf-sibling-loaded #{}
+        ;; a tab's view FACET (which collocated representation is showing, as preview/source) lives on its tab
+        ;; (vinary.app.nav :facet/:facet-mru); the preferred default in [:ui :settings :collocated-default]
         :window-zoom 1.0   ; app-renderer (DOM views) zoom factor, reported back from main
         :web-zoom 1.0      ; in-app web view's zoom factor, reported back from main
         ;; keybinding / modal / sequence state (ephemeral UI; the keymap itself lives in

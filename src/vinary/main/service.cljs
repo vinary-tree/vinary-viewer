@@ -90,24 +90,19 @@
   (try (mapv #(entry->map dir %) (.readdirSync fs dir #js {:withFileTypes true}))
        (catch :default _ [])))
 
-(defn- sibling-pdf
-  "The same-directory, same-stem `.pdf` companion of `p` if it exists on disk, else nil. Lets a previewable
-   document (LaTeX/Org/Markdown) collocated with an exported PDF offer a Document↔PDF representation switch —
-   computed main-side because the renderer has no filesystem access. The pure candidate-path arithmetic lives in
-   file-kind/pdf-sibling-path (node-tested); here we only add the filesystem existence check."
+(defn- siblings-group
+  "The document GROUP of `p`: every same-directory, same-stem file that EXISTS on disk and classifies to a
+   `file-kind/group-kind` (pdf + markdown/org/latex/mermaid/diff), as `[{:path :kind}]` — `p` itself included.
+   Lets the renderer offer the Preview/Source combo over all collocated representations of one document (e.g.
+   paper.org + paper.tex + paper.pdf), replacing the old pairwise sibling-pdf/sibling-source. Computed main-side
+   (the renderer has no fs access); the pure candidate arithmetic + classification live in file-kind (node-tested),
+   here we only add the filesystem existence check."
   [p]
-  (when-let [pdf (file-kind/pdf-sibling-path p)]
-    (when (try (.isFile (.statSync fs pdf)) (catch :default _ false))
-      pdf)))
-
-(defn- sibling-source
-  "The first existing same-directory, same-stem previewable SOURCE companion of a `.pdf` `p` (`.tex`/`.md`/
-   `.org`/…), else nil — the reverse of `sibling-pdf`. Lets a PDF opened alongside its source offer the same
-   [Doc | PDF] switch (\"Doc\" navigates the tab to the rendered source). Candidate paths come from the pure,
-   node-tested file-kind/source-sibling-paths; here we add the filesystem existence check."
-  [p]
-  (some (fn [cand] (when (try (.isFile (.statSync fs cand)) (catch :default _ false)) cand))
-        (file-kind/source-sibling-paths p)))
+  (into []
+        (comp (filter (fn [cand] (try (.isFile (.statSync fs cand)) (catch :default _ false))))
+              (map (fn [cand] {:path cand :kind (kind-of cand)}))
+              (filter (fn [m] (contains? file-kind/group-kinds (:kind m)))))
+        (file-kind/group-candidate-paths p)))
 
 (defn- resolve-diff-source
   "Locate a diff's referenced file `rel` on disk: try it relative to the diff's own directory, then walk up the
@@ -196,11 +191,11 @@
       ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)
       :pdf
       (try (let [bytes (.readFileSync fs path)
-                 ;; a PDF collocated with its previewable source advertises it, so the renderer can offer the
-                 ;; reverse [Doc | PDF] switch ("Doc" navigates to the rendered source — paper.pdf → paper.tex).
-                 src   (sibling-source path)]
-             (.send wc "vv:content" (clj->js (cond-> {:path path :kind "pdf" :bytes bytes :stamp stamp}
-                                               src (assoc :sourceSibling src)))))
+                 ;; the PDF's collocated document group (its authored sources + itself), so the renderer offers
+                 ;; the Preview/Source combo over every representation (paper.pdf ↔ paper.tex/paper.org). A lone
+                 ;; PDF's group is size 1 → the renderer shows no toggle.
+                 grp   (siblings-group path)]
+             (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp :siblings grp})))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
       ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
@@ -210,12 +205,13 @@
       :text
       (try (let [text (.readFileSync fs path "utf8")
                  size (try (.-size (.statSync fs path)) (catch :default _ nil))
-                 ;; a previewable doc collocated with a same-stem exported PDF advertises it, so the renderer can
-                 ;; offer a Document↔PDF switch (kind-agnostic: LaTeX papers AND Org/Markdown invoices).
-                 pdf  (when (contains? #{"latex" "org" "markdown"} kind) (sibling-pdf path))]
+                 ;; a group-kind source (markdown/org/latex/mermaid/diff) advertises its collocated document group
+                 ;; (its exported PDF + any sibling sources), so the renderer offers the Preview/Source combo over
+                 ;; every representation. Non-group text kinds (source/text) carry no group → no toggle.
+                 grp  (when (contains? file-kind/group-kinds kind) (siblings-group path))]
              (.send wc "vv:content" (clj->js (cond-> {:path path :kind kind :text text :stamp stamp}
                                                size (assoc :meta {:size size})
-                                               pdf  (assoc :pdfSibling pdf)))))
+                                               grp  (assoc :siblings grp)))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
 
 (defn- send-open-content! [path]
@@ -432,14 +428,6 @@
   (.handle ipcMain "vv:stream-close" (fn [_e req] (.streamClose content-service req)))
   (.handle ipcMain "vv:complete-path"
            (fn [_e raw] (if (file-kind/remote-uri? raw) (complete-remote raw) (clj->js (complete raw)))))
-  ;; load a collocated sibling PDF's bytes into the renderer's pdf-cache WITHOUT opening a tab (the Document↔PDF
-  ;; representation switch renders the sibling in-place). Returns the Buffer, or nil if unreadable; a remote
-  ;; sibling reads over SFTP (so Doc↔PDF works for a remote paper.tex ↔ paper.pdf too).
-  (.handle ipcMain "vv:load-pdf-bytes"
-           (fn [_e p]
-             (if (file-kind/remote-uri? p)
-               (.remoteReadFile ssh-transport p)
-               (try (.readFileSync fs p) (catch :default _ nil)))))
   ;; resolve a diff's referenced files (relative to the diff, walking up ancestors) → {rel → content}, for the
   ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"

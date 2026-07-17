@@ -4,6 +4,7 @@
    app-db ([:ui :tabs]/[:ui :active-tab]); reads go through vinary.app.nav."
   (:require [re-frame.core :as rf]
             [vinary.app.ds :as ds]
+            [vinary.app.facet :as facet]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -105,7 +106,7 @@
 (rf/reg-sub :ui/active-tab-id (fn [db _] (nav/active-id db)))
 (rf/reg-sub :ui/active-tab    (fn [db _] (nav/active-tab db)))
 (rf/reg-sub :ui/active-uri    (fn [db _] (nav/active-uri db)))
-(rf/reg-sub :ui/active-view-source? (fn [db _] (nav/view-source? db)))
+(rf/reg-sub :ui/active-view-source? :<- [:facet/active] (fn [af _] (= :source (:type af))))
 (rf/reg-sub :ui/active-path   (fn [db _] (nav/active-path db)))    ; the active uri iff it is a local file
 (rf/reg-sub :history/can-back?    (fn [db _] (nav/can-back? db)))
 (rf/reg-sub :history/can-forward? (fn [db _] (nav/can-forward? db)))
@@ -113,37 +114,41 @@
 ;; the tab strip reads the app-db tabs
 (rf/reg-sub :tabs :<- [:ui/tabs] (fn [tabs _] tabs))
 
-;; the active document: the cached DataScript doc for the active tab's local-file uri
+;; the active tab's effective view facet {:path :type} (its chosen collocated representation, or the default) and
+;; the derived CONTENT path — the file the pane / Contents / find operate on. This differs from the tab's primary
+;; uri when a sibling facet is shown in place. See vinary.app.facet.
+(rf/reg-sub :facet/active (fn [db _] (facet/resolve-facet db)))
+(rf/reg-sub :ui/active-content-path :<- [:facet/active] :<- [:ui/active-path]
+            (fn [[af primary] _] (or (:path af) primary)))
+(rf/reg-sub :facet/type :<- [:facet/active] (fn [af _] (:type af)))
+
+;; the active document: the cached DataScript doc for the active tab's active CONTENT path (its facet, defaulting
+;; to the primary uri). All :doc/* derivations below follow the shown facet automatically.
 (rf/reg-sub
  :doc/active
- :<- [:ds/rev] :<- [:ui/active-path]
+ :<- [:ds/rev] :<- [:ui/active-content-path]
  (fn [[_rev path] _] (when path (ds/active-doc (ds/snapshot) path))))
 
 ;; the active document's kind ("markdown" / "org" / "latex" / "source" / "pdf" / …) — gates the "Go to preview" jump item
 (rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
 
-;; the active document's collocated exported PDF (absolute path), or nil — enables the Document↔PDF switch
-(rf/reg-sub :doc/pdf-sibling :<- [:doc/active] (fn [doc _] (:doc/pdf-sibling doc)))
-
-;; the reverse: an opened PDF's collocated previewable SOURCE (absolute path), or nil — enables PDF→Doc (the
-;; toolbar's [Doc | PDF] on a PDF, where "Doc" navigates the tab to the rendered source)
-(rf/reg-sub :doc/source-sibling :<- [:doc/active] (fn [doc _] (:doc/source-sibling doc)))
+;; the active document's collocated GROUP [{:path :kind}…] (its :doc/siblings — authored sources + compiled PDF),
+;; read off the PRIMARY (opened) doc so the toolbar stays stable regardless of the shown facet. nil for a
+;; non-group doc (or one not yet loaded).
+(rf/reg-sub :doc/group :<- [:ds/rev] :<- [:ui/active-path]
+            (fn [[_rev primary] _] (facet/group-of (ds/snapshot) primary)))
 
 ;; the EFFECTIVE diff view of the active doc (:unified | :split); split is opt-in, so the default is :unified
 (rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] (fn [tab _] (nav/effective-diff-view (:diff-view tab))))
 
-;; the EFFECTIVE representation of the active doc: :pdf or :document. Only :pdf when a sibling PDF exists AND
-;; either the user chose it on this tab or the collocated-default preference (default :pdf) says so.
+;; the complete render model for the [Preview ▾ | Source ▾] toolbar combo (both buttons' modes/options/active).
+;; A plain db sub: recomputes on any app-db change including the :ds/rev bump that follows a content transaction.
 (rf/reg-sub
- :ui/active-representation
- :<- [:ui/active-tab] :<- [:doc/active] :<- [:ui/settings]
- (fn [[tab doc settings] _]
-   (nav/effective-representation (:representation tab)
-                                 (boolean (:doc/pdf-sibling doc))
-                                 (get settings :collocated-default :pdf))))
-
-;; whether a collocated sibling PDF's bytes are cached yet (content-view shows a loading note until then)
-(rf/reg-sub :pdf/sibling-loaded (fn [db _] (get-in db [:ui :pdf-sibling-loaded] #{})))
+ :view/switch
+ (fn [db _]
+   (let [primary (nav/active-path db)]
+     (facet/view-model (nav/facet db) (facet/group-of (ds/snapshot) primary) primary
+                       (get-in db [:ui :settings :collocated-default] :pdf) (nav/facet-mru db)))))
 
 ;; the persisted default representation for docs that have a collocated PDF (Settings toggle reads this)
 (rf/reg-sub :ui/collocated-default :<- [:ui/settings] (fn [s _] (get s :collocated-default :pdf)))

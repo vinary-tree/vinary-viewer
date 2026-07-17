@@ -379,7 +379,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   border-radius: 3px; padding: 1px 9px; margin-right: 4px; cursor: pointer; font-size: 14px; line-height: 1.4; }
 .vv-nav-btn:hover:not(:disabled) { color: var(--vv-head1); background: var(--vv-bg-code); }
 .vv-nav-btn:disabled { opacity: 0.4; cursor: default; }
-/* segmented switch: Preview|Source and Doc|PDF (view-switch-toolbar) */
+/* segmented switch: [Unified | Split] diff layout (view-switch-toolbar) */
 .vv-seg { display: inline-flex; margin-left: 6px; border: 1px solid var(--vv-border); border-radius: 3px;
   overflow: hidden; flex: 0 0 auto; }
 .vv-seg-btn { background: var(--vv-bg2); color: var(--vv-fg); border: none; border-left: 1px solid var(--vv-border);
@@ -387,6 +387,30 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-seg-btn:first-child { border-left: none; }
 .vv-seg-btn:hover:not(.vv-seg-active) { background: var(--vv-bg-code); color: var(--vv-head1); }
 .vv-seg-btn.vv-seg-active { background: var(--vv-accent, var(--vv-head1)); color: var(--vv-bg1); cursor: default; }
+
+/* [Preview ▾ | Source ▾] combo (split) buttons over a collocated document group (view-switch / combo-button).
+   Like .vv-seg but overflow-visible so the caret menu can escape; each combo is a MAIN region + a divider + caret. */
+.vv-combo-group { display: inline-flex; margin-left: 6px; border: 1px solid var(--vv-border); border-radius: 3px;
+  overflow: visible; flex: 0 0 auto; }
+.vv-combo { display: inline-flex; position: relative; }               /* anchor for the caret menu */
+.vv-combo-main, .vv-combo-plain, .vv-combo-caret {
+  background: var(--vv-bg2); color: var(--vv-fg); border: none; border-left: 1px solid var(--vv-border);
+  cursor: pointer; font-size: 12px; line-height: 1.5; font-family: inherit; }
+.vv-combo-main, .vv-combo-plain { padding: 1px 8px; }
+.vv-combo-caret { padding: 1px 5px; font-size: 10px; }               /* the down-arrow region (right of divider) */
+.vv-combo-group > .vv-combo:first-child .vv-combo-main,
+.vv-combo-group > .vv-combo-plain:first-child { border-left: none; } /* the group border is the left edge */
+.vv-combo-main:hover:not(.vv-combo-active), .vv-combo-plain:hover:not(.vv-combo-active),
+.vv-combo-caret:hover:not(.vv-combo-active) { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-combo-active { background: var(--vv-accent, var(--vv-head1)); color: var(--vv-bg1); }
+.vv-combo-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; margin: 0; padding: 4px 0;
+  list-style: none; min-width: 120px; background: var(--vv-bg2); border: 1px solid var(--vv-dialog-border);
+  border-radius: 6px; box-shadow: var(--vv-shadow-menu, 0 6px 20px rgba(0,0,0,0.4)); }
+.vv-combo-opt { padding: 3px 12px; cursor: pointer; font-size: 12px; color: var(--vv-fg); white-space: nowrap; }
+.vv-combo-opt::before { content: ""; display: inline-block; width: 1.1em; }   /* checkmark column (keeps labels aligned) */
+.vv-combo-opt-sel::before { content: "\2713"; }                       /* ✓ on the currently-shown file */
+.vv-combo-opt:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
+.vv-combo-opt-sel { color: var(--vv-head1); }
 .vv-theme-select { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
   border-radius: 3px; padding: 2px 6px; font-size: 12px; font-family: inherit; outline: none; }
 

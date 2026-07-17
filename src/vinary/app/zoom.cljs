@@ -4,6 +4,7 @@
    web view (http or local html), or the app-renderer DOM views (markdown/image/source/directory)."
   (:require [vinary.app.nav :as nav]
             [vinary.app.ds :as ds]
+            [vinary.app.facet :as facet]
             [vinary.app.uri :as uri]))
 
 (def presets
@@ -13,8 +14,10 @@
 (defn context
   "The zoom target for the active tab: :pdf, :web (http or local .html), or :window (app-renderer DOM)."
   [db]
+  ;; the kind of the SHOWN facet (its content path), not the tab's primary — so a PDF facet under an .org tab
+  ;; zooms the pdf.js surface (and lights the Fit/Invert/Reflow View items), not the DOM.
   (let [active-uri (nav/active-uri db)
-        kind       (some-> (nav/active-path db) (#(ds/doc-attr (ds/snapshot) % :doc/kind)))]
+        kind       (some-> (facet/active-content-path db) (#(ds/doc-attr (ds/snapshot) % :doc/kind)))]
     (cond
       (= "pdf" kind)                              :pdf
       (or (uri/http? active-uri) (= "html" kind)) :web

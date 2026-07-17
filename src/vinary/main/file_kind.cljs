@@ -35,31 +35,35 @@
   (let [s (str uri)]
     (or (str/starts-with? s "ssh://") (str/starts-with? s "sftp://"))))
 
-(defn pdf-sibling-path
-  "The same-directory, same-stem candidate `.pdf` path for a document path `p` (PURE — the caller checks
-   existence on disk). nil when `p` has no extension (no stem to swap) or IS itself a `.pdf` (a document never
-   siblings itself). Case-insensitive on the extension. Lives here (the pure, node-tested classifier) rather than
-   in the electron-bound service so the path arithmetic is unit-testable; service.cljs adds the `fs.existsSync`."
-  [p]
-  (let [ext (extension p)]
-    (when (and ext (not= ".pdf" (str/lower-case ext)))
-      (str (subs (str p) 0 (- (count (str p)) (count ext))) ".pdf"))))
+(def group-kinds
+  "Document kinds that participate in a collocated representation GROUP (the Preview/Source combo). Each such file
+   is an alternate representation of the same document — an authored source (markdown/org/latex/mermaid/diff) or
+   its compiled PDF. Office/table/log/image/html/source files are NOT group members (they have no Preview/Source
+   pairing). Mirrored in content_service.js/GROUP_KINDS (the CLI/TUI + remote twin)."
+  #{"pdf" "markdown" "org" "latex" "mermaid" "diff"})
 
-(def ^:private source-sibling-exts
-  ;; the previewable-document companions a `.pdf` may have been exported from (LaTeX papers, Org/Markdown docs),
-  ;; in preference order — the reverse of `pdf-sibling-path`.
-  [".tex" ".latex" ".ltx" ".md" ".markdown" ".org"])
+(def ^:private group-exts
+  ;; the file extensions whose kinds are in `group-kinds` — the candidate set probed for same-stem collocated
+  ;; siblings. Keep in sync with `group-kinds`. Mirrored in content_service.js/GROUP_EXTS.
+  (into #{".pdf"} (concat markdown-exts org-exts latex-exts mermaid-exts diff-exts)))
 
-(defn source-sibling-paths
-  "Candidate same-directory, same-stem previewable-SOURCE companions of a `.pdf` `p` (PURE — the caller checks
-   existence on disk and picks the first that exists), one per `source-sibling-exts` in preference order. nil
-   when `p` is not itself a `.pdf`. The reverse of `pdf-sibling-path`: lets a PDF opened alongside its source
-   offer the same Document↔PDF switch (`paper.pdf` → render `paper.tex`)."
+(defn stem
+  "The path minus its extension — the same-directory, same-basename stem used to find collocated representations —
+   or nil when `p` has no extension. Case-insensitive on the extension (matches `extension`)."
   [p]
-  (let [ext (extension p)]
-    (when (and ext (= ".pdf" (str/lower-case ext)))
-      (let [stem (subs (str p) 0 (- (count (str p)) (count ext)))]
-        (mapv #(str stem %) source-sibling-exts)))))
+  (when-let [ext (extension p)]
+    (subs (str p) 0 (- (count (str p)) (count ext)))))
+
+(defn group-candidate-paths
+  "Same-directory, same-stem candidate paths for `p`'s document GROUP — `p` itself first, then one path per
+   `group-exts` (deduped; `p`'s own re-derived candidate is dropped so `p` is not repeated). PURE: the caller
+   checks existence on disk and classifies each via `kind-of`, keeping only `group-kinds` members. `[p]` when `p`
+   has no extension (no stem to swap). Replaces the old pairwise `pdf-sibling-path`/`source-sibling-paths`: a
+   document may have SEVERAL collocated representations (e.g. `paper.org` + `paper.tex` + `paper.pdf`), not one."
+  [p]
+  (if-let [s (stem p)]
+    (into [p] (comp (map #(str s %)) (remove #{p})) (sort group-exts))
+    [p]))
 
 (defn- basename-of [path]
   (-> (str path) (str/replace #"\\" "/") (str/split #"/") last))

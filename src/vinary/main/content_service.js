@@ -51,6 +51,11 @@ const mermaidExts = new Set(['.mmd', '.mermaid']);
 // unified/git diffs — rendered (colored unified in the terminal; colored + side-by-side in the GUI) via the
 // diff IR front-end. Its own kind, not 'text': a diff's `@@`/`+`/`-`/tabbed hunks otherwise trip sniffDelimited.
 const diffExts = new Set(['.diff', '.patch']);
+// Document GROUP membership — the twin of file_kind.cljs/group-kinds + group-exts. A group's members are the
+// collocated same-stem alternate representations of one document (authored sources + its compiled PDF); the
+// renderer offers the Preview/Source combo over them. Keep in sync with file_kind.cljs.
+const GROUP_KINDS = new Set(['pdf', 'markdown', 'org', 'latex', 'mermaid', 'diff']);
+const GROUP_EXTS = new Set(['.pdf', ...markdownExts, ...orgExts, ...latexExts, ...mermaidExts, ...diffExts]);
 // Standard repo files that carry no (useful) extension. `wellKnownKind` below classifies them deterministically,
 // INDEPENDENT of any bundled grammar — the CLI/TUI twin of vinary.main.file-kind/well-known-kind. Without this a
 // GNU Makefile (its `target:` and tab-indented recipes) mis-detects as a delimited table via sniffDelimited.
@@ -765,18 +770,13 @@ async function openRemoteUri(uri, kind) {
 
   if (k === 'markdown' || k === 'mermaid' || k === 'org' || k === 'latex' || k === 'diff' || k === 'source') {
     const payload = { path: uri, kind: k, text: await transport.remoteReadText(uri), stamp, sourceable: true, meta };
-    if (k === 'markdown' || k === 'org' || k === 'latex') {   // a doc collocated with an exported PDF → Document↔PDF
-      const pdfSib = await firstExistingRemote([swapExtUri(uri, '.pdf')]);
-      if (pdfSib && pdfSib !== uri) payload.pdfSibling = pdfSib;
-    }
+    if (GROUP_KINDS.has(k)) payload.siblings = await remoteSiblingsGroup(uri);   // collocated group → Preview/Source combo
     return payload;
   }
   if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri)), stamp, meta };
   if (k === 'pdf') {
     const payload = { path: uri, kind: 'pdf', bytes: await transport.remoteReadFile(uri), stamp, meta };
-    // the reverse: a PDF collocated with its previewable source (paper.pdf → paper.tex) advertises it
-    const srcSib = await firstExistingRemote(['.tex', '.latex', '.ltx', '.md', '.markdown', '.org'].map(e => swapExtUri(uri, e)));
-    if (srcSib) payload.sourceSibling = srcSib;
+    payload.siblings = await remoteSiblingsGroup(uri);   // the PDF's collocated group (its authored sources + itself)
     return payload;
   }
   // Remote HTML is live-rendered in the web view via the vv-remote:// protocol (see main/service.cljs); the
@@ -805,12 +805,25 @@ function swapExtUri(uri, newExt) {
   return uri.slice(0, uri.length - ext.length) + newExt;
 }
 
-async function firstExistingRemote(uris) {
-  for (const u of uris) {
-    if (!u) continue;
-    try { const s = await transport.remoteStat(u); if (s.isFile) return u; } catch (_e) { /* not present */ }
+// The document GROUP of a remote `uri`: every same-stem candidate that EXISTS and classifies to a GROUP_KIND
+// (pdf + markdown/org/latex/mermaid/diff), as [{path, kind}] with `uri` itself first. The SFTP twin of
+// service.cljs/siblings-group — lets the renderer offer the Preview/Source combo over remote representation groups.
+async function remoteSiblingsGroup(uri) {
+  const cands = [uri, ...[...GROUP_EXTS].map(e => swapExtUri(uri, e))].filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const cand of cands) {
+    if (seen.has(cand)) continue;
+    seen.add(cand);
+    try {
+      const s = await transport.remoteStat(cand);
+      if (s.isFile) {
+        const kind = classifyName(cand);
+        if (GROUP_KINDS.has(kind)) out.push({ path: cand, kind });
+      }
+    } catch (_e) { /* not present */ }
   }
-  return null;
+  return out;
 }
 
 // A remote diff's referenced file, resolved relative to the diff's directory then walking up ancestors → its

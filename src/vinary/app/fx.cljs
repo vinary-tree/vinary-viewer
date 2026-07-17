@@ -142,24 +142,19 @@
 (rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
 
-;; Load a collocated sibling PDF's bytes into pdf-cache (Document↔PDF switch), without opening a tab: main reads
-;; the file over the vv:load-pdf-bytes invoke seam. Already-cached → mark ready immediately. On success, dispatch
-;; :pdf/sibling-ready so content-view mounts pdf-view for it.
+;; Load a collocated FACET's content into the cache WITHOUT opening a tab: main reads + routes the file over the
+;; vv:open seam and replies vv:content → :content/received transacts its doc entity (and, for a pdf, caches its
+;; bytes via :pdf/cache-bytes). Idempotent — a no-op when the entity is already present (and, for a pdf, its bytes
+;; are cached). This is how an in-place facet switch shows any sibling representation.
 (rf/reg-fx
- :pdf/ensure-sibling-bytes
+ :facet/ensure-loaded
  (fn [{:keys [path]}]
-   (cond
-     (not path)                 nil
-     (pdf-cache/get-bytes path) (rf/dispatch [:pdf/sibling-ready path])
-     :else
-     (when-let [^js v (.-vv js/window)]
-       (when (.-loadPdfBytes v)
-         (-> (.loadPdfBytes v path)
-             (.then (fn [buf]
-                      (when buf
-                        (pdf-cache/put-bytes! path buf)
-                        (rf/dispatch [:pdf/sibling-ready path]))))
-             (.catch (fn [_] nil))))))))
+   (let [snap (ds/snapshot)
+         eid  (ds/eid-for-path snap path)
+         pdf? (= "pdf" (ds/doc-attr snap path :doc/kind))]
+     (when (and path (or (nil? eid) (and pdf? (nil? (pdf-cache/get-bytes path)))))
+       (when-let [^js v (.-vv js/window)]
+         (when (.-open v) (.open v path)))))))
 ;; the :pdf/reflow effect is registered in vinary.renderer.pdf (a renderer-only ns; keeping it there avoids
 ;; pulling pdf.js — which touches `document` at load — into the DOM-free :node-test build).
 

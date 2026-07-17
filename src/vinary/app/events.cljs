@@ -9,6 +9,7 @@
             [cljs.reader :as reader]
             [vinary.app.db :as db]
             [vinary.app.ds :as ds]
+            [vinary.app.facet :as facet]
             [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
             [vinary.app.uri :as uri]
@@ -79,7 +80,7 @@
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged pdfSibling sourceSibling] :as payload}]]
+                            sourceable paged siblings] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -101,8 +102,7 @@
                    dataUrl               (assoc :doc/data-url dataUrl)
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
-                   pdfSibling            (assoc :doc/pdf-sibling pdfSibling)   ; collocated exported PDF (Doc↔PDF switch)
-                   sourceSibling         (assoc :doc/source-sibling sourceSibling) ; a PDF's collocated source (PDF→Doc switch)
+                   siblings              (assoc :doc/siblings (vec siblings))   ; the collocated document group (Preview/Source combo)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
                    ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
@@ -117,7 +117,14 @@
          ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
          ;; background live-refresh — so the MRU + trail track where the user actually went.
          active? (= path (nav/active-path db'))
-         db'     (if active? (record-recent db' path (#{"directory" "archive"} kind)) db')]
+         db'     (if active? (record-recent db' path (#{"directory" "archive"} kind)) db')
+         ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
+         ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
+         ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
+         fresh-facet (when (and active? (seq siblings) (nil? (nav/facet db')))
+                       (facet/default-facet (vec siblings) path
+                                            (get-in db' [:ui :settings :collocated-default] :pdf)))
+         db'     (cond-> db' fresh-facet (nav/set-facet (:path fresh-facet) (:type fresh-facet)))]
      (with-retention
        {:db db'
         :fx (cond-> [[:ds/transact tx]]
@@ -146,9 +153,10 @@
               (conj [:diff/build-split {:path path :text text}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
-              ;; a doc with a collocated sibling PDF: eagerly load its bytes into pdf-cache so the Document↔PDF
-              ;; switch (and a PDF-first default) shows the PDF with no wait. Byte-only — spawns no tab.
-              pdfSibling (conj [:pdf/ensure-sibling-bytes {:path pdfSibling}])
+              ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
+              ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
+              (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))
+              (conj [:facet/ensure-loaded {:path (:path fresh-facet)}])
               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
        db'))))
 
@@ -356,44 +364,37 @@
 
 (rf/reg-event-fx :tab/reload (fn [{:keys [db]} _] {:fx (load-fx (nav/active-uri db))}))
 
-;; toggle a markdown tab (the active one, or a given id) between rendered + source — in the pane, the
-;; content text is already cached, so no window replacement
-(rf/reg-event-db :tab/toggle-source
-                 (fn [db [_ id]] (if id (nav/toggle-source db id) (nav/toggle-source db))))
-
-;; Document↔PDF representation switch (a doc with a collocated sibling PDF). Setting :pdf ensures the sibling's
-;; bytes are cached (byte-only; no tab) so pdf-view can mount them in-place.
-(rf/reg-event-fx :tab/set-representation
-                 (fn [{:keys [db]} [_ id rep]]
-                   (let [db' (if id (nav/set-representation db id rep) (nav/set-representation db rep))
-                         sib (ds/doc-attr (ds/snapshot) (nav/active-path db') :doc/pdf-sibling)]
-                     (cond-> {:db db'}
-                       (and (= rep :pdf) sib) (assoc :fx [[:pdf/ensure-sibling-bytes {:path sib}]])))))
-
-;; a collocated sibling PDF's bytes finished loading into pdf-cache → record it so content-view can mount pdf-view
-(rf/reg-event-db :pdf/sibling-ready
-                 (fn [db [_ path]] (update-in db [:ui :pdf-sibling-loaded] (fnil conj #{}) path)))
-
-;; flip the active doc's representation (:document ↔ :pdf) — the command-palette / keybinding entry. No-op unless
-;; the doc has a collocated sibling PDF. Delegates to :tab/set-representation (which ensures the PDF bytes).
-(rf/reg-event-fx :tab/toggle-representation
-                 (fn [{:keys [db]} _]
-                   (if (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/pdf-sibling)
-                     (let [cur (or (nav/representation db) (get-in db [:ui :settings :collocated-default] :pdf))
-                           nxt (if (= cur :pdf) :document :pdf)]
-                       {:fx [[:dispatch [:tab/set-representation nil nxt]]]})
-                     {})))
-
-;; PDF→source: the "Doc" side of [Doc | PDF] on an opened PDF that is collocated with a previewable source. Unlike
-;; the in-place source→PDF switch, here the PDF IS the tab's doc, so "Doc" NAVIGATES the tab to the rendered source
-;; (which knows its own PDF sibling → "PDF" returns) and forces :document so the collocated-default :pdf pref, which
-;; would otherwise bounce straight back to the PDF, does not win. Reuses the whole Document↔PDF machinery.
-(rf/reg-event-fx :tab/open-representation-source
+;; ── the view FACET (which collocated representation is shown, as preview/source) — see vinary.app.facet ──
+;; Flip the ACTIVE file between preview + source (the [Preview|Source] main flip / C-S-s / "View Source"). Lands on
+;; the OTHER type's main target for the group; no-op when the other type has no options (e.g. a PDF-only doc).
+(rf/reg-event-fx :tab/toggle-source
                  (fn [{:keys [db]} [_ id]]
-                   (if-let [src (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/source-sibling)]
-                     {:fx [[:dispatch [:tab/navigate src]]
-                           [:dispatch [:tab/set-representation (or id (nav/active-id db)) :document]]]}
-                     {})))
+                   (let [primary (nav/active-path db)]
+                     (if-let [tgt (facet/toggle-target (facet/active-type db)
+                                                       (facet/group-of (ds/snapshot) primary)
+                                                       primary (nav/facet-mru db))]
+                       {:fx [[:dispatch [:tab/set-facet (or id (nav/active-id db)) (:path tgt) (:type tgt)]]]}
+                       {}))))
+
+;; Show `path` as `type` (:preview/:source) on the tab, IN-PLACE (no history). Loads the file when needed
+;; (idempotent) and syncs retention so the shown facet's doc is watched + not evicted. The combo menu-pick + the
+;; jump events' entry point. A PDF facet gets both its doc entity and cached bytes via :content/received.
+(rf/reg-event-fx :tab/set-facet
+                 (fn [{:keys [db]} [_ id path type]]
+                   (let [db' (nav/set-facet db (or id (nav/active-id db)) path type)]
+                     (with-retention {:db db' :fx [[:facet/ensure-loaded {:path path}]]} db'))))
+
+;; The combo MAIN region (left of the divider): activate `type`'s main target — its most-recently-used file, else
+;; the first/default option. No-op when the type has no options.
+(rf/reg-event-fx :tab/activate-facet-type
+                 (fn [{:keys [db]} [_ id type]]
+                   (let [primary (nav/active-path db)
+                         group   (facet/group-of (ds/snapshot) primary)
+                         opts    (if (= type :source) (facet/source-options group primary)
+                                     (facet/preview-options group primary))]
+                     (if-let [tgt (facet/main-target opts (get (nav/facet-mru db) type))]
+                       {:fx [[:dispatch [:tab/set-facet (or id (nav/active-id db)) tgt type]]]}
+                       {}))))
 
 ;; Diff unified⇄split view switch (a .diff/.patch doc). Selecting :split builds the side-by-side HTML the first
 ;; time (baseline immediately, then enriched with on-disk sources) — see the :diff/build-split fx.
@@ -401,7 +402,7 @@
                  (fn [{:keys [db]} [_ id view]]
                    (let [id    (or id (nav/active-id db))
                          db'   (nav/set-diff-view db id view)
-                         path  (nav/active-path db')
+                         path  (facet/active-content-path db')   ; the shown facet (a diff may be one of several)
                          snap  (ds/snapshot)
                          text  (ds/doc-attr snap path :doc/text)
                          built? (some? (ds/doc-attr snap path :doc/diff-split-html))]
@@ -413,7 +414,7 @@
 ;; active doc is a diff. Delegates to :tab/set-diff-view (which builds the split HTML on demand).
 (rf/reg-event-fx :tab/toggle-diff-view
                  (fn [{:keys [db]} _]
-                   (if (= "diff" (ds/doc-attr (ds/snapshot) (nav/active-path db) :doc/kind))
+                   (if (= "diff" (ds/doc-attr (ds/snapshot) (facet/active-content-path db) :doc/kind))
                      (let [nxt (if (= (nav/effective-diff-view (nav/diff-view db)) :split) :unified :split)]
                        {:fx [[:dispatch [:tab/set-diff-view nil nxt]]]})
                      {})))
@@ -433,31 +434,33 @@
  :source/goto-line                                        ; preview → source
  (fn [{:keys [db]} [_ line]]
    (when (number? line)
-     (if (nav/view-source? db)
+     (if (= :source (facet/active-type db))
        {:fx [[:source/scroll-line line]]}                 ; already source: scroll the live view now
-       {:db  (nav/toggle-source db)                       ; entering source: defer until create-source-view mounts
+       ;; entering source: flip the SHOWN file to its source facet (same path, already loaded) and defer the scroll
+       ;; until create-source-view mounts
+       {:db  (nav/set-facet db (facet/active-content-path db) :source)
         :fx  [[:source/want-line line]]}))))
 (rf/reg-event-fx
  :preview/goto-line                                       ; source → preview
  (fn [{:keys [db]} [_ line]]
    (when (number? line)
-     (if (nav/view-source? db)
-       {:db  (nav/toggle-source db)                       ; leaving source: defer until the preview mounts
+     (if (= :source (facet/active-type db))
+       {:db  (nav/set-facet db (facet/active-content-path db) :preview)  ; leaving source: defer until preview mounts
         :fx  [[:preview/want-line line]]}
        {:fx [[:preview/scroll-line line]]}))))            ; already preview: scroll now
 
 ;; keyboard / command-palette entry points (no click target): only fire in the meaningful direction, and only
 ;; for a previewable doc (markdown/org — the kinds that stamp data-vv-source-* and have both views).
 (defn- previewable-doc? [db]
-  (contains? #{"markdown" "org"} (:doc/kind (ds/active-doc (ds/snapshot) (nav/active-path db)))))
+  (contains? #{"markdown" "org"} (:doc/kind (ds/active-doc (ds/snapshot) (facet/active-content-path db)))))
 (rf/reg-event-fx
  :jump/goto-source                                        ; from preview → source (derives the viewport line)
  (fn [{:keys [db]} _]
-   (when (and (not (nav/view-source? db)) (previewable-doc? db)) {:fx [[:jump/to-source-current nil]]})))
+   (when (and (not= :source (facet/active-type db)) (previewable-doc? db)) {:fx [[:jump/to-source-current nil]]})))
 (rf/reg-event-fx
  :jump/goto-preview                                       ; from source → preview (derives the cursor line)
  (fn [{:keys [db]} _]
-   (when (and (nav/view-source? db) (previewable-doc? db)) {:fx [[:jump/to-preview-current nil]]})))
+   (when (and (= :source (facet/active-type db)) (previewable-doc? db)) {:fx [[:jump/to-preview-current nil]]})))
 
 ;; drag-reorder: drop tab `from-id` before/after `to-id` (after? = cursor past the target's midpoint)
 (rf/reg-event-db

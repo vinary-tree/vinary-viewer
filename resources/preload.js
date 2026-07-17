@@ -34,8 +34,6 @@ contextBridge.exposeInMainWorld('vv', {
   saveRecent: (edn) => ipcRenderer.send('vv:recent-save', edn),
   completePath: (input) => ipcRenderer.invoke('vv:complete-path', input),
   contentPage: (request) => ipcRenderer.invoke('vv:content-page', request),
-  // load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch), no new tab
-  loadPdfBytes: (path) => ipcRenderer.invoke('vv:load-pdf-bytes', path),
   loadDiffSources: (req) => ipcRenderer.invoke('vv:load-diff-sources', req),
   // bounded-memory document streaming (session pull-cursor)
   streamOpen: (req) => ipcRenderer.invoke('vv:stream-open', req),

@@ -65,10 +65,9 @@
    :palette/files {:id :palette/files :title "Find file" :category "Search" :dispatch [:palette/open {:source :file}]}
    ;; ---- View ----
    :sidebar/toggle {:id :sidebar/toggle :title "Toggle sidebar" :category "View" :dispatch [:sidebar/toggle]}
-   ;; Preview↔Source view toggle (previously reachable only from the tab right-click menu) + the Document↔PDF
-   ;; representation switch for a doc collocated with an exported PDF. Both self-gate (no-op when inapplicable).
+   ;; Preview↔Source view toggle — flips the shown file between its rendered preview and its source (facet-aware;
+   ;; self-gates: a no-op when there is no other facet to switch to, e.g. a lone PDF).
    :view/toggle-source         {:id :view/toggle-source :title "Toggle preview / source" :category "View" :dispatch [:tab/toggle-source]}
-   :view/toggle-representation {:id :view/toggle-representation :title "Toggle document / PDF" :category "View" :dispatch [:tab/toggle-representation]}
    :view/toggle-diff-split     {:id :view/toggle-diff-split :title "Toggle unified / split diff" :category "View" :dispatch [:tab/toggle-diff-view]}
    :theme/cycle    {:id :theme/cycle :title "Cycle theme" :category "View" :dispatch [:theme/cycle]}
    :theme/pick     {:id :theme/pick :title "Choose theme…" :category "View" :prompt :theme}
