@@ -984,7 +984,8 @@
                          (or (:doc/sourceable? doc)
                              (#{"markdown" "mermaid" "source" "org" "latex" "diff"} (:doc/kind doc)))))]
     [:div.vv-content
-     {:class (cond (or (uri/http? uri) (= "html" (:doc/kind doc))) "vv-content-web"        ; web/local-html: edge-to-edge
+     {:class (cond (and (or (uri/http? uri) (= "html" (:doc/kind doc)))
+                        (not= "pdf" (:doc/kind doc))) "vv-content-web"                     ; web/local-html: edge-to-edge (a web-view PDF is a pdf doc → pdf-flush below)
                    ;; the pdf.js canvas (a real PDF, or a PDF FACET of a collocated group — both are just a pdf doc
                    ;; entity now) supplies its own gutter → drop the prose reading gutter so pages sit flush.
                    (= "pdf" (:doc/kind doc))       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
@@ -998,6 +999,11 @@
      (cond
        (empty? tabs)               [watermark]
        (nil? uri)                  [:div.vv-empty "New Tab"]
+       ;; a PDF opened from a web-view link (main downloaded its bytes into the cache under the URL) → the app's
+       ;; pdf.js, NOT the web view — the web view would re-trigger Chromium's inline pdfium plugin (the bug fixed).
+       (and (uri/http? uri) (= "pdf" (:doc/kind doc)))
+       ^{:key (str "http-pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
+       [pdf-view (:doc/path doc) (:doc/stamp doc)]
        (uri/http? uri)             [web-host uri]
        ;; .html → render live in the web view (keyed by stamp so a live-refresh remounts the host and reloads),
        ;; not shown as escaped source. A LOCAL file loads by its file:// URL; a REMOTE file loads by its

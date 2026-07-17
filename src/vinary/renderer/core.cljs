@@ -64,6 +64,11 @@
     ;; in-app HTTP web view: in-page navigation + the page's heading outline / active heading (for the TOC)
     (when (.-onHttpNavigated vv)
       (.onHttpNavigated vv (fn [payload] (rf/dispatch [:http/navigated (js->clj payload :keywordize-keys true)]))))
+    ;; a PDF link clicked in the web view (main intercepted the nav + supplied the bytes) → open it in a tab, where
+    ;; the pdf-kind doc renders via the app's pdf.js instead of Chromium's inline pdfium plugin
+    (when (.-onHttpOpenPdf vv)
+      (.onHttpOpenPdf vv (fn [payload]
+                           (rf/dispatch [:doc/open-new (:url (js->clj payload :keywordize-keys true))]))))
     (when (.-onWebToc vv)
       (.onWebToc vv (fn [payload] (rf/dispatch [:web/toc (js->clj payload :keywordize-keys true)]))))
     (when (.-onWebActiveHeading vv)

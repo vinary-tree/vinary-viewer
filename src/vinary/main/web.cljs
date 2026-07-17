@@ -5,13 +5,17 @@
    page's heading outline and reports the active heading on scroll — so the Contents/TOC tab follows HTML
    sections just like Markdown — and scrolls to a heading on request. did-navigate is relayed so in-page
    link clicks update the active tab's URI + history."
-  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session]]
+  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session net]]
             ["path" :as path]
             ["./ssh_transport.js" :as ssh-transport]))
 
 (defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false :owner-tab nil}))
 (defonce ^:private inited (atom false))
 (defonce ^:private last-history-nav (atom {:dir nil :time 0}))
+
+;; a PDF link clicked in the web view must open in the app's own pdf.js viewer, not Chromium's pdfium plugin —
+;; ensure-view! wires the interception before these are defined (below, after mime-for), so forward-declare them.
+(declare pdf-url? route-pdf!)
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
 (defn- app-wc    ^js []   (some-> ^js (:win @state) .-webContents))   ; ^js return: extern-safe interop under advanced (parity with shell/wc)
@@ -168,6 +172,19 @@
                                                     :click #(.writeText clipboard (str link))}])
                              [#js {:type "separator"} #js {:role "selectAll" :label "Select All"}]))]
                  (.popup (.buildFromTemplate Menu items)))))
+        ;; a PDF LINK opens in the app's own pdf.js viewer, not Chromium's inline pdfium plugin. Catch a normal
+        ;; link navigation (will-navigate) and a target=_blank / Ctrl-click (setWindowOpenHandler); a forced
+        ;; download (Content-Disposition: attachment) is caught by the session-level will-download in init!.
+        (.on wc "will-navigate"
+             (fn [^js e url]
+               (when (pdf-url? url)
+                 (.preventDefault e)
+                 (route-pdf! url (:owner-tab @state)))))
+        (.setWindowOpenHandler wc
+             (fn [^js details]
+               (if (pdf-url? (.-url details))
+                 (do (route-pdf! (.-url details) (:owner-tab @state)) #js {:action "deny"})
+                 #js {:action "allow"})))
         (swap! state assoc :view v :win win)
         v)))
 
@@ -202,6 +219,41 @@
   (let [ext (some-> (re-find #"(\.[^./?#]+)(?:[?#].*)?$" (str uri)) second .toLowerCase)]
     (get mime-types ext "application/octet-stream")))
 
+(defn- pdf-url? [url] (= "application/pdf" (mime-for url)))
+
+(defn- download-pdf!
+  "Download a non-file:// PDF's bytes over the web view's OWN session (so cookies/logins for the source site
+   apply), then hand them to the app renderer as a `pdf` document keyed by the URL (main has no http reader, and
+   there is no byte-only PDF IPC). The renderer caches the bytes and opens the URL in a tab → pdf.js renders it.
+   Ordered: send the content BEFORE the open, so the pdf doc entity exists when the tab mounts (no web-view flash)."
+  [url tab]
+  (let [^js req (.request net (clj->js {:url url :partition "persist:vinary-web"}))
+        chunks  (array)]
+    (.on req "response"
+         (fn [^js resp]
+           (.on resp "data" (fn [chunk] (.push chunks chunk)))
+           (.on resp "end"
+                (fn []
+                  (when-let [^js awc (app-wc)]
+                    (.send awc "vv:content" (clj->js {:path url :kind "pdf" :bytes (.concat js/Buffer chunks)
+                                                      :stamp (js/Date.now)}))
+                    (.send awc "vv:http-open-pdf" (clj->js {:url url :tab tab})))))))
+    (.on req "error"
+         (fn [^js e]
+           (when-let [^js awc (app-wc)]
+             (.send awc "vv:error" (clj->js {:path url :message (str "PDF download failed: " (.-message e))})))))
+    (.end req)))
+
+(defn- route-pdf!
+  "Open a PDF link clicked in the web view in the app's pdf.js viewer instead of Chromium's pdfium plugin. A
+   file:// PDF is opened straight through the app's local open flow (which produces its own bytes); any other URL
+   (http(s), vv-remote://) is fetched here first via `download-pdf!`. `tab` = the owning http tab."
+  [url tab]
+  (if (.startsWith (str url) "file:")
+    (when-let [^js awc (app-wc)]
+      (.send awc "vv:http-open-pdf" (clj->js {:url url :tab tab})))
+    (download-pdf! url tab)))
+
 (defn- register-remote-protocol!
   "Serve vv-remote:// on the web view's session: map each request URL 1:1 back to its ssh:// URI and stream the
    file's bytes over SFTP. This lets the web view live-render a remote HTML page whose relative assets (CSS / JS
@@ -225,6 +277,13 @@
   (when-not @inited
     (reset! inited true)
     (register-remote-protocol!)   ; vv-remote:// → SFTP, for live-rendering remote HTML in the web view
+    ;; a PDF served as a forced download (Content-Disposition: attachment, or an extension-less application/pdf) →
+    ;; open it in the app's pdf.js viewer instead of downloading it. Registered once on the web view's session.
+    (.on (.fromPartition session "persist:vinary-web") "will-download"
+         (fn [^js e ^js item _]
+           (when (or (= "application/pdf" (.getMimeType item)) (pdf-url? (.getURL item)))
+             (.preventDefault e)
+             (route-pdf! (.getURL item) (:owner-tab @state)))))
     ;; ---- app renderer → web view ----
     (.on ipcMain "vv:http-show"
          (fn [_e ^js p] (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m) (:tabId m)))))

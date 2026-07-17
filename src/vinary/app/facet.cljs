@@ -145,9 +145,10 @@
 
 (defn active-content-path
   "The path of the file the active tab is currently SHOWING (its active facet) — the content the pane, Contents
-   outline, and find operate on. Falls back to the tab's primary path."
+   outline, and find operate on. Falls back to the tab's primary path, then the raw active-uri (so a doc keyed by
+   an http(s) URL — e.g. a PDF opened from a web-view link — resolves; a normal http page has no doc entity)."
   [db]
-  (or (:path (resolve-facet db)) (nav/active-path db)))
+  (or (:path (resolve-facet db)) (nav/active-path db) (nav/active-uri db)))
 
 (defn active-type
   "The active tab's current view type — `:preview` or `:source`."

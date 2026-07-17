@@ -105,6 +105,12 @@ contextBridge.exposeInMainWorld('vv', {
     ipcRenderer.on('vv:http-navigated', h);
     return () => ipcRenderer.removeListener('vv:http-navigated', h);
   },
+  // a PDF link clicked in the web view → open it in the app's pdf.js viewer (main intercepted the navigation)
+  onHttpOpenPdf: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:http-open-pdf', h);
+    return () => ipcRenderer.removeListener('vv:http-open-pdf', h);
+  },
   onHttpSnapshotReady: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:http-snapshot-ready', h);

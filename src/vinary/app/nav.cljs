@@ -31,7 +31,10 @@
   [db]
   (->> (tabs db)
        (mapcat (fn [t]
-                 (concat (keep (comp uri/file-path :uri) (get-in t [:hist :stack]))
+                 (concat ;; history uris in :doc/path form — local file-path, else the raw uri (so a doc keyed by an
+                         ;; http(s) URL, e.g. a PDF opened from a web-view link, is retained, not evicted). main only
+                         ;; watches local paths; a bare http uri is tracked but never chokidar-watched.
+                         (keep (fn [e] (let [u (:uri e)] (or (uri/file-path u) u))) (get-in t [:hist :stack]))
                          (keep :path [(:facet t)])
                          (vals (:facet-mru t)))))
        (remove nil?)

@@ -118,8 +118,11 @@
 ;; the derived CONTENT path — the file the pane / Contents / find operate on. This differs from the tab's primary
 ;; uri when a sibling facet is shown in place. See vinary.app.facet.
 (rf/reg-sub :facet/active (fn [db _] (facet/resolve-facet db)))
-(rf/reg-sub :ui/active-content-path :<- [:facet/active] :<- [:ui/active-path]
-            (fn [[af primary] _] (or (:path af) primary)))
+;; …falling back to the raw active-uri (not just the local file-path) so a doc transacted under an http(s) URL —
+;; a PDF opened from a web-view link, whose bytes main downloaded under its URL — resolves and renders in pdf.js
+;; (a normal http page has no doc entity, so :doc/active stays nil there and the web view still shows it).
+(rf/reg-sub :ui/active-content-path :<- [:facet/active] :<- [:ui/active-path] :<- [:ui/active-uri]
+            (fn [[af primary uri] _] (or (:path af) primary uri)))
 (rf/reg-sub :facet/type :<- [:facet/active] (fn [af _] (:type af)))
 
 ;; the active document: the cached DataScript doc for the active tab's active CONTENT path (its facet, defaulting

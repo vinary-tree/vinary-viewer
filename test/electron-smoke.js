@@ -2386,6 +2386,41 @@ async function main() {
   assert.strictEqual(tabsAfterGhost, tabsBeforeGhost, 'a navigation for a closed/unknown tab id must be a no-op');
   console.log('[ok] web-view navigation updates its owner tab, never the active tab');
 
+  // ── Part 1: a .pdf link clicked in the web view opens the app's pdf.js, NOT Chromium's pdfium ──
+  // main intercepts the PDF navigation (will-navigate / setWindowOpenHandler / will-download), downloads the
+  // bytes over the page's own session, proactively sends vv:content{kind pdf, keyed by the URL}, then relays
+  // vv:http-open-pdf{url}. The renderer's onHttpOpenPdf → [:doc/open-new url] opens a tab whose uri IS the http
+  // URL; because that doc is kind "pdf", content-view's http+pdf guard routes it to the in-DOM pdf.js
+  // (.vv-pdf-doc), never the web host — the web host would re-trigger Chromium's inline pdfium plugin (the bug).
+  // The main-side interception is standard Electron wiring; this drives the renderer-visible decision (the
+  // content-view guard + the onHttpOpenPdf → :doc/open-new wiring), which is the part that actually chose wrong.
+  await sendChord(win, 'T', ['control']);
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-empty')?.textContent.trim() === 'New Tab'`),
+    'fresh tab before the web-view PDF-link test');
+  const webPdfUrl = 'http://127.0.0.1:9/papers/paper.pdf';
+  const webPdfBytes = new Uint8Array(fs.readFileSync(pdfFixture));
+  // load-fx never re-requests an http uri (it has no local file path), so the bytes come solely from main's
+  // proactive post-download vv:content — register it in contentByPath too, belt-and-suspenders.
+  state.contentByPath.set(webPdfUrl, { path: webPdfUrl, kind: 'pdf', bytes: webPdfBytes });
+  win.webContents.send('vv:content', { path: webPdfUrl, kind: 'pdf', bytes: webPdfBytes, stamp: Date.now() });
+  win.webContents.send('vv:http-open-pdf', { url: webPdfUrl, tab: null });
+  await waitFor(() => evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    const t = ui.tabs.find((x) => x.id === ui['active-tab']); return Boolean(t && (t.uri || '').includes('paper.pdf')); })()`),
+    'a tab opens for the http PDF url');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc'))`),
+    'the http PDF renders in the app pdf.js (.vv-pdf-doc)');
+  const webPdfDom = await evalIn(win, `({
+    pdf: Boolean(document.querySelector('.vv-content .vv-pdf-doc')),
+    web: Boolean(document.querySelector('.vv-web-host')),
+    flush: Boolean(document.querySelector('.vv-content')?.classList.contains('vv-content-pdf-flush')),
+    webClass: Boolean(document.querySelector('.vv-content')?.classList.contains('vv-content-web'))
+  })`);
+  assert.strictEqual(webPdfDom.pdf, true, 'a web-view PDF link must open in the app pdf.js (.vv-pdf-doc)');
+  assert.strictEqual(webPdfDom.web, false, 'a web-view PDF link must NOT fall through to the web host (Chromium pdfium)');
+  assert.strictEqual(webPdfDom.webClass, false, 'the http-PDF pane must not use the edge-to-edge web (.vv-content-web) class');
+  assert.strictEqual(webPdfDom.flush, true, 'the http-PDF pane uses the flush (PDF) gutter (.vv-content-pdf-flush)');
+  console.log('[ok] a web-view PDF link opens in the app pdf.js, not Chromium pdfium');
+
   // ════════ Dialog UIX — the shared modal shell + each dialog's features ════════
   // open a top-level menu (Alt+<key>) and click the dropdown/sub-dropdown item whose text matches
   const openMenuItem = async (menuKey, itemText) => {

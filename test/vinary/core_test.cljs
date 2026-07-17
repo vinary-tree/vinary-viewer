@@ -318,13 +318,15 @@
       (is (= "/diagram.png" (:uri (second tabs)))))))
 
 (deftest nav-retained-file-paths
-  (testing "retained files include every local URI reachable from open tab histories"
+  (testing "retained paths include every URI reachable from open tab histories — local file paths AND raw non-file
+            uris (an http(s) URL is retained in :doc/path form so a doc keyed by it — e.g. a PDF opened from a
+            web-view link — is not evicted; main only ever watches the local paths)"
     (let [db (-> empty-tabs
                  (nav/add-tab "/a.md")
                  (nav/nav-active "/b.md" 10)
                  (nav/add-tab "https://example.com")
                  (nav/nav-active "/c.md" 0))]
-      (is (= ["/a.md" "/b.md" "/c.md"] (nav/retained-file-paths db)))))
+      (is (= ["/a.md" "/b.md" "https://example.com" "/c.md"] (nav/retained-file-paths db)))))
   (testing "history truncation drops no-longer-reachable files from the retained set"
     (let [db0 (-> empty-tabs
                   (nav/add-tab "/a.md")
