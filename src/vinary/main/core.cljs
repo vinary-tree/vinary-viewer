@@ -8,6 +8,7 @@
             ["fs" :as fs]
             [vinary.main.service :as service]
             [vinary.main.startup :as startup]
+            [vinary.main.profile :as profile]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
             [vinary.main.recent :as recent]
@@ -51,7 +52,17 @@
                                                 :preload (preload-path)}}
                               ;; restore last position/size (clamped on-screen); defaults to 1280×860
                               (window/options))))]
-    (.loadFile win (renderer-index))
+    ;; profiling: propagate VV_PROFILE into the renderer via a ?profile=1 search param (it has no process.env),
+    ;; and forward the renderer's `[vv-profile]` console marks to main's stdout (a renderer console.log does not
+    ;; otherwise reach it) so scripts/profile-cold-start.mjs sees main + renderer marks on one stream
+    (when profile/on?
+      (.on (.-webContents win) "console-message"
+           (fn [& args]
+             (let [msg (first (filter string? args))]   ; signature varies by Electron version; find the message
+               (when (and msg (re-find #"\[vv-profile\]" msg)) (js/console.log msg))))))
+    (if profile/on?
+      (.loadFile win (renderer-index) #js {:search "profile=1"})
+      (.loadFile win (renderer-index)))
     ;; Lock the app frame to its bundled index.html. Now that markdown renders (sanitized) raw HTML, a stray
     ;; top-frame navigation must never hand the privileged window.vv bridge to another origin. Real links open
     ;; in the isolated web view or externally (never here), and new-window requests are denied outright.
@@ -61,6 +72,7 @@
     (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
     (.once (.-webContents win) "did-finish-load"
            (fn []
+             (profile/mark! "did-finish-load")
              (config/init! (.-webContents win))
              (settings/init! (.-webContents win))
              (recent/init! (.-webContents win))
@@ -71,6 +83,7 @@
              ;; open every file/URI named on the command line, each in its own tab (first focused);
              ;; reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx)
              (when-let [args (seq (initial-args))]
+               (profile/mark! "open-sent")
                (.send (.-webContents win) "vv:open-files"
                       (clj->js {:paths (vec args) :focus-first true})))))
     (.on win "closed" (fn [] (reset! main-window nil)))
@@ -84,6 +97,7 @@
     (passwords/init! win)
     (shell/init! win)
     (reset! main-window win)
+    (profile/mark! "window")
     win))
 
 (defn- report-crash!
@@ -120,6 +134,7 @@
        (catch :default _ "unknown")))
 
 (defn ^:export main []
+  (profile/mark! "entry")
   ;; `electron . --help`/`--version` (and `vv --gui --help`) print usage/version and exit BEFORE any window —
   ;; the primary `vv --help` path is the install.sh dispatcher; this covers direct/`--gui` invocation.
   (case (startup/help-request? (js->clj js/process.argv))
@@ -156,7 +171,7 @@
   (service/init!)
   ;; remove Electron's default application menu — vinary-viewer draws its own themed menu bar, and its
   ;; keybindings own the accelerators (so the default menu's Ctrl+R/W/etc. don't double-fire)
-  (-> (.whenReady app) (.then (fn [] (.setApplicationMenu (.-Menu electron) nil) (create-window!))))
+  (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil) (create-window!))))
   (.on app "activate" (fn [] (when (nil? @main-window) (create-window!))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   (.on app "window-all-closed"

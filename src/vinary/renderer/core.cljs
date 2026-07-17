@@ -12,11 +12,14 @@
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
             [vinary.renderer.history-input :as history-input]
+            [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
             [vinary.renderer.syntax :as syntax]
             [cljs.reader :as reader]
             [vinary.ui.menubar :as menubar]
             [vinary.ui.views :as views]))
+
+(profile/mark! "eval")   ; the renderer bundle has finished evaluating (its entry ns initialised)
 
 (defonce root (atom nil))
 (defonce last-history-input (atom {:dir nil :time 0}))
@@ -51,7 +54,7 @@
    change (live-refresh)."
   []
   (when-let [^js vv (.-vv js/window)]
-    (.onContent vv (fn [payload] (rf/dispatch [:content/received (js->clj payload :keywordize-keys true)])))
+    (.onContent vv (fn [payload] (profile/mark! "received") (rf/dispatch [:content/received (js->clj payload :keywordize-keys true)])))
     (.onError   vv (fn [payload] (rf/dispatch [:content/error   (js->clj payload :keywordize-keys true)])))
     (.onTree    vv (fn [payload] (rf/dispatch [:tree/received    (js->clj payload :keywordize-keys true)])))
     (when (.-onKeymap vv)   ; guard: an older preload may not expose the keymap channel
@@ -358,6 +361,8 @@
   (rdomc/render @root [views/root]))
 
 (defn ^:export init []
+  (profile/mark! "init")
+  (profile/mark-first-content!)     ; one-shot: fires "rendered" when the first content node paints
   (rf/dispatch-sync [:db/init])
   (ds/install-bridge!)
   (set! (.-__vvdb js/window) (fn [] (clj->js @rfdb/app-db)))            ; DEV inspect hooks
@@ -378,6 +383,7 @@
   (ctrl-tracker!)
   (key-scroll!)
   (mount!)
+  (js/requestAnimationFrame (fn [] (profile/mark! "paint")))   ; the empty app shell has painted
   (rf/dispatch [:view/re-frame-10x-hide]))
 
 (defn ^:export reload [] (mount!))
