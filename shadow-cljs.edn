@@ -16,7 +16,17 @@
   :renderer {:target     :browser
              :output-dir "resources/public/js"
              :asset-path "js"
-             :modules    {:main {:init-fn vinary.renderer.core/init}}
+             ;; :module-loader (a build-level browser-target key) enables shadow.loader + shadow.lazy code-splitting,
+             ;; so the heavy @codemirror source-view editor (~1 MB) lives in its own lazily-loaded chunk instead of
+             ;; the boot bundle. renderer.cm loads it on demand (shadow.lazy/loadable) + a pool/idle preload warms it.
+             :module-loader true
+             :modules    {:main {:init-fn vinary.renderer.core/init}
+                          ;; the source-view chunk. It is reached ONLY via shadow.lazy/loadable (a bare js* ref, not
+                          ;; a :require edge), so it must be declared as a module :entry or it is never built; it
+                          ;; :depends-on :main so all the shared code stays in the base bundle and only @codemirror
+                          ;; (reachable solely through here) is pulled out into source-view.js.
+                          :source-view {:entries    [vinary.renderer.source-view]
+                                        :depends-on #{:main}}}
              :devtools   {:after-load vinary.renderer.core/reload
                           :preloads   [devtools.preload
                                        day8.re-frame-10x.preload.react-18]}

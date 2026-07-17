@@ -20,6 +20,10 @@ dist/
 resources/public/js/cljs-runtime/
 resources/public/js/main.js
 resources/public/js/manifest.edn
+# the lazily-loaded @codemirror source-view chunk + its module-loader manifest (renderer code-split)
+resources/public/js/source-view.js
+resources/public/js/module-loader.edn
+resources/public/js/module-loader.json
 
 # Vendored static assets (Font Awesome + synced self-hosted fonts), copied from node_modules.
 # Regenerate with `npm run assets:sync`.

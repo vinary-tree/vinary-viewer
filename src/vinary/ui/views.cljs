@@ -37,6 +37,7 @@
             [vinary.renderer.media :as media]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.syntax :as syntax]
+            [vinary.renderer.cm :as cm]
             [vinary.renderer.source-nav :as source-nav]
             [vinary.renderer.virtual-layout :as virtual-layout]))
 
@@ -170,11 +171,11 @@
        :source-line (:line (source-lc source a nil nil))})))
 
 (defn- source-location-for-pos [path view pos]
-  (some->> (syntax/line-info-at view pos)
+  (some->> (cm/line-info-at view pos)
            (preview-ctx/location-string path)))
 
 (defn- source-term-at [view pos]
-  (when-let [{:keys [text line-from]} (syntax/line-info-at view pos)]
+  (when-let [{:keys [text line-from]} (cm/line-info-at view pos)]
     (when-let [{term-text :text start :start} (preview-ctx/term-at text (- pos line-from))]
       {:text term-text
        :pos (+ line-from start)})))
@@ -617,6 +618,9 @@
         toc*    (atom nil)        ; the current source Contents outline (L<line> ids), read by the scroll-spy
         last*   (atom ::none)     ; last-dispatched active id — skip redundant dispatches on every scroll frame
         pending? (atom false)     ; rAF throttle (mirrors renderer.toc/spy-pending)
+        build*  (atom 0)          ; build generation: the @codemirror source-view chunk loads async (cm/ensure!),
+                                  ; so a stale in-flight build (superseded by a rebuild, or an unmount) must not
+                                  ; mount an orphan EditorView — each build! takes a token, destroy! bumps it
         detach* (atom nil)]       ; the scroll-listener remover, for teardown
     (letfn [(spy! []
               ;; the source analog of renderer.toc/spy!: mark the section at/above the editor viewport top. Reuses
@@ -628,16 +632,18 @@
                  (fn []
                    (reset! pending? false)
                    (when-let [v @view]
-                     (let [top    (syntax/viewport-top-line v)
+                     (let [top    (cm/viewport-top-line v)
                            hs     (->> @toc* (mapv (fn [e] {:id (:id e) :offset (:line e)})) (sort-by :offset))
                            active (toc/active-heading hs top 2)]
                        (when (not= active @last*)
                          (reset! last* active)
                          (rf/dispatch [:toc/active-heading active]))))))))
-            (build! [this]
-              (let [[_ text path] (r/argv this)]
-                (reset! path* path)
-                (reset! view (syntax/create-source-view @node text (syntax/grammar-for path)))
+            ;; mount the EditorView + wire its scroll-spy + derive the Contents outline. Factored out of build! so
+            ;; the (warm) chunk-ready path stays SYNCHRONOUS (identical to the pre-split behavior) while the cold
+            ;; path runs it from cm/ensure!'s .then. `token` fences a stale build (see build*).
+            (mount-editor! [text path token]
+              (when (and (= token @build*) @node)
+                (reset! view (cm/create-source-view @node text (syntax/grammar-for path)))
                 ;; follow the editor's own scroller so the Contents highlight tracks scrolling (rAF-throttled)
                 (let [scroller (.-scrollDOM ^js @view)
                       handler  (fn [_] (spy!))]
@@ -647,11 +653,25 @@
                 ;; set the initial highlight once it is ready
                 (-> (syntax/parse-outline text path)
                     (.then (fn [toc]
-                             (rf/dispatch [:toc/set path toc])
-                             (reset! toc* toc)
-                             (spy!)))
+                             (when (= token @build*)          ; not superseded while the parse was in flight
+                               (rf/dispatch [:toc/set path toc])
+                               (reset! toc* toc)
+                               (spy!))))
                     (.catch (fn [_] nil)))))
+            (build! [this]
+              (let [[_ text path] (r/argv this)
+                    token (swap! build* inc)]   ; supersede any in-flight (cold-path) build
+                (reset! path* path)
+                ;; the @codemirror editor lives in a lazily-loaded chunk (renderer.cm). Once it's warm (the pool
+                ;; preload, or a prior source open) create it synchronously — same timing as before the split; the
+                ;; first cold open waits on ensure!, leaving the .vv-source placeholder empty until the chunk lands.
+                (if (cm/ready?)
+                  (mount-editor! text path token)
+                  (-> (cm/ensure!)
+                      (.then (fn [_] (mount-editor! text path token)))
+                      (.catch (fn [e] (js/console.warn "[vv] source-view chunk load failed:" e)))))))
             (destroy! []
+              (swap! build* inc)   ; cancel any in-flight build so its .then can't mount a stale/orphan view
               (when @detach* (@detach*) (reset! detach* nil))
               (reset! toc* nil) (reset! last* ::none)
               (when @view (.destroy ^js @view) (reset! view nil)))
@@ -660,9 +680,9 @@
               (.stopPropagation e)
               (let [v        @view
                     path     @path*
-                    selected (syntax/selected-text v)
-                    sel-pos  (syntax/selection-start v)
-                    pos      (or sel-pos (syntax/pos-at-coords v (.-clientX e) (.-clientY e)))
+                    selected (cm/selected-text v)
+                    sel-pos  (cm/selection-start v)
+                    pos      (or sel-pos (cm/pos-at-coords v (.-clientX e) (.-clientY e)))
                     term     (when-not (seq selected) (source-term-at v pos))
                     text     (or selected (:text term) "")
                     loc-pos  (or sel-pos (:pos term) pos)]
@@ -672,7 +692,7 @@
                                                            :path path
                                                            :text text
                                                            :source-location (source-location-for-pos path v loc-pos)
-                                                           :source-line (:line (syntax/line-info-at v loc-pos))}}])))]
+                                                           :source-line (:line (cm/line-info-at v loc-pos))}}])))]
       (r/create-class
        {:display-name           "vv-source-view"
         :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))

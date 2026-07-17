@@ -10,7 +10,7 @@
             [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.hints :as hints]
-            [vinary.renderer.syntax :as syntax]
+            [vinary.renderer.cm :as cm]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
@@ -22,7 +22,7 @@
 ;; :source facet restores its LINE, a preview facet its pixel :scroll); the fx requests the next-rendered document
 ;; be restored to a saved pixel position (the source-line restore rides the :source/want-line fx instead).
 (rf/reg-cofx :view-pos (fn [cofx _] (assoc cofx :view-pos {:scroll (scroll/current)
-                                                           :line   (syntax/current-viewport-line)})))
+                                                           :line   (cm/current-viewport-line)})))
 (rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
 
 ;; send a user-typed SSH secret straight to main (vv:ssh-prompt-reply) — the ONLY secret-bearing channel; the
@@ -186,18 +186,18 @@
        (.scrollIntoView el #js {:block "start" :behavior "smooth"}))            ; fallback: not inside a scroller
      ;; no DOM anchor: a source Contents "L<line>" id — scroll the CodeMirror source view to that line.
      (when-let [[_ n] (re-matches #"L(\d+)" (str id))]
-       (syntax/scroll-source-to-line! (js/parseInt n))))))
+       (cm/scroll-source-to-line! (js/parseInt n))))))
 
 ;; bidirectional source⇄preview jump (dispatched by :source/goto-line, :preview/goto-line). *-scroll-line acts
 ;; on the already-mounted view now; *-want-line stashes the target for the view that is about to remount.
-(rf/reg-fx :source/scroll-line  (fn [line] (syntax/scroll-source-to-line! line)))
-(rf/reg-fx :source/want-line    (fn [line] (syntax/want-source-line! line)))
+(rf/reg-fx :source/scroll-line  (fn [line] (cm/scroll-source-to-line! line)))
+(rf/reg-fx :source/want-line    (fn [line] (cm/want-source-line! line)))
 (rf/reg-fx :preview/scroll-line (fn [line] (source-nav/scroll-preview-to-line! line)))
 (rf/reg-fx :preview/want-line   (fn [line] (source-nav/want-preview-line! line)))
 ;; keyboard/palette entry points: derive the "current" line from the DOM (no click target), then dispatch the
 ;; parameterized jump. No-op when the anchor can't be resolved (e.g. no preview / no mounted source view).
 (rf/reg-fx :jump/to-source-current  (fn [_] (when-let [line (source-nav/current-preview-line)] (rf/dispatch [:source/goto-line line]))))
-(rf/reg-fx :jump/to-preview-current (fn [_] (when-let [line (syntax/current-source-line)] (rf/dispatch [:preview/goto-line line]))))
+(rf/reg-fx :jump/to-preview-current (fn [_] (when-let [line (cm/current-source-line)] (rf/dispatch [:preview/goto-line line]))))
 
 ;; renderer → main (over the contextBridge seam)
 (rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))

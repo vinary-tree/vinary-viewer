@@ -15,6 +15,7 @@
             [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
             [vinary.renderer.syntax :as syntax]
+            [vinary.renderer.cm :as cm]
             [cljs.reader :as reader]
             [vinary.ui.menubar :as menubar]
             [vinary.ui.views :as views]))
@@ -151,7 +152,8 @@
 
 (defn- focused-source-selection []
   (when-let [^js editor (.querySelector js/document ".vv-source .cm-editor.cm-focused")]
-    (some-> (syntax/view-from-dom editor) syntax/selected-text)))
+    ;; a focused .cm-editor exists ⇒ the source-view chunk is loaded, so cm/view-from-dom passes straight through
+    (some-> (cm/view-from-dom editor) cm/selected-text)))
 
 (defn- fragment->text
   "Serialize a cloned selection fragment to plain text with block-aware line breaks. Plain textContent runs
@@ -384,6 +386,12 @@
   (key-scroll!)
   (mount!)
   (js/requestAnimationFrame (fn [] (profile/mark! "paint")))   ; the empty app shell has painted
+  ;; POOL PRELOAD: warm the lazily-loaded @codemirror source-view chunk on idle, so EVERY window — including hidden
+  ;; pool windows that pre-open on idle — has the editor ready before the first source open, keeping warm source
+  ;; opens instant. Off the boot critical path (idle callback, or a 0ms timeout where requestIdleCallback is absent).
+  (if (exists? js/requestIdleCallback)
+    (js/requestIdleCallback (fn [_] (cm/ensure!)))
+    (js/setTimeout (fn [] (cm/ensure!)) 0))
   (rf/dispatch [:view/re-frame-10x-hide]))
 
 (defn ^:export reload [] (mount!))
