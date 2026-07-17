@@ -277,43 +277,43 @@
 ;; ---- navigation: per-tab history with scroll (Phase A) + reorder/view-source (Phase B) ----
 (deftest nav-history-scroll
   (let [db1 (nav/add-tab empty-tabs "/a")
-        db2 (nav/nav-active db1 "/b" 100)]          ; leave /a at scroll 100, go to /b
-    (testing "add-tab creates a {:uri :scroll} history entry"
+        db2 (nav/nav-active db1 "/b" {:scroll 100})]   ; leave /a at scroll 100, go to /b (pos = {:scroll :line})
+    (testing "add-tab creates a {:uri :scroll :facet} history entry"
       (is (= "/a" (nav/active-uri db1)))
-      (is (= [{:uri "/a" :scroll 0}] (get-in (nav/active-tab db1) [:hist :stack]))))
+      (is (= [{:uri "/a" :scroll 0 :facet nil}] (get-in (nav/active-tab db1) [:hist :stack]))))
     (testing "nav-active saves the leaving scroll + pushes a new entry"
       (is (= "/b" (nav/active-uri db2)))
       (is (= 100 (get-in (nav/active-tab db2) [:hist :stack 0 :scroll])) "/a's scroll saved")
       (is (= 1 (get-in (nav/active-tab db2) [:hist :idx]))))
-    (testing "step back returns the prior uri + its saved scroll"
-      (let [[db3 uri sc] (nav/step db2 -1 50)]       ; leave /b at scroll 50
+    (testing "step back returns the prior uri + its saved-position entry"
+      (let [[db3 uri entry] (nav/step db2 -1 {:scroll 50})]  ; leave /b at scroll 50; step returns [db uri entry]
         (is (= "/a" uri))
-        (is (= 100 sc) "restores /a's scroll")
+        (is (= 100 (:scroll entry)) "restores /a's scroll")
         (is (= 50 (get-in (nav/active-tab db3) [:hist :stack 1 :scroll])) "/b's scroll saved")))))
 
 (deftest nav-preview-link-history
   (testing "preview navigation pushes into the active tab and restores the markdown scroll"
     (let [db1 (nav/add-tab empty-tabs "/previous.md")
-          db2 (nav/nav-active db1 "/readme.md" 25)
-          db3 (nav/nav-active db2 "/diagram.png" 340)
-          [db4 uri4 sc4] (nav/step db3 -1 0)
-          [db5 uri5 sc5] (nav/step db4 1 345)]
+          db2 (nav/nav-active db1 "/readme.md" {:scroll 25})
+          db3 (nav/nav-active db2 "/diagram.png" {:scroll 340})
+          [db4 uri4 entry4] (nav/step db3 -1 {:scroll 0})
+          [db5 uri5 entry5] (nav/step db4 1 {:scroll 345})]
       (is (= "/readme.md" uri4))
-      (is (= 340 sc4))
+      (is (= 340 (:scroll entry4)))
       (is (= "/diagram.png" uri5))
-      (is (= 0 sc5))
+      (is (= 0 (:scroll entry5)))
       (is (= 345 (get-in (nav/active-tab db5) [:hist :stack 1 :scroll])))))
   (testing "an image already open in another tab does not steal focus from preview navigation"
     (let [db0 (-> empty-tabs
                   (nav/add-tab "/readme.md")
                   (nav/add-tab "/diagram.png")
                   (nav/activate 0))
-          db1 (nav/nav-active db0 "/diagram.png" 120)
+          db1 (nav/nav-active db0 "/diagram.png" {:scroll 120})
           tabs (nav/tabs db1)]
       (is (= 0 (nav/active-id db1)))
       (is (= "/diagram.png" (nav/active-uri db1)))
-      (is (= [{:uri "/readme.md" :scroll 120}
-              {:uri "/diagram.png" :scroll 0}]
+      (is (= [{:uri "/readme.md" :scroll 120 :facet nil}
+              {:uri "/diagram.png" :scroll 0 :facet nil}]
              (get-in (nav/active-tab db1) [:hist :stack])))
       (is (= "/diagram.png" (:uri (second tabs)))))))
 
@@ -323,16 +323,16 @@
             web-view link — is not evicted; main only ever watches the local paths)"
     (let [db (-> empty-tabs
                  (nav/add-tab "/a.md")
-                 (nav/nav-active "/b.md" 10)
+                 (nav/nav-active "/b.md" {:scroll 10})
                  (nav/add-tab "https://example.com")
-                 (nav/nav-active "/c.md" 0))]
+                 (nav/nav-active "/c.md" {:scroll 0}))]
       (is (= ["/a.md" "/b.md" "https://example.com" "/c.md"] (nav/retained-file-paths db)))))
   (testing "history truncation drops no-longer-reachable files from the retained set"
     (let [db0 (-> empty-tabs
                   (nav/add-tab "/a.md")
-                  (nav/nav-active "/b.md" 10))
-          [db1 _uri _scroll] (nav/step db0 -1 20)
-          db2 (nav/nav-active db1 "/c.md" 30)]
+                  (nav/nav-active "/b.md" {:scroll 10}))
+          [db1 _uri _entry] (nav/step db0 -1 {:scroll 20})
+          db2 (nav/nav-active db1 "/c.md" {:scroll 30})]
       (is (= ["/a.md" "/c.md"] (nav/retained-file-paths db2))))))
 
 (deftest nav-reorder-and-source
@@ -348,7 +348,7 @@
   (testing "duplicate inserts immediately after the source tab and preserves tab state"
     (let [db0  (-> empty-tabs
                    (nav/add-tab "/a.md")
-                   (nav/nav-active "/b.md" 42)
+                   (nav/nav-active "/b.md" {:scroll 42})
                    (nav/set-facet 0 "/b.md" :source))
           db1  (nav/duplicate-tab db0 0)
           tabs (nav/tabs db1)]

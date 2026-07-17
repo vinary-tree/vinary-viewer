@@ -17,9 +17,12 @@
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.find :as finder]))
 
-;; content-pane scroll: a cofx reads the current scrollTop (so nav events save the leaving position into
-;; history); the fx requests the next-rendered document be restored to a saved position.
-(rf/reg-cofx :content-scroll (fn [cofx _] (assoc cofx :content-scroll (scroll/current))))
+;; content-pane view position: a cofx reads the leaving view's position — both the preview pixel scrollTop AND the
+;; source viewport line (each nav event saves the one its facet makes authoritative, via nav/capture-pos — so a
+;; :source facet restores its LINE, a preview facet its pixel :scroll); the fx requests the next-rendered document
+;; be restored to a saved pixel position (the source-line restore rides the :source/want-line fx instead).
+(rf/reg-cofx :view-pos (fn [cofx _] (assoc cofx :view-pos {:scroll (scroll/current)
+                                                           :line   (syntax/current-viewport-line)})))
 (rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
 
 ;; send a user-typed SSH secret straight to main (vv:ssh-prompt-reply) — the ONLY secret-bearing channel; the

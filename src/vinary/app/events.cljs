@@ -22,6 +22,12 @@
 (rf/reg-event-db :ds/changed (fn [db _] (update db :ds/rev inc)))
 
 ;; ---- the browser-tab model (transforms live in vinary.app.nav; tabs = views, DataScript caches content) ----
+(defn- conj-some
+  "conj x onto coll only when x is non-nil — so a cond-> step can contribute an OPTIONAL fx (e.g. a facet-aware
+   position restore that is nil when a source entry captured no line)."
+  [coll x]
+  (if (some? x) (conj coll x) coll))
+
 (defn- plain-html [text]
   (str "<pre class=\"vv-plain\">" (gstr/htmlEscape (or text "")) "</pre>"))
 
@@ -278,78 +284,104 @@
      :fx (cond-> (into (retention-fx db) (nav-fx uri scroll))
            (and uri (uri/http? uri)) (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}))
 
+;; FX helper: restore a history entry's view position, facet-aware. A :source entry stashes its :line for the
+;; source view's imminent (re)mount (create-source-view consumes it); a :preview entry with a :line stashes it for
+;; the preview remount; otherwise the pixel :scroll is restored on the next content render (scroll/apply!). nil when
+;; a source entry has no captured line (nothing to restore → stay at the top).
+(defn- entry-restore-fx [{:keys [scroll line facet]}]
+  (case (:type facet)
+    :source (when line [:source/want-line line])
+    (if line [:preview/want-line line] [:scroll/restore (or scroll 0)])))
+
+(defn- history-result
+  "Back/Forward (or a tab switch) landed on `entry` {:uri :scroll :line :facet}. Reload the primary doc
+   (idempotent), ensure the shown facet's sibling file is present, and restore the position facet-aware. Mirrors
+   nav-result's retention + http recent-save. The facet is already written onto the tab by nav/step, so the
+   :content/received fresh-facet guard (nil? facet) is false → the restored view is not clobbered."
+  [db uri entry]
+  (let [db         (record-web-history db uri)
+        facet-path (get-in entry [:facet :path])
+        restore    (entry-restore-fx entry)]
+    {:db db
+     :fx (cond-> (retention-fx db)
+           facet-path                       (conj [:facet/ensure-loaded {:path facet-path}])
+           (uri/file-path uri)              (into (load-fx uri))
+           (and restore (uri/file-path uri)) (conj restore)
+           (and uri (uri/http? uri))        (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}))
+
 ;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none. The leaving
 ;; scroll is saved into history; the new entry starts at the top.
 (rf/reg-event-fx
  :tab/navigate
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ uri]]
-   (let [db' (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ uri]]
+   (let [db' (if (nav/active-tab db) (nav/nav-active db uri view-pos) (nav/add-tab db uri))]
      (nav-result db' uri 0))))
 
-;; open uri in a NEW tab (Ctrl+click) — save the current tab's scroll first
+;; open uri in a NEW tab (Ctrl+click) — save the current tab's view position first
 (rf/reg-event-fx
  :tab/open
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ uri]]
-   (let [db' (nav/add-tab (nav/save-scroll db content-scroll) uri)]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ uri]]
+   (let [db' (nav/add-tab (nav/save-scroll db view-pos) uri)]
      (nav-result db' uri 0))))
 
 (rf/reg-event-fx
  :tab/new-blank
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} _]
-   (let [db' (nav/add-tab (nav/save-scroll db content-scroll) nil)]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
+   (let [db' (nav/add-tab (nav/save-scroll db view-pos) nil)]
      (with-retention {:db db'} db'))))
 
-;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its scroll), else navigate
+;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its view position, facet-aware),
+;; else navigate
 (rf/reg-event-fx
  :doc/open
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ uri]]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
-     (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
+     (let [db' (nav/activate (nav/save-scroll db view-pos) (:id t))]
        (with-retention
-         {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))}
+         {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
          db'))
-     (let [db' (if (nav/active-tab db) (nav/nav-active db uri content-scroll) (nav/add-tab db uri))]
+     (let [db' (if (nav/active-tab db) (nav/nav-active db uri view-pos) (nav/add-tab db uri))]
        (nav-result db' uri 0)))))
 
 ;; "Open in new tab" (Ctrl+click / context menu): focus an existing tab for uri, else a new tab
 (rf/reg-event-fx
  :doc/open-new
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ uri]]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
-     (let [db' (nav/activate (nav/save-scroll db content-scroll) (:id t))]
+     (let [db' (nav/activate (nav/save-scroll db view-pos) (:id t))]
        (with-retention
-         {:db db' :fx (cond-> [] (uri/file-path uri) (conj [:scroll/restore (nav/cur-scroll db')]))}
+         {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
          db'))
-     (let [db' (nav/add-tab (nav/save-scroll db content-scroll) uri)]
+     (let [db' (nav/add-tab (nav/save-scroll db view-pos) uri)]
        (nav-result db' uri 0)))))
 
-;; switch tabs — save the leaving tab's scroll, restore the target tab's
+;; switch tabs — save the leaving tab's view position, restore the target tab's (facet-aware)
 (rf/reg-event-fx
  :tab/activate
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ id]]
-   (let [db'    (nav/activate (nav/save-scroll db content-scroll) id)
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ id]]
+   (let [db'    (nav/activate (nav/save-scroll db view-pos) id)
          target (nav/active-uri db')]
      (with-retention
-       {:db db' :fx (cond-> [] (uri/file-path target) (conj [:scroll/restore (nav/cur-scroll db')]))}
+       {:db db' :fx (cond-> [] (uri/file-path target) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
        db'))))
 
 (rf/reg-event-fx
  :tab/duplicate
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} [_ id]]
-   (let [db'    (cond-> db (= id (nav/active-id db)) (nav/save-scroll content-scroll))
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ id]]
+   (let [db'    (cond-> db (= id (nav/active-id db)) (nav/save-scroll view-pos))
          db''   (nav/duplicate-tab db' id)
          target (nav/active-uri db'')]
      (with-retention
        {:db db''
         :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
-              (conj [:scroll/restore (nav/cur-scroll db'')]))}
+              (conj-some (entry-restore-fx (nav/cur-entry db''))))}
        db''))))
 
 (rf/reg-event-fx
@@ -376,13 +408,17 @@
                        {:fx [[:dispatch [:tab/set-facet (or id (nav/active-id db)) (:path tgt) (:type tgt)]]]}
                        {}))))
 
-;; Show `path` as `type` (:preview/:source) on the tab, IN-PLACE (no history). Loads the file when needed
-;; (idempotent) and syncs retention so the shown facet's doc is watched + not evicted. The combo menu-pick + the
-;; jump events' entry point. A PDF facet gets both its doc entity and cached bytes via :content/received.
+;; Show `path` as `type` (:preview/:source) on the tab as a HISTORY event (nav/push-facet), so Back/Forward returns
+;; to the previous view + location. Loads the file when needed (idempotent) and syncs retention so the shown facet's
+;; doc is watched + not evicted. The combo menu-pick + main-region + toggle-source entry point. A PDF facet gets its
+;; doc entity and cached bytes via :content/received. Re-selecting the already-shown facet is a no-op (no entry).
 (rf/reg-event-fx :tab/set-facet
-                 (fn [{:keys [db]} [_ id path type]]
-                   (let [db' (nav/set-facet db (or id (nav/active-id db)) path type)]
-                     (with-retention {:db db' :fx [[:facet/ensure-loaded {:path path}]]} db'))))
+                 [(rf/inject-cofx :view-pos)]
+                 (fn [{:keys [db view-pos]} [_ id path type]]
+                   (if (= {:path path :type type} (facet/resolve-facet db))
+                     {:fx [[:facet/ensure-loaded {:path path}]]}          ; already the shown view → don't push history
+                     (let [db' (nav/push-facet db (or id (nav/active-id db)) path type view-pos nil)]
+                       (with-retention {:db db' :fx [[:facet/ensure-loaded {:path path}]]} db')))))
 
 ;; The combo MAIN region (left of the divider): activate `type`'s main target — its most-recently-used file, else
 ;; the first/default option. No-op when the type has no options.
@@ -432,22 +468,26 @@
 ;; toggle-driven remount — mirrors renderer.scroll want!→apply!).
 (rf/reg-event-fx
  :source/goto-line                                        ; preview → source
- (fn [{:keys [db]} [_ line]]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ line]]
    (when (number? line)
      (if (= :source (facet/active-type db))
-       {:fx [[:source/scroll-line line]]}                 ; already source: scroll the live view now
-       ;; entering source: flip the SHOWN file to its source facet (same path, already loaded) and defer the scroll
-       ;; until create-source-view mounts
-       {:db  (nav/set-facet db (facet/active-content-path db) :source)
+       {:fx [[:source/scroll-line line]]}                 ; already source: scroll the live view now (no view switch)
+       ;; entering source: a VIEW SWITCH (+ jump) → push a history entry carrying the source facet and its target
+       ;; line (same file, already loaded), and defer the scroll until create-source-view mounts
+       {:db  (nav/push-facet db (nav/active-id db) (facet/active-content-path db) :source view-pos {:line line})
         :fx  [[:source/want-line line]]}))))
 (rf/reg-event-fx
  :preview/goto-line                                       ; source → preview
- (fn [{:keys [db]} [_ line]]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} [_ line]]
    (when (number? line)
      (if (= :source (facet/active-type db))
-       {:db  (nav/set-facet db (facet/active-content-path db) :preview)  ; leaving source: defer until preview mounts
+       ;; leaving source: a VIEW SWITCH (+ jump) → push a preview entry carrying its target line; defer the scroll
+       ;; until the preview remounts
+       {:db  (nav/push-facet db (nav/active-id db) (facet/active-content-path db) :preview view-pos {:line line})
         :fx  [[:preview/want-line line]]}
-       {:fx [[:preview/scroll-line line]]}))))            ; already preview: scroll now
+       {:fx [[:preview/scroll-line line]]}))))            ; already preview: scroll now (no view switch)
 
 ;; keyboard / command-palette entry points (no click target): only fire in the meaningful direction, and only
 ;; for a previewable doc (markdown/org — the kinds that stamp data-vv-source-* and have both views).
@@ -486,32 +526,33 @@
          idx (first (keep-indexed #(when (= (:id %2) id) %1) ts))]
      {:fx (if idx (mapv (fn [t] [:dispatch [:tab/close (:id t)]]) (subvec ts (inc idx))) [])})))
 
-;; back/forward act on the ACTIVE tab's own history (per-tab, browser-like) + restore that entry's scroll
+;; back/forward act on the ACTIVE tab's own history (per-tab, browser-like) + restore that entry's VIEW (facet) and
+;; position (facet-aware). nav/step returns the target entry; history-result reloads + ensure-loads the facet file.
 (rf/reg-event-fx
  :history/back
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} _]
-   (if-let [[db' uri sc] (nav/step db -1 content-scroll)]
-     (nav-result db' uri sc)
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
+   (if-let [[db' uri entry] (nav/step db -1 view-pos)]
+     (history-result db' uri entry)
      {})))
 
 (rf/reg-event-fx
  :history/forward
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} _]
-   (if-let [[db' uri sc] (nav/step db 1 content-scroll)]
-     (nav-result db' uri sc)
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
+   (if-let [[db' uri entry] (nav/step db 1 view-pos)]
+     (history-result db' uri entry)
      {})))
 
 ;; Alt+Up: navigate the active tab to the PARENT directory of the current file:// uri (no-op for http /
 ;; at the filesystem root). The came-from child is pre-highlighted so Alt+Down returns to it.
 (rf/reg-event-fx
  :nav/parent
- [(rf/inject-cofx :content-scroll)]
- (fn [{:keys [db content-scroll]} _]
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
    (let [cur (nav/active-uri db)]
      (if-let [parent (uri/dirname cur)]
-       (let [db' (-> (nav/nav-active db parent content-scroll)
+       (let [db' (-> (nav/nav-active db parent view-pos)
                      (assoc-in [:ui :dir-selected] (uri/file-path cur)))]
          (nav-result db' parent 0))
        {}))))

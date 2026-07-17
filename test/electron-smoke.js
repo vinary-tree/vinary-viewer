@@ -3213,8 +3213,32 @@ async function main() {
     'clicking Source shows the .tex source in place (gutter restored)', 8000
   );
   const stillTex = await evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && t.uri; })()`);
-  assert.ok((stillTex || '').includes('paper.tex'), 'Source is shown IN PLACE — the tab URI is unchanged (no history navigation)');
+  assert.ok((stillTex || '').includes('paper.tex'), 'Source is shown IN PLACE — the tab URI is unchanged (a facet switch pushes a same-uri history entry, not a cross-document navigation)');
   console.log('[ok] the [Preview | Source] combo switches facets in place (tab URI unchanged)');
+
+  // ── Part 2: a view (facet) switch is a HISTORY event → Back/Forward restore the previous VIEW + location ──
+  // The Source click above switched PDF-preview → .tex-source, pushing a same-uri history entry. Back must return
+  // to the PDF preview (the prior view); Forward must return to the .tex source. Driven through the REAL toolbar
+  // Back/Forward buttons (release-safe), not a re-frame dispatch.
+  const clickNavBtn = (kind) => evalIn(win, `(() => { const b = [...document.querySelectorAll('.vv-nav-btn')].find(x => (x.title||'').startsWith(${JSON.stringify(kind)})); if (b && !b.disabled) { b.click(); return true; } return false; })()`);
+  await waitFor(() => evalIn(win, `[...document.querySelectorAll('.vv-nav-btn')].some(x => (x.title||'').startsWith('Back') && !x.disabled)`),
+    'the facet switch enabled Back (a history entry was pushed for the same uri)');
+  await clickNavBtn('Back');
+  await waitFor(
+    () => evalIn(win, `(() => { const c = document.querySelector('.vv-content'); return c.classList.contains('vv-content-pdf-flush') && Boolean(c.querySelector('.vv-pdf-doc')) && !c.querySelector('.vv-source'); })()`),
+    'Back returns to the previous VIEW — the PDF preview (source gone, flush gutter restored)', 12000
+  );
+  const backUri = await evalIn(win, `(() => { const ui = window.__vvdb().ui; const t = ui.tabs.find(x => x.id === ui['active-tab']); return t && t.uri; })()`);
+  assert.ok((backUri || '').includes('paper.tex'), 'Back keeps the same tab URI (the facet switch was a same-uri history entry)');
+  console.log('[ok] Part 2: Back returns to the previous view (PDF preview), same uri');
+  await waitFor(() => evalIn(win, `[...document.querySelectorAll('.vv-nav-btn')].some(x => (x.title||'').startsWith('Forward') && !x.disabled)`),
+    'Forward is enabled after Back');
+  await clickNavBtn('Forward');
+  await waitFor(
+    () => evalIn(win, `(() => { const c = document.querySelector('.vv-content'); return Boolean(c.querySelector('.vv-source .cm-line')) && !c.classList.contains('vv-content-pdf-flush'); })()`),
+    'Forward returns to the .tex source view (gutter dropped again)', 12000
+  );
+  console.log('[ok] Part 2: Forward returns to the source view — a facet switch is a history event');
 
   // the Contents panel FOLLOWS the source view's active section on scroll (line-based scroll-spy). Reveal Contents,
   // then click a deep section: the editor scrolls there AND the section is highlighted — previously navigation

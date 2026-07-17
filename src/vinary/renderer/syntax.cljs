@@ -398,6 +398,13 @@
           doc   (.. view -state -doc)]
       (.-number (.lineAt doc (.-from block))))))
 
+(defn current-viewport-line
+  "The 1-based viewport-top line of the MOUNTED source view (nil when none is mounted) — the source coordinate
+   saved into history when leaving a :source facet (the :view-pos cofx). A pixel scrollTop is meaningless for a
+   source view because CodeMirror scrolls its own `.cm-scroller`, not the `.vv-content` DOM scroller."
+  []
+  (when-let [^js view @current-view] (viewport-top-line view)))
+
 (defn create-source-view
   "Mount a read-only CodeMirror view of text in parent. If grammar (a {:wasm-url :scm-url}) is given,
    asynchronously load the tree-sitter grammar and reconfigure with highlighting. Returns the view."
