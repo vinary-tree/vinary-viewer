@@ -14,6 +14,7 @@
             [vinary.main.settings :as settings]
             [vinary.main.recent :as recent]
             [vinary.main.window :as window]
+            [vinary.main.windows :as windows]
             [vinary.main.shell :as shell]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.web :as web]
@@ -29,10 +30,11 @@
 (def ^js app (.-app electron))
 (def ^js BrowserWindow (.-BrowserWindow electron))
 
-;; Every live app window. The app is SINGLE-INSTANCE (see `main`): the first process owns the lock and stays
-;; resident; each subsequent `vv <file>` hands its argv to it via Electron's `second-instance`, which opens the
-;; file in a NEW window of the already-warm process — no second cold start.
-(defonce windows (atom []))
+;; Every live (shown) app window is tracked in `vinary.main.windows` — a leaf registry the session-level
+;; services also read so they route to the ACTIVE window rather than one captured at init!. The app is
+;; SINGLE-INSTANCE (see `main`): the first process owns the lock and stays resident; each subsequent `vv <file>`
+;; hands its argv to it (via `second-instance` or the daemon socket), which opens the file in a warm window of
+;; the already-running process — no second cold start.
 
 ;; Process/session-level services (shared-web-session extensions + ad-block, the web view, password autofill, the
 ;; shell IPC handlers) register ONCE for the whole app; re-running them for a second window throws (e.g. "Cannot
@@ -47,8 +49,8 @@
 ;; ── warm window pool ────────────────────────────────────────────────────────────────────────────────────────
 ;; Pre-booted, fully-wired HIDDEN windows. A real open CLAIMS one and shows it instantly — the per-window bundle
 ;; eval (~700 ms even in the warm process) was already paid at boot — then the pool refills in the background.
-;; Pool windows live ONLY in `pool` (never `windows`), so `active-window` and global menu actions never target a
-;; hidden one. `booting` counts windows loading toward the pool so a refill doesn't overshoot the target.
+;; Pool windows are registered NOWHERE public (only in `pool`), so `windows/active` and global menu actions never
+;; target a hidden one. `booting` counts windows loading toward the pool so a refill doesn't overshoot the target.
 (defonce ^:private pool (atom []))
 (defonce ^:private booting (atom 0))
 (def ^:private pool-target
@@ -56,11 +58,6 @@
   ;; disables the pool entirely (every open cold-creates — the pre-pool behaviour).
   (let [v (some-> js/process .-env .-VV_POOL js/parseInt)]
     (if (and (number? v) (not (js/isNaN v)) (>= v 0)) v 1)))
-
-(defn- active-window
-  "The window a global action (menu, focus-follows) targets: the focused window, else the most recent."
-  ^js []
-  (or (.getFocusedWindow BrowserWindow) (peek @windows)))
 
 (defn renderer-index [] (path/join js/__dirname ".." ".." "resources" "public" "index.html"))
 (defn preload-path  [] (path/join js/__dirname ".." ".." "resources" "preload.js"))
@@ -128,10 +125,10 @@
              (connections/init! wc)   ; persisted (non-secret) SSH connection metadata
              (ssh/init! win)          ; SSH/SFTP transport prompts + vv:ssh-* channels
              (on-ready win)))
-    ;; drop a closed window from BOTH registries (a pool window can be closed before it is ever claimed)
+    ;; drop a closed window from BOTH the live registry and the pool (a pool window can be closed before claim)
     (.on win "closed" (fn []
-                        (swap! windows (fn [ws] (vec (remove #(= % win) ws))))
-                        (swap! pool    (fn [ps] (vec (remove #(= % win) ps))))))
+                        (windows/remove! win)
+                        (swap! pool (fn [ps] (vec (remove #(= % win) ps))))))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
     ;; process/session-level services register ONCE (see `services-inited?`) — extension runtime + ad-blocking on
     ;; the shared web session, the web view, password autofill, and the shell IPC handlers. They bind to the first
@@ -155,7 +152,7 @@
   ([] (create-window! nil))
   ([args]
    (let [win (wire-window! true (fn [win] (open-files! win args)))]
-     (swap! windows conj win)
+     (windows/add! win)
      win)))
 
 (defn- boot-pool-window!
@@ -176,7 +173,7 @@
   [args]
   (if-let [win (peek @pool)]
     (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
-        (swap! windows conj win)                    ; it is now a real, tracked window
+        (windows/add! win)                          ; it is now a real, tracked, on-screen window
         (profile/mark! "claim")
         (open-files! win args)
         (.show win)
@@ -283,7 +280,7 @@
                                 (if daemon?
                                   (refill-pool!)
                                   (claim-window! (initial-args))))))
-  (.on app "activate" (fn [] (when (and (empty? @windows) (not daemon?)) (claim-window! nil))))
+  (.on app "activate" (fn [] (when (and (empty? (windows/all)) (not daemon?)) (claim-window! nil))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"

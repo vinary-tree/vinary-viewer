@@ -7,6 +7,7 @@
             [vinary.main.password-adapters :as adapters]
             [vinary.main.password-config :as config]
             [vinary.main.password-util :as pu]
+            [vinary.main.windows :as windows]
             [vinary.main.web :as web]))
 
 (defonce ^:private state
@@ -25,7 +26,10 @@
 
 (def candidate-ttl-ms (* 2 60 1000))
 
-(defn- app-wc ^js [] (some-> ^js (:win @state) .-webContents))
+;; password provider state + (non-secret) item metadata go to the ACTIVE app window — the one the user is
+;; interacting with when they trigger a search/fill — falling back to the window captured at init!. (Revealed
+;; secrets never travel this path; they go straight to the web-view preload via web/fill-password!.)
+(defn- app-wc ^js [] (or (windows/active-wc) (some-> ^js (:win @state) .-webContents)))
 
 (defn- normalize-kind [kind]
   (if (keyword? kind) kind (keyword (or kind "json-command"))))

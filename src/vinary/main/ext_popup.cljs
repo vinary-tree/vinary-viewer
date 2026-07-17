@@ -7,25 +7,29 @@
   (:require ["electron" :refer [WebContentsView shell]]
             [vinary.main.ext-util :as eu]))
 
-(defonce ^:private state (atom {:view nil :win nil}))
+;; :win  = default host window (set at init!, a fallback)
+;; :host = the window the CURRENTLY-open popup is attached to (set per open!), so close! detaches from the same
+;;         window even after focus moved elsewhere — the popup follows the toolbar that opened it (multi-window).
+(defonce ^:private state (atom {:view nil :win nil :host nil}))
 
 (defn init! [^js win] (swap! state assoc :win win))
 
 (defn close! []
   (when-let [^js v (:view @state)]
-    (let [^js win (:win @state)]
+    (let [^js win (or (:host @state) (:win @state))]
       (.setVisible v false)
-      (try (.removeChildView ^js (.-contentView win) v) (catch :default _ nil))
+      (try (when (and win (not (.isDestroyed win))) (.removeChildView ^js (.-contentView win) v)) (catch :default _ nil))
       (try (.close (.-webContents v)) (catch :default _ nil)))
-    (swap! state assoc :view nil)))
+    (swap! state assoc :view nil :host nil)))
 
 (defn open!
-  "Open extension `id`'s `popup` (a path relative to the extension root) anchored below `bounds`
-   (the clicked toolbar icon's {:x :y :width :height})."
-  [^js sess id popup bounds]
+  "Open extension `id`'s `popup` (a path relative to the extension root) anchored below `bounds` (the clicked
+   toolbar icon's {:x :y :width :height}) in `host` — the window whose toolbar was clicked (falls back to the
+   init! window)."
+  [^js host ^js sess id popup bounds]
   (close!)
   (when (and sess id (seq (str popup)))
-    (let [^js win (:win @state)
+    (let [^js win (or host (:win @state))
           base    (str "chrome-extension://" id "/")
           url     (str base popup)
           v       (WebContentsView. (clj->js {:webPreferences {:partition "persist:vinary-web"
@@ -51,4 +55,4 @@
       (.setVisible v true)
       (.loadURL wc url)
       (.focus wc)
-      (swap! state assoc :view v))))
+      (swap! state assoc :view v :host win))))

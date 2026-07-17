@@ -5,11 +5,12 @@
    page's heading outline and reports the active heading on scroll — so the Contents/TOC tab follows HTML
    sections just like Markdown — and scrolls to a heading on request. did-navigate is relayed so in-page
    link clicks update the active tab's URI + history."
-  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session net]]
+  (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session net BrowserWindow]]
             ["path" :as path]
+            [vinary.main.windows :as windows]
             ["./ssh_transport.js" :as ssh-transport]))
 
-(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-win nil :snapshot nil :visible? false :owner-tab nil}))
+(defonce ^:private state  (atom {:view nil :win nil :url nil :app-command-wins #{} :snapshot nil :visible? false :owner-tab nil}))
 (defonce ^:private inited (atom false))
 (defonce ^:private last-history-nav (atom {:dir nil :time 0}))
 
@@ -18,7 +19,10 @@
 (declare pdf-url? route-pdf!)
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
-(defn- app-wc    ^js []   (some-> ^js (:win @state) .-webContents))   ; ^js return: extern-safe interop under advanced (parity with shell/wc)
+;; the web view's OWNER window's renderer — where its relays (navigation, TOC, active heading, snapshot) go.
+;; `:win` tracks the window that last requested the view (set from event.sender in vv:http-show); it falls back
+;; to the active app window so a relay is never routed to a stale/hidden window. ^js return: extern-safe interop.
+(defn- app-wc    ^js []   (or (some-> ^js (:win @state) .-webContents) (windows/active-wc)))
 
 (defn app-webcontents ^js [] (app-wc))
 
@@ -127,14 +131,30 @@
            (send-history-nav! dir)))))
 
 (defn- attach-app-command! [^js win]
-  (when (and win (not= win (:app-command-win @state)))
-    (swap! state assoc :app-command-win win)
+  ;; wire each window's Back/Forward mouse buttons AT MOST ONCE — the web view can re-parent between windows
+  ;; (multi-window), so track the set of windows already wired rather than just the latest.
+  (when (and win (not (contains? (:app-command-wins @state) win)))
+    (swap! state update :app-command-wins conj win)
     (.on win "app-command"
          (fn [event cmd]
            (case cmd
              "browser-backward" (do (.preventDefault event) (send-history-nav! "back"))
              "browser-forward"  (do (.preventDefault event) (send-history-nav! "forward"))
              nil)))))
+
+(defn- reparent-view!
+  "Bind the single shared web view to `win` (the window whose renderer requested it), so it always overlays the
+   window the user opened the URL from. Re-parents the LIVE native view (preserving its loaded page + session)
+   from the previous owner to `win`, re-points `:win`, and wires that window's app-command (Back/Forward) keys.
+   No-op when `win` is already the owner or is nil (fall back to the current owner)."
+  [^js win]
+  (when (and win (not (identical? win (:win @state))))
+    (when-let [^js v (:view @state)]
+      (let [^js old (:win @state)]
+        (try (when (and old (not (.isDestroyed old))) (.removeChildView (.-contentView old) v)) (catch :default _ nil))
+        (try (.addChildView (.-contentView win) v) (catch :default _ nil))))
+    (swap! state assoc :win win)
+    (attach-app-command! win)))
 
 (defn- ensure-view! [^js win]
   (or (:view @state)
@@ -286,7 +306,10 @@
              (route-pdf! (.getURL item) (:owner-tab @state)))))
     ;; ---- app renderer → web view ----
     (.on ipcMain "vv:http-show"
-         (fn [_e ^js p] (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m) (:tabId m)))))
+         (fn [^js e ^js p]
+           ;; the web view belongs to the window that asked for it — move it there (multi-window)
+           (reparent-view! (windows/from-wc (.-sender e)))
+           (let [m (js->clj p :keywordize-keys true)] (show! (:win @state) (:url m) (:bounds m) (:tabId m)))))
     (.on ipcMain "vv:http-hide"   (fn [_e] (hide!)))
     (.on ipcMain "vv:http-bounds"
          (fn [_e ^js p] (set-bounds! (:view @state) (:bounds (js->clj p :keywordize-keys true)))))

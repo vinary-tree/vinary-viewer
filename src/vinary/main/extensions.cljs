@@ -12,10 +12,11 @@
    (allowUnpackedExtensions false) and in-page 'Add to Chrome' is denied — installs go through our UI."
   (:require ["electron-chrome-web-store" :refer [installChromeWebStore installExtension
                                                  uninstallExtension updateExtensions]]
-            ["electron" :refer [ipcMain session app]]
+            ["electron" :refer [ipcMain session app BrowserWindow]]
             ["fs" :as fs]
             ["path" :as path]
             [vinary.main.ext-util :as eu]
+            [vinary.main.windows :as windows]
             [vinary.main.ext-popup :as popup]))
 
 ;; state: the web session, the app window's webContents (for state pushes), disabled-ids, id→unpacked path
@@ -62,14 +63,16 @@
                            :has-popup? (:has-popup? am)}}))
           (array-seq (.getAllExtensions ^js (.-extensions sess))))))
 
+;; extension runtime state (shared across the whole app) + action results go to the ACTIVE app window (the one
+;; the user has the Extensions UI focused in), falling back to the window captured at init!.
 (defn- push-state! []
-  (when-let [^js wc (:wc @state)]
+  (when-let [^js wc (or (windows/active-wc) (:wc @state))]
     (.send wc "vv:ext-state"
            (pr-str {:enabled?  (:enabled? @state)
                     :installed (installed-list)}))))
 
 (defn- result! [channel m]
-  (when-let [^js wc (:wc @state)] (.send wc channel (clj->js m))))
+  (when-let [^js wc (or (windows/active-wc) (:wc @state))] (.send wc channel (clj->js m))))
 
 ;; ---- runtime actions ----
 (defn- cache-path! [^js ext] (swap! state update :paths assoc (.-id ext) (.-path ext)))
@@ -147,6 +150,7 @@
       (.on ipcMain "vv:ext-remove"         (fn [_e id] (remove! id)))
       (.on ipcMain "vv:ext-set-enabled"    (fn [_e ^js p] (set-enabled! (.-id p) (.-on p))))
       (.on ipcMain "vv:ext-check-updates"  (fn [_e] (check-updates!)))
-      (.on ipcMain "vv:ext-action-clicked" (fn [_e ^js p]
-                                             (popup/open! (:sess @state) (.-id p) (.-popup p) (js->clj (.-bounds p) :keywordize-keys true))))
+      (.on ipcMain "vv:ext-action-clicked" (fn [^js e ^js p]
+                                             ;; anchor the popup to the window whose toolbar icon was clicked
+                                             (popup/open! (windows/from-wc (.-sender e)) (:sess @state) (.-id p) (.-popup p) (js->clj (.-bounds p) :keywordize-keys true))))
       (.on ipcMain "vv:ext-popup-close"    (fn [_e] (popup/close!))))))

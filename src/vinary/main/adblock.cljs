@@ -7,7 +7,8 @@
   (:require ["@ghostery/adblocker-electron" :refer [ElectronBlocker]]
             ["electron" :refer [ipcMain session app]]
             ["fs/promises" :as fsp]
-            ["path" :as path]))
+            ["path" :as path]
+            [vinary.main.windows :as windows]))
 
 (defonce ^:private inited (atom false))
 
@@ -29,7 +30,7 @@
 
 ;; push refresh status to the app renderer (mirrors vinary.main.extensions/result!) so the dialog can show
 ;; "Updating… → ✓ Updated / ⚠ Offline / ✗ error"
-(defn- result! [m] (when-let [^js wc (:wc @state)] (.send wc "vv:adblock-status" (clj->js m))))
+(defn- result! [m] (when-let [^js wc (or (windows/active-wc) (:wc @state))] (.send wc "vv:adblock-status" (clj->js m))))
 
 (defn refresh!
   "(Re)build the engine (fetch + re-serialize to cache, or fall back to cache / empty) and (re)enable it

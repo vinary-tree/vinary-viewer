@@ -115,6 +115,28 @@ down to 0. This is the payoff of the daemon+pool architecture; Phase 1 (code-spl
 each pool boot cheaper and pre-JIT CodeMirror so the first source/math render in a claimed window is instant too.
 **Kept.**
 
+## Phase 3b — independent windows (per-window routing)
+**Context.** The daemon + pool make it cheap to open *many* windows in one process, so the app is now
+genuinely multi-window. The process- and session-level services (`shell`, `web` view, `passwords`,
+`extensions`, `adblock`, `ext-popup`) were written for a single window: each captured the *first* window at
+`init!` and routed everything to it. With a pool that first window may even be a *hidden* pool window, and with
+several windows open, menu actions / the web view / extension popups would target the wrong (or a hidden) one.
+
+**Change.** A new leaf namespace `vinary.main.windows` holds the live-window registry and the shared resolver
+`active` (focused window, else most-recently-shown; **never** a hidden pool window — those aren't registered)
+and `from-wc` (the window that owns an `event.sender`). `core` registers a window only when it is *shown*
+(claimed / cold-created), so the registry excludes the pool. Every service now routes dynamically instead of to
+a captured window: `shell/cur-win`, `passwords`, `extensions`, and `adblock` send to `windows/active-wc`; the
+shared web view **re-parents** to the window whose renderer requested it (`vv:http-show` → `from-wc`,
+preserving the live page) and its relays follow that owner; extension popups anchor to the clicking window
+(`from-wc`); each window's Back/Forward keys are wired at most once (tracked as a set, since the view can move).
+
+**Verification.** `tmp/multiwin-test.mjs`: one daemon, two different `.md` files over the socket → two
+independent windows each render their own content, `claims 2/2`, pool refilled, and **0** main-process routing
+errors. The 316-test suite stays green; `release main` compiles. No latency change (the pool already delivered
+~127 ms) — this is correctness: opening files in multiple windows, and using the shared web view / extensions /
+passwords, now always act on the window the user is looking at. **Kept.**
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|

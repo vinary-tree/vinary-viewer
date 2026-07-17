@@ -5,16 +5,18 @@
    seam; the opened paths come back over vv:open-files."
   (:require ["electron" :refer [ipcMain dialog clipboard app shell BrowserWindow]]
             ["fs" :as fs]
-            ["path" :as path]))
+            ["path" :as path]
+            [vinary.main.windows :as windows]))
 
 (defonce ^:private win*   (atom nil))
 (defonce ^:private inited (atom false))
 
 (defn- cur-win
   "The window a shell action targets — the FOCUSED window (multi-instance: the one the user triggered the menu/
-   zoom/devtools from), falling back to the last-registered window."
+   zoom/devtools from), else the most-recently-shown app window; never a hidden pool window. `win*` (the window
+   captured at init!) is only an ultimate fallback for the pre-first-window edge."
   ^js []
-  (or (.getFocusedWindow BrowserWindow) @win*))
+  (or (windows/active) @win*))
 
 ;; ^js return tag → the un-hinted interop callers (e.g. (.toggleDevTools (wc))) get an inferred extern, so
 ;; advanced compilation can't rename the method to a non-existent one. (Belt-and-suspenders with the :main
