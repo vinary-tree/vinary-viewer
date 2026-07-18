@@ -316,7 +316,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:hints/follow` | target | activate the hinted link | — |
 | `:vv/zoom` / `:vv/zoom-set` | direction / factor | app-window zoom (DOM views) → `vv:zoom` / `vv:zoom-set` | — (main reports `vv:zoom-changed`) |
 | `:vv/http-zoom` / `:vv/http-zoom-set` | direction / factor | zoom the **web page** inside the native web view (not the app chrome) | — |
-| `:vv/open-dialog` | — | open the native multi-file Open dialog | — |
+| `:vv/open-dialog` | candidate paths (vector) | open the native multi-file Open dialog, seeded to the folder of the active file/dir then the recent-files MRU (`nav/dialog-seed-path` + fallback) | — |
 | `:vv/open-path` / `:vv/open-external` | path / URL | ask the OS to reveal a local path / open an external URL | — |
 | `:vv/copy` | text | copy text to the OS clipboard | — |
 | `:vv/quit` / `:vv/devtools` | — | quit the app / toggle renderer devtools | — |

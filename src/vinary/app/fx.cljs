@@ -224,7 +224,7 @@
     (when (fn? show!)
       (show! (boolean visible?)))))
 
-(rf/reg-fx :vv/open-dialog   (fn [_]    (when-let [^js v (vv)] (when (.-openDialog v)   (.openDialog v)))))
+(rf/reg-fx :vv/open-dialog   (fn [seeds] (when-let [^js v (vv)] (when (.-openDialog v)  (.openDialog v (clj->js seeds))))))
 (rf/reg-fx :vv/quit          (fn [_]    (when-let [^js v (vv)] (when (.-quit v)         (.quit v)))))
 (rf/reg-fx :vv/zoom          (fn [dir]  (when-let [^js v (vv)] (when (.-zoom v)         (.zoom v dir)))))
 (rf/reg-fx :vv/zoom-set      (fn [f]    (when-let [^js v (vv)] (when (.-zoomSet v)      (.zoomSet v f)))))

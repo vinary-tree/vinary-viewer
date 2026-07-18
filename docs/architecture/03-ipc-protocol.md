@@ -120,7 +120,7 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 
 | Channel | `window.vv` API | Payload | Main owner | Purpose |
 |---------|-----------------|---------|------------|---------|
-| `vv:open-dialog` | `openDialog()` | none | main UI/dialog service | Show native open dialog. |
+| `vv:open-dialog` | `openDialog(defaultPaths)` | candidate paths (`string[]`) | `vinary.main.shell` | Show the native Open dialog, seeded to the active file's / active directory's / most-recent file's folder. The renderer sends an ordered candidate chain — the active tab's local path (`nav/dialog-seed-path`) then the recent-files MRU, deduped; main's `seeds->dir` opens in the first candidate that still resolves (a file → its parent dir, a directory → itself), falling back to the OS home dir. Chosen paths return via `vv:open-files`. |
 | `vv:clipboard-write` | `copyText(text)` | string | `vinary.main.shell` | Write clipboard text. |
 | `vv:open-path` / `vv:open-external` | `openPath(path)` / `openExternal(url)` | string | `vinary.main.shell` | Open a local path / external URL via the OS. |
 | `vv:app-info-request` | `requestAppInfo()` | none | main app info | Push app metadata. |

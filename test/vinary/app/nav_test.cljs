@@ -37,6 +37,39 @@
       (is (contains? ret "/a/notes.md")  "tab-2 history file")
       (is (contains? ret "/a/paper.pdf") "the active facet's file — the addition this feature requires"))))
 
+;; ── The native Open dialog seeds its folder from the active tab (dialog-seed-path): a local file/dir path,
+;;    or nil for non-local tabs (http/archive/remote) so the event falls back to the recent-files MRU. ──
+(defn- one-tab-db [uri] {:ui {:active-tab 1 :tabs [{:id 1 :uri uri}]}})
+
+(deftest dialog-seed-path-local-and-nonlocal
+  (testing "a local FILE tab → its path (main takes the parent dir)"
+    (is (= "/a/paper.tex" (nav/dialog-seed-path (one-tab-db "file:///a/paper.tex")))))
+  (testing "a bare absolute path (no file:// prefix) is returned as-is"
+    (is (= "/a/b/c.md" (nav/dialog-seed-path (one-tab-db "/a/b/c.md")))))
+  (testing "a directory tab (file-browser mode) → the directory path itself (main uses it as-is)"
+    (is (= "/a/proj" (nav/dialog-seed-path (one-tab-db "file:///a/proj")))))
+  (testing "http / archive / remote tabs are not browsable local folders → nil"
+    (doseq [u ["https://example.com/x"
+               "vv-archive://open?chain=%5B%22%2Fa%2Fz.zip%22%5D"
+               "ssh://host/x/y"
+               "sftp://host/x/y"]]
+      (is (nil? (nav/dialog-seed-path (one-tab-db u))) (str "non-local uri → nil: " u))))
+  (testing "no active tab → nil (the event then falls back to the recent-files MRU)"
+    (is (nil? (nav/dialog-seed-path {:ui {:active-tab nil :tabs []}})))))
+
+(deftest local-fs-path-classifies-seed-candidates
+  ;; the recent-files fallback is filtered by this predicate so only browsable LOCAL folders seed the dialog
+  (testing "local paths (plain or file://) are browsable folders"
+    (is (nav/local-fs-path? "/a/b/c.md"))
+    (is (nav/local-fs-path? "file:///a/b")))
+  (testing "http / archive / remote are not local folders"
+    (is (not (nav/local-fs-path? "https://example.com/x")))
+    (is (not (nav/local-fs-path? "vv-archive://open?chain=%5B%5D")))
+    (is (not (nav/local-fs-path? "ssh://host/x")))
+    (is (not (nav/local-fs-path? "sftp://host/x"))))
+  (testing "nil → false"
+    (is (not (nav/local-fs-path? nil)))))
+
 ;; ── Part 2: a view (facet) switch is a HISTORY event (Back/Forward returns to the previous view + location) ──
 (def ^:private empty-db {:ui {:tabs [] :active-tab nil :next-tab-id 0}})
 

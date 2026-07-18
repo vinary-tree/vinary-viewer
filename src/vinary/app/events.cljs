@@ -824,8 +824,15 @@
 (rf/reg-event-fx
  :file/open-dialog
  (fn [{:keys [db]} [_ mode]]
-   {:db (assoc-in db [:ui :open-dialog-mode] (open-dialog-mode mode))
-    :fx [[:vv/open-dialog]]}))
+   ;; seed the native dialog's folder from an ORDERED candidate chain: the active file/dir, then the
+   ;; most-recently-opened files (persisted recent-files MRU). Main opens in the first candidate that still
+   ;; resolves to a real directory (a file → its parent, a dir → itself), else the OS home dir — walking the
+   ;; chain lets a since-deleted higher-priority path fall through to the next instead of skipping to home.
+   (let [seeds (->> (cons (nav/dialog-seed-path db)
+                          (filter nav/local-fs-path? (get-in db [:ui :recent :recent-files])))
+                    (keep identity) distinct vec)]
+     {:db (assoc-in db [:ui :open-dialog-mode] (open-dialog-mode mode))
+      :fx [[:vv/open-dialog seeds]]})))
 (rf/reg-event-fx :app/quit         (fn [_ _] {:fx [[:vv/quit]]}))
 (rf/reg-event-fx
  :view/zoom

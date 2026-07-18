@@ -100,7 +100,7 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 
 | Channel | Preload method | Payload | Main receiver | Purpose |
 |---------|----------------|---------|---------------|---------|
-| `vv:open-dialog` | `openDialog()` | none | `shell` | Open the multi-file native dialog. |
+| `vv:open-dialog` | `openDialog(defaultPaths)` | candidate paths (`string[]`) | `shell` | Open the multi-file native dialog, seeded to the active/most-recent folder — main's `seeds->dir` opens in the first candidate that resolves (`seed-dir`: file → its parent, dir → itself; else the OS home dir). |
 | `vv:clipboard-write` | `copyText(text)` | string | `shell` | Copy text to the OS clipboard. |
 | `vv:open-path` | `openPath(path)` | string | `shell` | Ask the OS to reveal/open a local path. |
 | `vv:open-external` | `openExternal(url)` | string | `shell` | Ask the OS to open an external URL. |

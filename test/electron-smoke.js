@@ -520,8 +520,9 @@ function installIpc(state) {
     state.zoomRequests = (state.zoomRequests || 0) + 1;
     event.sender.send('vv:zoom-changed', { context: 'window', factor: event.sender.getZoomFactor() });
   });
-  ipcMain.on('vv:open-dialog', () => {
+  ipcMain.on('vv:open-dialog', (_event, seed) => {
     state.openDialogs += 1;
+    state.lastOpenSeed = seed === undefined ? null : seed;   // ordered candidate folders (active path, then recent-files MRU)
   });
   ipcMain.on('vv:open', (event, filePath) => {
     // remote (ssh://) paths route through the REAL remote reader exactly as service.cljs/send-remote-content! does
@@ -595,6 +596,7 @@ function installIpc(state) {
 async function main() {
   const state = {
     openDialogs: 0,
+    lastOpenSeed: null,   // ordered candidate folder paths the renderer passed with the last vv:open-dialog
     zoomRequests: 0,   // vv:zoom-request boot-pull calls (Bug-1 restart-% regression)
     pdfShow: null,
     pdfBounds: null,
@@ -1234,6 +1236,30 @@ async function main() {
   const openMode = await evalIn(win, `String(window.__vvdb().ui['open-dialog-mode'])`);
   assert.strictEqual(openMode, 'new-tab', 'Ctrl+Shift+O must request the new-tab open mode');
   console.log('[ok] Ctrl+Shift+O works from preview content');
+
+  // The Open dialog is seeded with an ORDERED candidate chain of folders: the active tab's local path (when
+  // it is a browsable local file/dir), then the recent-files MRU. Reproduce the renderer's seed selection
+  // (nav/dialog-seed-path + the recent-files fallback, deduped) here as an INDEPENDENT oracle over the raw
+  // app-db, and assert the candidate array that crossed the IPC seam matches exactly.
+  const expectedSeeds = await evalIn(win, `(() => {
+    const ui = (window.__vvdb() || {}).ui || {};
+    const tabs = ui.tabs || [];
+    const tab = tabs.find((t) => t.id === ui['active-tab']);
+    const isLocal = (u) => {
+      if (!u) return false;
+      const lo = u.toLowerCase();
+      return !(lo.startsWith('http://') || lo.startsWith('https://')
+        || u.startsWith('vv-archive://') || lo.startsWith('ssh://') || lo.startsWith('sftp://'));
+    };
+    const uri = tab && tab.uri;
+    const active = isLocal(uri) ? (uri.startsWith('file://') ? uri.slice(7) : uri) : null;
+    const recent = ((ui.recent && ui.recent['recent-files']) || []).filter(isLocal);
+    const seen = new Set();
+    return [active, ...recent].filter((p) => p && !seen.has(p) && seen.add(p));
+  })()`);
+  assert.deepStrictEqual(state.lastOpenSeed, expectedSeeds,
+    'the Open dialog is seeded with the active-tab local path then the recent-files MRU, matching nav/dialog-seed-path');
+  console.log('[ok] Open dialog seeded with the active/recent directory chain:', JSON.stringify(state.lastOpenSeed));
 
   // B3 — app-global Ctrl/Cmd chords forwarded from the (separate-context) web view are replayed through the
   // resolver. Simulate the forward by delivering vv:web-key to the renderer and assert the same command runs.
