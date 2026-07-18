@@ -34,7 +34,17 @@
                           ;; (renderer.math pure helpers, sanitize) in the base bundle and pulls ONLY @mathjax (reachable
                           ;; solely through here) out into math-engine.js, off the boot bundle and the :cli/:tui bundles.
                           :math-engine {:entries    [vinary.renderer.math-engine]
-                                        :depends-on #{:main}}}
+                                        :depends-on #{:main}}
+                          ;; the heavy-engine chunk — same treatment as :math-engine. renderer.heavy-engine (the heavy
+                          ;; unified-latex sources — renderer.latex + renderer.latex-structure + the @unified-latex/*
+                          ;; packages — and, from the Org split, uniorg) is reached ONLY via shadow.lazy/loadable in
+                          ;; renderer.heavy-lazy (a bare js* ref, NOT a :require edge), so it must be a declared :entry
+                          ;; or it is never built; :depends-on :main keeps the shared code (the renderer.heavy-registry
+                          ;; leaf, the DOM-free markdown-pipeline) in the base bundle and pulls ONLY unified-latex/uniorg
+                          ;; (reachable solely through here) out into heavy-engine.js, off the boot bundle. The node
+                          ;; builds require heavy-engine eagerly via renderer.heavy-node instead (no shadow.lazy).
+                          :heavy-engine {:entries    [vinary.renderer.heavy-engine]
+                                         :depends-on #{:main}}}
              :devtools   {:after-load vinary.renderer.core/reload
                           :preloads   [devtools.preload
                                        day8.re-frame-10x.preload.react-18]}

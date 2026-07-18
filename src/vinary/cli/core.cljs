@@ -11,6 +11,9 @@
             ["readline" :as readline]
             [clojure.string :as str]
             [vinary.cli.render :as render]
+            ;; eager (non-lazy) population of the shared renderer.heavy-registry — Node has no shadow.lazy, so
+            ;; unified-latex/uniorg are bundled + wired at startup (see main) instead of code-split like the renderer.
+            [vinary.renderer.heavy-node :as heavy-node]
             [vinary.terminal.caps :as caps]
             [vinary.terminal.syntax :as tsyntax]
             [vinary.terminal.stream :as tstream]
@@ -175,6 +178,7 @@
         (.catch (fn [e] (ewrite (str "vv-cli: " file ": " (.-message e))) (set! (.-exitCode js/process) 1))))))
 
 (defn ^:export main []
+  (heavy-node/install!)   ; wire unified-latex/uniorg into the shared pipeline before any doc renders (Node: no shadow.lazy)
   (let [{:keys [files opts]} (parse-args (drop 2 (js->clj js/process.argv)))]
     (cond
       (:help opts)      (do (println usage) (js/Promise.resolve nil))

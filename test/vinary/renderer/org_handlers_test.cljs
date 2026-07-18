@@ -5,7 +5,13 @@
   (:require [cljs.test :refer [deftest is testing async]]
             [clojure.string :as str]
             ["rehype-stringify$default" :as rehype-stringify]
+            ;; the org-pipeline now reaches unified-latex/uniorg through the runtime registry (they code-split out
+            ;; of the renderer boot bundle); populate it eagerly for Node, exactly as cli.core/tui.core do at
+            ;; startup — otherwise the pipeline throws "renderer not loaded" and uniorg isn't even bundled.
+            [vinary.renderer.heavy-node :as heavy-node]
             [vinary.renderer.markdown-pipeline :as pipeline]))
+
+(heavy-node/install!)   ; wire unified-latex/uniorg into the shared registry before any test runs (Node: eager, no shadow.lazy)
 
 (defn- org-html
   "Run the shared org-pipeline on `src`, stringify, return Promise<html>."

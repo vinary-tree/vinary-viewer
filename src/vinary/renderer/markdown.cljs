@@ -11,7 +11,12 @@
             [vinary.ir.frontend.office :as ir-office]
             [vinary.ir.backend.html :as ir-html]
             [vinary.ir.capability.toc :as ir-toc]
-            [vinary.renderer.latex :as latex]
+            ;; unified-latex (+ uniorg, after the Org split) code-split into the lazily-loaded :heavy-engine chunk:
+            ;; heavy-lazy/ensure! loads + wires it, and the render entry points below await it (gated by format)
+            ;; before running the synchronous pipeline; latex->html is reached through the runtime registry, not a
+            ;; static require, so this ns carries no unified-latex edge into the renderer boot bundle.
+            [vinary.renderer.heavy-registry :as registry]
+            [vinary.renderer.heavy-lazy :as heavy-lazy]
             [vinary.renderer.markdown-pipeline :as pipeline]
             [vinary.renderer.mathjax-lazy :as mathjax-lazy]
             [vinary.renderer.mermaid :as mermaid]
@@ -20,6 +25,30 @@
 
 ;; re-exported so existing callers (app.fx, stream.scheduler, ui.views) keep using `md/dir-of` unchanged
 (def dir-of pipeline/dir-of)
+
+;; ── heavy-engine (unified-latex / uniorg) format gate ─────────────────────────────────────────────────────────
+;; The heavy engines live in a lazily-loaded chunk (renderer.heavy-engine, behind renderer.heavy-lazy). The render
+;; entry points below await heavy-lazy/ensure! BEFORE running the synchronous pipeline — but ONLY when the format
+;; can reach unified-latex/uniorg: .org (uniorg) and .tex (unified-latex) ALWAYS; markdown ONLY when it embeds raw
+;; LaTeX. Plain prose markdown skips the load entirely, preserving the cold-start win (the whole point of the
+;; split — a no-latex markdown render never pays for the chunk). The idle preload (renderer.core) warms the chunk a
+;; beat after first paint, so on a warm window ensure! is already resolved and adds no latency.
+(def ^:private embedded-latex-re
+  ;; Markdown that embeds raw LaTeX the unified-latex engine handles: a \begin{ENV} environment, a $$…$$ display-
+  ;; math block, or a \[…\] display-math delimiter. Plain prose (and inline $…$) never matches. This is a
+  ;; conservative SUPERSET guard: the markdown pipeline itself does not route through unified-latex, so a false
+  ;; positive only warms the chunk early (never changes output), while a plain-markdown false negative is the
+  ;; desired fast path.
+  #"\\begin\{|\$\$|\\\[")
+
+(defn- needs-heavy? [text] (boolean (and text (re-find embedded-latex-re text))))
+
+(defn- ensure-heavy!
+  "Resolve once the heavy (unified-latex/uniorg) chunk is loaded + wired. 0-arg: unconditional (org/latex, which
+   always reach the engines). 1-arg: only when the markdown `text` embeds LaTeX — otherwise a resolved no-op
+   Promise, so plain markdown never loads the chunk. Awaited behind the Loading/Rendering placeholder."
+  ([]     (heavy-lazy/ensure!))
+  ([text] (if (needs-heavy? text) (heavy-lazy/ensure!) (js/Promise.resolve nil))))
 
 (def ^:private math-markers-re
   ;; The class tokens the two math passes look for in the serialized (post-sanitize) HTML: markdown/org/latex
@@ -89,20 +118,25 @@
    byte-equal to a direct stringify (proven by ir.parity-test + the electron smoke)."
   ([^String md base-dir] (render-ir md base-dir nil))
   ([^String md base-dir cache-token]
-   (let [metadata (atom {:toc [] :assets #{}})
-         captured (atom nil)]
-     (-> (pipeline/base-pipeline metadata base-dir cache-token)
-         (.use (pipeline/capture-hast captured))
-         (.use rehype-stringify)
-         (.process md)
-         (.then (fn [_file]
-                  (let [ir (ir-md/hast->ir @captured)]
-                    (-> (apply-posts (ir-html/lower ir))
-                        (.then (fn [html]
-                                 {:html html
-                                  :ir ir
-                                  :toc (ir-toc/toc-of ir)
-                                  :assets (vec (:assets @metadata))}))))))))))
+   ;; gate the heavy chunk on EMBEDDED LaTeX — plain markdown resolves immediately and never loads it (cold-start
+   ;; win); an embedded-LaTeX markdown awaits ensure! so the pipeline's registry latex->html is wired.
+   (-> (ensure-heavy! md)
+       (.then
+        (fn [_]
+          (let [metadata (atom {:toc [] :assets #{}})
+                captured (atom nil)]
+            (-> (pipeline/base-pipeline metadata base-dir cache-token)
+                (.use (pipeline/capture-hast captured))
+                (.use rehype-stringify)
+                (.process md)
+                (.then (fn [_file]
+                         (let [ir (ir-md/hast->ir @captured)]
+                           (-> (apply-posts (ir-html/lower ir))
+                               (.then (fn [html]
+                                        {:html html
+                                         :ir ir
+                                         :toc (ir-toc/toc-of ir)
+                                         :assets (vec (:assets @metadata))})))))))))))))
 
 (defn- stream-blocks*
   "The format-agnostic progressive-commit block provider. Runs the EXACT batch pipeline (`make-pipeline` —
@@ -136,17 +170,21 @@
                     :assets (vec (:assets @metadata))}))))))
 
 (defn stream-blocks
-  "Progressive-commit streaming for Markdown. See `stream-blocks*`."
+  "Progressive-commit streaming for Markdown. See `stream-blocks*`. Awaits the heavy chunk ONLY when the text
+   embeds LaTeX (plain markdown streams with no chunk load — the cold-start win)."
   ([text base-dir] (stream-blocks text base-dir nil))
   ([text base-dir cache-token]
-   (stream-blocks* pipeline/base-pipeline text base-dir cache-token)))
+   (-> (ensure-heavy! text)
+       (.then (fn [_] (stream-blocks* pipeline/base-pipeline text base-dir cache-token))))))
 
 (defn org-stream-blocks
   "Progressive-commit streaming for Org (.org) — the same engine, the same IR, the same per-block post-passes;
-   only the parse prefix differs. See `stream-blocks*`."
+   only the parse prefix differs. See `stream-blocks*`. Awaits the heavy chunk unconditionally (Org always reaches
+   uniorg + the embedded-LaTeX org-handlers)."
   ([text base-dir] (org-stream-blocks text base-dir nil))
   ([text base-dir cache-token]
-   (stream-blocks* pipeline/org-pipeline (pipeline/org-preprocess text) base-dir cache-token)))
+   (-> (ensure-heavy!)
+       (.then (fn [_] (stream-blocks* pipeline/org-pipeline (pipeline/org-preprocess text) base-dir cache-token))))))
 
 (defn latex-stream-blocks
   "Progressive-commit streaming for LaTeX (.tex) — the same progressive-paint engine, IR, and per-block
@@ -158,14 +196,16 @@
    (unified-latex is a whole-document parse; see ADR-0025 / ADR-0018). Returns Promise<{:blocks :toc :assets}>."
   ([text base-dir] (latex-stream-blocks text base-dir nil))
   ([text base-dir cache-token]
-   (let [metadata (atom {:toc [] :assets #{}})
-         tree     (.runSync ^js (pipeline/tex-processor metadata base-dir cache-token)
-                            (pipeline/latex-raw-tree (latex/latex->html text)))
-         ir       (ir-md/hast->ir tree)]
-     (js/Promise.resolve
-      {:blocks (vec (node/children ir))
-       :toc    (ir-toc/toc-of ir)
-       :assets (vec (:assets @metadata))}))))
+   (-> (ensure-heavy!)
+       (.then
+        (fn [_]
+          (let [metadata (atom {:toc [] :assets #{}})
+                tree     (.runSync ^js (pipeline/tex-processor metadata base-dir cache-token)
+                                   (pipeline/latex-raw-tree (registry/latex->html text)))
+                ir       (ir-md/hast->ir tree)]
+            {:blocks (vec (node/children ir))
+             :toc    (ir-toc/toc-of ir)
+             :assets (vec (:assets @metadata))}))))))
 
 (defn render-office-ir
   "Render office HTML through the common IR: parse via rehype-raw + the shared sanitizer + rehype-slug
@@ -185,21 +225,24 @@
    Promise<{:html :ir :toc :assets}>."
   ([^String text base-dir] (render-org-ir text base-dir nil))
   ([^String text base-dir cache-token]
-   (let [text     (pipeline/org-preprocess text)     ; expand {{{macros}}} / inline src / babel / targets first
-         metadata (atom {:toc [] :assets #{}})
-         captured (atom nil)]
-     (-> (pipeline/org-pipeline metadata base-dir cache-token)
-         (.use (pipeline/capture-hast captured))
-         (.use rehype-stringify)
-         (.process text)
-         (.then (fn [_file]
-                  (let [ir (ir-md/hast->ir @captured)]
-                    (-> (apply-posts (ir-html/lower ir))
-                        (.then (fn [html]
-                                 {:html html
-                                  :ir ir
-                                  :toc (ir-toc/toc-of ir)
-                                  :assets (vec (:assets @metadata))}))))))))))
+   (-> (ensure-heavy!)     ; Org always reaches uniorg + the embedded-LaTeX org-handlers → await the heavy chunk
+       (.then
+        (fn [_]
+          (let [text     (pipeline/org-preprocess text)     ; expand {{{macros}}} / inline src / babel / targets first
+                metadata (atom {:toc [] :assets #{}})
+                captured (atom nil)]
+            (-> (pipeline/org-pipeline metadata base-dir cache-token)
+                (.use (pipeline/capture-hast captured))
+                (.use rehype-stringify)
+                (.process text)
+                (.then (fn [_file]
+                         (let [ir (ir-md/hast->ir @captured)]
+                           (-> (apply-posts (ir-html/lower ir))
+                               (.then (fn [html]
+                                        {:html html
+                                         :ir ir
+                                         :toc (ir-toc/toc-of ir)
+                                         :assets (vec (:assets @metadata))})))))))))))))
 
 (defn render-latex-ir
   "Render a standalone LaTeX (.tex) document through the common IR: the shared tex-pipeline (renderer.latex
@@ -212,13 +255,16 @@
    Promise<{:html :ir :toc :assets}>."
   ([^String text base-dir] (render-latex-ir text base-dir nil))
   ([^String text base-dir cache-token]
-   (let [metadata (atom {:toc [] :assets #{}})
-         tree     (.runSync ^js (pipeline/tex-processor metadata base-dir cache-token)
-                            (pipeline/latex-raw-tree (latex/latex->html text)))
-         ir       (ir-md/hast->ir tree)]
-     (-> (apply-posts (ir-html/lower ir))
-         (.then (fn [html]
-                  {:html html
-                   :ir ir
-                   :toc (ir-toc/toc-of ir)
-                   :assets (vec (:assets @metadata))}))))))
+   (-> (ensure-heavy!)     ; .tex always reaches unified-latex → await the heavy chunk before latex->html
+       (.then
+        (fn [_]
+          (let [metadata (atom {:toc [] :assets #{}})
+                tree     (.runSync ^js (pipeline/tex-processor metadata base-dir cache-token)
+                                   (pipeline/latex-raw-tree (registry/latex->html text)))
+                ir       (ir-md/hast->ir tree)]
+            (-> (apply-posts (ir-html/lower ir))
+                (.then (fn [html]
+                         {:html html
+                          :ir ir
+                          :toc (ir-toc/toc-of ir)
+                          :assets (vec (:assets @metadata))})))))))))

@@ -15,6 +15,7 @@
             [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
             [vinary.renderer.mathjax-lazy :as mathjax-lazy]
+            [vinary.renderer.heavy-lazy :as heavy-lazy]
             [vinary.renderer.syntax :as syntax]
             [vinary.renderer.cm :as cm]
             [cljs.reader :as reader]
@@ -395,8 +396,11 @@
   ;;   • the @mathjax math-engine chunk, AND — once it resolves — inject MathJax's own stylesheet (see the init
   ;;     comment above). A non-daemon window does both just after first paint; a pool window warms them while
   ;;     hidden, so the first document render (math included) never pays the engine build on the critical path.
+  ;;   • the unified-latex/uniorg heavy-engine chunk (heavy-lazy/ensure! also wires the shared registry on load),
+  ;;     so warm .org/.tex (and embedded-LaTeX markdown) renders never pay the engine build on the critical path.
   (let [preload! (fn []
                    (cm/ensure!)
+                   (heavy-lazy/ensure!)
                    (-> (mathjax-lazy/ensure!)
                        (.then (fn [_] (mathjax-lazy/install-stylesheet!)))))]
     (if (exists? js/requestIdleCallback)

@@ -23,7 +23,11 @@
             ["uniorg-rehype$default"    :as uniorg-rehype]
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
-            [vinary.renderer.latex :as latex]
+            ;; unified-latex is reached through the runtime registry (renderer.heavy-registry), NOT a static
+            ;; require, so it code-splits out of the renderer boot bundle into the :heavy-engine chunk while the
+            ;; node builds populate it eagerly (heavy-node/install!). The org-handler arms below call
+            ;; registry/latex->html (populated by heavy-engine/install!) instead of importing renderer.latex.
+            [vinary.renderer.heavy-registry :as registry]
             [vinary.renderer.media :as media]
             [vinary.renderer.math :as math]))
 
@@ -384,7 +388,7 @@
         (cond
           (= "html" backend) nil                            ; fall through to uniorg's raw-HTML path
           (and (= "latex" backend) (not (math/tex-block-math? body)))
-          #js {:type "raw" :value (latex/latex->html body {:preamble (preamble-str)})}
+          #js {:type "raw" :value (registry/latex->html body {:preamble (preamble-str)})}
           :else
           (let [classes #js []]
             (when (seq backend) (.push classes (str "language-" backend)))
@@ -399,7 +403,7 @@
     (fn [^js org]
       (let [value (str (or (.-value org) ""))]
         (when-not (math/tex-block-math? value)
-          #js {:type "raw" :value (latex/latex->html value {:preamble (preamble-str)})})))
+          #js {:type "raw" :value (registry/latex->html value {:preamble (preamble-str)})})))
 
     ;; Inline latex-fragment. Only a text-formatting macro (\textbf{…}, \emph{…}, …) is rerouted to unified-latex
     ;; (rendered inline, no paragraph wrap); real inline math ($…$, \(…\), bare \alpha) falls through to uniorg's
@@ -408,7 +412,7 @@
     (fn [^js org]
       (let [frag (str (or (.-value org) (.-contents org) ""))]
         (when (re-find tex-fragment-text-macro-re frag)
-          #js {:type "raw" :value (latex/latex->html frag {:inline? true :preamble (preamble-str)})})))
+          #js {:type "raw" :value (registry/latex->html frag {:inline? true :preamble (preamble-str)})})))
 
     ;; `- [ ]` / `- [X]` task items → GFM's task-list shape (which GitHub's sanitize schema allows verbatim, so
     ;; the existing CSS styles it). A plain item bearing an Org counter `[@n]` → <li value=n> so BOTH back-ends

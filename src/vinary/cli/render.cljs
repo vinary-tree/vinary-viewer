@@ -9,7 +9,10 @@
             ["path" :as path]
             ["fs" :as fs]
             [clojure.string :as str]
-            [vinary.renderer.latex :as latex]
+            ;; unified-latex reached through the runtime registry (populated eagerly under Node by
+            ;; heavy-node/install!, called from cli.core / tui.core) rather than a static require — the same
+            ;; decoupling the renderer uses so the shared pipeline carries no unified-latex edge.
+            [vinary.renderer.heavy-registry :as registry]
             [vinary.renderer.markdown-pipeline :as pipeline]
             [vinary.renderer.media :as media]
             [vinary.ir.frontend.markdown :as ir-md]
@@ -60,7 +63,7 @@
    fallback), and the layout (tables, styling, lists) is already lowered by unified-latex."
   [text base-dir]
   (let [tree (.runSync ^js (pipeline/tex-processor (atom {:toc [] :assets #{}}) base-dir nil)
-                       (pipeline/latex-raw-tree (latex/latex->html text)))]
+                       (pipeline/latex-raw-tree (registry/latex->html text)))]
     (js/Promise.resolve (ir-md/hast->ir tree))))
 
 (defn- log->ir
