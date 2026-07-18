@@ -309,6 +309,37 @@ now that the module-loader is already paid — **materially shrinks the boot bun
 strips mathjax from the terminal (`:cli`/`:tui`) bundles entirely. 317 tests green (math tests exercise the real
 engine via the direct require). **Kept.** This is the fine-grained split the "infeasible" note wrongly dismissed.
 
+## Phase 1 (completed) — latex + org split via a runtime registry
+The remaining heavy deps, unlike mathjax, ARE in the shared DOM-free pipeline (the `:cli`/`:tui` render `.tex`
+and `.org`), so a renderer-only split was impossible. Solved with a **runtime registry** (`8a0bc91` latex,
+`0baa7c3` org): `renderer.heavy-registry` (a leaf of three atoms + accessors that throw a clear `ex-info` before
+load) carries the seam in the base bundle; `markdown-pipeline` calls `(registry/latex->html …)` /
+`(registry/uniorg-plugins)` with NO static require of unified-latex/uniorg. The renderer lazy-loads
+`renderer.heavy-engine` (unified-latex + uniorg) via `renderer.heavy-lazy` and populates the atoms on load
+(idle-preloaded like `cm`/`mathjax-lazy`); node targets populate them EAGERLY via `renderer.heavy-node` called at
+`cli.core`/`tui.core` `main` (+ the org node-tests). **Format-gated** in `renderer.markdown`: `.org`/`.tex`
+always `await ensure!`; `.md` only when it contains embedded LaTeX (`re-find #"\\begin\{|\$\$|\\\["`), so plain
+prose markdown never loads the chunk. Org decoupled cleanly (uniorg was only two `.use` plugin calls; handlers
+are pipeline-local options). Rendering byte-identical.
+
+**Measured:** `main.js` 7,320,089 → **6,073,714 B** (−1.25 MB); new `heavy-engine.js` chunk 1,250,410 B. cli/tui
+keep unified-latex+uniorg eager (verified: `vv-cli x.org` renders title+heading, not a "not loaded" throw). 317
+tests green.
+
+## Cumulative result — cold-start program complete
+| | baseline | final | Δ |
+|---|---:|---:|---:|
+| **warm open** (daemon+pool, perceived) | ~1450 ms | **~127 ms** | **~11× (Phase 2+3)** |
+| cold boot **eval** (entry→eval) | ~645 ms | **~465 ms** | **−180 ms (−28%)** |
+| cold entry→**rendered** | ~1450 ms | ~850–1120 ms | ~−350 ms |
+| renderer **boot bundle** (`main.js`) | 11.87 MB | **6.07 MB** | **−49%** |
+
+Lazy chunks split out of boot (loaded on demand, pool-preloaded on idle): `math-engine.js` 4.56 MB,
+`heavy-engine.js` (latex+org) 1.25 MB, `source-view.js` (CodeMirror) 265 KB, plus the pre-existing pdf.js/mermaid
+lazies. The `:cli`/`:tui` node bundles shed mathjax entirely (135→0 `mathjax_modern_font` refs). Warm opens stay
+~85–220 ms across every format (chunks preloaded). The V8 snapshot is the only planned item proven NOT viable
+(exhausted — see Phase 4). 317 tests green; all four targets compile.
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
@@ -319,3 +350,4 @@ engine via the direct require). **Kept.** This is the fine-grained split the "in
 | 4 | splitting @codemirror to a lazy chunk shrinks boot eval | `syntax`/`source-view`/`cm` boundary + `:module-loader` (`c58d9d9`) | cold A/B + warm pool | eval unchanged (~645 ms), rendered −80 ms, bytes +170 KB; warm source 70→93 ms | ✅ (architecture; eval-neutral) |
 | 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike + exhaustive retry: mksnapshot on 11 MB AND 6.94 MB, + electron-link | renderer bundle | SIGTRAPs at BOTH sizes (not size-gated); electron-link can't parse the shadow IIFE | ✗ not viable (exhausted) |
 | 6 | mathjax renders renderer-only, so its 4.5 MB engine can leave boot | `math`/`math-engine`/`mathjax-lazy` split (`a76a684`) | cold A/B + warm pool | **boot 11.87→7.32 MB (−4.3 MB), cold eval 645→520 ms (−125 ms)**, mathjax gone from cli/tui | ✅ big win |
+| 7 | latex+org can leave boot too via a runtime registry (shared pipeline) | `heavy-registry`/`-engine`/`-lazy`/`-node` split (`8a0bc91`,`0baa7c3`) | cold + warm pool | **boot 7.32→6.07 MB (−1.25 MB), cold eval 520→465 ms**; node keeps them eager; plain md skips the chunk | ✅ |
