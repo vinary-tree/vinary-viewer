@@ -7,7 +7,12 @@
    `render-html-math` (needs js/DOMParser, absent under :node-test) is exercised by the electron smoke test."
   (:require [cljs.test :refer [deftest is testing]]
             [clojure.string :as str]
-            [vinary.renderer.math :as math]))
+            ;; pure, mathjax-free helpers (delimit-tex, strip-math-fence, tex-error?, tex-block-math?)
+            [vinary.renderer.math :as math]
+            ;; the heavy TeX→SVG engine (render-tex, engine-font-name). :node-test requires it DIRECTLY / eager —
+            ;; the renderer reaches it lazily via renderer.mathjax-lazy (shadow.lazy, browser-only), but shadow.lazy
+            ;; can't drive a chunk load under :node-test, so the tests exercise the real engine by requiring it here.
+            [vinary.renderer.math-engine :as engine]))
 
 ;; ── Inline math geometry: one <svg>, no line breaks, a box that encloses the expression ─────────────────────
 ;;
@@ -40,7 +45,7 @@
 (deftest inline-math-is-a-single-unbroken-svg
   (testing "inline math never line-breaks: one <svg>, no <mjx-break> (the \\implies regression emitted three)"
     (doseq [tex inline-cases]
-      (let [html (math/render-tex tex false)]
+      (let [html (engine/render-tex tex false)]
         (is (= 1 (svg-count html))
             (str tex ": expected exactly one <svg>, got " (svg-count html)
                  " — MathJax line-broke the inline expression"))
@@ -50,14 +55,14 @@
 (deftest display-math-is-a-single-unbroken-svg
   (testing "the inline fix must not disturb display math, which was never broken"
     (doseq [tex ["\\implies" "x \\le y" "\\max\\{\\,L\\,\\}" "\\frac{a}{b}"]]
-      (let [html (math/render-tex tex true)]
+      (let [html (engine/render-tex tex true)]
         (is (= 1 (svg-count html)) (str tex " (display): exactly one <svg>"))
         (is (zero? (break-count html)) (str tex " (display): no <mjx-break>"))))))
 
 (deftest inline-math-viewbox-encloses-the-expression
   (testing "the container's box grows with the expression. Each of these is FALSE when the row collapses to its
             first child, and none depends on a specific font metric."
-    (let [w #(viewbox-width (math/render-tex % false))]
+    (let [w #(viewbox-width (engine/render-tex % false))]
       (is (> (w "\\implies") (w "\\Longrightarrow"))
           "\\implies is \\;\\Longrightarrow\\; — it must be WIDER than the arrow alone")
       (is (> (w "\\iff") (w "\\Longleftrightarrow"))
@@ -80,12 +85,12 @@
 
 (deftest tex-error?-detects-mathjax-error-nodes
   (testing "an unknown environment renders an error node rather than throwing"
-    (let [bad (math/render-tex "\\begin{center}hi\\end{center}" true)]
+    (let [bad (engine/render-tex "\\begin{center}hi\\end{center}" true)]
       (is (string? bad) "render-tex returns normally — noerrors/noundefined suppress the throw")
       (is (math/tex-error? bad) "…and the failure is visible as a data-mjx-error node")))
   (testing "real math carries no error node"
-    (is (not (math/tex-error? (math/render-tex "E = mc^2" true))))
-    (is (not (math/tex-error? (math/render-tex "\\begin{align} a &= b \\end{align}" true)))))
+    (is (not (math/tex-error? (engine/render-tex "E = mc^2" true))))
+    (is (not (math/tex-error? (engine/render-tex "\\begin{align} a &= b \\end{align}" true)))))
   (testing "the raw predicate"
     (is (math/tex-error? "<mjx-container data-mjx-error=\"Unknown environment 'center'\">"))
     (is (math/tex-error? "<merror>boom</merror>"))
@@ -112,19 +117,19 @@
 
 (deftest render-tex-modern-font
   (testing "TeX renders (DOM-free via liteAdaptor) to a MathJax SVG container in the Latin-Modern MathJax Modern font"
-    (let [inline  (math/render-tex "x^2 + \\alpha" false)
-          display (math/render-tex "\\begin{cases} a & b \\\\ c & d \\end{cases}" true)]
+    (let [inline  (engine/render-tex "x^2 + \\alpha" false)
+          display (engine/render-tex "\\begin{cases} a & b \\\\ c & d \\end{cases}" true)]
       (is (str/includes? inline "mjx-container") "produces a MathJax SVG container")
       (is (str/includes? inline "<svg") "with an <svg> element")
       (is (str/includes? display "<svg") "display math renders too")
-      (is (= "MathJaxModern" (math/engine-font-name)) "SVG output uses the Latin-Modern-derived Modern font"))))
+      (is (= "MathJaxModern" (engine/engine-font-name)) "SVG output uses the Latin-Modern-derived Modern font"))))
 
 (deftest render-tex-dynamic-glyphs
   (testing "glyphs in MathJax 4's dynamically-loaded font chunks render synchronously — no async 'retry' throw"
     ;; MathJax 4 splits the SVG font into a base set + dynamic chunks; \mathtt (monospace), \mathbb (double-struck),
     ;; \mathfrak, \mathscr, \mathsf all live in chunks. Before the dynamic-font preload, the SYNCHRONOUS .convert
     ;; threw MathJax's 'retry -- an asynchronous action is required' error on the first such glyph. This renders it.
-    (let [out (math/render-tex "\\mathtt{for}\\;\\mathbb{R}\\;\\mathfrak{g}\\;\\mathscr{L}\\;\\mathsf{X}" false)]
+    (let [out (engine/render-tex "\\mathtt{for}\\;\\mathbb{R}\\;\\mathfrak{g}\\;\\mathscr{L}\\;\\mathsf{X}" false)]
       (is (str/includes? out "<svg") "dynamic-chunk variant glyphs render to an <svg> (no retry throw)")
       (is (not (str/includes? out "fill=\"red\"")) "and are real glyphs, not error text"))))
 
@@ -132,8 +137,8 @@
   (testing "\\llbracket / \\rrbracket render as real ⟦ ⟧ container delimiters, not red undefined-macro text"
     ;; stmaryrd isn't bundled by MathJax, so these are bound (in mj-engine!) to the bare U+27E6/7 chars, which are
     ;; MO.OPEN/MO.CLOSE in the operator dictionary and stretchy in the font.
-    (let [bare    (math/render-tex "\\llbracket x \\rrbracket" false)
-          stretch (math/render-tex "\\left\\llbracket \\frac{a}{b} \\right\\rrbracket" true)]
+    (let [bare    (engine/render-tex "\\llbracket x \\rrbracket" false)
+          stretch (engine/render-tex "\\left\\llbracket \\frac{a}{b} \\right\\rrbracket" true)]
       (is (str/includes? bare "<svg") "bare brackets render")
       (is (not (str/includes? bare "fill=\"red\"")) "not red noundefined text — the macros are defined")
       (is (str/includes? stretch "<svg") "stretchy \\left\\llbracket…\\right\\rrbracket renders (⟦ accepted as a delimiter)"))))
@@ -211,7 +216,7 @@
 (deftest text-mode-escaped-underscore-renders-an-underscore
   (testing "`\\text{a\\_b}` draws an underscore and NO backslash — the escape is expanded, not shown"
     (doseq [tex ["\\text{a\\_b}" "\\text{phonetic\\_cost} \\le 0"]]
-      (let [g (glyphs (math/render-tex tex false))]
+      (let [g (glyphs (engine/render-tex tex false))]
         (is (str/includes? g "_") (str tex ": expected an underscore glyph, drew " (pr-str g)))
         (is (not (str/includes? g "\\"))
             (str tex ": drew a LITERAL BACKSLASH " (pr-str g)
@@ -220,18 +225,18 @@
 (deftest text-mode-bare-underscore-is-an-error
   (testing "`\\text{a_b}` is invalid LaTeX and GitHub rejects it, so this previewer must too"
     (doseq [tex ["\\text{a_b}" "\\text{phonetic_cost} \\le 0"]]
-      (is (math/tex-error? (math/render-tex tex false))
+      (is (math/tex-error? (engine/render-tex tex false))
           (str tex ": expected a MathJax error node ('_' allowed only in math mode)")))))
 
 (deftest math-mode-escaped-underscore-is-untouched
   (testing "in MATH mode `\\_` is correct and a bare `_` would subscript — textmacros must not disturb this"
     (doseq [tex ["\\mathrm{a\\_b}" "\\mathrm{match\\_count}(g)"]]
-      (let [g (glyphs (math/render-tex tex false))]
+      (let [g (glyphs (engine/render-tex tex false))]
         (is (str/includes? g "_") (str tex ": expected an underscore glyph, drew " (pr-str g)))
         (is (not (str/includes? g "\\")) (str tex ": drew a literal backslash " (pr-str g)))))))
 
 (deftest textmacros-does-not-disturb-the-other-packages
   (testing "adding textmacros must not regress the rest of safe-packages"
-    (is (not (math/tex-error? (math/render-tex "\\llbracket x \\rrbracket" false))) "the configured macros")
-    (is (not (math/tex-error? (math/render-tex "\\boldsymbol{x}" false))) "boldsymbol")
-    (is (not (math/tex-error? (math/render-tex "\\begin{CD} A @>>> B \\end{CD}" true))) "amscd")))
+    (is (not (math/tex-error? (engine/render-tex "\\llbracket x \\rrbracket" false))) "the configured macros")
+    (is (not (math/tex-error? (engine/render-tex "\\boldsymbol{x}" false))) "boldsymbol")
+    (is (not (math/tex-error? (engine/render-tex "\\begin{CD} A @>>> B \\end{CD}" true))) "amscd")))

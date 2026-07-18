@@ -256,7 +256,7 @@
     (clear-size! img)))
 
 (defn scale-figures-html
-  "Pre-DOM figure-sizing post-pass — the twin of mermaid/render-html-diagrams and math/render-html-math. Bakes
+  "Pre-DOM figure-sizing post-pass — the twin of mermaid/render-html-diagrams and math-engine/render-html-math. Bakes
    font-matched width (local .svg) or an intrinsic layout box (raster/remote) into every <img> of an off-DOM
    DOMParser document, so figures render at FINAL SIZE on first paint with no post-insert style mutation (no
    flash), and re-renders/streaming reuse the memoized geometry (no re-scale). Pass-through when DOMParser is

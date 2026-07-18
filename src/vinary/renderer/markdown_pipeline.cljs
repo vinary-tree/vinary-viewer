@@ -373,7 +373,7 @@
 
     ;; #+BEGIN_EXPORT <backend> — uniorg emits a raw node for `html` and DROPS every other backend, silently
     ;; swallowing the body. A viewer must not lose content. For `latex`: a math-looking block keeps the
-    ;; MathJax-attempt marker (renderer.math/render-tex-blocks typesets it, else falls back to the code block); a
+    ;; MathJax-attempt marker (renderer.math-engine/render-tex-blocks typesets it, else falls back to the code block); a
     ;; NON-math block (invoice layout: center/flushleft/itemize/tabular) is rendered by unified-latex into a `raw`
     ;; node of real HTML, which app-hast-suffix's rehype-raw parses, tex-normalize normalizes, and sanitize cleans.
     ;; Every other backend → a fenced code block in that backend's language.
@@ -497,7 +497,7 @@
 (defn- org-normalized-node
   "Rewrite ONE uniorg hast element into the shape a shared post-pass already matches, or nil to leave it alone.
 
-   • math — renderer.math/render-html-math selects `code.math-*` ONLY, and GitHub's schema strips className from
+   • math — renderer.math-engine/render-html-math selects `code.math-*` ONLY, and GitHub's schema strips className from
      <span>/<div>, so uniorg's span.math / div.math would render as literal text. Inline → <code
      class=\"math-inline\">; display → <pre><code class=\"math-display\">…</code></pre> (the pass replaces the
      code's PARENT for display math, so the <pre> wrapper is required).
@@ -552,7 +552,7 @@
 ;; word order is REVERSED from uniorg's math-inline/math-display, so this never collides with org-normalized-node),
 ;; and \begin{center} as the deprecated <center> tag (not in GitHub's sanitize allowlist). These rewrites run as
 ;; app-hast-suffix's `post-raw` hook — AFTER rehype-raw has parsed the embedded LaTeX HTML into real elements,
-;; BEFORE the sanitizer — so the math markers reach renderer.math/render-html-math (which selects code.math-* ONLY)
+;; BEFORE the sanitizer — so the math markers reach renderer.math-engine/render-html-math (which selects code.math-* ONLY)
 ;; and centered content survives as a block. Both the standalone `.tex` pipeline and the Org pipeline (for LaTeX
 ;; embedded in invoices) install it; it is a no-op on documents that carry no unified-latex markup.
 

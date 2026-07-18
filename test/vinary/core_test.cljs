@@ -28,6 +28,9 @@
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.markdown :as markdown]
             [vinary.renderer.math :as math]
+            ;; the heavy TeX→SVG engine — required DIRECTLY / eager in :node-test (the renderer reaches it lazily
+            ;; via renderer.mathjax-lazy, which uses browser-only shadow.lazy). math/strip-math-fence above is pure.
+            [vinary.renderer.math-engine :as math-engine]
             [vinary.renderer.media :as media]
             [vinary.ui.access-keys :as access]
             [vinary.ui.context-menu :as context-menu]
@@ -472,24 +475,24 @@
 
 (deftest mathjax-svg-rendering
   (testing "MathJax renders cached SVG without DOM typesetting"
-    (let [svg (math/render-tex "x^2" false)]
+    (let [svg (math-engine/render-tex "x^2" false)]
       (is (str/includes? svg "MathJax"))
       (is (str/includes? svg "<svg"))
-      (is (= svg (math/render-tex "x^2" false)))))
+      (is (= svg (math-engine/render-tex "x^2" false)))))
   (testing "GitHub backtick-dollar inline math ($`x^2`$) has its fence stripped to clean TeX"
     ;; the former raw-string normalize was replaced by an mdast-level fence strip (math/strip-math-fence),
     ;; so a code span `$x$` stays literal; full-pipeline behavior is covered by markdown-code-span-vs-math
     (is (= "x^2" (math/strip-math-fence "`x^2`"))))
   (testing "AMS family (boldsymbol + amscd) render via the shadow-bundled engine, with assistive MathML"
-    (let [bs (math/render-tex "\\boldsymbol{x}" false)
-          cd (math/render-tex "\\begin{CD} A @>f>> B \\end{CD}" true)]
+    (let [bs (math-engine/render-tex "\\boldsymbol{x}" false)
+          cd (math-engine/render-tex "\\begin{CD} A @>f>> B \\end{CD}" true)]
       (is (str/includes? bs "<svg") "boldsymbol renders an SVG")
       (is (str/includes? bs "mjx-assistive-mml") "assistive MathML is emitted (a11y preserved)")
       (is (re-find #"bold-italic" bs) "boldsymbol → bold-italic MathML (amsbsy package active)")
       (is (str/includes? cd "<svg") "amscd renders an SVG")
       (is (re-find #"<mtable" cd) "amscd \\begin{CD} builds an mtable (amscd package active)")))
   (testing "the html package is absent from the engine — \\href cannot inject a link (renders inert)"
-    (let [out (math/render-tex "\\href{javascript:alert(1)}{x}" false)]
+    (let [out (math-engine/render-tex "\\href{javascript:alert(1)}{x}" false)]
       (is (not (re-find #"<a\b" out)) "no anchor element is produced")
       (is (not (re-find #"href=" out)) "no href attribute is produced"))))
 

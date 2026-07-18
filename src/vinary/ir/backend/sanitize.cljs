@@ -20,7 +20,7 @@
 
 (def tex-attempt-class
   "Marker class the Org frontend stamps on `#+BEGIN_EXPORT latex` code blocks. It survives sanitization (see
-   `schema`) so renderer.math/render-tex-blocks — which must run POST-sanitize, because MathJax's <svg> is not
+   `schema`) so renderer.math-engine/render-tex-blocks — which must run POST-sanitize, because MathJax's <svg> is not
    in the allowlist — can find those blocks, try to typeset them, and fall back to the code block on failure."
   "vv-tex-attempt")
 

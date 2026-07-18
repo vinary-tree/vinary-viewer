@@ -26,6 +26,14 @@
                           ;; :depends-on :main so all the shared code stays in the base bundle and only @codemirror
                           ;; (reachable solely through here) is pulled out into source-view.js.
                           :source-view {:entries    [vinary.renderer.source-view]
+                                        :depends-on #{:main}}
+                          ;; the math-engine chunk — same treatment as :source-view. renderer.math-engine (the heavy
+                          ;; @mathjax/src source + the Latin-Modern MathJax Modern font, ~3-5 MB) is reached ONLY via
+                          ;; shadow.lazy/loadable in renderer.mathjax-lazy (a bare js* ref, NOT a :require edge), so it
+                          ;; must be a declared :entry or it is never built; :depends-on :main keeps the shared code
+                          ;; (renderer.math pure helpers, sanitize) in the base bundle and pulls ONLY @mathjax (reachable
+                          ;; solely through here) out into math-engine.js, off the boot bundle and the :cli/:tui bundles.
+                          :math-engine {:entries    [vinary.renderer.math-engine]
                                         :depends-on #{:main}}}
              :devtools   {:after-load vinary.renderer.core/reload
                           :preloads   [devtools.preload

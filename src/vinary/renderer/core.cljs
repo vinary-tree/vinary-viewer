@@ -14,6 +14,7 @@
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
+            [vinary.renderer.mathjax-lazy :as mathjax-lazy]
             [vinary.renderer.syntax :as syntax]
             [vinary.renderer.cm :as cm]
             [cljs.reader :as reader]
@@ -375,8 +376,9 @@
   (copy-shortcuts!)
   ;; MathJax typesets off-DOM (liteAdaptor) and we inject the SVG as a string, so MathJax never inserts its own
   ;; stylesheet — without it the UA's `svg:not(:root){overflow:hidden}` clips every glyph that reaches past the
-  ;; viewBox. Install it before the first paint. Costs one memoised engine build (~16 ms).
-  (math/install-stylesheet!)
+  ;; viewBox. The engine (and thus its stylesheet) now lives in a lazily-loaded chunk (renderer.math-engine), so
+  ;; the install is deferred to the idle preload below (off the boot critical path) rather than forcing the whole
+  ;; engine to build synchronously at init; the preload's ensure!→install-stylesheet! runs just after first paint.
   (math-selection-highlight!)
   (keybindings!)
   (menubar/install-access-keys!)
@@ -386,12 +388,20 @@
   (key-scroll!)
   (mount!)
   (js/requestAnimationFrame (fn [] (profile/mark! "paint")))   ; the empty app shell has painted
-  ;; POOL PRELOAD: warm the lazily-loaded @codemirror source-view chunk on idle, so EVERY window — including hidden
-  ;; pool windows that pre-open on idle — has the editor ready before the first source open, keeping warm source
-  ;; opens instant. Off the boot critical path (idle callback, or a 0ms timeout where requestIdleCallback is absent).
-  (if (exists? js/requestIdleCallback)
-    (js/requestIdleCallback (fn [_] (cm/ensure!)))
-    (js/setTimeout (fn [] (cm/ensure!)) 0))
+  ;; POOL PRELOAD: warm the lazily-loaded chunks on idle, so EVERY window — including hidden pool windows that
+  ;; pre-open on idle — has them ready before first use, off the boot critical path (idle callback, or a 0ms
+  ;; timeout where requestIdleCallback is absent):
+  ;;   • the @codemirror source-view chunk, so warm source opens stay instant;
+  ;;   • the @mathjax math-engine chunk, AND — once it resolves — inject MathJax's own stylesheet (see the init
+  ;;     comment above). A non-daemon window does both just after first paint; a pool window warms them while
+  ;;     hidden, so the first document render (math included) never pays the engine build on the critical path.
+  (let [preload! (fn []
+                   (cm/ensure!)
+                   (-> (mathjax-lazy/ensure!)
+                       (.then (fn [_] (mathjax-lazy/install-stylesheet!)))))]
+    (if (exists? js/requestIdleCallback)
+      (js/requestIdleCallback (fn [_] (preload!)))
+      (js/setTimeout preload! 0)))
   (rf/dispatch [:view/re-frame-10x-hide]))
 
 (defn ^:export reload [] (mount!))

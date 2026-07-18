@@ -13,7 +13,7 @@
             [vinary.ir.capability.toc :as ir-toc]
             [vinary.renderer.latex :as latex]
             [vinary.renderer.markdown-pipeline :as pipeline]
-            [vinary.renderer.math :as math]
+            [vinary.renderer.mathjax-lazy :as mathjax-lazy]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.syntax :as syntax]))
@@ -21,20 +21,42 @@
 ;; re-exported so existing callers (app.fx, stream.scheduler, ui.views) keep using `md/dir-of` unchanged
 (def dir-of pipeline/dir-of)
 
-(defn apply-posts
-  "The shared string post-passes applied to serialized HTML: MathJax SVG (synchronous), then Org
-   `#+BEGIN_EXPORT latex` blocks (attempt MathJax, else leave the code block — a no-op for every other format),
-   then Mermaid SVG (async, font-matched), then figure geometry (async — bakes font-matched SVG width / raster
-   box reservation into <img> tags so they render at final size with no post-insert re-scale), then tree-sitter
-   fenced-code highlighting (async). All operate on self-contained elements, so they distribute over block
-   concatenation → byte-identical whether run whole (render-ir) or per streamed block (sink). Returns
-   Promise<html>. Public so the streaming sink can run the identical passes per appended block.
+(def ^:private math-markers-re
+  ;; The class tokens the two math passes look for in the serialized (post-sanitize) HTML: markdown/org/latex
+  ;; inline+display math survive sanitize as code.math-inline / code.math-display (renderer.math-engine/
+  ;; render-html-math also selects the pre-sanitize language-math / lang-math, kept here for safety), and an Org
+  ;; #+BEGIN_EXPORT latex block as code.vv-tex-attempt (renderer.math-engine/render-tex-blocks). If NONE is
+  ;; present the document has no math, so apply-posts skips loading the mathjax engine chunk ENTIRELY (the whole
+  ;; point of the split — a no-math markdown render never pays for the engine). It is a proper SUPERSET of both
+  ;; querySelectors, so it can only ever over-load the engine, never wrongly skip real math. Keep in sync with the
+  ;; querySelectors in renderer.math-engine.
+  #"math-inline|math-display|language-math|lang-math|vv-tex-attempt")
 
-   render-tex-blocks MUST precede the syntax pass: a block that fails to typeset falls back to a
+(defn- has-math? [html] (boolean (and html (re-find math-markers-re html))))
+
+(defn apply-posts
+  "The shared string post-passes applied to serialized HTML: MathJax SVG, then Org `#+BEGIN_EXPORT latex` blocks
+   (attempt MathJax, else leave the code block — a no-op for every other format), then Mermaid SVG (async,
+   font-matched), then figure geometry (async — bakes font-matched SVG width / raster box reservation into <img>
+   tags so they render at final size with no post-insert re-scale), then tree-sitter fenced-code highlighting
+   (async). All operate on self-contained elements, so they distribute over block concatenation → byte-identical
+   whether run whole (render-ir) or per streamed block (sink). Returns Promise<html>. Public so the streaming
+   sink can run the identical passes per appended block.
+
+   The two MathJax passes drive the heavy engine, which now lives in a lazily-loaded chunk (renderer.math-engine,
+   behind the renderer.mathjax-lazy facade). So the math branch runs ONLY when the HTML actually carries a math
+   marker AND there is a DOM to render into (`exists? js/DOMParser`): a no-math document never loads the engine
+   (the split's win), and DOM-free :node-test skips it exactly as it always did — the two passes were pass-throughs
+   there (no DOMParser), so skipping them is byte-identical to running them. When math IS present, ensure! loads
+   the chunk on demand, then the two passes run in the `.then` (so the deref in the facade is always past a
+   resolved load). render-tex-blocks MUST precede the syntax pass: a block that fails to typeset falls back to a
    `language-latex` code block, which the syntax pass then highlights."
   [html]
-  (-> (js/Promise.resolve (math/render-html-math html))
-      (.then math/render-tex-blocks)
+  (-> (if (and (exists? js/DOMParser) (has-math? html))
+        (-> (mathjax-lazy/ensure!)
+            (.then (fn [_] (mathjax-lazy/render-html-math html)))
+            (.then mathjax-lazy/render-tex-blocks))
+        (js/Promise.resolve html))
       (.then mermaid/render-html-diagrams)
       (.then figures/scale-figures-html)
       (.then syntax/highlight-html-code-blocks)))
