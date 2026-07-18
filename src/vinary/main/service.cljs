@@ -215,8 +215,12 @@
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
 
 (defn- send-open-content! [path]
+  ;; the single choke point for every watcher/poller-driven re-send (local file watch, asset watch, remote
+  ;; poll). The doc's window may have CLOSED since it was retained — under the resident daemon the watcher
+  ;; outlives it — so skip a destroyed webContents (else `.send` throws "Object has been destroyed").
   (when-let [wc (and (contains? @retained-paths path) (get @doc-webcontents path))]
-    (send-content! wc path)))
+    (when-not (.isDestroyed ^js wc)
+      (send-content! wc path))))
 
 ;; ---- remote (SSH) live-refresh via polling ----
 ;; SFTP has no inotify, so a remote doc cannot be chokidar-watched. Instead a per-doc poller re-stats the URI

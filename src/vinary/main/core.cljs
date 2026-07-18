@@ -15,6 +15,7 @@
             [vinary.main.recent :as recent]
             [vinary.main.window :as window]
             [vinary.main.windows :as windows]
+            [vinary.main.paths :as paths]
             [vinary.main.shell :as shell]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.web :as web]
@@ -182,27 +183,59 @@
     (do (create-window! args)
         (refill-pool!))))
 
+(declare app-version)
+
+(defonce ^:private last-crash (atom {:sig nil :t 0}))   ; dedupe a crash STORM: one repeating fault → not N dialogs
+
+(defn- write-crash-log!
+  "Write the full trace to ~/.config/vinary-viewer/crash-<timestamp>.log — reliable and survives app exit, so the
+   user can always recover the trace to report it even if the clipboard or dialog misbehave. Returns the path,
+   or nil if it couldn't be written."
+  [text]
+  (try
+    (let [dir   (paths/conf-dir)
+          stamp (.replace (.toISOString (js/Date.)) (js/RegExp. ":" "g") "-")
+          file  (path/join dir (str "crash-" stamp ".log"))
+          hdr   (str "vinary-viewer crash — " (.toISOString (js/Date.)) "\n"
+                     "version " (app-version) "  platform " js/process.platform "-" js/process.arch "\n\n")]
+      (when-not (.existsSync fs dir) (.mkdirSync fs dir (clj->js {:recursive true})))
+      (.writeFileSync fs file (str hdr text "\n"))
+      file)
+    (catch :default _ nil)))
+
 (defn- report-crash!
-  "Log the full stack (terminal/logs) and show a COPYABLE error dialog. Electron's default
-   uncaught-exception dialog has only an OK button and its text can't be selected/copied, so the
-   user had to retype crash traces by hand; this offers a 'Copy details' button instead."
+  "Surface an uncaught main-process exception so the user can actually recover the trace to report it: ALWAYS
+   write it to a crash-log file (reliable — survives app exit), pre-copy it to the clipboard, and show a dialog
+   whose 'Open crash log' button opens that file in the user's editor (selectable + copyable — a native message
+   box's own detail text is not selectable, which is why manual highlight never worked). A repeating identical
+   fault is logged every time but shows the modal at most once per ~2 s, so a crash storm can't stack N dialogs."
   [^js err]
-  (let [text (or (some-> err .-stack) (str err))]
+  (let [text (or (some-> err .-stack) (str err))
+        now  (.now js/Date)]
     (js/console.error "[vinary] uncaught main-process exception:\n" text)
-    (try
-      (let [^js dialog    (.-dialog electron)
-            ^js clipboard (.-clipboard electron)
-            choice (.showMessageBoxSync dialog
-                     (clj->js {:type      "error"
-                               :title     "vinary-viewer — unexpected error"
-                               :message   "An unexpected error occurred in the main process."
-                               :detail    text
-                               :buttons   ["Copy details" "Dismiss"]
-                               :defaultId 0
-                               :cancelId  1
-                               :noLink    true}))]
-        (when (zero? choice) (.writeText clipboard text)))
-      (catch :default _ nil))))   ; pre-ready / headless → the console still has the full stack
+    (let [logfile (write-crash-log! text)]                        ; log EVERY occurrence, even a deduped repeat
+      (when-not (and (= text (:sig @last-crash)) (< (- now (:t @last-crash)) 2000))
+        (reset! last-crash {:sig text :t now})
+        (let [^js clipboard (.-clipboard electron)
+              ^js dialog    (.-dialog electron)
+              ^js shell     (.-shell electron)]
+          (try (.writeText clipboard text) (catch :default _ nil))   ; pre-copy (best-effort) before the dialog
+          (try
+            (let [detail (cond-> text logfile (str "\n\nFull trace saved to:\n  " logfile))
+                  choice (.showMessageBoxSync dialog
+                           (clj->js {:type      "error"
+                                     :title     "vinary-viewer — unexpected error"
+                                     :message   "An unexpected error occurred in the main process."
+                                     :detail    detail
+                                     :buttons   ["Copy details" "Open crash log" "Dismiss"]
+                                     :defaultId 0
+                                     :cancelId  2
+                                     :noLink    true}))]
+              (case choice
+                0 (try (.writeText clipboard text) (catch :default _ nil))
+                1 (when logfile (try (.openPath shell logfile) (catch :default _ nil)))
+                nil))
+            (catch :default _ nil)))))))   ; pre-ready / headless → the console + crash log still have the trace
 
 (defn- install-crash-reporting! []
   (.on js/process "uncaughtException"  (fn [err]      (report-crash! err)))

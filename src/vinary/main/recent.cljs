@@ -8,7 +8,8 @@
             ["fs" :as fs]
             ["path" :as path]
             ["os" :as os]
-            ["chokidar" :refer [watch]]))
+            ["chokidar" :refer [watch]]
+            [vinary.main.windows :as windows]))
 
 (defonce ^:private watcher (atom nil))
 (defonce ^:private inited  (atom false))
@@ -29,16 +30,18 @@
     (.writeFileSync fs (recent-path) (str text))
     (catch :default _ nil)))
 
-(defn push! [^js wc] (.send wc "vv:recent" (recent-text)))
+(defn push! [^js wc] (when (and wc (not (.isDestroyed wc))) (.send wc "vv:recent" (recent-text))))
 
 (defn init! [^js wc]
   (push! wc)                               ; initial push (the renderer also pulls via requestRecent)
   (let [p (recent-path)]
     (when-not @watcher
+      ;; the watcher outlives any single window (esp. under the daemon) — re-push global recents to ALL live
+      ;; windows, never the `wc` captured here (it may have closed → "Object has been destroyed").
       (let [w (watch p (clj->js {:ignoreInitial true
                                  :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-        (.on w "change" (fn [_] (push! wc)))
-        (.on w "add"    (fn [_] (push! wc)))
+        (.on w "change" (fn [_] (windows/broadcast! "vv:recent" (recent-text))))
+        (.on w "add"    (fn [_] (windows/broadcast! "vv:recent" (recent-text))))
         (reset! watcher w))))
   (when-not @inited
     (reset! inited true)

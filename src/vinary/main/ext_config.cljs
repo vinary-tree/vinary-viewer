@@ -10,7 +10,8 @@
             ["chokidar" :refer [watch]]
             [clojure.string :as str]
             [cljs.reader :as reader]
-            [vinary.main.ext-util :as eu]))
+            [vinary.main.ext-util :as eu]
+            [vinary.main.windows :as windows]))
 
 (defonce ^:private watcher (atom nil))
 (defonce ^:private inited  (atom false))
@@ -39,16 +40,17 @@
     (.writeFileSync fs (config-path) (str text))
     (catch :default _ nil)))
 
-(defn push! [^js wc] (.send wc "vv:ext-config" (config-text)))
+(defn push! [^js wc] (when (and wc (not (.isDestroyed wc))) (.send wc "vv:ext-config" (config-text))))
 
 (defn init! [^js wc]
   (push! wc)
   (let [p (config-path)]
     (when-not @watcher
+      ;; re-push global extension/ad-block prefs to ALL live windows, never the `wc` captured here (may close)
       (let [w (watch p (clj->js {:ignoreInitial true
                                  :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-        (.on w "change" (fn [_] (push! wc)))
-        (.on w "add"    (fn [_] (push! wc)))
+        (.on w "change" (fn [_] (windows/broadcast! "vv:ext-config" (config-text))))
+        (.on w "add"    (fn [_] (windows/broadcast! "vv:ext-config" (config-text))))
         (reset! watcher w))))
   (when-not @inited
     (reset! inited true)
