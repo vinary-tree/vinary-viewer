@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('vv', {
   httpScroll: (kind) => ipcRenderer.send('vv:http-scroll', kind),   // page/edge keys → native web view (when visible)
   openDialog: () => ipcRenderer.send('vv:open-dialog'),
   copyText: (text) => ipcRenderer.send('vv:clipboard-write', text),
+  readText: () => ipcRenderer.invoke('vv:clipboard-read'),   // Promise<string> — the system clipboard, for Paste
   openPath: (p) => ipcRenderer.send('vv:open-path', p),
   openExternal: (url) => ipcRenderer.send('vv:open-external', url),
   requestSettings: () => ipcRenderer.send('vv:settings-request'),

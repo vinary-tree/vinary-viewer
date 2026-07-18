@@ -6,7 +6,8 @@
             [re-frame.core :as rf]
             [clojure.string :as str]
             [vinary.ui.menu-focus :as menu-focus]
-            [vinary.ui.preview-navigation :as preview-nav]))
+            [vinary.ui.preview-navigation :as preview-nav]
+            [vinary.renderer.text-edit :as text-edit]))
 
 (defn- basename [p] (last (str/split (str p) #"/")))
 
@@ -84,6 +85,14 @@
            :sep
            {:label "Copy file path"       :event [:clipboard/copy path]}
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
+    ;; a text <input>/<textarea> (any of the app's own fields). Actions run on the focused field via
+    ;; execCommand — the menu keeps it focused (see `context-menu`), so no target element need be threaded.
+    :text-input
+    [{:label "Cut"        :action text-edit/cut!        :disabled? (not (:has-selection? target))}
+     {:label "Copy"       :action text-edit/copy!       :disabled? (not (:has-selection? target))}
+     {:label "Paste"      :action text-edit/paste!}
+     :sep
+     {:label "Select All" :action text-edit/select-all! :disabled? (not (:has-text? target))}]
     nil))
 
 (defn- act! [event] (rf/dispatch [:context-menu/close]) (rf/dispatch event))
@@ -113,7 +122,11 @@
           ;; toggle instead — its unified-latex positions map to generated HTML, not the .tex, so no line jump.
           previewable? (contains? #{"markdown" "org"} @(rf/subscribe [:doc/kind]))
           items (vec (remove nil? (items-for target vs? previewable?)))
-          focused @focus]
+          focused @focus
+          ;; a text-input menu must NOT steal focus — the right-clicked field stays document.activeElement so
+          ;; execCommand targets it (and the URI field's on-blur can't wipe a mid-edit draft). Its items are
+          ;; therefore mouse-driven (no keyboard nav); every other menu keeps today's focus + keyboard behavior.
+          keep-focus? (= (:kind target) :text-input)]
       (when (not= @last-menu m)
         (reset! last-menu m)
         (reset! focus nil))
@@ -121,12 +134,15 @@
         [:div.vv-ctx-overlay
          {:on-click        #(rf/dispatch [:context-menu/close])
           :on-context-menu (fn [^js e] (.preventDefault e) (rf/dispatch [:context-menu/close]))}
-         [:div.vv-ctx-menu {:style       {:left (str x "px") :top (str y "px")}
-                            :role        "menu"
-                            :tab-index   0
-                            :on-click    #(.stopPropagation %)
-                            :on-key-down #(on-menu-key items focus %)
-                            :ref         (fn [el] (when el (.focus el)))}
+         [:div.vv-ctx-menu {:style        {:left (str x "px") :top (str y "px")}
+                            :role         "menu"
+                            :tab-index    (when-not keep-focus? 0)
+                            ;; keep-focus: cancel the mousedown's default focus-shift so clicking an item can't
+                            ;; blur the input execCommand needs to act on
+                            :on-mouse-down (when keep-focus? (fn [^js e] (.preventDefault e)))
+                            :on-click     #(.stopPropagation %)
+                            :on-key-down  #(on-menu-key items focus %)
+                            :ref          (when-not keep-focus? (fn [el] (when el (.focus el))))}
           (doall
            (for [[i item] (map-indexed vector items)]
              (if (= item :sep)
@@ -134,8 +150,14 @@
                [:div.vv-menu-sep]
                ^{:key i}
                [:div.vv-menu-item
-                {:class (when (= focused i) "vv-menu-item-focused")
+                {:class (str (when (= focused i) "vv-menu-item-focused")
+                             (when (:disabled? item) " vv-menu-item-disabled"))
                  :role "menuitem"
-                 :on-mouse-enter #(reset! focus i)
-                 :on-click #(act! (:event item))}
+                 :aria-disabled (boolean (:disabled? item))
+                 :on-mouse-enter (when-not (:disabled? item) #(reset! focus i))
+                 :on-click (when-not (:disabled? item)
+                             (if-let [action (:action item)]
+                               ;; run synchronously (within the click gesture) so the clipboard write is allowed
+                               (fn [_] (action) (rf/dispatch [:context-menu/close]))
+                               #(act! (:event item))))}
                 [:span.vv-menu-item-label (:label item)]])))]]))))

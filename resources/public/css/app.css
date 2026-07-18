@@ -735,6 +735,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 24px;
   padding: 5px 14px; font-size: 13px; color: var(--vv-fg); cursor: pointer; white-space: nowrap; }
 .vv-menu-item:hover, .vv-menu-item-focused { background: var(--vv-highlight); color: var(--vv-fg-strong); }
+/* a disabled item (e.g. Copy/Cut with no selection) — dimmed + inert (no click handler, no hover highlight) */
+.vv-menu-item-disabled { color: var(--vv-fg-dim); cursor: default; }
+.vv-menu-item-disabled:hover { background: transparent; color: var(--vv-fg-dim); }
 .vv-menu-item-accel { color: var(--vv-fg-dim); font-size: 11px; }
 .vv-menu-item:hover .vv-menu-item-accel,
 .vv-menu-item-focused .vv-menu-item-accel { color: var(--vv-fg-strong); }

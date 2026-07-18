@@ -45,6 +45,7 @@
                           (when-let [^js sender (and (not (.-canceled r)) (.-sender e))]
                             (.send sender "vv:open-files" (clj->js {:paths (vec (.-filePaths r))})))))))))
     (.on ipcMain "vv:clipboard-write"  (fn [_e text] (.writeText clipboard (str text))))
+    (.handle ipcMain "vv:clipboard-read" (fn [_e] (.readText clipboard)))   ; invoke → resolves to the clipboard text (for Paste)
     (.on ipcMain "vv:open-path"        (fn [_e p]   (.openPath shell (str p))))      ; dir → file manager
     (.on ipcMain "vv:open-external"    (fn [_e url] (.openExternal shell (str url)))) ; http → system browser
     (.on ipcMain "vv:app-info-request" (fn [_e] (when (wc) (.send (wc) "vv:app-info" (clj->js (app-info))))))

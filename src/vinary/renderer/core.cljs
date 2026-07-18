@@ -14,6 +14,7 @@
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
+            [vinary.renderer.text-edit :as text-edit]
             [vinary.renderer.mathjax-lazy :as mathjax-lazy]
             [vinary.renderer.heavy-lazy :as heavy-lazy]
             [vinary.renderer.syntax :as syntax]
@@ -271,6 +272,23 @@
                          nil))
                      true))
 
+(defn text-input-menu!
+  "Right-clicking any of the app's own text fields (<input>/<textarea>) opens the themed Cut/Copy/Paste/Select-All
+   menu (vinary.ui.context-menu, :text-input kind). A document-level listener that only acts on editable text
+   targets — other right-clicks (content, tabs, tree, source) fall through to their own handlers untouched."
+  []
+  (.addEventListener js/document "contextmenu"
+                     (fn [^js e]
+                       (when-let [^js el (.-target e)]
+                         (when (text-edit/editable-target? el)
+                           (.preventDefault e)
+                           (let [s (.-selectionStart el) t (.-selectionEnd el)]
+                             (rf/dispatch [:context-menu/show
+                                           {:x (.-clientX e) :y (.-clientY e)
+                                            :target {:kind          :text-input
+                                                     :has-selection? (and (number? s) (number? t) (not= s t))
+                                                     :has-text?      (pos? (count (or (.-value el) "")))}}])))))))
+
 (defn hints!
   "When link hints are active, a capture-phase key listener owns the keyboard: letters filter/activate the
    labels, Backspace pops a char, Esc cancels — preempting the global resolver via stopPropagation. When
@@ -384,6 +402,7 @@
   (keybindings!)
   (menubar/install-access-keys!)
   (mouse-nav!)
+  (text-input-menu!)
   (hints!)
   (ctrl-tracker!)
   (key-scroll!)
