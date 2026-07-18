@@ -166,6 +166,41 @@
 (defn- markdown-grammar? [grammar]
   (= "markdown" (some-> (or (:id grammar) (:language grammar)) str/lower-case)))
 
+(defn- org-grammar? [grammar]
+  (= "org" (some-> (or (:id grammar) (:language grammar)) str/lower-case)))
+
+(defn- math-regions
+  "Math spans in `s` (offsets INTO s): display `$$…$$` (two-char delimiters) first, then inline `$…$`
+   (one-char). GitHub-ish rules — an unescaped opening `$`/`$$` (not preceded by a backslash); inline requires
+   a non-space just inside each `$` and stays on one line; display may span lines. Each region is
+   {:open-from :open-to :inner-from :inner-to :close-from :close-to}. Returns a seq (empty when no math). The
+   bundled markdown/​markdown-inline grammars have no math node, so the source view detects it here."
+  [s]
+  (let [out     (array)
+        covered (js/Array. (count s))]           ; chars claimed by a display region → inline skips them
+    (let [re (js/RegExp. "(?<!\\\\)\\$\\$([\\s\\S]+?)\\$\\$" "g")]
+      (loop []
+        (when-let [m (.exec re s)]
+          (let [start (.-index m) inner (aget m 1)
+                open-to    (+ start 2)
+                inner-to   (+ open-to (count inner))
+                end        (+ inner-to 2)]
+            (.push out {:open-from start :open-to open-to :inner-from open-to :inner-to inner-to
+                        :close-from inner-to :close-to end})
+            (dotimes [i (- end start)] (aset covered (+ start i) true)))
+          (recur))))
+    (let [re (js/RegExp. "(?<!\\\\)\\$(?=\\S)([^\\n$]+?)(?<=\\S)\\$" "g")]
+      (loop []
+        (when-let [m (.exec re s)]
+          (when-not (aget covered (.-index m))    ; not inside a display region
+            (let [start (.-index m) inner (aget m 1)
+                  open-to  (+ start 1)
+                  inner-to (+ open-to (count inner))]
+              (.push out {:open-from start :open-to open-to :inner-from open-to :inner-to inner-to
+                          :close-from inner-to :close-to (+ inner-to 1)})))
+          (recur))))
+    (array-seq out)))
+
 (defn- info-language [raw]
   (let [s     (str/trim (or raw ""))
         token (or (second (re-find #"\.([A-Za-z0-9_+-]+)" s))
@@ -213,12 +248,27 @@
                        tree         (parse-tree block-loaded text)
                        root         (.-rootNode tree)
                        spans        (array)
-                       code-jobs    (array)]
+                       code-jobs    (array)
+                       latex        (grammar-by-id "latex")]
                    (capture-spans! spans tree (:query block-loaded) 0)
-                   (when inline-loaded
-                     (doseq [^js inline (nodes-of-type root #{"inline"})]
-                       (let [inline-tree (parse-tree inline-loaded (node-text text inline))]
-                         (capture-spans! spans inline-tree (:query inline-loaded) (.-startIndex inline)))))
+                   (doseq [^js inline (nodes-of-type root #{"inline"})]
+                     (let [itext (node-text text inline)
+                           ioff  (.-startIndex inline)]
+                       (when inline-loaded
+                         (capture-spans! spans (parse-tree inline-loaded itext) (:query inline-loaded) ioff))
+                       ;; $…$ / $$…$$ math has no node in the bundled markdown grammar, so nest LaTeX by hand.
+                       ;; Scoping to `inline` text auto-excludes fenced code (its content is not an inline node).
+                       (when latex
+                         (doseq [{:keys [open-from open-to inner-from inner-to close-from close-to]}
+                                 (math-regions itext)]
+                           (push-span! spans "cm-punctuation" (+ ioff open-from) (+ ioff open-to))
+                           (push-span! spans "cm-punctuation" (+ ioff close-from) (+ ioff close-to))
+                           (.push code-jobs
+                                  (-> (load-grammar latex)
+                                      (.then (fn [ll]
+                                               (let [t (parse-tree ll (.slice itext inner-from inner-to))]
+                                                 (capture-spans! spans t (:query ll) (+ ioff inner-from)))))
+                                      (.catch (fn [e] (js/console.warn "[vv] $-math latex highlight failed:" e)))))))))
                    (doseq [block (nodes-of-type root #{"fenced_code_block"})]
                      (when-let [job (highlight-fenced-spans! spans text block)]
                        (.push code-jobs job)))
@@ -226,16 +276,42 @@
                      (-> (js/Promise.all code-jobs) (.then (fn [_] spans)))
                      spans)))))))
 
+(defn- org-highlight-spans
+  "Org source: the org grammar's own capture, PLUS — for every `#+begin_NAME` block whose parameter names a
+   language/backend (`#+begin_src LANG`, `#+begin_export BACKEND`) — the block CONTENTS parsed with that
+   language's grammar. The org highlights query captures block names/directives only, never block contents, so
+   this cannot double-highlight the content."
+  [text grammar]
+  (-> (load-grammar grammar)
+      (.then (fn [loaded]
+               (let [tree      (parse-tree loaded text)
+                     root      (.-rootNode tree)
+                     spans     (array)
+                     code-jobs (array)]
+                 (capture-spans! spans tree (:query loaded) 0)
+                 (doseq [^js block (nodes-of-type root #{"block"})]
+                   (when-let [^js contents (.childForFieldName block "contents")]
+                     (when-let [g (some-> (.childForFieldName block "parameter") (.-text) grammar-for-language)]
+                       (.push code-jobs
+                              (-> (load-grammar g)
+                                  (.then (fn [gl]
+                                           (let [t (parse-tree gl (node-text text contents))]
+                                             (capture-spans! spans t (:query gl) (.-startIndex contents)))))
+                                  (.catch (fn [e] (js/console.warn "[vv] org block grammar failed:" e))))))))
+                 (if (pos? (.-length code-jobs))
+                   (-> (js/Promise.all code-jobs) (.then (fn [_] spans)))
+                   spans))))))
+
 (defn highlight-spans
   "Parse `text` with `grammar` (a {:wasm-url :scm-url}) and resolve to a JS array of @codemirror-free highlight
-   spans ({:from :to :class}, in capture order). Markdown gets the block+inline+fenced-code recursion; every other
-   grammar a single generic capture. The source EditorView (renderer.source-view) converts these spans into
-   CodeMirror Decorations in the SAME order the old in-ns capture-ranges! built them, so the decoration set is
-   unchanged. Returns Promise<array<span>>."
+   spans ({:from :to :class}, in capture order). Markdown gets block+inline+fenced-code + `$`-math recursion;
+   Org gets its capture + per-block language nesting; every other grammar a single generic capture. The source
+   EditorView (renderer.source-view) converts these spans into CodeMirror Decorations. Returns Promise<array<span>>."
   [text grammar]
-  (if (markdown-grammar? grammar)
-    (markdown-highlight-spans text grammar)
-    (generic-highlight-spans text grammar)))
+  (cond
+    (markdown-grammar? grammar) (markdown-highlight-spans text grammar)
+    (org-grammar? grammar)      (org-highlight-spans text grammar)
+    :else                       (generic-highlight-spans text grammar)))
 
 (defn- escape-html [s]
   (-> (or s "")

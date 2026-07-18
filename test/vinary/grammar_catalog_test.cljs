@@ -7,6 +7,7 @@
             [vinary.grammar-catalog :as gc]))
 
 (defn- gid [path] (:id (gc/grammar-for-path path gc/bundled-grammars {})))
+(defn- lang-id [language] (:id (gc/grammar-for-language language gc/bundled-grammars)))
 
 (deftest built-in-repo-file-grammars
   (testing "build systems"
@@ -33,3 +34,15 @@
   (testing "the bundled catalog actually contains the two newly-added grammars"
     (is (some? (gc/by-id "make")))
     (is (some? (gc/by-id "gitignore")))))
+
+(deftest nested-language-grammars
+  (testing "```math fences + $…$ math + `#+BEGIN_EXPORT latex` all resolve to the bundled latex grammar"
+    (is (= "latex" (lang-id "latex")))
+    (is (= "latex" (lang-id "tex")))
+    (is (= "latex" (lang-id "math")) "the ```math info-string / #+begin_src math alias")
+    (is (= "latex" (lang-id "LaTeX")) "resolution is case-insensitive"))
+  (testing "org #+begin_src / #+begin_export contents nest via their language's grammar"
+    (is (= "python" (lang-id "python")))
+    (is (= "python" (lang-id "py")))
+    (is (= "elisp"  (lang-id "emacs-lisp")) "org #+begin_src emacs-lisp")
+    (is (= "elisp"  (lang-id "el")))))

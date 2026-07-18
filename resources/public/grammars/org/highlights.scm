@@ -14,9 +14,13 @@
 ; #+KEY: value directives (TITLE, AUTHOR, OPTIONS, …)
 (directive name: (expr) @keyword (value)? @string)
 
-; Blocks  #+begin_NAME … #+end_NAME — colour the block NAME (src / example / quote / export …).
+; Blocks  #+begin_NAME … #+end_NAME — colour the block NAME (src / example / quote / export …) AND the
+; #+begin_/#+end_ delimiters, so the whole `#+BEGIN_EXPORT` / `#+END_EXPORT` reads as one keyword macro like a
+; `#+KEY:` directive (rather than only the bare NAME being coloured).
 (block name: (expr) @keyword)
+(block "#+begin_" @keyword "#+end_" @keyword)
 (dynamic_block name: (expr) @keyword)
+(dynamic_block "#+begin:" @keyword "#+end:" @keyword)
 
 ; Comments
 (comment) @comment
