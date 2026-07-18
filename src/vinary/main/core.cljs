@@ -30,6 +30,7 @@
 
 (def ^js app (.-app electron))
 (def ^js BrowserWindow (.-BrowserWindow electron))
+(def ^js nativeImage (.-nativeImage electron))
 
 ;; Every live (shown) app window is tracked in `vinary.main.windows` — a leaf registry the session-level
 ;; services also read so they route to the ACTIVE window rather than one captured at init!. The app is
@@ -62,6 +63,11 @@
 
 (defn renderer-index [] (path/join js/__dirname ".." ".." "resources" "public" "index.html"))
 (defn preload-path  [] (path/join js/__dirname ".." ".." "resources" "preload.js"))
+;; The application icon (the Full-Automaton logo, vendored in resources/icons/). The 256px PNG feeds the
+;; BrowserWindow icon (Linux/Windows _NET_WM_ICON — the WM downsizes it to the taskbar size); the 512px PNG
+;; feeds the macOS dock (set in `main`, since an unpackaged `electron <repo>` run has no .app bundle to carry it).
+(defn app-icon  [] (path/join js/__dirname ".." ".." "resources" "icons" "appicon-256.png"))
+(defn dock-icon [] (path/join js/__dirname ".." ".." "resources" "icons" "appicon-512.png"))
 
 (defn initial-args
   "All non-flag document arguments passed on the command line (e.g. `vv a.md b.pdf https://…`),
@@ -86,6 +92,7 @@
   [show? on-ready]
   (let [win (BrowserWindow.
               (clj->js (merge {:show show?
+                               :icon (app-icon)
                                :backgroundColor "#292b2e"
                                :autoHideMenuBar true
                                :webPreferences {:contextIsolation true
@@ -303,6 +310,9 @@
          (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
            (claim-window! (seq args)))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
+                                ;; macOS dock icon (unpackaged run — no .app bundle carries it; Linux/Win use the window :icon)
+                                (when (= "darwin" js/process.platform)
+                                  (some-> (.-dock app) (.setIcon (.createFromPath nativeImage (dock-icon)))))
                                 ;; the resident-server socket (systemd-independent): a `vv <file>` client connects
                                 ;; and sends paths; we open them in a warm pool window of this process. `args` are
                                 ;; already cwd-resolved by the client — normalise via doc-uris (identity resolver).

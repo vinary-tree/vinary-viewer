@@ -76,6 +76,41 @@ echo "    vv [files…]    -> GUI (default)"
 echo "    vv --cli FILE  -> render to the terminal"
 echo "    vv --tui FILE  -> interactive terminal viewer"
 
+# ---- desktop entry + hicolor icons (Linux application-menu integration) --------------------------
+# Registers the app in the desktop launcher with its logo, from the vendored set in resources/icons/
+# (the Full-Automaton mark). macOS/Windows show the icon at runtime via the window / dock (core.cljs),
+# so this XDG step is Linux-only; the cache refreshes are optional (guarded, non-fatal).
+if [ "$(uname -s)" = "Linux" ]; then
+  DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+  ICONS="$DATA_HOME/icons/hicolor"
+  APPS="$DATA_HOME/applications"
+  echo "==> installing desktop entry + icons"
+  for sz in 16 32 48 64 128 256 512; do
+    case $sz in 16) src="favicon-16.png" ;; *) src="appicon-$sz.png" ;; esac
+    install -Dm644 "$REPO/resources/icons/$src" "$ICONS/${sz}x${sz}/apps/vinary-viewer.png"
+  done
+  install -Dm644 "$REPO/resources/icons/vinary-viewer-appicon.svg" "$ICONS/scalable/apps/vinary-viewer.svg"
+  mkdir -p "$APPS"
+  cat > "$APPS/vinary-viewer.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Vinary Viewer
+GenericName=Document Viewer
+Comment=Fast Markdown / document / source viewer
+Exec=$BIN/vinary-viewer %F
+Icon=vinary-viewer
+Terminal=false
+Categories=Utility;Viewer;TextTools;
+StartupWMClass=vinary-viewer
+StartupNotify=true
+EOF
+  update-desktop-database "$APPS" 2>/dev/null || true
+  gtk-update-icon-cache -f -t "$ICONS" 2>/dev/null || true
+  echo "    desktop entry: $APPS/vinary-viewer.desktop"
+  echo "    hicolor icons: $ICONS/{16x16..512x512,scalable}/apps/vinary-viewer.*"
+fi
+
 # ---- optional: a systemd user service to keep the warm daemon up at login ------------------------
 # The daemon does NOT require systemd (the `vv` launcher starts it over the socket on demand); this unit just
 # keeps it warm from login on systemd systems so even the first open is instant. On non-systemd systems this is

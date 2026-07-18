@@ -29,7 +29,7 @@
         :actions     [:button.vv-btn (merge {:on-click #(rf/dispatch [:about/close])}
                                             (access/access-attrs "c"))
                       [access/label "Close" "c" access-active?]]}
-       [:img.vv-about-logo {:src "assets/vinary-tree-logo.svg" :alt ""}]
+       [:img.vv-about-logo {:src "../icons/vinary-viewer.svg" :alt "Vinary Viewer"}]
        [:div.vv-about-version (str "Version " (or version "0.2.0"))]
        [:p.vv-about-summary
         "A reactive, browser-like previewer for repository documentation and source code — live-refreshing "

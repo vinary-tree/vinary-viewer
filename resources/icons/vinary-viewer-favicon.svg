@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+<title>Vinary Viewer</title><defs><linearGradient id="vvbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#46305e"></stop><stop offset="0.55" stop-color="#2a1e3f"></stop><stop offset="1" stop-color="#211737"></stop></linearGradient></defs>
+<rect width="96" height="96" rx="21" fill="url(#vvbg)"></rect>
+<g transform="translate(48 48) scale(0.92) translate(-48 -48)">
+<path d="M20 6 H56 L80 30 V90 H20 Z" fill="#f8f5ec"></path>
+<path d="M56 6 L56 30 H80 Z" fill="#6fa847"></path>
+<path d="M28 38 L50 74 L72 38" fill="none" stroke="#3e6b26" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="M39 38 L50 56 L61 38" fill="none" stroke="#8fbf62" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path>
+<circle cx="50" cy="74" r="6.5" fill="#d4a94a" stroke="#f8f5ec" stroke-width="2.5"></circle></g>
+</svg>

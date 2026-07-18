@@ -26,6 +26,11 @@
     child-src 'self' blob:;
     object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';">
   <title>vinary-viewer</title>
+  <!-- Application favicon (the Full-Automaton mark, vendored in resources/icons/; ../ escapes public/ into the
+       shared icon set — same file: origin, allowed by img-src). SVG first, PNG fallback where SVG favicons
+       are unsupported. -->
+  <link rel="icon" type="image/svg+xml" href="../icons/vinary-viewer-favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="../icons/favicon-32.png">
   <!-- Active theme first (defines --vv-*), then the structural stylesheet that references it.
        Theme selection becomes reactive (re-frame) in P2; spacemacs-dark is the default. -->
   <link id="vv-theme-link" rel="stylesheet" href="css/themes/spacemacs-dark.css">
