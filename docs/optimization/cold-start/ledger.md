@@ -236,6 +236,35 @@ chunk is preloadable by the pool, and the `:module-loader` infra is now in place
 317 tests green; all four targets compile; all 6 formats render cold (incl. `code.py` source via the chunk).
 **Kept** (`c58d9d9`). The actual boot-eval lever is the V8 snapshot (next).
 
+## Phase 4 — V8 startup snapshot: spiked, NOT viable (skip)
+The "go further" decision included a V8 startup snapshot to pre-compile the boot bundle (the only lever for the
+un-splittable mathjax/latex/org eval). Spiked end-to-end with the version-matched toolchain
+(`electron-mksnapshot@42.7.0`; `v8_context_snapshot.bin` is Electron's swappable context-snapshot):
+
+1. **Feasible in principle** — the renderer bundle's top-level is **DOM-free** (audited: zero top-level
+   `def`/`defonce` touch `js/window`/`js/document`; all 44+39 refs are inside functions), and the tail auto-call
+   `$APP.vinary.renderer.core.init();` can be stripped so nothing touches the DOM at snapshot time.
+2. **mksnapshot works on small JS** — a trivial script snapshots fine, producing `v8_context_snapshot.bin`.
+3. **But it hard-aborts on the real 11 MB bundle** — `mksnapshot` exits **133 (SIGTRAP / int3)** with **empty
+   stderr** (`dmesg`: `traps: mksnapshot … trap int3`), a bare V8 release-CHECK with no diagnostic. It is not a
+   DOM/`self` reference error (those print) — it is V8's context-snapshot serializer rejecting the input.
+
+**Root cause.** The Electron snapshot toolchain (`electron-link` + mksnapshot) is built for the **Node
+main-process world**: many small **CommonJS** modules, each `electron-link`-wrapped for deferred init and kept
+under V8's per-snapshot size/complexity CHECK (VS Code's model). shadow-cljs emits **one monolithic browser
+IIFE** (goog modules, `.call(this)`), which (a) exceeds that CHECK as a single unit and (b) doesn't fit
+`electron-link`'s CJS-module deferral model. Making shadow output electron-link-compatible CJS would abandon its
+bundling model — out of scope and non-idiomatic. **Skipped** per the plan's "spike first, else skip"; the
+`electron-mksnapshot` devDep was reverted.
+
+**Why the loss is small — Chromium's V8 disk code cache already delivers most of the benefit.** A snapshot's
+point is to skip parse+compile of the bundle. Chromium **already** disk-caches compiled bytecode per script:
+Phase 2 measured the daemon's **2nd+** renderer eval drop **876 → ~697 ms** purely from the code cache warming.
+Every pool boot/refill after the first hits that cache, so the daemon+pool architecture already gets the
+snapshot's core win automatically. The snapshot's residual value would be only the **very first** cold eval per
+login (before any code cache) — the narrowest slice, for which the fragile custom-blob integration is not worth
+it. Net: the cold-start program is complete via daemon + pool + code-split + the automatic code cache.
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
@@ -244,4 +273,4 @@ chunk is preloadable by the pool, and the `:module-loader` infra is now in place
 | 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
 | 3 | first source/org/latex render in a warm window stalls (warm-on-idle needed) | — (measured before implementing) | py/org/tex (pool hit) | claim→rendered 70 / 84 / 109 ms — **no stall**; hypothesis REJECTED | ✗ not needed |
 | 4 | splitting @codemirror to a lazy chunk shrinks boot eval | `syntax`/`source-view`/`cm` boundary + `:module-loader` (`c58d9d9`) | cold A/B + warm pool | eval unchanged (~645 ms), rendered −80 ms, bytes +170 KB; warm source 70→93 ms | ✅ (architecture; eval-neutral) |
-| … | | | | | |
+| 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike: `electron-mksnapshot@42.7.0` on the stripped bundle | 11 MB renderer bundle | mksnapshot SIGTRAPs (exit 133, V8 CHECK) — toolchain targets CJS, not the monolithic browser IIFE; code cache already gives the win | ✗ not viable (skip) |
