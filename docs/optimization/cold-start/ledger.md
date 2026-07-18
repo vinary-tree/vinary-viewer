@@ -265,6 +265,38 @@ snapshot's core win automatically. The snapshot's residual value would be only t
 login (before any code cache) — the narrowest slice, for which the fragile custom-blob integration is not worth
 it. Net: the cold-start program is complete via daemon + pool + code-split + the automatic code cache.
 
+## Phase 1 (corrected) — mathjax IS splittable, and it's the real cold-start win
+An earlier note called the mathjax/latex/org split "infeasible (shared sync pipeline)." **That was premature and
+wrong for mathjax.** The correct observation: mathjax **rendering** (`render-html-math`/`render-tex-blocks`, which
+drive the `mj-engine`) is called ONLY from `renderer.markdown/apply-posts` — the renderer-only DOM post-pass,
+**not** the shared `markdown-pipeline`. The pipeline (shared with `:cli`/`:tui`/`:test`) uses only the **pure**
+helpers (`strip-math-fence`, `tex-block-math?`). Yet requiring the whole `renderer.math` namespace for those two
+pure helpers dragged the entire 4.5 MB `@mathjax` engine into the boot module **and** the node bundles.
+
+**Change** (`a76a684`, same Lightning-Bug boundary as CodeMirror): `renderer.math` slimmed to the `@mathjax`-FREE
+pure helpers (shared, eager everywhere); the engine moved **verbatim** to a new renderer-only
+`renderer.math-engine` (the fragile synchronous-font-loading core preserved byte-for-byte); a `renderer.mathjax-lazy`
+`shadow.lazy` facade; `apply-posts` routes through it (gated on `DOMParser` + a math-marker `re-find`, so no-math
+renders and `:node-test` never load it); `core/init`'s synchronous `install-stylesheet!` moved to the idle
+preload (pool windows warm it). `:node-test` requires `math-engine` directly (eager) since shadow.lazy is
+browser-only.
+
+**Measured (same profiler, cold, `--runs 5`):**
+
+| metric | pre (CodeMirror-split HEAD) | post mathjax-split | Δ |
+|---|---:|---:|---:|
+| `main.js` boot bundle | 11,873,481 B | **7,320,089 B** | **−4.3 MB (−38%)** |
+| boot **eval** (entry→eval) | ~645 ms | **~520 ms** | **−125 ms** |
+| `math-engine.js` lazy chunk | — | 4,557,736 B | (pool-preloaded) |
+| `:cli`/`:tui` `mathjax_modern_font` refs | 135 | **0** | mathjax gone from node builds |
+| warm-pool render (md/py/org/tex) | 100/70/84/109 ms | 134/72/79/202 ms | math still renders (lazy chunk) |
+
+**Finding.** Unlike CodeMirror alone (eval-neutral, offset by the module-loader overhead), the mathjax split —
+now that the module-loader is already paid — **materially shrinks the boot bundle (−4.3 MB) and cuts cold eval
+~125 ms**, because the 4.5 MB engine + its 26 synchronously-loaded font chunks no longer eval at boot. It also
+strips mathjax from the terminal (`:cli`/`:tui`) bundles entirely. 317 tests green (math tests exercise the real
+engine via the direct require). **Kept.** This is the fine-grained split the "infeasible" note wrongly dismissed.
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
@@ -273,4 +305,5 @@ it. Net: the cold-start program is complete via daemon + pool + code-split + the
 | 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
 | 3 | first source/org/latex render in a warm window stalls (warm-on-idle needed) | — (measured before implementing) | py/org/tex (pool hit) | claim→rendered 70 / 84 / 109 ms — **no stall**; hypothesis REJECTED | ✗ not needed |
 | 4 | splitting @codemirror to a lazy chunk shrinks boot eval | `syntax`/`source-view`/`cm` boundary + `:module-loader` (`c58d9d9`) | cold A/B + warm pool | eval unchanged (~645 ms), rendered −80 ms, bytes +170 KB; warm source 70→93 ms | ✅ (architecture; eval-neutral) |
-| 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike: `electron-mksnapshot@42.7.0` on the stripped bundle | 11 MB renderer bundle | mksnapshot SIGTRAPs (exit 133, V8 CHECK) — toolchain targets CJS, not the monolithic browser IIFE; code cache already gives the win | ✗ not viable (skip) |
+| 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike: `electron-mksnapshot@42.7.0` on the stripped 11 MB bundle | 11 MB renderer bundle | mksnapshot SIGTRAPs (exit 133) on the monolith — retried post-split (below) | ⟳ retry on smaller bundle |
+| 6 | mathjax renders renderer-only, so its 4.5 MB engine can leave boot | `math`/`math-engine`/`mathjax-lazy` split (`a76a684`) | cold A/B + warm pool | **boot 11.87→7.32 MB (−4.3 MB), cold eval 645→520 ms (−125 ms)**, mathjax gone from cli/tui | ✅ big win |
