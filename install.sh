@@ -99,10 +99,15 @@ RestartSec=2
 WantedBy=graphical-session.target
 EOF
   systemctl --user daemon-reload 2>/dev/null || true
-  if systemctl --user enable --now vinary-viewer.service 2>/dev/null; then
-    echo "    systemd: vinary-viewer.service enabled (warm daemon at login)"
+  # Enable at login AND (re)start now onto the freshly-built dist/. `restart` (not `enable --now`) is the key:
+  # `--now` is a no-op on an ALREADY-running daemon, so a re-install would otherwise leave the OLD dist/main
+  # loaded (and its warm pool windows on the OLD renderer) until the next manual restart. `restart` starts the
+  # daemon if it's stopped and reloads it if it's running — so a re-install always ends on the new build.
+  if systemctl --user enable vinary-viewer.service 2>/dev/null \
+     && systemctl --user restart vinary-viewer.service 2>/dev/null; then
+    echo "    systemd: vinary-viewer.service enabled + (re)started on the new build"
   else
-    echo "    systemd: unit installed; enable with 'systemctl --user enable --now vinary-viewer.service'"
+    echo "    systemd: unit installed; start with 'systemctl --user enable --now vinary-viewer.service'"
   fi
 else
   echo "    (no systemd — the daemon starts on demand via 'vv'; no service needed)"
