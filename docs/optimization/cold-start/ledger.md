@@ -204,6 +204,38 @@ whole editor behind an imperative-handle boundary and ship it as an ESM module w
 `:keep-as-import #{"@codemirror/*"}`, so the host never statically references CodeMirror internals and the chunk
 loads on demand. Surfaced to the user rather than implemented, given the nil warm-path benefit.
 
+## Phase 1 (revisited) — CodeMirror IS splittable via the Lightning Bug boundary
+The "go further" decision + the Lightning Bug reference (`../lightning-bug/`) reopened the CodeMirror split. The
+earlier "Wall 1" (sync source-view handlers) is real but surmountable: the handlers only ever run on an EXISTING
+`EditorView`, so the chunk is always loaded by the time they fire. The clean boundary (commit `c58d9d9`):
+- **`renderer.syntax`** → now `@codemirror`-FREE tree-sitter core + HTML highlighting (still shared by `:cli`);
+  the Decoration builders were refactored to emit `@codemirror`-free **spans** (`highlight-spans`), byte-identical
+  HTML output.
+- **`renderer.source-view`** (NEW, lazy) → the `@codemirror` `EditorView` half (spans→Decorations + the editor).
+- **`renderer.cm`** (NEW) → a `shadow.lazy` facade (`ensure!`/`ready?` + guarded/buffered pass-throughs); the
+  source-view render path awaits `ensure!`, and `core` idle-preloads the chunk so pool windows stay warm.
+- `shadow-cljs.edn` `:renderer` gained `:module-loader true` + a `:source-view` module.
+
+**Measured — same-session cold A/B** (`profile-cold-start.mjs --runs 5`, worktree at `bc08913` vs HEAD `c58d9d9`):
+
+| metric | pre-split | post-split | Δ |
+|---|---:|---:|---:|
+| boot **eval** (entry→eval) | ~645 ms | ~645 ms | **0** |
+| entry→**rendered** (median) | ~1180 ms | ~1100 ms | **−80 ms** |
+| `main.js` bytes | 11,703,155 | 11,873,481 | +170 KB |
+| separate chunk | — | `source-view.js` 259 KB | — |
+
+**Finding.** The split does NOT shrink boot bytes — shadow's `:module-loader` pulls in ~430 KB of
+`goog.module`/`goog.net` infra that exceeds the 259 KB `@codemirror` chunk it defers (the browser bundle uses
+only `@codemirror/state` + `/view`, ~259 KB — not the ~1 MB `node_modules` source). BUT boot **eval time is
+unchanged** (V8 lazy-compiles the added `goog.module` classes — bytes are a misleading proxy), and
+entry→`rendered` is ~80 ms faster because `@codemirror`'s top-level execution is deferred out of the boot path.
+So the split is **cold-start-neutral-to-slightly-positive with zero eval penalty**, and it delivers real
+architecture: `:cli` no longer pulls `@codemirror`, markdown-only windows never instantiate the editor, the
+chunk is preloadable by the pool, and the `:module-loader` infra is now in place to amortize future chunks.
+317 tests green; all four targets compile; all 6 formats render cold (incl. `code.py` source via the chunk).
+**Kept** (`c58d9d9`). The actual boot-eval lever is the V8 snapshot (next).
+
 ## Experiments
 | # | hypothesis | change | fixture | before → after (perceived, entry/client→rendered) | kept? |
 |---|---|---|---|---|---|
@@ -211,4 +243,5 @@ loads on demand. Surfaced to the user rather than implemented, given the nil war
 | 1 | a resident warm process halves per-open cost | single-instance + Unix-socket daemon (Phase 2) | math.md (warm 2nd+) | ~1450 → **~729 ms** (~1275 → ~697 ms window→rendered) | ✅ |
 | 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
 | 3 | first source/org/latex render in a warm window stalls (warm-on-idle needed) | — (measured before implementing) | py/org/tex (pool hit) | claim→rendered 70 / 84 / 109 ms — **no stall**; hypothesis REJECTED | ✗ not needed |
+| 4 | splitting @codemirror to a lazy chunk shrinks boot eval | `syntax`/`source-view`/`cm` boundary + `:module-loader` (`c58d9d9`) | cold A/B + warm pool | eval unchanged (~645 ms), rendered −80 ms, bytes +170 KB; warm source 70→93 ms | ✅ (architecture; eval-neutral) |
 | … | | | | | |
