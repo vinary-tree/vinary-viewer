@@ -20,10 +20,11 @@ dist/
 resources/public/js/cljs-runtime/
 resources/public/js/main.js
 resources/public/js/manifest.edn
-# the lazily-loaded @codemirror source-view chunk + the @mathjax math-engine chunk + their module-loader
-# manifest (renderer code-splits)
+# the lazily-loaded renderer code-split chunks (@codemirror source-view, @mathjax math-engine,
+# unified-latex+uniorg heavy-engine) + their module-loader manifest
 resources/public/js/source-view.js
 resources/public/js/math-engine.js
+resources/public/js/heavy-engine.js
 resources/public/js/module-loader.edn
 resources/public/js/module-loader.json
 
