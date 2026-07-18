@@ -251,11 +251,23 @@ un-splittable mathjax/latex/org eval). Spiked end-to-end with the version-matche
 
 **Root cause.** The Electron snapshot toolchain (`electron-link` + mksnapshot) is built for the **Node
 main-process world**: many small **CommonJS** modules, each `electron-link`-wrapped for deferred init and kept
-under V8's per-snapshot size/complexity CHECK (VS Code's model). shadow-cljs emits **one monolithic browser
-IIFE** (goog modules, `.call(this)`), which (a) exceeds that CHECK as a single unit and (b) doesn't fit
-`electron-link`'s CJS-module deferral model. Making shadow output electron-link-compatible CJS would abandon its
-bundling model — out of scope and non-idiomatic. **Skipped** per the plan's "spike first, else skip"; the
-`electron-mksnapshot` devDep was reverted.
+under V8's per-snapshot CHECK (VS Code's model). shadow-cljs emits **one monolithic browser IIFE** (goog modules,
+`.call(this)`), which doesn't fit that model.
+
+**Exhaustive retry (not a single-attempt skip).** Two further paths were tried and both fail for fundamental,
+documented reasons:
+- **Smaller bundle** — after the mathjax split cut boot from 11 MB to **6.94 MB**, mksnapshot **still SIGTRAPs
+  (exit 133)**. So it is **not size-gated** in the 7–11 MB range: the shadow output contains a construct V8's
+  context-snapshot serializer rejects outright (a bare release-CHECK, no diagnostic — not a DOM/`self`
+  reference, which would print).
+- **electron-link** (the deferral tool that makes large trees snapshot-able) — its transformer **cannot even
+  parse** the shadow bundle (`Unable to transform … Unexpected token (63:86)`), and architecturally it defers by
+  traversing the CJS **require graph**, which a self-contained IIFE (no `require()`s) does not have. So it has
+  nothing to split even if it parsed.
+
+The only remaining route — make shadow emit electron-link-compatible CJS modules (or switch to `:target :esm`) —
+abandons shadow-cljs's bundling model and is out of scope. **Skipped** per the plan's "spike first, else skip",
+now on *exhausted* evidence; both `electron-mksnapshot` and `electron-link` devDeps were reverted.
 
 **Why the loss is small — Chromium's V8 disk code cache already delivers most of the benefit.** A snapshot's
 point is to skip parse+compile of the bundle. Chromium **already** disk-caches compiled bytecode per script:
@@ -305,5 +317,5 @@ engine via the direct require). **Kept.** This is the fine-grained split the "in
 | 2 | a warm window pool makes opens near-instant | pre-booted hidden window pool + claim/refill (Phase 3a) | math.md (pool hit) | ~729 → **~127 ms** (claim→rendered ~101 ms) — ~11× vs cold | ✅ |
 | 3 | first source/org/latex render in a warm window stalls (warm-on-idle needed) | — (measured before implementing) | py/org/tex (pool hit) | claim→rendered 70 / 84 / 109 ms — **no stall**; hypothesis REJECTED | ✗ not needed |
 | 4 | splitting @codemirror to a lazy chunk shrinks boot eval | `syntax`/`source-view`/`cm` boundary + `:module-loader` (`c58d9d9`) | cold A/B + warm pool | eval unchanged (~645 ms), rendered −80 ms, bytes +170 KB; warm source 70→93 ms | ✅ (architecture; eval-neutral) |
-| 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike: `electron-mksnapshot@42.7.0` on the stripped 11 MB bundle | 11 MB renderer bundle | mksnapshot SIGTRAPs (exit 133) on the monolith — retried post-split (below) | ⟳ retry on smaller bundle |
+| 5 | a V8 snapshot pre-compiles the boot bundle → faster eval | spike + exhaustive retry: mksnapshot on 11 MB AND 6.94 MB, + electron-link | renderer bundle | SIGTRAPs at BOTH sizes (not size-gated); electron-link can't parse the shadow IIFE | ✗ not viable (exhausted) |
 | 6 | mathjax renders renderer-only, so its 4.5 MB engine can leave boot | `math`/`math-engine`/`mathjax-lazy` split (`a76a684`) | cold A/B + warm pool | **boot 11.87→7.32 MB (−4.3 MB), cold eval 645→520 ms (−125 ms)**, mathjax gone from cli/tui | ✅ big win |
