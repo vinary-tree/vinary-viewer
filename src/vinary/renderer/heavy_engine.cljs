@@ -15,13 +15,21 @@
    the Org split, uniorg-parse*/uniorg-rehype*), so loading this chunk (or requiring it under Node) wires the
    pipeline. Idempotent (reset! is)."
   (:require [vinary.renderer.heavy-registry :as registry]
-            [vinary.renderer.latex :as latex]))
+            [vinary.renderer.latex :as latex]
+            ;; the two uniorg unified plugins — the org-pipeline's ONLY uniorg dependency. Reached here (not in
+            ;; markdown-pipeline) so uniorg code-splits into this chunk with unified-latex; install! hands the
+            ;; plugins to the registry the pipeline reads.
+            ["uniorg-parse$default"  :as uniorg-parse]
+            ["uniorg-rehype$default" :as uniorg-rehype]))
 
 (defn install!
-  "Wire the heavy engine(s) into the shared pipeline's runtime registry. Idempotent. Called by the heavy-lazy
-   facade after the chunk loads (renderer) and by heavy-node at startup (node)."
+  "Wire the heavy engines into the shared pipeline's runtime registry: renderer.latex/latex->html and the two
+   uniorg plugins. Idempotent. Called by the heavy-lazy facade after the chunk loads (renderer) and by heavy-node
+   at startup (node)."
   []
   (reset! registry/latex->html-fn latex/latex->html)
+  (reset! registry/uniorg-parse*  uniorg-parse)
+  (reset! registry/uniorg-rehype* uniorg-rehype)
   nil)
 
 ;; The renderer.heavy-lazy facade loads this module lazily and calls install! through this export (string key so

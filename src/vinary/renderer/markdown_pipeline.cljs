@@ -19,14 +19,13 @@
             ["rehype-highlight$default" :as rehype-highlight]
             ["rehype-raw$default"       :as rehype-raw]
             ["rehype-sanitize$default"  :as rehype-sanitize]
-            ["uniorg-parse$default"     :as uniorg-parse]
-            ["uniorg-rehype$default"    :as uniorg-rehype]
             [clojure.string :as str]
             [vinary.ir.backend.sanitize :as sanitize]
-            ;; unified-latex is reached through the runtime registry (renderer.heavy-registry), NOT a static
-            ;; require, so it code-splits out of the renderer boot bundle into the :heavy-engine chunk while the
-            ;; node builds populate it eagerly (heavy-node/install!). The org-handler arms below call
-            ;; registry/latex->html (populated by heavy-engine/install!) instead of importing renderer.latex.
+            ;; unified-latex AND uniorg are reached through the runtime registry (renderer.heavy-registry), NOT
+            ;; static requires, so they code-split out of the renderer boot bundle into the :heavy-engine chunk
+            ;; while the node builds populate the registry eagerly (heavy-node/install!). The org-handler arms call
+            ;; registry/latex->html and org-pipeline installs the two registry/uniorg-plugins instead of importing
+            ;; renderer.latex / uniorg-parse / uniorg-rehype.
             [vinary.renderer.heavy-registry :as registry]
             [vinary.renderer.media :as media]
             [vinary.renderer.math :as math]))
@@ -692,7 +691,12 @@
   [metadata base-dir cache-token]
   (let [front-matter (atom {})
         preamble     (atom [])    ; per-call, like front-matter: #+LATEX_HEADER lines for the LaTeX macro expander
-        todo-seq     (atom {})]   ; per-call: a document's #+TODO:/#+SEQ_TODO: keyword→state sequence
+        todo-seq     (atom {})    ; per-call: a document's #+TODO:/#+SEQ_TODO: keyword→state sequence
+        ;; the two uniorg plugins from the runtime registry (populated by heavy-engine/install!) — the ONLY uniorg
+        ;; dependency; everything downstream (handlers/front-matter/footnotes/normalizations) is pipeline-local.
+        ;; The render entry points await heavy-lazy/ensure! (renderer) or heavy-node ran install! (node) first, so
+        ;; this deref is always past a loaded chunk; uniorg-plugins throws a clear error otherwise.
+        [uniorg-parse uniorg-rehype] (registry/uniorg-plugins)]
     (-> (unified)
         ;; trackPosition → orgast nodes carry source positions; the patched uniorg-rehype `h()` copies them onto
         ;; the hast elements (patches/uniorg-rehype+2.2.0.patch), so the shared source-positions plugin stamps

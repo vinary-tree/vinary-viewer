@@ -42,3 +42,16 @@
      (f source opts)
      (throw (ex-info "LaTeX renderer not loaded — heavy-engine/install! has not run (await heavy-lazy/ensure! in the renderer, or call heavy-node/install! at node startup)"
                      {:engine :unified-latex})))))
+
+(defn uniorg-plugins
+  "The two uniorg unified plugins `[uniorg-parse uniorg-rehype]` the org-pipeline installs (its ONLY unified-latex/
+   uniorg dependency — the handlers/front-matter/footnotes/normalizations stay in the pipeline as plain options).
+   Throws a clear ex-info if the Org engine chunk has not been loaded (install! not yet run) — the render entry
+   points await heavy-lazy/ensure! (renderer) or heavy-node/install! runs at startup (node) before any org path
+   executes, so a throw here is a wiring bug, never a user-facing state."
+  []
+  (let [parse @uniorg-parse* rehype @uniorg-rehype*]
+    (if (and parse rehype)
+      [parse rehype]
+      (throw (ex-info "Org renderer (uniorg) not loaded — heavy-engine/install! has not run (await heavy-lazy/ensure! in the renderer, or call heavy-node/install! at node startup)"
+                      {:engine :uniorg})))))
