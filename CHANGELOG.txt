@@ -94,6 +94,18 @@ Added
       Markdown and Org too.
 
 Changed
+    - The installer (install.sh) no longer aborts when an optional tree-sitter grammar
+      cannot be downloaded or built: the failing grammar is skipped and the install
+      finishes, then the installer prints exactly which grammars were skipped and how to
+      enable them. The Rholang grammar -- whose WASM ships in the private GitHub Packages
+      npm package @f1r3fly-io/tree-sitter-rholang-js-with-comments -- is now an
+      optionalDependency, so an unconfigured ~/.npmrc / missing GitHub PAT only warns
+      instead of failing npm install (with an --omit=optional retry as a fallback); the
+      MeTTa grammar (built from the sibling ../MeTTa-Compiler checkout) is likewise
+      skippable. Tolerance is opt-in via a new `grammars:sync --allow-failures` flag and
+      is confined to install.sh; the release:cli / compile:cli / npm test build paths stay
+      strict (a broken grammar still fails them). See
+      docs/usage/02-installation-and-build.md § 1.1.
     - Diagrams and inline Mermaid are now sized BEFORE the HTML is inserted into the
       DOM (in the shared apply-posts pass), so figures render at their final size with
       no post-insert re-scale (no "scaling effect") and no re-scale on resize /

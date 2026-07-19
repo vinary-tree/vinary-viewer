@@ -88,6 +88,13 @@ vv --help
 `vinary-viewer`/`vv` launcher into `~/.local/bin` by default. Override the launcher directory with
 `BIN=/path/to/bin ./install.sh`. Remove the launcher with `./uninstall.sh`.
 
+**Optional grammars (Rholang / MeTTa).** Nearly all syntax-highlighting grammars are fetched and built
+automatically. Two need extra resources: **Rholang** ships in a private GitHub Packages npm package (needs a
+GitHub Personal Access Token in `~/.npmrc`) and **MeTTa** builds from a sibling `../MeTTa-Compiler` checkout.
+If either is unavailable, `./install.sh` **skips it and finishes anyway** — the install never fails on a
+missing grammar — and prints the exact steps to enable it, so you can add the token / checkout and re-run.
+See [Installation and build → Optional grammars](docs/usage/02-installation-and-build.md#11-optional-grammars-rholang-and-metta).
+
 For development without installing launchers:
 
 ```bash

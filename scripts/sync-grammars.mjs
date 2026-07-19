@@ -26,10 +26,16 @@ const only = new Set((process.argv.find(arg => arg.startsWith('--only=')) || '')
 //                    surfaced; in quiet mode the captured child stderr is appended to the error message.)
 //   --skip-existing  leave already-built grammars (grammar.wasm + highlights.scm both present) untouched: no
 //                    network fetch, no wasm rebuild, no source.json re-pin. Makes re-installs fast + idempotent.
-// Also settable via GRAMMARS_VERBOSE=1 / GRAMMARS_SKIP_EXISTING=1.
+//   --allow-failures do NOT exit non-zero when some grammars fail to download/build. The per-grammar failures
+//                    are still surfaced (and listed at the end), but the run exits 0 so a tolerant caller —
+//                    install.sh — can skip the unavailable grammar(s) and finish the install instead of
+//                    aborting. OFF by default: build/CI (release:cli, compile:cli, npm test) stay strict and
+//                    still exit 1 on a broken grammar, so real regressions are caught.
+// Also settable via GRAMMARS_VERBOSE=1 / GRAMMARS_SKIP_EXISTING=1 / GRAMMARS_ALLOW_FAILURES=1.
 const cliFlags = new Set(process.argv.slice(2).filter(arg => arg.startsWith('--') && !arg.startsWith('--only=')));
 const VERBOSE = cliFlags.has('--verbose') || process.env.GRAMMARS_VERBOSE === '1';
 const SKIP_EXISTING = cliFlags.has('--skip-existing') || process.env.GRAMMARS_SKIP_EXISTING === '1';
+const ALLOW_FAILURES = cliFlags.has('--allow-failures') || process.env.GRAMMARS_ALLOW_FAILURES === '1';
 
 const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
 const entries = (only.size ? lock.entries.filter(entry => only.has(entry.id)) : lock.entries)
@@ -311,9 +317,26 @@ for (const entry of entries) {
 
 const finalCatalog = only.size ? mergeCatalog(readExistingCatalog(), catalog) : catalog;
 fs.writeFileSync(catalogPath, catalogEdn(finalCatalog));
-console.log(`\nwrote ${path.relative(root, catalogPath)} (${finalCatalog.length} grammar${finalCatalog.length === 1 ? '' : 's'}; ${built} built, ${cached} cached, ${failures.length} failed)`);
+
+// Machine-readable outcome sidecar, written every run so a tolerant caller (install.sh, with --allow-failures)
+// can report exactly which grammars were skipped — and tailor its remediation (e.g. the GitHub-PAT setup for
+// the private `rholang` package, or the ../MeTTa-Compiler checkout for `metta`) — without parsing this stdout.
+// Lives under the gitignored .cache/, so it never churns the tracked tree.
+ensureDir(cacheRoot);
+fs.writeFileSync(
+  path.join(cacheRoot, 'last-sync.json'),
+  `${JSON.stringify({
+    built,
+    cached,
+    failed: failures.map(failure => ({ id: failure.id, message: String(failure.error && failure.error.message || failure.error) }))
+  }, null, 2)}\n`
+);
+
+const failLabel = ALLOW_FAILURES ? 'skipped' : 'failed';
+console.log(`\nwrote ${path.relative(root, catalogPath)} (${finalCatalog.length} grammar${finalCatalog.length === 1 ? '' : 's'}; ${built} built, ${cached} cached, ${failures.length} ${failLabel})`);
 if (failures.length) {
-  console.error('\nfailed grammars:');
+  console.error(ALLOW_FAILURES ? '\nskipped grammars (continuing — these file types just miss syntax highlighting):' : '\nfailed grammars:');
   for (const failure of failures) console.error(`- ${failure.id}: ${failure.error.message || failure.error}`);
-  process.exit(1);
+  // Strict by default so build/CI catch a genuinely broken grammar; --allow-failures downgrades to exit 0.
+  if (!ALLOW_FAILURES) process.exit(1);
 }

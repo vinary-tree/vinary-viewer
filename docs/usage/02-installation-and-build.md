@@ -20,8 +20,9 @@ It is idempotent and performs:
 
 | Phase | Behavior |
 |-------|----------|
-| Dependencies | Runs `npm install --no-fund --no-audit`. |
-| Build | Runs `npx shadow-cljs release main renderer` by default. Set `VV_BUILD=compile` to build debug artifacts. |
+| Dependencies | Runs `npm install --no-fund --no-audit`. On failure it retries once with `--omit=optional`, so a missing/unauthed **optional** grammar package (Rholang — see [§1.1](#11-optional-grammars-rholang-and-metta)) can't abort the core install. |
+| Grammars + graphics | Syncs the bundled tree-sitter grammars (`grammars:sync --skip-existing --allow-failures`) and the resvg image WASM. A grammar that can't be downloaded/built is **skipped, not fatal**; the installer then reports which were skipped and how to enable them. |
+| Build | Runs `npx shadow-cljs release main renderer` by default (then `… cli tui`). Set `VV_BUILD=compile` to build debug artifacts. |
 | Launchers | Writes `vinary-viewer` and symlinks `vv` into `${BIN:-$HOME/.local/bin}`. |
 | Legacy notice | Detects signs of the old v0.1.0 vmd-patching install and prints manual cleanup guidance. |
 
@@ -39,6 +40,47 @@ Uninstall launchers only:
 
 The installer does not delete the repository and does not delete
 `~/.config/vinary-viewer/`.
+
+### 1.1 Optional grammars: Rholang and MeTTa
+
+Most of the bundled syntax-highlighting grammars are fetched from public git
+repositories and built to WASM automatically. Two are **optional** because they
+depend on resources that aren't present on a plain clone, and `./install.sh` is
+deliberately tolerant of them — a fresh install never aborts because one of these
+could not be obtained:
+
+| Grammar | Comes from | Missing when | Enable it by |
+|---------|-----------|-------------|--------------|
+| **Rholang** (`.rho`) | the private npm package `@f1r3fly-io/tree-sitter-rholang-js-with-comments`, served from the **GitHub Packages** registry | `~/.npmrc` lacks the `@f1r3fly-io` scoped registry and a valid GitHub Personal Access Token | configuring `~/.npmrc` (below), then re-running `./install.sh` |
+| **MeTTa** (`.metta`) | the sibling checkout `../MeTTa-Compiler/tree-sitter-metta`, built locally | that sibling repository isn't checked out next to `vinary-viewer` | `git clone https://github.com/F1R3FLY-io/MeTTa-Compiler ../MeTTa-Compiler`, then re-running `./install.sh` |
+
+When a grammar is skipped, the app still runs — those file types simply render
+without syntax highlighting — and the installer prints exactly which grammars were
+skipped together with these steps. Re-running `./install.sh` retries only the
+missing grammars; `--skip-existing` leaves the already-built ones untouched.
+
+**Enabling Rholang.** The package is an `optionalDependencies` entry, so `npm
+install` only warns (rather than failing) when it cannot be fetched. To install it,
+add a GitHub Personal Access Token:
+
+1. Create a **classic** PAT with the `read:packages` scope:
+   <https://github.com/settings/tokens/new?scopes=read:packages>
+2. Add these two lines to `~/.npmrc`:
+
+   ```
+   @f1r3fly-io:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT
+   ```
+
+3. Re-run `./install.sh`.
+
+**Under the hood.** The tolerance is opt-in and confined to `./install.sh`, which
+passes `--allow-failures` to `grammars:sync`. The build/CI scripts (`release:cli`,
+`compile:cli`, `npm test`) run `grammars:sync` **without** that flag, so they still
+fail loudly on a genuinely broken grammar. `sync-grammars.mjs` records each run's
+outcome in the gitignored `.cache/tree-sitter-grammars/last-sync.json`
+(`{ built, cached, failed: [{ id, message }] }`), which `./install.sh` reads to
+report the skipped grammars.
 
 ---
 
@@ -113,7 +155,7 @@ the `:sync` variants automatically; run them directly for CI or to refresh asset
 |---------|------|
 | `npm run assets:sync` / `assets:check` | Stage / verify the self-hosted fonts and Font Awesome icons. |
 | `npm run pdfjs:sync` / `pdfjs:check` | Stage / verify the pdf.js distribution + worker. |
-| `npm run grammars:sync` / `grammars:check` | Build / verify the bundled tree-sitter grammar WASM. |
+| `npm run grammars:sync` / `grammars:check` | Build / verify the bundled tree-sitter grammar WASM. Strict by default (a failed grammar exits non-zero); pass `--skip-existing` to skip already-built grammars and `--allow-failures` to skip (rather than abort on) grammars that can't be downloaded/built — the installer uses both (see [§1.1](#11-optional-grammars-rholang-and-metta)). |
 | `npm run graphics:sync` | Stage the resvg image WASM used by terminal graphics. |
 
 ### 3.4 Tests and lint

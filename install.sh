@@ -19,7 +19,16 @@ echo "==> vinary-viewer install (repo: $REPO)"
 command -v npx >/dev/null 2>&1 || { echo "error: node/npx not found on PATH" >&2; exit 1; }
 
 echo "==> npm install"
-( cd "$REPO" && npm install --no-fund --no-audit )
+# The Rholang grammar ships in the private @f1r3fly-io/tree-sitter-rholang-js-with-comments package (served from
+# the GitHub Packages npm registry — needs ~/.npmrc auth + a GitHub PAT). It is an OPTIONAL dependency, so a
+# missing/misconfigured token normally just warns and npm continues. Should a specific registry/auth error (e.g.
+# an invalid-PAT 401) still be fatal, retry ONCE without optional deps so the core install proceeds; the skipped
+# Rholang grammar (and how to enable it) is reported after the grammar sync below.
+if ! ( cd "$REPO" && npm install --no-fund --no-audit ); then
+  echo "    (warn: npm install failed — often the private @f1r3fly-io Rholang grammar needs a GitHub PAT;"
+  echo "     retrying without optional dependencies so the core install can proceed…)"
+  ( cd "$REPO" && npm install --no-fund --no-audit --omit=optional )
+fi
 
 echo "==> syncing terminal-renderer assets (tree-sitter grammars + graphics wasm)"
 # grammars/graphics wasm are runtime assets shared by the GUI source-preview and the cli/tui renderers, so
@@ -27,7 +36,44 @@ echo "==> syncing terminal-renderer assets (tree-sitter grammars + graphics wasm
 # prepend grammars:sync + graphics:sync, which is why a plain install re-fetched every grammar twice).
 # --skip-existing leaves already-built grammars untouched (fast, idempotent re-installs; no source.json churn);
 # the sync is quiet by default (pass --verbose to grammars:sync to see the per-repo git/tree-sitter output).
-( cd "$REPO" && npm run grammars:sync -- --skip-existing && npm run graphics:sync )
+# --allow-failures: a grammar that can't be downloaded/built (a transient network hiccup, or the auth/local-gated
+# rholang/metta) is SKIPPED rather than aborting the install — skipped grammars are reported just below. Run
+# graphics:sync on its own line (not chained with &&) so the graphics wasm still syncs even if a grammar failed.
+( cd "$REPO" && npm run grammars:sync -- --skip-existing --allow-failures )
+( cd "$REPO" && npm run graphics:sync )
+
+# Report skipped grammars and — for the auth/local-gated ones — exactly how to enable them. sync-grammars.mjs
+# writes the outcome to .cache/tree-sitter-grammars/last-sync.json (gitignored); read the failed ids from it.
+SYNC_REPORT="$REPO/.cache/tree-sitter-grammars/last-sync.json"
+FAILED_IDS="$(node -e 'const fs=require("fs");try{const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write((s.failed||[]).map(f=>f.id).join(" "))}catch(_){}' "$SYNC_REPORT" 2>/dev/null || true)"
+if [ -n "$FAILED_IDS" ]; then
+  echo ""
+  echo "==> NOTE: some tree-sitter grammars were skipped (the app still works without them — those file"
+  echo "    types just won't get syntax highlighting):  $FAILED_IDS"
+  echo "    Re-run ./install.sh to retry them (already-built grammars are left untouched)."
+  case " $FAILED_IDS " in
+    *" rholang "*)
+      echo ""
+      echo "    • rholang — its grammar ships in the PRIVATE npm package"
+      echo "        @f1r3fly-io/tree-sitter-rholang-js-with-comments  (GitHub Packages registry),"
+      echo "      which needs a GitHub Personal Access Token. To enable it:"
+      echo "        1. Create a classic PAT with the 'read:packages' scope:"
+      echo "             https://github.com/settings/tokens/new?scopes=read:packages"
+      echo "        2. Add these two lines to ~/.npmrc:"
+      echo "             @f1r3fly-io:registry=https://npm.pkg.github.com"
+      echo "             //npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT"
+      echo "        3. Re-run ./install.sh"
+      ;;
+  esac
+  case " $FAILED_IDS " in
+    *" metta "*)
+      echo ""
+      echo "    • metta — its grammar is built from the sibling checkout ../MeTTa-Compiler. To enable it:"
+      echo "        git clone https://github.com/F1R3FLY-io/MeTTa-Compiler ../MeTTa-Compiler"
+      echo "      (so ../MeTTa-Compiler/tree-sitter-metta exists), then re-run ./install.sh"
+      ;;
+  esac
+fi
 
 echo "==> building GUI ($VV_BUILD)"
 ( cd "$REPO" && npx shadow-cljs "$VV_BUILD" main renderer )
