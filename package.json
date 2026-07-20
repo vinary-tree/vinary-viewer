@@ -45,6 +45,7 @@
     "test:cli": "npm run compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js",
     "test:tui": "npm run compile:tui && node test/tui-smoke.js",
     "test:electron": "electron --no-sandbox test/electron-smoke.js",
+    "test:tree-e2e": "shadow-cljs compile main renderer && xvfb-run -a electron --no-sandbox test/tree-e2e.js",
     "test:electron:release": "npm run release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js",
     "test:extensions": "electron --no-sandbox test/extensions-smoke.js",
     "test:extensions:sandbox": "electron test/extensions-smoke.js"

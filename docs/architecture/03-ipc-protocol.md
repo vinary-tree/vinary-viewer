@@ -144,7 +144,7 @@ Every `on*` API returns an unsubscribe function.
 |---------|-----------------|---------|----------------|
 | `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?}` | `[:content/received payload]` |
 | `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
-| `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received payload]` |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?}` | `[:tree/received payload]` |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated payload]` |

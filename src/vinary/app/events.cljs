@@ -12,6 +12,7 @@
             [vinary.app.facet :as facet]
             [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
+            [vinary.app.projects :as projects]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
             [vinary.renderer.pdf-layout :as pdf-layout]
@@ -670,17 +671,21 @@
      {:db (-> db (assoc-in [:ui :theme] theme) (assoc-in [:ui :settings] settings))
       :fx [[:theme/apply theme] [:vv/save-settings (pr-str settings)]]})))
 
-;; multi-project file trees: accumulate one {:root :files} per git root (updated in place by root, so
-;; re-opening a file from a known project refreshes its tree without reordering the sidebar)
+;; multi-project file trees: accumulate one {:root :files} per project — a git root, or the containing
+;; directory of a file that belongs to no repository (:synthetic?). The merge rules (update in place;
+;; a covered synthetic root merges into its coverer rather than duplicating it) live in
+;; vinary.app.projects so they are testable without a DOM.
 (rf/reg-event-db
  :tree/received
- (fn [db [_ {:keys [root files]}]]
-   (update-in db [:ui :projects]
-              (fn [projects]
-                (let [projects (vec projects)
-                      idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))
-                      entry    {:root root :files (vec files)}]
-                  (if idx (assoc projects idx entry) (conj projects entry)))))))
+ (fn [db [_ entry]]
+   (update-in db [:ui :projects] projects/merge-project entry)))
+
+;; drop a project from the sidebar (project-header context menu). It returns if a file under it is
+;; opened again — send-tree! runs from main's open!, not from a watcher refresh.
+(rf/reg-event-db
+ :tree/remove-project
+ (fn [db [_ root]]
+   (update-in db [:ui :projects] projects/remove-project root)))
 
 (rf/reg-event-db
  :tree/filter

@@ -15,7 +15,8 @@ re-frame events/effects, DataScript, and views.
 4. Local file destinations emit `[:vv/open path]`.
 5. Preload sends `vv:open`.
 6. Main `service/open!` reads/classifies the path, sends `vv:content`, sends
-   `vv:tree` when a git root is available, and ensures the file is watched.
+   `vv:tree` — the file's git root, or its containing directory as a synthetic
+   root when it belongs to no repository — and ensures the file is watched.
 7. Renderer receives `vv:content` and dispatches `[:content/received payload]`.
 8. `:content/received` caches content in DataScript and starts Markdown render
    when needed.

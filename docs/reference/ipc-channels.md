@@ -131,7 +131,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 |---------|----------------------|---------|-----------------------|---------|
 | `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, dataUrl?, sourceable?, paged?, pdfSibling?, sourceSibling?}` | `[:content/received …]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first `:page`; a doc collocated with an exported PDF carries `:pdfSibling` (and a PDF its `:sourceSibling`). |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error …]` | Deliver read/render errors. |
-| `vv:tree` | `onTree(cb)` | `{root, files}` | `[:tree/received …]` | Deliver git file-tree data (one project per git root). |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?}` | `[:tree/received …]` | Deliver file-tree data (one project per root). `synthetic? true` marks a root inferred from a file's containing directory rather than found by git. |
 | `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. |
 | `vv:grammars` | `onGrammars(cb)` | EDN **text** `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
 | `vv:settings` | `onSettings(cb)` | EDN **text** | `[:settings/received …]` | Deliver persisted settings. |

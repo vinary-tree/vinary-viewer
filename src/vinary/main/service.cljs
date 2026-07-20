@@ -14,6 +14,7 @@
             [cljs.reader :as reader]
             [clojure.set :as set]
             [clojure.string :as str]
+            [vinary.main.dir-walk :as dir-walk]
             [vinary.main.file-kind :as file-kind]
             [vinary.main.service-util :as service-util]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
@@ -51,10 +52,6 @@
             files (when out (vec (remove str/blank? (str/split out #"\n"))))]
         {:root root :files (or files [])}))))
 
-(defn- send-tree! [^js wc file-path]
-  (when-let [t (repo-tree file-path)]
-    (.send wc "vv:tree" (clj->js t))))
-
 (defn- kind-of [^String path]
   (file-kind/kind-of grammars/source? path))
 
@@ -67,6 +64,14 @@
 
 (defn- directory? [path]
   (try (and (not (archive-uri? path)) (.isDirectory (.statSync fs path))) (catch :default _ false)))
+
+(defn- send-tree!
+  "Send the sidebar tree for a path: its git repository when it has one, else its containing directory as a
+   synthetic project root, so a file outside every repo still gets a Files tab. The fallback walk lives in
+   vinary.main.dir-walk, which is Electron-free and therefore node-testable."
+  [^js wc file-path]
+  (when-let [t (or (repo-tree file-path) (dir-walk/dir-tree file-path (directory? file-path)))]
+    (.send wc "vv:tree" (clj->js t))))
 
 (defn- entry->map
   "One directory child as plain data for the renderer's directory view. Symlinks are flagged and

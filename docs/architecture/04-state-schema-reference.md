@@ -74,7 +74,7 @@ Current default shape:
       :active-tab nil
       :next-tab-id 0
       :tab-drop nil                 ; {:over <tab-id> :after? bool} tab-drag drop indicator, or nil
-      :projects []
+      :projects []                  ; [{:root :files :synthetic?} …] one file tree per open project
       :menu nil
       :settings {}
       :recent {:trail {} :recent-files []}  ; persisted (recent.edn): dir→last-child trail + MRU
@@ -111,7 +111,7 @@ Important slices:
 | `[:ui :adblock]` | Ad-block prefs `{:enabled? :lists :last-updated}` (persisted in `extensions.edn`). |
 | `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
-| `[:ui :projects]` | Git-rooted file trees. |
+| `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. Merge rules live in `vinary.app.projects`. |
 | `[:ui :settings]` | Persisted settings loaded from `settings.edn`. |
 | `[:ui :keymaps]` | Persisted keymap registry loaded from `keybindings.edn`. |
 | `[:ui :input]` | Modal/chord resolver display state. |

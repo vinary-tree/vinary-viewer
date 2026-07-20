@@ -42,6 +42,15 @@
            :sep
            {:label "Copy directory path"  :event [:clipboard/copy path]}
            {:label "Copy directory name"  :event [:clipboard/copy (basename path)]}]
+    ;; a Files-tab project header — a directory, plus the one action only a root has: leaving the sidebar
+    :project [{:label "Open"                 :event [:doc/open path]}
+              {:label "Open in new tab"      :event [:doc/open-new path]}
+              {:label "Open in file manager" :event [:shell/open-path path]}
+              :sep
+              {:label "Copy directory path"  :event [:clipboard/copy path]}
+              {:label "Copy directory name"  :event [:clipboard/copy (basename path)]}
+              :sep
+              {:label "Remove from Files"    :event [:tree/remove-project path]}]
     :http [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
            {:label "Open in system browser" :event [:shell/open-external path]}

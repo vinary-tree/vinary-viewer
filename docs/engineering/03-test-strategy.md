@@ -105,7 +105,7 @@ framework. They fall into three groups by host.
 | Harness | Drives |
 |---------|--------|
 | [`content-service-smoke.js`](../../test/content-service-smoke.js) | `content_service.js` — the main-process file reader — against real archives (`tar-stream`, `zlib`, `yauzl`) with a hand-rolled `crc32`, proving archive listing/extraction and content classification. |
-| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The v0.2 sidebar file-tree fix at its seam: `repo-tree` (in `service.cljs`) lists with `git ls-files --cached --others --exclude-standard`, so a newly-created, uncommitted, non-ignored file **appears** while `.gitignore`'d clutter does not. It exercises the exact git command against a throwaway repo and asserts `service.cljs` still issues it. |
+| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The v0.2 sidebar file-tree fix at its seam: `repo-tree` (in `service.cljs`) lists with `git ls-files --cached --others --exclude-standard`, so a newly-created, uncommitted, non-ignored file **appears** while `.gitignore`'d clutter does not. It exercises the exact git command against a throwaway repo, asserts `service.cljs` still issues it, and asserts `send-tree!` still falls back to `dir-walk/dir-tree` when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)). |
 | [`ssh-config-smoke.js`](../../test/ssh-config-smoke.js) | Hermetic unit tests for `ssh_config.js` (pure, no fs/net): `parseSshUri` for `ssh://` / `sftp://` authority, port, user, and home-relative path handling ([ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)). |
 | [`ssh-transport-smoke.js`](../../test/ssh-transport-smoke.js) | `ssh_transport.js` end-to-end against the **hermetic in-process ssh2 SFTP fixture** (no network, no external host); also asserts ssh2 runs **pure-JS** (no native crypto addon) and that `AddKeysToAgent` adds a key to a throwaway ssh-agent. |
 
@@ -126,9 +126,41 @@ shadow-cljs compile test && node dist/test/test.js \
 ```
 
 The Electron smokes are separate scripts (`test:electron`, `test:electron:release`,
-`test:extensions`, `test:extensions:sandbox`) because they require a running
+`test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`) because they require a running
 Electron with a display — a proposed CI matrix runs them under Xvfb (see
 [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
+
+### 3.5 The one harness that runs the REAL main process
+
+`electron-smoke.js` and `scripts/screenshots.cjs` both **mock** the `vv:open` IPC seam — they inject
+content through `state.contentByPath` / `vv:open-files` — so main's real `open!` → `send-tree!` →
+`repo-tree` / `dir-walk` chain never executes in them. That left the sidebar's project-root logic
+verifiable only in pieces.
+
+[`tree-e2e.js`](../../test/tree-e2e.js) closes that gap. It `require`s the **real compiled main**
+(`dist/main/main.js`) from inside an Electron process — the only way it can be required, since it
+auto-invokes `vinary.main.core/main` on load — so the entire production chain runs:
+
+```
+__vvopen(path) → [:doc/open] → load-fx → vv:open → main open! → send-tree!
+  → repo-tree (git) OR dir-walk/dir-tree (synthetic) → vv:tree → [:tree/received]
+  → projects/merge-project → [:ui :projects] → ui.tree renders <details.vv-project>
+```
+
+It asserts against **both** `window.__vvdb()` (app-db verbatim) and the real sidebar DOM, and drives
+the project-header context menu with genuine `MouseEvent`s — covering the synthetic root, its walk
+exclusions, containment absorption, git-root coexistence, the directory-is-its-own-root rule, and
+**Remove from Files** end to end. Its fixture is a throwaway temp directory outside any repository,
+created and removed by the harness.
+
+```bash
+npm run test:tree-e2e     # shadow-cljs compile main renderer && xvfb-run -a electron … test/tree-e2e.js
+```
+
+> **Poll, never single-read.** Every UI assertion in this harness goes through a polling helper.
+> Reagent re-renders on an animation frame and the IPC round-trip is async, so reading the DOM once
+> immediately after an app-db assertion races the re-render — which is exactly how the
+> Remove-from-Files check first failed against a correct implementation.
 
 > **Note on `test/test-sidebar.js`.** This is the legacy v0.1.0 vmd-patch sidebar
 > harness. It is parse-checked by [`test/lint.js`](../../test/lint.js) but is not

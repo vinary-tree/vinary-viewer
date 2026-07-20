@@ -101,6 +101,13 @@ function main() {
     assert.ok(/\[\s*"ls-files"\s+"--cached"\s+"--others"\s+"--exclude-standard"\s*\]/.test(src),
       'service.cljs repo-tree must call git with --cached --others --exclude-standard');
 
+    // …and that a file in NO repo still gets a tree: send-tree! must fall back to the synthetic root.
+    // The fallback's own behavior is covered against real directories by the node :test build
+    // (test/vinary/main/dir_walk_test.cljs); what can only be checked here is that main still WIRES it,
+    // since repo-tree returning nil is silent — the sidebar would simply go missing again.
+    assert.ok(/\(or\s+\(repo-tree\s+file-path\)\s+\(dir-walk\/dir-tree\s+file-path/.test(src),
+      'service.cljs send-tree! must fall back to dir-walk/dir-tree when there is no repo');
+
     console.log('git file-tree smoke OK');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

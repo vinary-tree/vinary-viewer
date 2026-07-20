@@ -16,7 +16,8 @@
         :tabs []
         :active-tab nil
         :next-tab-id 0
-        :projects []                ; [{:root :files} …] — one git-rooted file tree per open project
+        :projects []                ; [{:root :files :synthetic?} …] — one file tree per open project: a
+                                    ; git root, or (:synthetic?) a directory adopted for a file in no repo
         ;; menu bar / dialogs / context menu (Phase 5)
         :ssh-prompt nil             ; a pending SSH auth-prompt request (non-secret) shown by the prompt modal
         :ssh-error nil              ; the last SSH connection error (for the dismissable toast)

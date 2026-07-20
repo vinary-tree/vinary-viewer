@@ -87,6 +87,7 @@ The next free number is **0030**.
 | [0027](0027-remote-files-over-ssh.md) | Opening remote files & directories over SSH (ssh2, virtual URIs, polling refresh) | Accepted |
 | [0028](0028-composable-rendering-features.md) | Composable rendering features (native deterministic recognizers) — explored, then reversed | Superseded |
 | [0029](0029-mature-parsers-shared-ir-features.md) | Mature parsers + a shared IR/feature layer (reverses 0028); Org gap-closing; backend parity gate; weighted PDF reflow; HTML facet | Accepted |
+| [0030](0030-fallback-project-roots.md) | Fallback project roots: a file in no git repository adopts its containing directory (bounded BFS walk, realpath'd root, containment-aware merge, Remove from Files) | Accepted |
 
 ---
 
@@ -139,6 +140,9 @@ The **later fifteen** (0013–0027) build capability on that core without distur
 - **0021** adds bidirectional "Go to source" / "Go to preview" jumps over the IR's per-node source positions.
 - **0027** opens **remote files over SSH** (`ssh://` / `sftp://`) as a virtual backend that reuses the entire
   pipeline — renderers, streaming, paging, refresh — main-side, with secrets never leaving the main process.
+- **0030** closes the last gap in the **Files tab**: a file belonging to no git repository adopts its
+  containing directory as a project root, so the sidebar works for scratch notes and standalone documents
+  exactly as it does inside a checkout.
 
 Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
 core, which is why they compose without conflict.

@@ -14,6 +14,23 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - A file that belongs to no git repository now gets a Files-tab tree: its containing
+      directory is adopted as a project root of its own (a directory opened directly is
+      its own root; a filesystem root is never adopted). Previously the sidebar read
+      "No files open" while a document was plainly open, or simply omitted the active
+      file. The directory is walked breadth-first and bounded (depth 6, 5000 entries) --
+      a repository is self-delimiting and self-filtering via --exclude-standard, an
+      arbitrary directory is neither -- skipping hidden and heavy directories
+      (node_modules, target, dist, build, out, __pycache__) while keeping hidden FILES,
+      and resolving symlinks without ever descending a symlinked directory. The root is
+      realpath'd so one directory reached two ways cannot appear twice. Overlapping
+      roots resolve by containment: a covered synthetic root merges its freshly walked
+      subtree into its coverer rather than duplicating it (so the file you just opened
+      is always in the tree, matching git ls-files --others), a broader root absorbs the
+      narrower ones it now covers, and a git repository nested inside a browsed
+      directory always survives as its own project. Project headers gain a
+      "Remove from Files" context-menu action. See
+      docs/design-decisions/0030-fallback-project-roots.md.
     - Open remote files AND directories over SSH via ssh:// and sftp:// URIs (ssh2,
       main-process only). A remote URI is a virtual backend modeled on vv-archive://:
       it opens through the same pipeline, renderers, streaming, paging, and refresh as

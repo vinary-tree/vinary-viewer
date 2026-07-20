@@ -1,58 +1,83 @@
 @startuml seq-tree
 '' ============================================================================
-'' vinary-viewer — Sequence: git file-tree delivery + client-side filtering.
+'' vinary-viewer — Sequence: file-tree delivery + client-side filtering.
 ''
 '' PlantUML over Mermaid because: this flow has two distinct triggers (initial
 '' open vs. filter keystroke) that share a downstream render, and the filter path
 '' never touches main — it is a pure app-db update that force-expands matching
 '' folders. PlantUML `== phase ==` dividers separate the two triggers while
 '' keeping one `file-tree` lifeline; Mermaid would need two disconnected diagrams.
+'' The delivery phase also branches (git root vs. synthetic directory root), which
+'' PlantUML expresses as a native `alt` on the same lifelines.
 '' ============================================================================
 !include _vv-theme.iuml
 
-title Git file-tree — delivery (`vv:tree`) + filter (`:tree/filter`)
+title File-tree — delivery (`vv:tree`) + filter (`:tree/filter`)
 
 autonumber "0:"
 
 actor User #white
 participant "main.service" as Svc MAIN_TINT
 participant "git CLI" as Git FS_TINT
+participant "main.dir-walk\n(fs)" as Walk FS_TINT
 participant "preload `window.vv`" as Vv IPC_TINT
 participant "re-frame\nevents/subs" as RF REFRAME_TINT
-participant "app.db\n(:ui :tree /\n :ui :tree-filter)" as Db APPDB_TINT
+participant "app.db\n(:ui :projects /\n :ui :tree-filter)" as Db APPDB_TINT
 participant "ui.tree\nfile-tree" as Tree RENDERER_TINT
 
 == delivery (on open) ==
-Svc -> Git : `rev-parse --show-toplevel`\n+ `ls-files --cached --others --exclude-standard`\n(cwd = file's dir)
-Git --> Svc : repo root + tracked & untracked-not-ignored paths
-Svc -> Vv : `webContents.send`\n**vv:tree** {root, files}
+Svc -> Git : `rev-parse --show-toplevel`\n(cwd = file's dir)
+Git --> Svc : repo root, or nothing
+
+alt the file is inside a git repository
+  Svc -> Git : `ls-files --cached --others --exclude-standard`\n(cwd = repo root)
+  Git --> Svc : tracked & untracked-not-ignored paths
+  Svc -> Svc : {root, files, synthetic?=**false**}
+else no repo / git unavailable
+  Svc -> Walk : adopt the containing directory\n(a directory is its own root;\na filesystem root is refused)
+  Walk -> Walk : breadth-first walk, bounded\n(<latex>D \le 6</latex>, <latex>N \le 5000</latex>);\nskip dotted + heavy dirs;\nresolve symlinks, never descend them
+  Walk --> Svc : {root=**realpath**'d, files,\nsynthetic?=**true**}
+end
+
+Svc -> Vv : `webContents.send`\n**vv:tree** {root, files, synthetic?}
 Vv -> RF : `onTree` → dispatch `[:tree/received]`
-RF -> Db : `assoc-in [:ui :tree] {:root :files}`
-Db -> Tree : `:ui/tree` sub fires
-Tree -> Tree : `build-tree` (flat paths → nested map)\n→ collapsible `<details>` hiccup
-Tree --> User : sidebar shows the repo tree
+RF -> Db : `projects/merge-project`\n(upsert by root; a covered synthetic\nroot MERGES into its coverer)
+Db -> Tree : `:ui/projects` sub fires
+Tree -> Tree : per project: `build-tree`\n(flat paths → nested map)\n→ collapsible `<details>` hiccup
+Tree --> User : sidebar shows one tree per project
 
 == filter (per keystroke) ==
 User -> Tree : type in "Filter files…"
 Tree -> RF : dispatch `[:tree/filter q]`
 RF -> Db : `assoc-in [:ui :tree-filter] q`
 Db -> Tree : `:ui/tree-filter` sub fires
-Tree -> Tree : keep files whose path\n`includes?` (lower-case q);\nmatching folders `:open true`
+Tree -> Tree : across ALL projects, keep files whose\npath `includes?` (lower-case q);\nmatching folders `:open true`
 Tree --> User : narrowed, force-expanded tree
 
-note over Svc, Git
-  No repo / git unavailable ⟶ `repo-tree` returns nil ⟶
-  no `vv:tree` sent ⟶ the sidebar simply does not appear
-  (`file-tree` renders nothing when `:files` is empty).
+note over Svc, Walk
+  Every local open sends a tree — a git root when there is one,
+  else the containing directory as a **synthetic** root. Archive
+  (`vv-archive://`) and remote (`ssh://`) URIs are excluded before
+  `send-tree!` is reached, so they synthesize nothing.
+end note
+
+note over RF, Db
+  A git root is a **fact**; a synthetic root is an **inference**.
+  Containment therefore only ever removes synthetic roots: a repo
+  nested inside a browsed directory stays its own project.
+  A synthetic root covered by another does not duplicate it — its
+  walked subtree is re-based and merged in, so the file you just
+  opened is always in the tree (the `--others` invariant).
+  Removal is manual — project header ⟶ *Remove from Files*.
 end note
 
 legend right
   |= Colour |= Concept |
-  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN (git) |
-  |<#9F8766>&#160;&#160;&#160;&#160;| git CLI |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN (service) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| git CLI / fs walk |
   |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
   |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame |
-  |<#7590DB>&#160;&#160;&#160;&#160;| app-db (tree + filter) |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db (projects + filter) |
   |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
 endlegend
 @enduml

@@ -63,6 +63,63 @@
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "source"})))
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "markdown"})))))
 
+(deftest synthetic-root-walk-policy
+  (testing "hidden directories are skipped wholesale — .git/.venv/.cache/.next/.tox in one rule"
+    (is (true? (service-util/skip-dir? ".git")))
+    (is (true? (service-util/skip-dir? ".venv")))
+    (is (true? (service-util/skip-dir? ".cache")))
+    (is (true? (service-util/skip-dir? ".next"))))
+  (testing "named heavy directories are skipped: build output and dependency trees"
+    (is (true? (service-util/skip-dir? "node_modules")))
+    (is (true? (service-util/skip-dir? "target")))
+    (is (true? (service-util/skip-dir? "dist")))
+    (is (true? (service-util/skip-dir? "__pycache__"))))
+  (testing "ordinary directories are walked, including ones merely resembling a heavy name"
+    (is (false? (service-util/skip-dir? "src")))
+    (is (false? (service-util/skip-dir? "docs")))
+    (is (false? (service-util/skip-dir? "distribution")))
+    (is (false? (service-util/skip-dir? "targets")))
+    (is (false? (service-util/skip-dir? nil))))
+  (testing "the walk is bounded on both axes — an arbitrary directory is not self-delimiting"
+    (is (pos? (:max-depth   service-util/walk-limits)))
+    (is (pos? (:max-entries service-util/walk-limits)))))
+
+(deftest synthetic-root-selection
+  (testing "a FILE adopts its parent directory"
+    (is (= "/home/u/notes"
+           (service-util/fallback-root {:path "/home/u/notes/a.md" :directory? false
+                                        :parent "/home/u/notes"}))))
+  (testing "a DIRECTORY is its own root — its parent would be a surprise"
+    ;; opening /notes must add /notes, never /
+    (is (= "/notes"
+           (service-util/fallback-root {:path "/notes" :directory? true :parent "/"}))))
+  (testing "a filesystem root is refused: walking it is useless and effectively unbounded"
+    (is (nil? (service-util/fallback-root {:path "/a.md" :directory? false :parent "/"})))
+    (is (nil? (service-util/fallback-root {:path "/" :directory? true :parent "/"})))
+    (is (nil? (service-util/fallback-root {:path "C:\\a.md" :directory? false :parent "C:\\"})))
+    (is (nil? (service-util/fallback-root {:path "C:/a.md"  :directory? false :parent "C:/"})))
+    (is (nil? (service-util/fallback-root {:path "\\\\srv\\a.md" :directory? false
+                                           :parent "\\\\srv"}))))
+  (testing "a blank or missing parent yields no root"
+    (is (nil? (service-util/fallback-root {:path "a.md" :directory? false :parent ""})))
+    (is (nil? (service-util/fallback-root {:path "a.md" :directory? false :parent nil}))))
+  (testing "the home directory IS adopted — walk-limits bounds it, and a browsable ~ is reasonable"
+    (is (= "/home/u" (service-util/fallback-root {:path "/home/u/a.md" :directory? false
+                                                  :parent "/home/u"}))))
+  (testing "filesystem-root? recognizes each spelling of a root and nothing deeper"
+    (is (true?  (service-util/filesystem-root? "/")))
+    (is (true?  (service-util/filesystem-root? "C:")))
+    (is (true?  (service-util/filesystem-root? "C:\\")))
+    (is (true?  (service-util/filesystem-root? "C:/")))
+    (is (true?  (service-util/filesystem-root? "\\\\server")))
+    (is (true?  (service-util/filesystem-root? "\\\\server\\share")))   ; node dirname's own parent
+    (is (false? (service-util/filesystem-root? "/home")))
+    (is (false? (service-util/filesystem-root? "C:\\Users")))
+    (is (false? (service-util/filesystem-root? "\\\\server\\share\\x")))
+    ;; a POSIX "//foo" is legal and NOT a root — the UNC test is gated on the backslash spelling
+    (is (false? (service-util/filesystem-root? "//home/u")))
+    (is (false? (service-util/filesystem-root? nil)))))
+
 (deftest startup-switches
   (testing "software-compositor present/raster artifact fixes ship as invariant startup switches"
     (is (contains? (set startup/chromium-switches) "ui-disable-partial-swap")

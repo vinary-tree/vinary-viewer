@@ -1,7 +1,8 @@
 (ns vinary.ui.tree
-  "The git file-tree (the sidebar's Files tab). Main sends {:root :files} per open project; we keep one
-   collapsible tree per project (rooted at the project-directory name) and fold each project's flat
-   repo-relative paths into a nested folder/file tree of native <details>. A filter narrows across all
+  "The file-tree (the sidebar's Files tab). Main sends {:root :files :synthetic?} per open project — a git
+   repository, or (:synthetic?) the containing directory of a file that belongs to none (ADR-0030). We keep
+   one collapsible tree per project (rooted at the project-directory name) and fold each project's flat
+   root-relative paths into a nested folder/file tree of native <details>. A filter narrows across all
    projects. Left-click navigates the active tab; Ctrl+click opens a new tab. On every activation the
    active file's ancestor folders auto-expand and it scrolls into view (reveal-active!, additive)."
   (:require [reagent.core :as r]
@@ -53,7 +54,8 @@
   (let [shown (cond->> files ql (filter #(str/includes? (str/lower-case %) ql)))]
     (when (seq shown)
       [:details.vv-project {:open true}
-       [:summary.vv-project-name {:on-context-menu (ctx! :dir root)} (icons/folder-icon) (last (str/split root #"/"))]
+       ;; :project (not :dir) — the header's menu can remove the project, which a directory node's cannot
+       [:summary.vv-project-name {:on-context-menu (ctx! :project root)} (icons/folder-icon) (last (str/split root #"/"))]
        (nodes->hiccup (build-tree shown) root active (boolean ql) root)])))
 
 (defn- reveal-active!
