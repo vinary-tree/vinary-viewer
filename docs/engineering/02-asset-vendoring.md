@@ -105,16 +105,24 @@ distinction is the single most important thing to understand about the mechanism
 
 ### 4.1 Static UI assets — `sync-assets.mjs`
 
-[`sync-assets.mjs`](../../scripts/sync-assets.mjs) vendors two icon-font faces and
-two variable UI fonts out of their npm packages, driven by an explicit `MANIFEST`
-array of `{pkg, from, to}` triples:
+[`sync-assets.mjs`](../../scripts/sync-assets.mjs) vendors the Font Awesome icon
+font and the Fira Code monospace face out of their npm packages, driven by an
+explicit `MANIFEST` array of `{pkg, from, to}` triples:
 
 - **Font Awesome Free 7** — `fontawesome.min.css`, `solid.min.css`, and the
   `fa-solid-900.woff2` webfont → `resources/public/assets/fa/…`.
-- **Noto Sans (variable)** — the UI/body face, Latin + Latin-Extended subsets →
-  `assets/fonts/noto-sans/…`.
 - **Fira Code (variable)** — the code/monospace face, Latin + Latin-Extended →
   `assets/fonts/fira-code/…`.
+
+The two **variable-width prose faces are not synced.** **Noto Sans** — the default
+UI/body/Markdown font (`--vv-font-variable`), shipped as full-coverage **OTF** (Latin +
+Greek + Cyrillic + IPA + symbols, eight static faces for weights 400/500/600/700 ×
+roman/italic) — and **Latin Modern Roman** — the LaTeX-look serif, still user-selectable —
+are instead **hand-vendored and git-tracked** under `assets/fonts/noto-sans-otf/…` and
+`assets/fonts/lm-roman/…`, each beside its own license (SIL OFL 1.1 and the GUST Font
+License). They join the same hand-authored `fonts.css` `@font-face` table but bypass the
+`MANIFEST` and the lock; see
+[ADR-0011 Amendments](../design-decisions/0011-font-awesome-icons-self-hosted-fonts.md#amendments-2026-07-20).
 
 The written `assets.lock.json` records the resolved `packages` map (package →
 installed version) and a `files` array of `{to, pkg, from, bytes, sha256}`.

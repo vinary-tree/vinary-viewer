@@ -4,6 +4,12 @@
 - **Date:** 2026-06-27
 - **Deciders:** vinary-viewer maintainers
 
+> **Amended 2026-07-20.** The variable-width default's *delivery* changed: **Noto Sans** is still the
+> default `--vv-font-variable`, but it is now **hand-vendored as full-coverage OTF** (git-tracked, like
+> Latin Modern Roman) instead of the Fontsource variable `.woff2`, and the `@fontsource-variable/noto-sans`
+> build-time-vendoring wiring was removed. The Font-Awesome, no-framework, and build-time-vendoring
+> decisions (the latter still governs **Fira Code**) stand unchanged — see [Amendments](#amendments-2026-07-20).
+
 ## Context
 
 Two gaps in the chrome's visual layer needed closing, and one framework question needed settling.
@@ -128,3 +134,51 @@ The build runs an extra idempotent copy step, and `fonts.css` must be kept in st
 vendoring script copies (guarded by `check-assets.mjs`). In return: a consistent, themeable, offline,
 CSP-ready icon + font layer with trivial upgrades, no committed binaries, and no framework weight or
 second build pipeline — the crispest result for a bespoke, token-driven, CSS-first UI.
+
+## Amendments (2026-07-20)
+
+This ADR's **fonts** decision evolved in two steps after acceptance. The Font Awesome, no-CSS-framework,
+and build-time-vendoring mechanisms are unchanged; the notes below apply only to the variable-width
+(`--vv-font-variable`) prose/UI font.
+
+1. **Interim — Latin Modern Roman (the "LaTeX look").** After this ADR, `app.css` switched
+   `--vv-font-variable` from Noto Sans to `"Latin Modern Roman", Georgia, serif` — the GUST successor to
+   Computer Modern — to give rendered documents a LaTeX-typeset feel. LM Roman was hand-vendored as four
+   static `.woff2` faces under `assets/fonts/lm-roman/` (git-tracked, with its GUST-license file): already
+   the "commit the files" pattern this ADR had *rejected* for the Fontsource fonts.
+
+2. **Now — Noto Sans restored as the default, delivered as full-coverage OTF.** Per request, the default
+   returns to **Noto Sans**. Its *delivery* is deliberately changed from the original decision:
+
+   - **Format & source.** Noto Sans is now **hand-vendored OTF**, not the Fontsource variable `.woff2`.
+     Eight static faces — weights **400 / 500 / 600 / 700 × {roman, italic}** — are committed under
+     `resources/public/assets/fonts/noto-sans-otf/` with their own `OFL.txt` (SIL OFL 1.1), sourced from
+     the notofonts project (`github.com/notofonts`). `fonts.css` declares them with `format("opentype")`
+     and **no `unicode-range`**, so each face's full cmap is used.
+   - **Coverage.** The `full/otf` faces cover **Latin + Greek + Cyrillic + IPA + common symbols** —
+     materially broader than the Fontsource **latin + latin-ext** subsets this ADR shipped (though still
+     not CJK / Arabic / Hebrew / Indic, which are separate Noto families). This supersedes the
+     "glyph coverage spans latin + latin-ext" consequence for the body font.
+   - **True weights, no snap.** Discrete 400/500/600/700 faces exist because the chrome uses
+     `font-weight: 600` (and `500`) on many elements; with only 400/700 faces the CSS font-matching
+     algorithm would render those at 700/400. Shipping the intermediate weights renders every used weight
+     truthfully, with no synthetic oblique for the italic pairs.
+   - **Pipeline retired.** Because Noto Sans no longer comes from npm, `@fontsource-variable/noto-sans` was
+     removed from `package.json`, its two `MANIFEST` entries from `scripts/sync-assets.mjs`, its line from
+     `.gitignore`, and its entries from `scripts/assets.lock.json`; the git-ignored `assets/fonts/noto-sans/`
+     woff2 directory was deleted. **Fira Code** remains the sole build-time-vendored
+     (`@fontsource-variable/fira-code`) font and keeps this ADR's original mechanism and its
+     latin/latin-ext `unicode-range` subsetting.
+
+**Net delivery model now:** Fira Code → npm-synced woff2 (this ADR's mechanism); Noto Sans and Latin
+Modern Roman → hand-vendored, git-tracked (the "commit the files" alternative this ADR had reserved,
+now used intentionally for the two prose faces). LM Roman stays bundled and remains user-selectable via
+**Settings ▸ Preferences ▸ Variable-width font**; only the *default* is Noto Sans.
+
+**Unaffected:** the offline / CSP-ready posture holds — the OTFs load same-origin over `file://`, already
+permitted by the shipped `font-src 'self' file: data:` policy, so no CSP change was needed.
+
+**Follow-on.** This ADR governs how the faces are *delivered*. Which face each document format *uses* —
+Noto Sans for Markdown/Org/prose, Latin Modern Roman for LaTeX (`.tex`) previews, Fira Code for code — and
+the Fira Code programming-ligature toggle are specified in
+[ADR-0031](0031-per-content-type-fonts-and-ligatures.md).

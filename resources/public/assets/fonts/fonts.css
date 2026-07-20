@@ -1,32 +1,53 @@
-/* Self-hosted variable fonts for Vinary Viewer.
+/* Self-hosted fonts for Vinary Viewer.
  *
- * The .woff2 files referenced below are vendored from npm into ./noto-sans/ and
- * ./fira-code/ by `npm run assets:sync` (scripts/sync-assets.mjs) and are
- * git-ignored build output. Upstream packages (both SIL OFL 1.1):
- *   - Noto Sans : @fontsource-variable/noto-sans
- *   - Fira Code : @fontsource-variable/fira-code
+ * Fira Code (mono / code / chrome accents) is a variable .woff2 vendored from npm into ./fira-code/
+ * by `npm run assets:sync` (scripts/sync-assets.mjs) and is git-ignored build output (SIL OFL 1.1,
+ * @fontsource-variable/fira-code). Its unicode-range values below are the Fontsource latin /
+ * latin-ext subsets verbatim; if assets:sync vendors more subsets, add matching @font-face blocks.
  *
- * Families are declared with clean names ("Noto Sans" / "Fira Code") so the
- * --vv-font-* tokens in css/app.css stay readable. The unicode-range values are
- * the Fontsource latin / latin-ext subsets verbatim; if assets:sync vendors more
- * subsets, add matching @font-face blocks here. */
+ * Noto Sans (variable-width UI / body / Markdown — the default --vv-font-variable) and Latin Modern
+ * Roman (the LaTeX-look serif, still user-selectable) are instead hand-vendored + git-tracked
+ * (Pattern B): their files live under ./noto-sans-otf/ and ./lm-roman/ alongside their licenses and
+ * are NOT listed in scripts/sync-assets.mjs. All families use clean names ("Noto Sans" / "Fira Code"
+ * / "Latin Modern Roman") so the --vv-font-* tokens in css/app.css stay readable. */
 
-/* ---------- Noto Sans (variable weight 100–900) — UI / body / Markdown ---------- */
+/* ---------- Noto Sans (8 static styles: weights 400/500/600/700 × roman/italic) — UI / body / Markdown ----------
+   The default variable-width / prose font (--vv-font-variable in css/app.css). Full-coverage OTF (Latin + Greek +
+   Cyrillic + IPA + symbols) hand-vendored from the notofonts project (github.com/notofonts), NOT via @fontsource —
+   so, like ./lm-roman below, these are NOT listed in scripts/sync-assets.mjs; see ./noto-sans-otf/OFL.txt (SIL OFL
+   1.1). Discrete faces for every weight the app uses (incl. the many `font-weight: 600` chrome elements) so text
+   renders at its true weight with no CSS weight-matching snap and no synthetic oblique. */
 @font-face {
-  font-family: "Noto Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url("./noto-sans/noto-sans-latin-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: "Noto Sans"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-Regular.otf") format("opentype");
 }
 @font-face {
-  font-family: "Noto Sans";
-  font-style: normal;
-  font-display: swap;
-  font-weight: 100 900;
-  src: url("./noto-sans/noto-sans-latin-ext-wght-normal.woff2") format("woff2-variations");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  font-family: "Noto Sans"; font-style: italic; font-weight: 400; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-Italic.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-Medium.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: italic; font-weight: 500; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-MediumItalic.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-SemiBold.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: italic; font-weight: 600; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-SemiBoldItalic.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-Bold.otf") format("opentype");
+}
+@font-face {
+  font-family: "Noto Sans"; font-style: italic; font-weight: 700; font-display: swap;
+  src: url("./noto-sans-otf/NotoSans-BoldItalic.otf") format("opentype");
 }
 
 /* ---------- Fira Code (variable weight 300–700) — code / mono / chrome accents ---------- */
@@ -50,7 +71,8 @@
 /* ---------- Latin Modern Roman (10pt, 4 static styles) — prose / body / Markdown ----------
    The GUST e-foundry successor to Computer Modern (the LaTeX look). Vendored directly from TeX Live
    (converted OTF→WOFF2), NOT via @fontsource, so these are NOT listed in scripts/sync-assets.mjs; see
-   ./lm-roman/LICENSE.txt (GUST Font License). Static weights/styles (unlike the variable UI fonts above). */
+   ./lm-roman/LICENSE.txt (GUST Font License). Static weights/styles, like the Noto Sans faces above
+   (Fira Code is the lone remaining variable face). */
 @font-face {
   font-family: "Latin Modern Roman"; font-style: normal; font-weight: 400; font-display: swap;
   src: url("./lm-roman/lmroman10-regular.woff2") format("woff2");

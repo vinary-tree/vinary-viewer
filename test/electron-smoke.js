@@ -2500,12 +2500,12 @@ async function main() {
     'editing a font field updates settings live');
   // the document-streaming toggle: present, checked by default (Phase 4 default-on), and persists on toggle
   const streamCheck = await evalIn(win, `(() => {
-    const box = document.querySelector('.vv-pref-checkbox');
+    const box = document.querySelector(".vv-pref-checkbox[data-vv-access-key='t']");
     return box ? { present: true, checked: box.checked } : { present: false };
   })()`);
   assert.strictEqual(streamCheck.present, true, 'the "Stream large documents" checkbox is present in Preferences');
   assert.strictEqual(streamCheck.checked, true, 'streaming is checked by default (Phase 4 default-on)');
-  await evalIn(win, `(() => { document.querySelector('.vv-pref-checkbox').click(); return true; })()`);
+  await evalIn(win, `(() => { document.querySelector(".vv-pref-checkbox[data-vv-access-key='t']").click(); return true; })()`);
   await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === false`), 'toggling the checkbox persists :stream? false');
   console.log('[ok] Settings: document-streaming toggle present, default-on, persists on toggle');
   win.webContents.send('vv:settings', '{:stream? true}');   // restore default-on for the rest of the run
@@ -2929,11 +2929,11 @@ async function main() {
   assert.ok(batchH2 >= md.sections, 'batch reference rendered every section');
   console.log(`[ok] batch markdown reference rendered (${batchH2} sections, ${(md.size / 1024).toFixed(0)} KiB)`);
 
-  // Latin Modern Roman prose font: the self-hosted @font-face loads, and the app.css DEFAULT --vv-font-variable is
-  // Latin Modern Roman. (An earlier settings test set a runtime font-variable override on :root via fx.cljs; remove
+  // Noto Sans prose font: the self-hosted @font-face loads, and the app.css DEFAULT --vv-font-variable is
+  // Noto Sans. (An earlier settings test set a runtime font-variable override on :root via fx.cljs; remove
   // it to expose the app.css default, read the computed prose font, then restore it so the smoke state is intact.)
-  await evalIn(win, `document.fonts.load('16px "Latin Modern Roman"').then(() => document.fonts.load('italic 16px "Latin Modern Roman"'))`);
-  const lmLoaded = await evalIn(win, `document.fonts.check('16px "Latin Modern Roman"')`);
+  await evalIn(win, `document.fonts.load('16px "Noto Sans"').then(() => document.fonts.load('italic 16px "Noto Sans"'))`);
+  const notoLoaded = await evalIn(win, `document.fonts.check('16px "Noto Sans"')`);
   const bodyFont = await evalIn(win, `(() => {
     const s = document.documentElement.style, prior = s.getPropertyValue('--vv-font-variable');
     s.removeProperty('--vv-font-variable');
@@ -2941,9 +2941,59 @@ async function main() {
     if (prior) s.setProperty('--vv-font-variable', prior);
     return f;
   })()`);
-  assert.ok(lmLoaded, 'Latin Modern Roman @font-face loaded from resources/public/assets/fonts/lm-roman/');
-  assert.ok(/Latin Modern Roman/i.test(bodyFont), `default prose font is Latin Modern Roman (got: ${bodyFont})`);
-  console.log('[ok] prose renders in the self-hosted Latin Modern Roman web font (app.css default)');
+  assert.ok(notoLoaded, 'Noto Sans @font-face loaded from resources/public/assets/fonts/noto-sans-otf/');
+  assert.ok(/Noto Sans/i.test(bodyFont), `default prose font is Noto Sans (got: ${bodyFont})`);
+  console.log('[ok] prose renders in the self-hosted Noto Sans web font (app.css default)');
+
+  // ── Three-font scheme: LaTeX-scoped prose font + Fira Code ligature toggle ─────────────────────────────
+  // (a) .vv-content exposes data-doc-kind (views.cljs) so app.css can pick the prose font by document format.
+  const contentKind = await evalIn(win, `document.querySelector('.vv-content') && document.querySelector('.vv-content').getAttribute('data-doc-kind')`);
+  assert.ok(contentKind, `.vv-content exposes data-doc-kind for CSS font scoping (got: ${contentKind})`);
+  // (b) LaTeX documents render prose in Latin Modern (matching the Computer-Modern math). Verify the app.css
+  //     scope rule + the --vv-font-latex token (and a user :font-latex override) by flipping the kind on the
+  //     live .vv-content and reading the computed prose font — no LaTeX-engine round-trip needed.
+  await evalIn(win, `document.fonts.load('16px "Latin Modern Roman"').then(() => true)`);
+  const latexFonts = await evalIn(win, `(() => {
+    const c = document.querySelector('.vv-content'), body = c.querySelector('.markdown-body');
+    const prior = c.getAttribute('data-doc-kind');
+    const base = getComputedStyle(body).fontFamily;                 // markdown/org → the variable-width font
+    c.setAttribute('data-doc-kind', 'latex');
+    const lm = getComputedStyle(body).fontFamily;                   // latex → Latin Modern (--vv-font-latex)
+    const st = document.documentElement.style, had = st.getPropertyValue('--vv-font-latex');
+    st.setProperty('--vv-font-latex', '"VV Latex Probe", serif');   // a user :font-latex override flows through
+    const overridden = getComputedStyle(body).fontFamily;
+    if (had) st.setProperty('--vv-font-latex', had); else st.removeProperty('--vv-font-latex');
+    if (prior) c.setAttribute('data-doc-kind', prior); else c.removeAttribute('data-doc-kind');
+    return { base, lm, overridden };
+  })()`);
+  assert.ok(!/Latin Modern Roman/i.test(latexFonts.base), `non-LaTeX prose is not Latin Modern (base: ${latexFonts.base})`);
+  assert.ok(/Latin Modern Roman/i.test(latexFonts.lm), `LaTeX-kind prose switches to Latin Modern Roman (got: ${latexFonts.lm})`);
+  assert.ok(/VV Latex Probe/i.test(latexFonts.overridden), `a :font-latex override (--vv-font-latex) flows to LaTeX prose (got: ${latexFonts.overridden})`);
+  console.log('[ok] LaTeX previews render prose in Latin Modern (format-scoped via data-doc-kind, --vv-font-latex overridable)');
+  // (c) Fira Code programming ligatures default OFF on mono surfaces; the :code-ligatures? setting flips them on
+  //     everywhere (fx.cljs → --vv-code-liga → font-variant-ligatures). Probe a .markdown-body code node.
+  const ligProbe = `(() => {
+    const d = document.createElement('div'); d.className = 'markdown-body';
+    d.style.cssText = 'position:absolute;left:-9999px;top:-9999px';
+    const code = document.createElement('code'); code.textContent = 'x=y';   // a mono/code node
+    d.appendChild(code); document.body.appendChild(d);
+    const v = getComputedStyle(code).fontVariantLigatures;
+    const rootVar = getComputedStyle(document.documentElement).getPropertyValue('--vv-code-liga').trim();
+    d.remove(); return { v, rootVar };
+  })()`;
+  const ligDefault = await evalIn(win, ligProbe);
+  assert.strictEqual(ligDefault.v, 'none', `code ligatures are OFF by default (font-variant-ligatures=${ligDefault.v})`);
+  assert.strictEqual(ligDefault.rootVar, 'none', `--vv-code-liga defaults to none (got ${ligDefault.rootVar})`);
+  win.webContents.send('vv:settings', '{:code-ligatures? true}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['code-ligatures?'] === true`), ':code-ligatures? true persists');
+  const ligOn = await evalIn(win, ligProbe);
+  assert.strictEqual(ligOn.rootVar, 'normal', `:code-ligatures? true → --vv-code-liga: normal on :root (fx.cljs)`);
+  assert.notStrictEqual(ligOn.v, 'none', `:code-ligatures? true → mono ligatures enabled (font-variant-ligatures=${ligOn.v})`);
+  win.webContents.send('vv:settings', '{:code-ligatures? false}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['code-ligatures?'] === false`), ':code-ligatures? false persists');
+  const ligOff = await evalIn(win, ligProbe);
+  assert.strictEqual(ligOff.v, 'none', `:code-ligatures? false → font-variant-ligatures: none (got ${ligOff.v})`);
+  console.log('[ok] Fira Code ligatures default off across mono surfaces; :code-ligatures? toggles them live');
 
   // streamed render (flag ON) → progressive block-commit
   win.webContents.send('vv:settings', '{:stream? true}');

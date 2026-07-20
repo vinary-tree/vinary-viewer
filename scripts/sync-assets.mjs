@@ -29,10 +29,9 @@ const MANIFEST = [
   { pkg: '@fortawesome/fontawesome-free', from: 'css/fontawesome.min.css',     to: 'fa/css/fontawesome.min.css' },
   { pkg: '@fortawesome/fontawesome-free', from: 'css/solid.min.css',           to: 'fa/css/solid.min.css' },
   { pkg: '@fortawesome/fontawesome-free', from: 'webfonts/fa-solid-900.woff2', to: 'fa/webfonts/fa-solid-900.woff2' },
-  // Noto Sans (variable weight) — UI / body face. Latin + Latin-Extended subsets.
-  { pkg: '@fontsource-variable/noto-sans', from: 'files/noto-sans-latin-wght-normal.woff2',     to: 'fonts/noto-sans/noto-sans-latin-wght-normal.woff2' },
-  { pkg: '@fontsource-variable/noto-sans', from: 'files/noto-sans-latin-ext-wght-normal.woff2', to: 'fonts/noto-sans/noto-sans-latin-ext-wght-normal.woff2' },
   // Fira Code (variable weight) — code / monospace face. Latin + Latin-Extended.
+  // (Noto Sans — UI / body / Markdown — is no longer synced here: it is hand-vendored as full-coverage
+  //  OTF under resources/public/assets/fonts/noto-sans-otf/ and git-tracked, like lm-roman. See ADR-0011.)
   { pkg: '@fontsource-variable/fira-code', from: 'files/fira-code-latin-wght-normal.woff2',     to: 'fonts/fira-code/fira-code-latin-wght-normal.woff2' },
   { pkg: '@fontsource-variable/fira-code', from: 'files/fira-code-latin-ext-wght-normal.woff2', to: 'fonts/fira-code/fira-code-latin-ext-wght-normal.woff2' }
 ];

@@ -98,7 +98,6 @@
   },
   "devDependencies": {
     "@fontsource-variable/fira-code": "^5.2.7",
-    "@fontsource-variable/noto-sans": "^5.2.10",
     "@fortawesome/fontawesome-free": "^7.3.0",
     "electron": "^42.5.0",
     "patch-package": "^8.0.1",

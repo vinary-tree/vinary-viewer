@@ -111,7 +111,9 @@ twelve** (0001–0012) establish the reactive core:
 - **0011** dresses the chrome: a self-hosted Font Awesome icon set + self-hosted Noto Sans / Fira Code
   fonts, both vendored at build time by the same mechanism as the tree-sitter grammars (**0001**'s modern
   Electron makes the `file://` self-host viable), and themed through the same `--vv-*` token system used
-  everywhere else — the bespoke CSS kept over any framework.
+  everywhere else — the bespoke CSS kept over any framework. **0031** later makes the prose font
+  content-type-aware (Latin Modern Roman for LaTeX previews, Noto Sans elsewhere) and adds a Fira Code
+  programming-ligature toggle, all through that same token system.
 - **0012** makes every navigation affordance a thin interface over **0010**'s per-tab history spine:
   filesystem navigation joins that history (directories render in-pane, piggybacking **0002**'s renderer
   Strategy registry and the `vv:content` spine), `Alt+Up`/`Alt+Down` retrace a persisted directory

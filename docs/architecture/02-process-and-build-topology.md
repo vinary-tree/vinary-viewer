@@ -241,8 +241,12 @@ in a Node build; "vendored" = shipped as a file and loaded off the Closure path 
 | `electron` | `^42.5.0` | The Electron runtime. |
 | `shadow-cljs` | `3.2.0` | The JS-side shadow-cljs CLI (mirrors the Clojure dep). |
 | `@fontsource-variable/fira-code` | `^5.2.7` | Self-hosted monospace font, vendored into `resources` by `assets:sync`. |
-| `@fontsource-variable/noto-sans` | `^5.2.10` | Self-hosted UI font, vendored by `assets:sync`. |
 | `@fortawesome/fontawesome-free` | `^7.3.0` | Self-hosted icon set (no CDN; ADR-0011), vendored by `assets:sync`. |
+
+> The UI/body font (**Noto Sans**) is **not** an npm dependency: it is hand-vendored as full-coverage
+> OTF under `resources/public/assets/fonts/noto-sans-otf/` (git-tracked, like `lm-roman`) — see
+> [ADR-0011 Amendments](../design-decisions/0011-font-awesome-icons-self-hosted-fonts.md#amendments-2026-07-20)
+> and [engineering/02-asset-vendoring.md](../engineering/02-asset-vendoring.md#41-static-ui-assets--sync-assetsmjs).
 
 ---
 

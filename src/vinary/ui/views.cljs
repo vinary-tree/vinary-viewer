@@ -1015,6 +1015,8 @@
       ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri
       ;; (not stamp) — a same-path live-refresh re-measures in place, so its cache stays valid.
       :data-doc-key (cond (uri/http? uri) uri :else (:doc/path doc))
+      ;; expose the document format so CSS can scope the prose font by kind (LaTeX → Latin Modern; app.css)
+      :data-doc-kind (:doc/kind doc)
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]

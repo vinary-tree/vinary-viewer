@@ -28,25 +28,30 @@ launchers.
 
 ## 2. Settings
 
-Open `Settings > Preferences...` to change variable-width and fixed-width font
-families and sizes. Use `Settings > Theme` to change the active theme.
+Open `Settings > Preferences...` to change the variable-width (prose), LaTeX-preview,
+and fixed-width (code) font families and sizes, and to toggle Fira Code programming
+ligatures. Use `Settings > Theme` to change the active theme.
 
-Settings persist as EDN:
+Settings persist as EDN (the keys below are exactly those the Preferences UI writes):
 
 ```clojure
 {:theme "spacemacs-dark"
- :variable-font-family "Inter"
- :variable-font-size 16
- :fixed-font-family "JetBrains Mono"
- :fixed-font-size 14
+ :font-variable "Noto Sans, system-ui, sans-serif"   ; prose / Markdown / UI body font
+ :font-latex "Latin Modern Roman, Georgia, serif"    ; prose font for LaTeX (.tex) previews only
+ :font-size 15                                        ; document font size (px)
+ :font-fixed "Fira Code, JetBrains Mono, monospace"  ; code / logs / tables (monospace)
+ :code-font-size 13                                   ; code font size (px)
+ :code-ligatures? false                               ; Fira Code programming ligatures (default off)
  :sidebar-width 280            ; sidebar width in px
- :sidebar-visible? true}       ; sidebar open / closed
+ :sidebar-visible? true        ; sidebar open / closed
+ :stream? true}                ; progressive rendering of large documents
 ```
 
-The exact keys are the settings currently written by the UI. Unknown keys are
-merged into the settings map but only known UI settings have visible effects.
-Beyond fonts and theme, `settings.edn` also remembers the **sidebar** width and
-open/closed state, so the shell reopens the way you left it.
+Every font key is optional: an absent key falls back to the built-in default baked into
+`app.css` (Noto Sans / Latin Modern Roman / Fira Code), and an absent `:code-ligatures?`
+means ligatures are off. Unknown keys are merged into the settings map but only known UI
+settings have visible effects. Beyond fonts and theme, `settings.edn` also remembers the
+**sidebar** width and open/closed state, so the shell reopens the way you left it.
 
 ---
 

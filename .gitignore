@@ -30,10 +30,10 @@ resources/public/js/module-loader.json
 
 # Vendored static assets (Font Awesome + synced self-hosted fonts), copied from node_modules.
 # Regenerate with `npm run assets:sync`.
-# Hand-vendored and TRACKED (do NOT ignore): assets/fonts/fonts.css, and assets/fonts/lm-roman/
-# (Latin Modern Roman — the prose/math body font, GUST Font License).
+# Hand-vendored and TRACKED (do NOT ignore): assets/fonts/fonts.css, assets/fonts/lm-roman/
+# (Latin Modern Roman — the LaTeX-look serif, GUST Font License), and assets/fonts/noto-sans-otf/
+# (Noto Sans — the default UI/body/Markdown font, SIL OFL 1.1).
 resources/public/assets/fa/
-resources/public/assets/fonts/noto-sans/
 resources/public/assets/fonts/fira-code/
 
 # Vendored PDF.js worker + data assets (cmaps/standard_fonts/wasm/iccs), copied from node_modules.

@@ -145,6 +145,28 @@ the tab-drag drop-line are easy to find. No new tokens were added — every colo
 > §2.4) so the two never collide. The selected row is always `--vv-highlight` and the row/icon accent is
 > always `--vv-head1`.
 
+### 2.8 Structural font and ligature tokens
+
+Unlike the palette above, these live on `:root` in **`app.css`** (not the theme files) and carry no
+dark/light variants — they are the typographic defaults, each overridden live by `Settings ▸ Preferences`
+(persisted to `settings.edn`; see [usage/05-configuration.md §2](../usage/05-configuration.md#2-settings)).
+The renderer writes the matching inline property on `:root` via the `:fonts/apply` effect only when the
+preference is set, so an unset preference leaves the `app.css` default authoritative.
+
+| Token | Default (`app.css`) | Role | Preference |
+| --- | --- | --- | --- |
+| `--vv-font-variable` | `"Noto Sans", system-ui, sans-serif` | Prose / Markdown / UI body font | Variable-width font (`:font-variable`) |
+| `--vv-font-latex` | `"Latin Modern Roman", Georgia, serif` | Prose font for **LaTeX** (`.tex`) previews only — scoped by `.vv-content[data-doc-kind="latex"] .markdown-body`, so the body matches the Computer-Modern math | LaTeX-preview font (`:font-latex`) |
+| `--vv-font-fixed` | `"Fira Code", "JetBrains Mono", monospace` | Code / logs / tables / chrome (every mono surface) | Fixed-width font (`:font-fixed`) |
+| `--vv-font-size` | `15px` | Document prose font size | Document font size (`:font-size`) |
+| `--vv-code-font-size` | `13px` | Code / mono font size | Code font size (`:code-font-size`) |
+| `--vv-code-liga` | `none` | `font-variant-ligatures` for every mono surface — `none` disables Fira Code's programming ligatures (`->`, `=>`, `==`, …); the preference flips it to `normal` | Enable Fira Code ligatures (`:code-ligatures?`) |
+
+> **Why a token for ligatures.** `font-variant-ligatures` is applied only to mono/code surfaces (never
+> prose), so toggling it never disturbs the normal typographic ligatures (fi, fl) of the Noto Sans / Latin
+> Modern prose. A single `--vv-code-liga` token means one preference toggles every mono surface at once.
+> See [ADR-0031](../design-decisions/0031-per-content-type-fonts-and-ligatures.md).
+
 ---
 
 ## 3. The watermark (theme-tinted)

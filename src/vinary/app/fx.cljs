@@ -293,10 +293,14 @@
 ;; apply font preferences as CSS custom properties on :root (consumed by app.css with fallbacks)
 (rf/reg-fx
  :fonts/apply
- (fn [{:keys [font-variable font-fixed font-size code-font-size]}]
+ (fn [{:keys [font-variable font-latex font-fixed font-size code-font-size code-ligatures?]}]
    (let [^js root (.. js/document -documentElement -style)]
      (when (seq font-variable) (.setProperty root "--vv-font-variable" font-variable))
+     (when (seq font-latex)    (.setProperty root "--vv-font-latex" font-latex))
      (when (seq font-fixed)    (.setProperty root "--vv-font-fixed" font-fixed))
+     ;; Fira Code ligatures: nil (unset) keeps the app.css default (none / off); a stored boolean maps to the
+     ;; CSS font-variant-ligatures keyword applied to every mono surface.
+     (when (some? code-ligatures?) (.setProperty root "--vv-code-liga" (if code-ligatures? "normal" "none")))
      (when font-size
        (.setProperty root "--vv-font-size" (str font-size "px"))
        ;; the document font changed with NO re-render (the CSS var is applied live), so re-fit any figures /

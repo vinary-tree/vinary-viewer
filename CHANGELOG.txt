@@ -138,7 +138,8 @@ Changed
       shadow-cljs) as one engine shared by the renderer and the Node tests, importing
       only the safe TeX packages -- replacing the separately-loaded es5 tex-svg.js
       script. Math typesets in the Latin Modern ("MathJax Modern") font
-      (@mathjax/mathjax-modern-font), matching the Latin Modern Roman prose body. The
+      (@mathjax/mathjax-modern-font); selecting the bundled Latin Modern Roman as the
+      variable-width font makes body text match the math. The
       dangerous html/require/autoload packages are never imported (absent from the
       bundle), so \href{javascript:...} is unreachable by construction. Assistive
       MathML (a11y) is preserved; math renders synchronously -- MathJax 4's dynamic
@@ -146,10 +147,19 @@ Changed
       async "retry" (variant alphabets \mathbb/\mathfrak/\mathscr/\mathtt/\mathsf,
       extended symbols, arrows, accents, shapes). \llbracket / \rrbracket render as the
       container delimiters ⟦ ⟧ (bound to U+27E6/7 -- MathJax bundles no stmaryrd).
-    - The prose / Markdown body font is now Latin Modern Roman (the GUST e-foundry
-      successor to Computer Modern -- the LaTeX look), self-hosted as WOFF2 under
-      assets/fonts/lm-roman/ (GUST Font License), replacing Noto Sans so body text
-      matches the Latin Modern math. Code / logs / tables stay Fira Code.
+    - Per-format preview typography. Markdown / Org / office / prose render in Noto Sans
+      (the default variable-width font), self-hosted as full-coverage OTF (Latin + Greek +
+      Cyrillic + IPA + symbols; eight static faces covering weights 400/500/600/700 in roman
+      and italic) under assets/fonts/noto-sans-otf/ (SIL OFL 1.1), hand-vendored and
+      git-tracked. LaTeX (.tex) previews instead render prose in Latin Modern Roman -- the
+      GUST successor to Computer Modern -- so the body matches the Computer-Modern math
+      (WOFF2 under assets/fonts/lm-roman/, GUST Font License); this is scoped by document
+      format and configurable via a new "LaTeX-preview font" preference (:font-latex). Code /
+      logs / tables / chrome stay Fira Code, whose programming ligatures (->, =>, ==, ...) are
+      now OFF by default across every mono surface, with a new "Enable Fira Code ligatures"
+      preference (:code-ligatures?) to turn them on. See
+      docs/design-decisions/0011-font-awesome-icons-self-hosted-fonts.md (Amendments
+      2026-07-20) and docs/design-decisions/0031-per-content-type-fonts-and-ligatures.md.
     - Markdown and office render through the common IR unconditionally; output is
       byte-identical to the retired legacy path (guaranteed by the lossless HAST
       round-trip, ir.parity-test).

@@ -1,6 +1,7 @@
 (ns vinary.ui.settings
-  "The Preferences dialog: variable + fixed-width font families and sizes (the theme lives in the Settings
-   menu). Each change applies live (CSS vars) and persists to settings.edn via :settings/set."
+  "The Preferences dialog: variable / LaTeX-preview / fixed-width font families, their sizes, and the
+   Fira-Code-ligature toggle (the theme lives in the Settings menu). Each change applies live (CSS vars)
+   and persists to settings.edn via :settings/set."
   (:require [re-frame.core :as rf]
             [vinary.ui.access-keys :as access]
             [vinary.stream.flag :as stream-flag]
@@ -38,9 +39,11 @@
   (when-let [k (and (.-altKey e) (access/event-letter e))]
     (when (case k
             "v" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='v']")
+            "l" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='l']")
             "d" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='d']")
             "f" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='f']")
             "s" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='s']")
+            "g" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='g']")
             "t" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='t']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
@@ -61,10 +64,14 @@
        [:div.vv-modal-body
         [:div.vv-pref-section "Fonts"]
         [text-field "Variable-width font" "v" :font-variable (:font-variable s)
-         "Inter, system-ui, sans-serif" access-active?]
+         "Noto Sans, system-ui, sans-serif" access-active?]
+        [text-field "LaTeX-preview font" "l" :font-latex (:font-latex s)
+         "Latin Modern Roman, Georgia, serif" access-active?]
         [num-field  "Document font size (px)" "d" :font-size (:font-size s) access-active?]
         [text-field "Fixed-width font" "f" :font-fixed (:font-fixed s) "Fira Code, monospace" access-active?]
         [num-field  "Code font size (px)" "s" :code-font-size (:code-font-size s) access-active?]
+        [check-field "Enable Fira Code ligatures" "g" :code-ligatures?
+         (boolean (:code-ligatures? s)) access-active?]
         [:div.vv-pref-section "Documents"]
         [check-field "Stream large documents (progressive rendering)" "t" :stream?
          (stream-flag/flag-on? (:stream? s)) access-active?]]])))
