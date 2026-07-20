@@ -12,5 +12,5 @@
     "subdir": "tree-sitter-markdown",
     "queryFile": "resources/public/grammars/markdown/highlights.scm"
   },
-  "sourceRev": "c3570720f7f7bbad22fe96603f106276618e0cf5"
+  "sourceRev": "a0a00f817d02412bd92c54d316f164d827b57b5c"
 }
