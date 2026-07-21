@@ -307,8 +307,14 @@
   ;; NEW window of this warm process. `wd` is the second instance's working directory — resolve its relative paths.
   (.on app "second-instance"
        (fn [_e ^js argv ^js wd]
-         (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
-           (claim-window! (seq args)))))
+         ;; IGNORE a `--daemon` sibling that LOST the single-instance lock race: vv-open.mjs spawns
+         ;; `electron <repo> --daemon`, then a fallback `electron <repo>` when the 8 s socket handoff times out —
+         ;; on a slow cold start EITHER can win the lock. When the fallback wins, the losing --daemon process is
+         ;; delivered here as a second instance; its argv carries no user file, so opening a window for it added a
+         ;; spurious DUPLICATE window stacked on the real one. Only a real `vv <file>` (no --daemon) opens a window.
+         (when-not (some #{"--daemon"} (js->clj argv))
+           (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
+             (claim-window! (seq args))))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
                                 ;; macOS dock icon (unpackaged run — no .app bundle carries it; Linux/Win use the window :icon)
                                 (when (= "darwin" js/process.platform)
@@ -322,8 +328,17 @@
                                 ;; then refills the pool so every subsequent open is instant)
                                 (if daemon?
                                   (refill-pool!)
-                                  (claim-window! (initial-args))))))
-  (.on app "activate" (fn [] (when (and (empty? (windows/all)) (not daemon?)) (claim-window! nil))))
+                                  (claim-window! (initial-args)))
+                                ;; Register `activate` HERE — inside whenReady, AFTER the first window exists — not
+                                ;; at top level (the canonical macOS pattern). On launch macOS emits `activate` in the
+                                ;; same native batch as `ready`; a top-level listener's (empty? (windows/all)) guard
+                                ;; would then run BEFORE this whenReady `.then` microtask registered the initial
+                                ;; window, see an empty registry, and open a DUPLICATE window. Registered post-create,
+                                ;; `activate` only re-opens a window when the app is reactivated with none open (dock
+                                ;; click). A daemon opens no window on ready, so `not daemon?` keeps its activate a no-op.
+                                (.on app "activate"
+                                     (fn [] (when (and (empty? (windows/all)) (not daemon?))
+                                              (claim-window! nil)))))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
