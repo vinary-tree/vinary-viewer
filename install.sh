@@ -126,6 +126,15 @@ if [ -n "$FAILED_IDS" ]; then
   esac
 fi
 
+# The GUI (main + renderer) serves its vendored web assets from resources/public/assets/, which must exist
+# BEFORE the renderer is built: Font Awesome (toolbar icons) + Fira Code via assets:sync, and pdf.js via
+# pdfjs:sync. Those dirs are gitignored (regenerated from node_modules), so a clean checkout won't have them.
+# The canonical `npm run release`/`compile` chain these first; we invoke shadow-cljs directly below, so run
+# them explicitly here — otherwise the built app 404s the Font Awesome CSS/webfont and toolbar glyphs are blank.
+echo "==> syncing GUI assets (fonts + Font Awesome icons + pdf.js)"
+( cd "$REPO" && npm run assets:sync )
+( cd "$REPO" && npm run pdfjs:sync )
+
 echo "==> building GUI ($VV_BUILD)"
 ( cd "$REPO" && npx shadow-cljs "$VV_BUILD" main renderer )
 
