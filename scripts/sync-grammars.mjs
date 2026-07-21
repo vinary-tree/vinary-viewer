@@ -184,11 +184,38 @@ function copyLicense(entry, srcDir, outDir) {
   );
 }
 
+function ensureTreeSitterManifest(entry, gramDir) {
+  // tree-sitter-cli 0.24+ refuses to `build --wasm` without a `tree-sitter.json` alongside the grammar,
+  // and several older upstream grammars (clojure, erlang, groovy, zig, org, scss, gitignore, metta) don't
+  // ship one. `tree-sitter init` — the official generator — requires a TTY, so synthesize a minimal
+  // manifest here. Only the `grammars[0].{name,scope,path}` fields are read by `build`; metadata/bindings
+  // are placeholders to satisfy the schema.
+  const manifestPath = path.join(gramDir, 'tree-sitter.json');
+  if (fs.existsSync(manifestPath)) return;
+  const name = entry.language || entry.id;
+  const manifest = {
+    grammars: [{ name, scope: `source.${name}`, path: '.' }],
+    metadata: {
+      version: '0.0.0',
+      license: 'MIT',
+      description: `${name} grammar (manifest synthesized by vinary-viewer sync-grammars)`,
+      authors: []
+    },
+    bindings: { c: true, node: true }
+  };
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 function buildWasm(entry, srcDir, gramDir, outFile) {
+  // Resolve tree-sitter from the local devDependency (node_modules/.bin) instead of the caller's PATH,
+  // so `./install.sh` works on a clean checkout without a system-wide `brew install tree-sitter`.
+  const binDir = path.join(root, 'node_modules', '.bin');
   const env = {
     ...process.env,
-    XDG_CACHE_HOME: buildCacheRoot
+    XDG_CACHE_HOME: buildCacheRoot,
+    PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`
   };
+  ensureTreeSitterManifest(entry, gramDir);
   if (!fs.existsSync(path.join(gramDir, 'src', 'parser.c'))) {
     run('tree-sitter', ['generate'], { cwd: gramDir, env, timeout: buildTimeoutMs });
   }

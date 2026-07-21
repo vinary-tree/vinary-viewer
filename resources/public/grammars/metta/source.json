@@ -9,5 +9,5 @@
     "path": "../MeTTa-Compiler/tree-sitter-metta",
     "query": "queries/highlights.scm"
   },
-  "sourceRev": "5b2635dc7510e90b0a7ea7a0666027a07de60d84"
+  "sourceRev": "60753a4dafdeb860e2748195f7bbb7d34f7b0565"
 }

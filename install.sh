@@ -18,6 +18,57 @@ VV_BUILD="${VV_BUILD:-release}"
 echo "==> vinary-viewer install (repo: $REPO)"
 command -v npx >/dev/null 2>&1 || { echo "error: node/npx not found on PATH" >&2; exit 1; }
 
+# tree-sitter build --wasm compiles each grammar with Emscripten. The `tree-sitter-cli` npm devDep supplies
+# the tree-sitter binary itself, but not the C→wasm toolchain — we need either a local `emcc` (from
+# `brew install emscripten`) or a running Docker daemon (tree-sitter falls back to an emscripten image).
+# Fail fast with a clear message; a missing toolchain otherwise surfaces as ~47 opaque "Command failed:
+# tree-sitter build --wasm" lines mid-install.
+if ! command -v emcc >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+error: need one of the following to compile tree-sitter grammars to WASM:
+  • emcc on PATH  (macOS: brew install emscripten)
+  • a running Docker daemon  (macOS: open -a Docker, then wait for it to be ready)
+EOF
+  exit 1
+fi
+
+# shadow-cljs 3.2.0 launches the JVM with `--sun-misc-unsafe-memory-access=allow` (JDK 24+). On older JDKs the
+# launcher aborts with "Unrecognized option" before shadow-cljs prints anything useful. Resolve a 24+ JDK now so
+# the failure (if any) is one actionable line instead of a Maven-download red herring — and so a machine that HAS
+# a new-enough JDK (just not first on PATH) builds without manual JAVA_HOME juggling.
+java_major_of() {  # echo the major version of the java binary in $1 (nothing if unusable)
+  [ -x "$1" ] || return 1
+  "$1" -version 2>&1 | awk -F'"' '/version/ {split($2, a, "."); print a[1]; exit}'
+}
+
+# Candidate: honour an explicit JAVA_HOME, else the java on PATH.
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  java_bin="$JAVA_HOME/bin/java"
+else
+  java_bin="$(command -v java 2>/dev/null || true)"
+fi
+java_major="$(java_major_of "$java_bin" 2>/dev/null || true)"
+
+# Too old / missing? On macOS, auto-locate a 24+ JDK via java_home before giving up, and put it on PATH so the
+# later `npx shadow-cljs` runs inherit it too.
+if [ -z "${java_major:-}" ] || [ "$java_major" -lt 24 ] 2>/dev/null; then
+  if [ -x /usr/libexec/java_home ] && jh="$(/usr/libexec/java_home -v 24 2>/dev/null)" && [ -n "$jh" ]; then
+    export JAVA_HOME="$jh"
+    export PATH="$JAVA_HOME/bin:$PATH"
+    java_bin="$JAVA_HOME/bin/java"
+    java_major="$(java_major_of "$java_bin" 2>/dev/null || true)"
+    echo "==> using JDK ${java_major:-?} for shadow-cljs (JAVA_HOME=$JAVA_HOME)"
+  fi
+fi
+
+# Still unusable -> actionable error.
+if [ -z "${java_major:-}" ] || [ "$java_major" -lt 24 ] 2>/dev/null; then
+  echo "error: shadow-cljs 3.2.0 needs JDK 24+; found java ${java_major:-none} (checked ${java_bin:-PATH})." >&2
+  echo "       macOS: brew install --cask temurin, then re-run (install.sh auto-detects it via /usr/libexec/java_home)." >&2
+  echo "       Linux: install a JDK 24+ and put it first on PATH (or set JAVA_HOME)." >&2
+  exit 1
+fi
+
 echo "==> npm install"
 # The Rholang grammar ships in the private @f1r3fly-io/tree-sitter-rholang-js-with-comments package (served from
 # the GitHub Packages npm registry — needs ~/.npmrc auth + a GitHub PAT). It is an OPTIONAL dependency, so a

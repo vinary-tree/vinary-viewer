@@ -16,10 +16,18 @@ history, search, themes, and the Contents panel.
 | Tool | Why it is needed | Check |
 |------|------------------|-------|
 | Node.js with `npm` and `npx` | Installs JavaScript dependencies and runs Electron/shadow-cljs scripts. | `node --version` |
-| JDK | Runs the `shadow-cljs` compiler. | `java -version` |
+| JDK **24 or newer** | Runs the `shadow-cljs` compiler. shadow-cljs 3.2.0 passes `--sun-misc-unsafe-memory-access=allow`, a JDK 24+ launcher flag. | `java -version` |
 | git | Provides the sidebar file tree through `git ls-files`. | `git --version` |
+| Emscripten **or** a running Docker daemon | `tree-sitter build --wasm` compiles each syntax grammar to WebAssembly during `install.sh` and needs one of these C→wasm toolchains. `install.sh` preflights this and fails fast if neither is present. | `emcc --version` or `docker info` |
 
 The JDK is only the compiler runtime; you do not write Java for this project.
+
+Emscripten setup:
+
+- macOS: `brew install emscripten` (installs `emcc` on PATH).
+- macOS with Docker: `open -a Docker` and wait for the whale icon to stop
+  animating; `tree-sitter build --wasm` will then use the emscripten Docker
+  image automatically (no separate `emcc` install needed).
 
 ---
 
