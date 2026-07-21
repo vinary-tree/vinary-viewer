@@ -217,10 +217,10 @@ EOF
   echo "    hicolor icons: $ICONS/{16x16..512x512,scalable}/apps/vinary-viewer.*"
 fi
 
-# ---- optional: a systemd user service to keep the warm daemon up at login ------------------------
-# The daemon does NOT require systemd (the `vv` launcher starts it over the socket on demand); this unit just
-# keeps it warm from login on systemd systems so even the first open is instant. On non-systemd systems this is
-# simply skipped — nothing else changes.
+# ---- optional: keep the warm daemon up at login — systemd (Linux) / launchd (macOS) --------------
+# The daemon does NOT require a service manager (the `vv` launcher starts it over the socket on demand); this
+# just keeps it warm from login so even the FIRST open is instant. Linux uses a systemd user unit; macOS uses a
+# launchd LaunchAgent. On systems with neither, this is skipped — nothing else changes.
 if command -v systemctl >/dev/null 2>&1; then
   UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
   mkdir -p "$UNIT_DIR"
@@ -250,8 +250,65 @@ EOF
   else
     echo "    systemd: unit installed; start with 'systemctl --user enable --now vinary-viewer.service'"
   fi
+elif [ "$(uname -s)" = "Darwin" ]; then
+  # macOS equivalent of the systemd unit: a per-user launchd LaunchAgent. Same NON-socket-activated model — the
+  # daemon binds its own socket at runtime; launchd just keeps the process warm. RunAtLoad starts it at login;
+  # KeepAlive{SuccessfulExit=false} restarts it only on a crash (a clean Cmd-Q stays quit until next login),
+  # mirroring systemd's Restart=on-failure. Same `electron <repo> --daemon` command as the systemd ExecStart.
+  LABEL="io.vinarytree.vinary-viewer"
+  AGENT_DIR="$HOME/Library/LaunchAgents"
+  PLIST="$AGENT_DIR/$LABEL.plist"
+  LOG_DIR="$HOME/Library/Logs"
+  mkdir -p "$AGENT_DIR" "$LOG_DIR"
+  # Point at the REAL Electron binary, not node_modules/.bin/electron (a symlink to cli.js, a `#!/usr/bin/env node`
+  # script). A launchd agent runs with a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that excludes a Homebrew/nvm
+  # `node`, so the cli.js shebang would fail to launch; the native binary needs no node. Invoking it directly with
+  # `<repo> --daemon` is exactly what cli.js does. Path derived from electron/path.txt (version/arch-robust).
+  ELECTRON_BIN="$REPO/node_modules/electron/dist/$(cat "$REPO/node_modules/electron/path.txt" 2>/dev/null)"
+  if [ ! -x "$ELECTRON_BIN" ]; then ELECTRON_BIN="$REPO/node_modules/.bin/electron"; fi   # fallback (shouldn't happen post-build)
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$ELECTRON_BIN</string>
+        <string>$REPO</string>
+        <string>--daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>StandardOutPath</key>
+    <string>$LOG_DIR/vinary-viewer.daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_DIR/vinary-viewer.daemon.log</string>
+</dict>
+</plist>
+EOF
+  # (Re)load onto the freshly-built dist/. Like the systemd `restart` (not `enable --now`): `kickstart -k`
+  # restarts an already-running daemon so a re-install always ends on the new build. `bootout` first so
+  # `bootstrap` re-reads the (possibly changed) plist. Modern launchctl (bootstrap/bootout/kickstart), not
+  # the deprecated load/unload.
+  DOM="gui/$(id -u)"
+  launchctl bootout "$DOM/$LABEL" 2>/dev/null || true
+  if launchctl bootstrap "$DOM" "$PLIST" 2>/dev/null; then
+    launchctl kickstart -k "$DOM/$LABEL" 2>/dev/null || true
+    echo "    launchd: $LABEL loaded + (re)started on the new build"
+  else
+    echo "    launchd: plist installed at $PLIST; load with 'launchctl bootstrap $DOM \"$PLIST\"'"
+  fi
 else
-  echo "    (no systemd — the daemon starts on demand via 'vv'; no service needed)"
+  echo "    (no systemd/launchd — the daemon starts on demand via 'vv'; no service needed)"
 fi
 
 # ---- migrate off v0.1.0 (the vmd-patching tool) -------------------------------------------------

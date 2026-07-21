@@ -69,6 +69,14 @@
 (defn app-icon  [] (path/join js/__dirname ".." ".." "resources" "icons" "appicon-256.png"))
 (defn dock-icon [] (path/join js/__dirname ".." ".." "resources" "icons" "appicon-512.png"))
 
+(defn- set-dock-visible!
+  "macOS only: show/hide the Dock icon. The resident --daemon hides it (invisible background service, like the
+   Linux systemd unit / launchd LaunchAgent that keeps it warm) and shows it whenever a window is on screen."
+  [visible?]
+  (when (= "darwin" js/process.platform)
+    (when-let [dock (.-dock app)]
+      (if visible? (.show dock) (.hide dock)))))
+
 (defn initial-args
   "All non-flag document arguments passed on the command line (e.g. `vv a.md b.pdf https://…`),
    normalized to canonical tab uris in order — see `startup/doc-uris`. node's `path.resolve` is the
@@ -179,6 +187,7 @@
   "Open `args` in a pre-warmed pool window — instant, no bundle eval — else cold-create one. Refills the pool
    afterward so the next open is warm too."
   [args]
+  (set-dock-visible! true)   ; a window is about to appear — restore the Dock icon (no-op off macOS / if already shown)
   (if-let [win (peek @pool)]
     (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
         (windows/add! win)                          ; it is now a real, tracked, on-screen window
@@ -327,7 +336,10 @@
                                 ;; launch claims a window for its command-line files (cold the very first time,
                                 ;; then refills the pool so every subsequent open is instant)
                                 (if daemon?
-                                  (refill-pool!)
+                                  (do (refill-pool!)
+                                      ;; resident daemon has no window yet — hide the Dock icon so it's an invisible
+                                      ;; background service (claim-window! reveals it when a window opens)
+                                      (set-dock-visible! false))
                                   (claim-window! (initial-args)))
                                 ;; Register `activate` HERE — inside whenReady, AFTER the first window exists — not
                                 ;; at top level (the canonical macOS pattern). On launch macOS emits `activate` in the
@@ -342,4 +354,8 @@
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
-       (fn [] (when-not (or daemon? (= js/process.platform "darwin")) (.quit app)))))))
+       (fn [] (cond
+                ;; resident daemon on macOS: stay alive but go invisible again (re-hide the Dock icon)
+                (and daemon? (= js/process.platform "darwin")) (set-dock-visible! false)
+                ;; non-daemon off macOS quits when its last window closes; a normal macOS app stays in the Dock
+                (not (or daemon? (= js/process.platform "darwin"))) (.quit app)))))))
