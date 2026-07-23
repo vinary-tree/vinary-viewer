@@ -79,16 +79,22 @@
                    (js/setTimeout #(stop! on-stop) 0))
         (end! conn (js/JSON.stringify #js {:ok false :error (str "unknown command: " cmd)}))))
     (try
-      ;; a valid message opens a window (empty args → a New-Tab window, like bare `vv`)
-      (on-open (vec (js->clj (.-args (js/JSON.parse msg)))))
+      ;; a valid open message: {"args": [...], "instanceId": "..."} — empty args = a New-Tab window, like
+      ;; bare `vv`. `instanceId` is the launch's idempotency key: the daemon opens at most one window per id,
+      ;; so redundant signals of one `vinary-viewer` invocation (socket + second-instance racing) coalesce to
+      ;; a single window at the source. A pre-instance-id client simply omits the field (id → nil).
+      (let [^js parsed (js/JSON.parse msg)]
+        (on-open {:args        (vec (js->clj (.-args parsed)))
+                  :instance-id (not-empty (.-instanceId parsed))}))
       (end! conn nil)
       (catch :default e
         (js/console.error "[vv daemon] bad request:" (str e))
         (end! conn nil)))))
 
 (defn listen!
-  "Start the daemon socket server. Handlers: `:on-open` receives a vector of doc-uri args (already
-   cwd-resolved by the client) for each open message; `:on-stop` quits the process for `vv1 stop` and for
+  "Start the daemon socket server. Handlers: `:on-open` receives `{:args [...] :instance-id \"…\"|nil}` for
+   each open message (args are cwd-resolved by the client; instance-id is the launch idempotency key);
+   `:on-stop` quits the process for `vv1 stop` and for
    SIGTERM/SIGINT; `:status` returns {:pid :version :bundle-mtime-ms :windows :daemon?} for `vv1 ping`.
    Returns the server (or nil if the socket could not be bound — e.g. a live daemon already owns it, which
    shouldn't happen since only the single-instance primary calls this)."

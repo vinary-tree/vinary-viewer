@@ -294,10 +294,23 @@ after the client's FIN.
 
 | Frame | Meaning | Reply |
 |---|---|---|
-| `{"args":["/abs/file","https://…"],"cwd":"/abs"}` | open these in a new window (empty `args` → a New-Tab window, like bare `vv`) | none |
+| `{"args":["/abs/file","https://…"],"instanceId":"<uuid>"}` | open these in a new window (empty `args` → a New-Tab window, like bare `vv`) | none |
 | `vv1 ping` | who are you, and which build are you running? | `{"ok":true,"pid":…,"version":…,"bundleMtimeMs":…,"windows":N,"daemon":bool}` |
 | `vv1 stop` | quit gracefully — `app.quit()`, so `before-quit` runs (SSH pools torn down, window bounds persisted) | the same status object, sent *before* quitting |
 | anything else | logged `bad request`; **no window is opened** | none |
+
+**`instanceId` — one window per launch.** Every window-open trigger — the initial command-line open,
+this socket open, an Electron `second-instance`, macOS `activate` — routes through the single
+`open-window!` authority in `core.cljs`. `scripts/vv-open.mjs` mints one `instanceId` per `vinary-viewer`
+invocation and stamps it on **every** signal that launch can deliver (the socket message here, and
+`--vv-instance-id=<id>` in the argv of its direct-open fallback, which can reach the primary as
+`initial-args` or via `second-instance`). `open-window!` opens **at most one window per instanceId** —
+so when two signals of the same launch race (the classic duplicate-window bug), the second finds the
+first launch's window and surfaces it instead of opening another. Distinct launches carry distinct ids,
+so each still gets its own window (this is idempotency, not coalescing — no timers). Each window holds
+its id (`win.vvInstance`); the id→window map prunes itself when the window closes. A pre-instance-id
+client simply omits the field (`instanceId` → nil, never deduped), so the open contract stays
+backward-compatible.
 
 **Why the control frames are not JSON.** A pre-`vv1` daemon parses every message with `JSON.parse`
 inside a try/catch and opens a window only on success. `vv1 …` therefore fails to parse and is

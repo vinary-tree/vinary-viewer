@@ -122,7 +122,7 @@ async function main() {
     'ping reports the mtime of the bundle it actually loaded');
 
   // 3. The v0.2 open message still opens a window — the control frames are additive, and an OLD `vv`
-  //    client must keep working against a NEW daemon.
+  //    client must keep working against a NEW daemon. (No instanceId — a pre-instance-id client.)
   await request(JSON.stringify({ args: [path.join(ROOT, 'README.md')] }));
   await waitUntil(async () => (await ping()).windows === 1, 30000, 'the open message to produce a window');
 
@@ -147,6 +147,23 @@ async function main() {
   await waitUntil(async () => (await ping()).windows === 2, 30000, 'the second file to open');
   const deferred = await ping();
   assert.strictEqual(deferred.pid, a.pid, 'a daemon with windows open is never restarted underneath the user');
+
+  // 6a. INSTANCE-ID IDEMPOTENCY — the fix for duplicate launch windows. One `vinary-viewer` invocation can
+  //     deliver more than one open signal (the socket open AND a second-instance from a sibling racing the
+  //     single-instance lock); every signal of one launch carries the same instanceId, and the daemon must open
+  //     at most ONE window per id. Sending the same id twice reproduces that race deterministically. Counts are
+  //     relative to a baseline, since this runs after step 6; the daemon is stopped at step 7 regardless.
+  const base = (await ping()).windows;
+  await request(JSON.stringify({ args: [], instanceId: 'smoke-id-X' }));
+  await waitUntil(async () => (await ping()).windows === base + 1, 30000, 'the first signal for an id to open one window');
+  await request(JSON.stringify({ args: [], instanceId: 'smoke-id-X' }));   // the DUPLICATE signal of the same launch
+  await sleep(2000);                                                       // give any wrongful window time to appear
+  assert.strictEqual((await ping()).windows, base + 1,
+    'a second open with the SAME instanceId must NOT open another window (the duplicate-launch fix)');
+  await request(JSON.stringify({ args: [], instanceId: 'smoke-id-Y' }));   // a genuinely different launch
+  await waitUntil(async () => (await ping()).windows === base + 2, 30000, 'a distinct instanceId opens its own window (not coalesced)');
+  await request(JSON.stringify({ args: [] }));                             // no id (OS/legacy) → never deduped
+  await waitUntil(async () => (await ping()).windows === base + 3, 30000, 'an id-less open always produces a window');
 
   // 7. stop quits the process and frees the socket, so the lock is available to the next launch.
   const stopped = runNode(path.join(APP, 'scripts', 'vv-daemon.mjs'), ['stop', '--notice']);

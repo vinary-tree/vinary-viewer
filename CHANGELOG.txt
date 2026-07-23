@@ -216,6 +216,24 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Launching `vinary-viewer` frequently opened two windows. Window-opening was triggered
+      from four independent sites (the initial command-line open, the daemon socket open, an
+      Electron second-instance, and macOS activate), each calling claim-window! directly with
+      only ad-hoc guards -- and ONE `vinary-viewer` invocation can legitimately deliver more
+      than one of them (e.g. the socket open plus a second-instance from a sibling racing the
+      single-instance lock), so two fired for one launch. Two earlier band-aids (a --daemon
+      argv filter on second-instance; moving the activate handler into whenReady) patched two
+      specific races but not the class. Replaced with one authority: `open-window!` is now the
+      sole caller of claim-window!, and every launch carries a unique instance-id (minted by
+      vv-open.mjs, threaded onto every signal it can emit -- the socket message and the
+      --vv-instance-id argv of its fallback). open-window! opens at most one window per
+      instance-id, so redundant signals of one launch coalesce to a single window at the
+      source, deterministically and with no timer; each window holds its own id (win.vvInstance)
+      and the id->window map prunes itself on close. Distinct launches carry distinct ids, so
+      each still opens its own window. The two band-aids became the named :daemon-bootstrap and
+      :activate rules inside open-window!. Verified: a same-instance-id open sent twice opens
+      exactly one window (new assertion in test/daemon-smoke.js, proven to fail with the dedup
+      disabled), and a real launcher loop opens exactly one window per invocation.
     - ./install.sh did not, in fact, always end on the new build -- its own comments claimed
       that twice. It restarted the systemd unit / launchd agent, but the resident process is
       usually not that job: `vv` starts a daemon on demand whenever no socket answers, so it

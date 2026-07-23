@@ -89,6 +89,19 @@
       (some args ["-V" "--version"]) :version
       :else                          nil)))
 
+(def ^:private instance-id-flag "--vv-instance-id=")
+
+(defn instance-id
+  "The launch's idempotency key, if present: the value of a `--vv-instance-id=<id>` flag anywhere in `argv`
+   (scripts/vv-open.mjs stamps every window-opening signal of one `vinary-viewer` invocation with the same
+   id), else nil. `doc-uris` drops leading-'-' args, so the flag never reaches the tab list — this reads it
+   back out. Whichever signal arrives (own argv when a process becomes primary, or the argv Electron delivers
+   to `second-instance`), the id travels with it, so the daemon opens at most one window per invocation."
+  [argv]
+  (some (fn [a] (when (and (string? a) (str/starts-with? a instance-id-flag))
+                  (not-empty (subs a (count instance-id-flag)))))
+        argv))
+
 (defn doc-uris
   "Ordered, normalized tab uris for the non-flag document arguments in `argv` — supporting any number of
    files/URIs named on the command line (`vv a.md b.pdf https://example.com`), each opened in its own tab.

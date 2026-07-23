@@ -93,6 +93,8 @@
     (.send (.-webContents win) "vv:open-files"
            (clj->js {:paths (vec paths) :focus-first true}))))
 
+(declare forget-instance!)
+
 (defn- wire-window!
   "Build a fully-wired app window (nav lockdown, per-window init!s, session services once). `show?` starts it
    visible (a normal open) or hidden (a pool window). `on-ready` runs with the window AFTER did-finish-load +
@@ -141,9 +143,11 @@
              (connections/init! wc)   ; persisted (non-secret) SSH connection metadata
              (ssh/init! win)          ; SSH/SFTP transport prompts + vv:ssh-* channels
              (on-ready win)))
-    ;; drop a closed window from BOTH the live registry and the pool (a pool window can be closed before claim)
+    ;; drop a closed window from BOTH the live registry and the pool (a pool window can be closed before claim),
+    ;; and release its instance-id so `served` never outgrows the live windows
     (.on win "closed" (fn []
                         (windows/remove! win)
+                        (forget-instance! win)
                         (swap! pool (fn [ps] (vec (remove #(= % win) ps))))))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
     ;; process/session-level services register ONCE (see `services-inited?`) — extension runtime + ad-blocking on
@@ -185,7 +189,8 @@
 
 (defn- claim-window!
   "Open `args` in a pre-warmed pool window — instant, no bundle eval — else cold-create one. Refills the pool
-   afterward so the next open is warm too."
+   afterward so the next open is warm too. Returns the window it opened (so `open-window!` can bind the
+   launch's instance-id to it)."
   [args]
   (set-dock-visible! true)   ; a window is about to appear — restore the Dock icon (no-op off macOS / if already shown)
   (if-let [win (peek @pool)]
@@ -195,9 +200,52 @@
         (open-files! win args)
         (.show win)
         (.focus win)
-        (refill-pool!))
-    (do (create-window! args)
-        (refill-pool!))))
+        (refill-pool!)
+        win)
+    (let [win (create-window! args)]
+      (refill-pool!)
+      win)))
+
+;; ── the window-open authority ─────────────────────────────────────────────────────────────────────────────
+;; Every window-open trigger — the initial command-line launch, a `vv <file>` over the daemon socket, an
+;; Electron `second-instance`, and macOS `activate` — routes through `open-window!`, the SOLE caller of
+;; claim-window!. Two things made duplicate windows possible before: (1) those four sites each called
+;; claim-window! directly with only ad-hoc guards, and (2) ONE `vinary-viewer` invocation can legitimately
+;; deliver more than one of them (e.g. the socket open AND a second-instance from a sibling process racing the
+;; single-instance lock). The fix is an idempotency key: scripts/vv-open.mjs stamps every signal of one
+;; invocation with the same `instance-id`, we open at most ONE window per id, and the window itself holds its
+;; id (win.vvInstance) so the map self-prunes when the window closes. This is deterministic — no timers, no
+;; debounce — and genuine separate launches carry distinct ids, so each still gets its own window.
+(defonce ^:private served (atom {}))   ; instance-id -> the window opened for it (bounded by live windows)
+
+(defn- forget-instance!
+  "Drop a window's instance-id from `served` (called from the window's `closed` handler), so a launch whose
+   window the user closed can open a fresh one later and the map never outgrows the live windows."
+  [^js win]
+  (when-let [id (.-vvInstance win)] (swap! served dissoc id)))
+
+(defn- open-window!
+  "The ONLY caller of claim-window!. `source` classifies the trigger; `id` is the launch's instance-id (nil for
+   OS-originated signals that carry no launch identity); `args` are canonical doc uris (nil/empty = New-Tab).
+   At most one window per instance-id: a duplicate signal for an id whose window is still alive surfaces that
+   window instead of opening another."
+  [source id args]
+  (case source
+    ;; NON-authoritative signals — never open a window on their own identity:
+    ;;   :activate — a macOS dock reactivation, NOT a `vv` invocation (so no instance-id). Reopen a window only
+    ;;     for a NORMAL app run with none left open (the canonical macOS pattern); NEVER on the resident daemon,
+    ;;     which must stay windowless until a real open. Without the `not daemon?` guard an activate arriving
+    ;;     before a socket open (both id-less/authoritative) could stack a stray empty window on the real one.
+    :activate          (when (and (empty? (windows/all)) (not daemon?)) (claim-window! nil))
+    :daemon-bootstrap  nil                                                 ; a --daemon sibling that lost the lock
+    ;; authoritative user launch/open (:initial | :socket | :second-instance)
+    (if-let [^js win (and id (get @served id))]
+      (when-not (.isDestroyed win) (.show win) (.focus win))               ; a duplicate signal → surface it
+      (let [^js win (claim-window! (seq args))]
+        (when (and id win)
+          (set! (.-vvInstance win) id)      ; the window holds its own instance-id
+          (swap! served assoc id win))
+        win))))
 
 (declare app-version)
 
@@ -333,16 +381,18 @@
   ;; keybindings own the accelerators (so the default menu's Ctrl+R/W/etc. don't double-fire)
   ;; a second `vv <file>` invocation: its argv/cwd arrive here (its own process then exits). Open the files in a
   ;; NEW window of this warm process. `wd` is the second instance's working directory — resolve its relative paths.
+  ;; A `--daemon` sibling that lost the single-instance lock race is delivered here too (vv-open.mjs may spawn
+  ;; `electron <repo> --daemon` and a fallback `electron <repo>`; either can win the lock) — classify it as
+  ;; :daemon-bootstrap so open-window! never opens a window for it. Every real launch carries its instance-id in
+  ;; argv, so a second-instance that duplicates a signal already served over the socket coalesces to one window.
   (.on app "second-instance"
        (fn [_e ^js argv ^js wd]
-         ;; IGNORE a `--daemon` sibling that LOST the single-instance lock race: vv-open.mjs spawns
-         ;; `electron <repo> --daemon`, then a fallback `electron <repo>` when the 8 s socket handoff times out —
-         ;; on a slow cold start EITHER can win the lock. When the fallback wins, the losing --daemon process is
-         ;; delivered here as a second instance; its argv carries no user file, so opening a window for it added a
-         ;; spurious DUPLICATE window stacked on the real one. Only a real `vv <file>` (no --daemon) opens a window.
-         (when-not (some #{"--daemon"} (js->clj argv))
-           (let [args (startup/doc-uris (js->clj argv) #(.resolve path wd %))]
-             (claim-window! (seq args))))))
+         (let [argv (js->clj argv)]
+           (if (some #{"--daemon"} argv)
+             (open-window! :daemon-bootstrap nil nil)
+             (open-window! :second-instance
+                           (startup/instance-id argv)
+                           (startup/doc-uris argv #(.resolve path wd %)))))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
                                 ;; macOS dock icon (unpackaged run — no .app bundle carries it; Linux/Win use the window :icon)
                                 (when (= "darwin" js/process.platform)
@@ -353,29 +403,33 @@
                                 ;; `vv1 ping`/`vv1 stop` (scripts/vv-daemon.mjs) additionally let a client see WHICH
                                 ;; build this process is running and ask it to quit gracefully — the seam install.sh
                                 ;; needs to guarantee a re-install ends on the new build (see daemon-status).
+                                ;; the socket open carries the launch's instance-id, so a `vv <file>` that also
+                                ;; reaches this process via second-instance opens exactly one window (see open-window!)
                                 (daemon/listen!
-                                  {:on-open (fn [args] (claim-window! (startup/doc-uris (into ["_" "_"] args) identity)))
+                                  {:on-open (fn [{:keys [args instance-id]}]
+                                              (open-window! :socket instance-id
+                                                            (startup/doc-uris (into ["_" "_"] args) identity)))
                                    :on-stop (fn [] (.quit app))
                                    :status  daemon-status})
                                 ;; a daemon opens no window (it stays resident and pre-warms the pool); a normal
                                 ;; launch claims a window for its command-line files (cold the very first time,
-                                ;; then refills the pool so every subsequent open is instant)
+                                ;; then refills the pool so every subsequent open is instant). The initial open
+                                ;; carries this process's own instance-id (from --vv-instance-id in argv), so if the
+                                ;; same launch also arrives over the socket it is recognized as already served.
                                 (if daemon?
                                   (do (refill-pool!)
                                       ;; resident daemon has no window yet — hide the Dock icon so it's an invisible
                                       ;; background service (claim-window! reveals it when a window opens)
                                       (set-dock-visible! false))
-                                  (claim-window! (initial-args)))
+                                  (open-window! :initial (startup/instance-id (js->clj js/process.argv)) (initial-args)))
                                 ;; Register `activate` HERE — inside whenReady, AFTER the first window exists — not
                                 ;; at top level (the canonical macOS pattern). On launch macOS emits `activate` in the
-                                ;; same native batch as `ready`; a top-level listener's (empty? (windows/all)) guard
-                                ;; would then run BEFORE this whenReady `.then` microtask registered the initial
-                                ;; window, see an empty registry, and open a DUPLICATE window. Registered post-create,
-                                ;; `activate` only re-opens a window when the app is reactivated with none open (dock
-                                ;; click). A daemon opens no window on ready, so `not daemon?` keeps its activate a no-op.
-                                (.on app "activate"
-                                     (fn [] (when (and (empty? (windows/all)) (not daemon?))
-                                              (claim-window! nil)))))))
+                                ;; same native batch as `ready`; registering post-create means the initial window is
+                                ;; already in the registry, so `activate`'s (empty? (windows/all)) guard sees it and
+                                ;; does not open a duplicate. `activate` carries no launch identity (it is a dock
+                                ;; reactivation, not a `vv` invocation), so open-window! only honors it when no window
+                                ;; is open at all — a daemon that has served a socket open already has one.
+                                (.on app "activate" (fn [] (open-window! :activate nil nil))))))
   (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
