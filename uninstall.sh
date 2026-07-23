@@ -7,7 +7,17 @@
 #    git show v0.1.0:uninstall.sh | bash )
 set -euo pipefail
 
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="${BIN:-$HOME/.local/bin}"
+
+# Stop the resident process FIRST. Tearing down the service manager job below does not reach a daemon that
+# `vv` started on demand (the common case — it belongs to no service manager), which would otherwise keep
+# running until logout with its launchers gone and no supported way to reach it. The socket owner is the
+# daemon, whoever started it; vv-daemon.mjs asks it to quit and falls back to terminating it by pid.
+if [ -f "$REPO/scripts/vv-daemon.mjs" ] && command -v node >/dev/null 2>&1; then
+  node "$REPO/scripts/vv-daemon.mjs" stop --notice || true
+fi
+
 removed=0
 for f in vv vinary-viewer; do
   if [ -e "$BIN/$f" ] || [ -L "$BIN/$f" ]; then rm -f "$BIN/$f"; echo "removed $BIN/$f"; removed=1; fi

@@ -24,6 +24,7 @@ It is idempotent and performs:
 | Grammars + graphics | Syncs the bundled tree-sitter grammars (`grammars:sync --skip-existing --allow-failures`) and the resvg image WASM. A grammar that can't be downloaded/built is **skipped, not fatal**; the installer then reports which were skipped and how to enable them. |
 | Build | Runs `npx shadow-cljs release main renderer` by default (then `… cli tui`). Set `VV_BUILD=compile` to build debug artifacts. |
 | Launchers | Writes `vinary-viewer` and symlinks `vv` into `${BIN:-$HOME/.local/bin}`. |
+| Resident daemon | **Stops** whatever process currently serves `vv`, (re)starts the login service (systemd user unit / launchd LaunchAgent), then **verifies** the daemon now running is the build just built — see [§1.2](#12-the-resident-daemon-and-staleness). |
 | Legacy notice | Detects signs of the old v0.1.0 vmd-patching install and prints manual cleanup guidance. |
 
 Override the destination:
@@ -81,6 +82,45 @@ fail loudly on a genuinely broken grammar. `sync-grammars.mjs` records each run'
 outcome in the gitignored `.cache/tree-sitter-grammars/last-sync.json`
 (`{ built, cached, failed: [{ id, message }] }`), which `./install.sh` reads to
 report the skipped grammars.
+
+---
+
+### 1.2 The resident daemon and staleness
+
+A **resident process** keeps the app warm: `vv` hands it your files over a Unix socket and a window
+opens with no cold start. It loads `dist/main/main.js` **once, at boot**, so anything that rebuilds
+that file — `./install.sh`, or a bare `npm run release` — leaves the running daemon serving the
+**old** build until something replaces it.
+
+Replacing it is not as simple as restarting the login service, and that was a real bug:
+
+- The daemon is whichever process owns the socket (equivalently, the single-instance lock). `vv`
+  **starts one on demand** whenever none answers, so it usually belongs to *no* service manager —
+  `systemctl --user restart` / `launchctl kickstart -k` then restart a job that is not the one
+  serving you.
+- The service's fresh instance loses the single-instance lock race to that survivor and quits with
+  status 0, which neither `Restart=on-failure` nor `KeepAlive{SuccessfulExit=false}` retries. The
+  old daemon keeps serving, silently.
+
+Three things now close that gap:
+
+| Where | Behavior |
+|---|---|
+| `./install.sh` | Stops the socket owner (gracefully — `before-quit` runs, so window bounds persist), restarts the service, then **verifies** with `vv-daemon.mjs ping --expect-bundle`. A mismatch is printed loudly rather than assumed away. Open windows are closed by this; the installer says so before doing it. |
+| `./uninstall.sh` | Stops the resident process too — otherwise a daemon `vv` started on demand would outlive its own launchers. |
+| `vv` | Retires a daemon that is **stale and idle** (0 windows) before opening, so a bare `npm run release` takes effect on your next `vv`. One with windows open is left alone — a live session is never closed behind you; the staleness clears when you close them. |
+
+Inspect or drive it yourself:
+
+```bash
+node scripts/vv-daemon.mjs ping            # pid, version, loaded-bundle mtime, open windows
+node scripts/vv-daemon.mjs ping --json --expect-bundle dist/main/main.js   # exit 5 if stale
+node scripts/vv-daemon.mjs stop            # graceful; falls back to terminating the socket owner
+```
+
+Exit codes: `0` ok · `3` no daemon running · `4` a daemon too old to answer (pre-`vv1`) · `5` stale.
+The wire protocol is documented in
+[`architecture/03-ipc-protocol.md` §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process).
 
 ---
 
@@ -166,6 +206,7 @@ the `:sync` variants automatically; run them directly for CI or to refresh asset
 | `npm run test:cli` | `compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js` | Build `vv --cli` and run the CLI + terminal-graphics smokes. |
 | `npm run test:tui` | `compile:tui && node test/tui-smoke.js` | Build `vv --tui` and run the TUI smoke (headless `--drive` replay). |
 | `npm run test:electron` | `electron --no-sandbox test/electron-smoke.js` | Electron GUI smoke test (debug artifacts). |
+| `npm run test:daemon` | `compile && node test/daemon-smoke.js` | The resident-daemon control seam ([§1.2](#12-the-resident-daemon-and-staleness)): `vv1 ping`/`stop`, the legacy-inertness contract, and the stale-but-idle self-heal. Spawns real daemons on an isolated socket, so it never touches yours. Headless Linux: `xvfb-run -a npm run test:daemon`. |
 | `npm run test:electron:release` | `release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js` | The GUI smoke against a fresh optimized release build. |
 | `npm run test:extensions` | `electron --no-sandbox test/extensions-smoke.js` | Browser-extension runtime smoke (no sandbox). |
 | `npm run test:extensions:sandbox` | `electron test/extensions-smoke.js` | The extension smoke with the Chromium sandbox enabled. |

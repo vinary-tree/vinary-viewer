@@ -81,7 +81,7 @@ shadow-cljs compile test && node dist/test/test.js
 
 ## 3. The JavaScript smoke harnesses
 
-Nine JavaScript harnesses (`test/*-smoke.js`) drive the wiring. Each is a plain
+Ten JavaScript harnesses (`test/*-smoke.js`) drive the wiring. Each is a plain
 Node or Electron script using the built-in `assert` module; there is no test
 framework. They fall into three groups by host.
 
@@ -91,6 +91,7 @@ framework. They fall into three groups by host.
 |---------|--------|
 | [`electron-smoke.js`](../../test/electron-smoke.js) | The flagship. Boots the **real renderer** (`resources/public/index.html`) in Electron, wires `vv:stream-*` to the **real** `content_service.js` (genuine `createReadStream`/`readline` batching + the session registry), and asserts: streamed `innerHTML` is **byte-identical** to batch over a corpus; the mid-stream scrollbar spacer sizes the whole document ([ADR-0023](../design-decisions/0023-streaming-scrollbar-and-pacing.md)); the session registry returns to `0` after teardown (**no fd/session leak**); DevTools opens with no main-process crash; and re-frame-10x is hidden by default. |
 | [`extensions-smoke.js`](../../test/extensions-smoke.js) | The Chrome-extension + ad-block runtime ([ADR-0015](../design-decisions/0015-scoped-extension-runtime-gpl-free.md)): `session.extensions.loadExtension` loads the unpacked MV3 fixture, its content script injects into a matched HTTP page, its action popup loads with native `chrome.*` (runtime/storage/action), and the native ad-blocker fetches filter lists (network-gated). |
+| [`daemon-smoke.js`](../../test/daemon-smoke.js) | The resident-daemon control seam ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)): `vv1 ping` reports the pid/version/**loaded-bundle mtime**/window count `install.sh` verifies against; the v0.2 open message still opens a window; an unknown command opens none; `vv1 stop` exits the process and frees the socket **and** the single-instance lock; and `vv` retires a stale **idle** daemon but never one with a window open. It also guards the backward-compatibility contract that makes all this safe — a control frame must not parse as JSON, or probing a pre-`vv1` daemon would open a stray window on it. Spawns real daemons under a private `XDG_RUNTIME_DIR` and a renamed mirror app (its own userData → its own lock), so it cannot disturb the developer's live daemon. |
 
 ### 3.2 Terminal smokes (Node, no display)
 

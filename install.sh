@@ -217,6 +217,19 @@ EOF
   echo "    hicolor icons: $ICONS/{16x16..512x512,scalable}/apps/vinary-viewer.*"
 fi
 
+# ---- stop whatever resident process is currently serving `vv` ------------------------------------
+# This runs BEFORE the service-manager (re)start below, and runs even when there is no service manager at all.
+# The daemon is identified by the SOCKET it owns (equivalently, the single-instance lock), never by who
+# started it: `vv` spawns one on demand whenever no socket answers, so the resident process usually belongs to
+# no service manager — and `systemctl --user restart` / `launchctl kickstart -k` then restart a job that is not
+# the one serving you. Their replacement instance loses the single-instance lock race to the survivor and
+# quits with status 0, so neither Restart=on-failure nor KeepAlive{SuccessfulExit=false} retries it, and the
+# OLD build keeps serving — silently, which is how a fix can appear to ship and not. scripts/vv-daemon.mjs
+# asks the socket owner to quit gracefully (before-quit: SSH pools torn down, window bounds persisted) and
+# falls back to terminating it by pid for pre-vv1 daemons that cannot be asked.
+echo "==> stopping any resident daemon (so this install lands on the new build)"
+node "$REPO/scripts/vv-daemon.mjs" stop --notice || true
+
 # ---- optional: keep the warm daemon up at login — systemd (Linux) / launchd (macOS) --------------
 # The daemon does NOT require a service manager (the `vv` launcher starts it over the socket on demand); this
 # just keeps it warm from login so even the FIRST open is instant. Linux uses a systemd user unit; macOS uses a
@@ -240,10 +253,12 @@ RestartSec=2
 WantedBy=graphical-session.target
 EOF
   systemctl --user daemon-reload 2>/dev/null || true
-  # Enable at login AND (re)start now onto the freshly-built dist/. `restart` (not `enable --now`) is the key:
-  # `--now` is a no-op on an ALREADY-running daemon, so a re-install would otherwise leave the OLD dist/main
-  # loaded (and its warm pool windows on the OLD renderer) until the next manual restart. `restart` starts the
-  # daemon if it's stopped and reloads it if it's running — so a re-install always ends on the new build.
+  # Enable at login AND (re)start now onto the freshly-built dist/. `restart` (not `enable --now`) is half of
+  # it: `--now` is a no-op on an ALREADY-running unit, so a re-install would otherwise leave the OLD dist/main
+  # loaded (and its warm pool windows on the OLD renderer) until the next manual restart. The other half is the
+  # unconditional stop above — `restart` only restarts THIS UNIT, and a daemon `vv` started on demand is not in
+  # it; the unit's fresh instance would lose the single-instance lock to that survivor and quit. Stop + restart
+  # together are what make a re-install end on the new build; the ping below verifies that it actually did.
   if systemctl --user enable vinary-viewer.service 2>/dev/null \
      && systemctl --user restart vinary-viewer.service 2>/dev/null; then
     echo "    systemd: vinary-viewer.service enabled + (re)started on the new build"
@@ -296,9 +311,11 @@ elif [ "$(uname -s)" = "Darwin" ]; then
 </plist>
 EOF
   # (Re)load onto the freshly-built dist/. Like the systemd `restart` (not `enable --now`): `kickstart -k`
-  # restarts an already-running daemon so a re-install always ends on the new build. `bootout` first so
-  # `bootstrap` re-reads the (possibly changed) plist. Modern launchctl (bootstrap/bootout/kickstart), not
-  # the deprecated load/unload.
+  # restarts an already-running JOB. That alone is not enough — a daemon `vv` started on demand is not this
+  # job, and the job's fresh instance would lose the single-instance lock to it and quit with status 0 (which
+  # KeepAlive{SuccessfulExit=false} does not retry); the unconditional stop above is what frees the lock.
+  # `bootout` first so `bootstrap` re-reads the (possibly changed) plist. Modern launchctl
+  # (bootstrap/bootout/kickstart), not the deprecated load/unload.
   DOM="gui/$(id -u)"
   launchctl bootout "$DOM/$LABEL" 2>/dev/null || true
   if launchctl bootstrap "$DOM" "$PLIST" 2>/dev/null; then
@@ -310,6 +327,13 @@ EOF
 else
   echo "    (no systemd/launchd — the daemon starts on demand via 'vv'; no service needed)"
 fi
+
+# Verify rather than assume: ask whatever daemon is now resident which build it loaded and compare it with the
+# one just built. This is the claim the two blocks above make, so it is checked, not trusted — a mismatch
+# prints exactly what is stale and how to fix it. With no service manager nothing is running yet (by design:
+# the next `vv` starts one on the new build), and `ping` says so without starting anything.
+node "$REPO/scripts/vv-daemon.mjs" ping --deadline 15000 --expect-bundle "$REPO/dist/main/main.js" \
+  | sed 's/^/    /' || true
 
 # ---- migrate off v0.1.0 (the vmd-patching tool) -------------------------------------------------
 # v0.1.0 patched the system `vmd` npm package, set ~/.vmdrc styles.extra, and installed a vmd() shell

@@ -272,3 +272,45 @@ committed as:
 The seam is intentionally broad enough for current app features but narrow
 enough to audit. New privileged capabilities should be added in main, exposed as
 small `window.vv` methods, and documented here and in the threat model.
+
+---
+
+## 6. The daemon socket (process ↔ process)
+
+Everything above is renderer ↔ main *inside* one process. There is a second, much smaller IPC
+seam **between processes**: the resident-server Unix socket
+([`vinary.main.daemon`](../../src/vinary/main/daemon.cljs)). Any single-instance **primary**
+listens on it — not only a `--daemon` one — and `vv` (`scripts/vv-open.mjs`) is its client, so a
+`vv <file>` opens a window in the already-warm process instead of paying a cold start
+([cold-start ledger, Phase 2](../optimization/cold-start/ledger.md)).
+
+**Socket path** — `$XDG_RUNTIME_DIR/vinary-viewer.sock`, else `$TMPDIR/vinary-viewer-<uid>.sock`.
+Stated in two places that must change together: `daemon/socket-path` and
+`scripts/daemon-socket.mjs` (the single JS copy, imported by both client scripts).
+
+**Messages** — one per connection. The client half-closes to frame its message; the server replies
+(control frames only) and ends. The server sets `allowHalfOpen` precisely so it can still write
+after the client's FIN.
+
+| Frame | Meaning | Reply |
+|---|---|---|
+| `{"args":["/abs/file","https://…"],"cwd":"/abs"}` | open these in a new window (empty `args` → a New-Tab window, like bare `vv`) | none |
+| `vv1 ping` | who are you, and which build are you running? | `{"ok":true,"pid":…,"version":…,"bundleMtimeMs":…,"windows":N,"daemon":bool}` |
+| `vv1 stop` | quit gracefully — `app.quit()`, so `before-quit` runs (SSH pools torn down, window bounds persisted) | the same status object, sent *before* quitting |
+| anything else | logged `bad request`; **no window is opened** | none |
+
+**Why the control frames are not JSON.** A pre-`vv1` daemon parses every message with `JSON.parse`
+inside a try/catch and opens a window only on success. `vv1 …` therefore fails to parse and is
+**inert** on an old daemon — whereas a JSON-shaped control message (one with no `args`) would have
+opened a stray empty window on every old daemon a new client probed. That inertness is what lets a
+new client safely ask an unknown daemon what it is; silence identifies it as legacy, and
+`scripts/vv-daemon.mjs` then falls back to terminating the **socket owner** by pid (`lsof`, `fuser`,
+`pgrep`, in that order of precision).
+
+**Why `ping` exists at all.** The daemon is identified by the socket it owns, never by who started
+it — `vv` spawns one on demand, so it usually belongs to no service manager. `bundleMtimeMs` (the
+mtime of `dist/main/main.js` *as loaded at boot*) is what lets `install.sh` verify that a re-install
+actually landed on the new build, and lets `vv` retire a stale **idle** daemon; `windows` (the live
+registry, never the warm pool) is what stops it retiring one mid-session. See
+[`usage/02-installation-and-build.md`](../usage/02-installation-and-build.md#the-resident-daemon-and-staleness).
+`test/daemon-smoke.js` covers the whole seam, including the legacy-inertness contract.

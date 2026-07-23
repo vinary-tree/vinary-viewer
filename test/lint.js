@@ -20,7 +20,10 @@ const jsFiles = [
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
   'test/git-tree-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
-  'test/tui-smoke.js',
+  'test/tui-smoke.js', 'test/daemon-smoke.js',
+  // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the
+  // socket path/helpers both import (scripts/vv-open.mjs was previously unchecked here)
+  'scripts/vv-open.mjs', 'scripts/vv-daemon.mjs', 'scripts/daemon-socket.mjs',
   'scripts/sync-grammars.mjs', 'scripts/check-grammars.mjs',
   'scripts/sync-graphics-wasm.mjs',
   'scripts/sync-pdfjs.mjs', 'scripts/check-pdfjs.mjs',

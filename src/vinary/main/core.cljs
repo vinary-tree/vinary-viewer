@@ -264,6 +264,25 @@
   (try (-> (.readFileSync fs (path/join js/__dirname ".." ".." "package.json") "utf8") (js/JSON.parse) (.-version))
        (catch :default _ "unknown")))
 
+(defonce ^:private bundle-mtime-ms
+  ;; The identity of the build this process is RUNNING: the mtime of dist/main/main.js as it was when we
+  ;; loaded it. Sampled once, at boot, on purpose — a later `shadow-cljs release` rewrites that file while we
+  ;; keep serving the copy already in V8, and it is exactly that difference (ours < the file's) that means
+  ;; "this daemon is stale". `js/__filename` is the bundle itself under the :node-script (CommonJS) target.
+  (delay (try (.-mtimeMs (.statSync fs (or js/__filename (path/join js/__dirname "main.js"))))
+              (catch :default _ nil))))
+
+(defn- daemon-status
+  "What `vv1 ping` reports (vinary.main.daemon wires it): who we are and which build we are running, so a
+   client can tell a fresh resident process from a stale one. `windows/all` — never the pool — is the
+   user's on-screen session, which is what decides whether stopping us would lose anything."
+  []
+  {:pid             js/process.pid
+   :version         (app-version)
+   :bundle-mtime-ms @bundle-mtime-ms
+   :windows         (count (windows/all))
+   :daemon?         daemon?})
+
 (defn ^:export main []
   (profile/mark! "entry")
   ;; `electron . --help`/`--version` (and `vv --gui --help`) print usage/version and exit BEFORE any window —
@@ -331,7 +350,13 @@
                                 ;; the resident-server socket (systemd-independent): a `vv <file>` client connects
                                 ;; and sends paths; we open them in a warm pool window of this process. `args` are
                                 ;; already cwd-resolved by the client — normalise via doc-uris (identity resolver).
-                                (daemon/listen! (fn [args] (claim-window! (startup/doc-uris (into ["_" "_"] args) identity))))
+                                ;; `vv1 ping`/`vv1 stop` (scripts/vv-daemon.mjs) additionally let a client see WHICH
+                                ;; build this process is running and ask it to quit gracefully — the seam install.sh
+                                ;; needs to guarantee a re-install ends on the new build (see daemon-status).
+                                (daemon/listen!
+                                  {:on-open (fn [args] (claim-window! (startup/doc-uris (into ["_" "_"] args) identity)))
+                                   :on-stop (fn [] (.quit app))
+                                   :status  daemon-status})
                                 ;; a daemon opens no window (it stays resident and pre-warms the pool); a normal
                                 ;; launch claims a window for its command-line files (cold the very first time,
                                 ;; then refills the pool so every subsequent open is instant)

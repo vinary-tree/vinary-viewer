@@ -82,6 +82,19 @@ per-window bundle **eval** (each `BrowserWindow` still spawns its own renderer a
 file read+render — exactly what **Phase 3's pre-booted window pool** removes (attach the file to an
 already-evaluated renderer). **Kept.**
 
+**Consequence found later — the daemon must be replaceable.** A resident process evaluates the bundle once,
+so it keeps serving the build it booted with: a rebuild (`./install.sh`, or a bare `npm run release`) does
+not reach it, and *restarting the login service does not either* — `vv` starts a daemon on demand, so the
+resident process usually belongs to no service manager, and the service's replacement loses the
+single-instance lock race to it and quits with status 0 (which neither `Restart=on-failure` nor
+`KeepAlive{SuccessfulExit=false}` retries). The warm daemon is what makes this optimization pay, and it is
+also what makes staleness possible; the two arrived together. The socket therefore gained control frames —
+`vv1 ping` (which build am I running? how many windows are open?) and `vv1 stop` (quit gracefully) — so
+`install.sh` can stop the **socket owner** rather than a job, then verify the daemon that came back is the
+build it just built, and `vv` can retire a stale **idle** one on its own. See
+[architecture/03 §6](../../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process) and
+[usage/02 §1.2](../../usage/02-installation-and-build.md#12-the-resident-daemon-and-staleness).
+
 ## Phase 3a — warm window pool
 **Hypothesis.** The residual ~697 ms of a warm-daemon open is the per-window bundle **eval** — each new
 `BrowserWindow` spawns its own renderer and re-evaluates the 11 MB bundle. If the process keeps a small pool of

@@ -216,6 +216,32 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - ./install.sh did not, in fact, always end on the new build -- its own comments claimed
+      that twice. It restarted the systemd unit / launchd agent, but the resident process is
+      usually not that job: `vv` starts a daemon on demand whenever no socket answers, so it
+      belongs to no service manager. The service's replacement instance then lost the
+      single-instance lock race to the survivor and quit with status 0, which neither
+      Restart=on-failure nor KeepAlive{SuccessfulExit=false} retries -- so the OLD daemon kept
+      serving, silently, and a freshly built fix could appear to ship without ever running.
+      (./uninstall.sh had the same hole in reverse: it removed the launchers and the service
+      but left the daemon resident until logout.) The root cause was identifying the daemon by
+      who STARTED it; the daemon is whoever owns the socket, and any single-instance primary
+      listens -- not only a --daemon one. The socket protocol gained two control frames,
+      `vv1 ping` (pid, version, the mtime of the dist/main/main.js it actually loaded, and how
+      many windows are open) and `vv1 stop` (quit through app.quit, so before-quit runs: SSH
+      pools torn down, window bounds persisted, with a 5 s watchdog behind it). They are
+      deliberately NOT valid JSON, so a pre-vv1 daemon rejects them in its existing JSON.parse
+      catch and does nothing -- where a JSON-shaped control message would have opened a stray
+      empty window on every old daemon a new client probed; a new client detects that silence
+      and falls back to terminating the socket owner by pid (lsof, fuser, pgrep). install.sh
+      now stops the socket owner before the service (re)start and VERIFIES the daemon that came
+      back is running the build just built, instead of assuming it; uninstall.sh stops it too;
+      and `vv` retires a daemon that is stale AND idle, so a bare `npm run release` takes effect
+      on the next open -- never one with windows open, which would close a live session behind
+      the user. SIGTERM/SIGINT now take the same graceful path (they used to process.exit(0),
+      skipping before-quit), so `systemctl --user restart` and `launchctl kickstart -k` are
+      clean shutdowns as well. New test/daemon-smoke.js covers the seam, including the
+      not-valid-JSON contract; `npm run test:daemon`.
     - The resident daemon crashed once every 24 hours with "TypeError: Object has been
       destroyed", and its ad-block filter lists silently stopped updating -- one bug, two
       symptoms. The scheduled ad-block refresh pushes its status ("Updating...") to a
