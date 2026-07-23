@@ -93,3 +93,6 @@ is recorded here.
 - [theory/09 §8 — Complexity](../theory/09-document-streaming-and-the-wpda.md) — the asymptotic claims to time.
 - [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md) — the scientific-method loop, applied
   to a correctness defect, that a performance experiment would mirror.
+- [08 — Daemon window-lifetime crash experiment](08-daemon-window-lifetime-experiment.md) — the same loop
+  applied to a runtime-lifetime defect, including the controlled A/B (a pre-fix control build carrying only
+  the measurement instrument) that this methodology's "hold everything but the intervention fixed" rule asks for.

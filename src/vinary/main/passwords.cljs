@@ -29,7 +29,9 @@
 ;; password provider state + (non-secret) item metadata go to the ACTIVE app window — the one the user is
 ;; interacting with when they trigger a search/fill — falling back to the window captured at init!. (Revealed
 ;; secrets never travel this path; they go straight to the web-view preload via web/fill-password!.)
-(defn- app-wc ^js [] (or (windows/active-wc) (some-> ^js (:win @state) .-webContents)))
+;; the init!-captured window is a FALLBACK and is liveness-checked (windows/live): it may have closed while an
+;; async provider callback was in flight, and sending to it then throws "Object has been destroyed".
+(defn- app-wc ^js [] (or (windows/active-wc) (windows/live (some-> ^js (:win @state) .-webContents))))
 
 (defn- normalize-kind [kind]
   (if (keyword? kind) kind (keyword (or kind "json-command"))))

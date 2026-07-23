@@ -64,15 +64,33 @@
           (array-seq (.getAllExtensions ^js (.-extensions sess))))))
 
 ;; extension runtime state (shared across the whole app) + action results go to the ACTIVE app window (the one
-;; the user has the Extensions UI focused in), falling back to the window captured at init!.
+;; the user has the Extensions UI focused in), falling back to the window captured at init! — liveness-checked
+;; through windows/live, because these pushes are driven by session `extension-loaded`/`extension-unloaded`
+;; events and updateExtensions promises that can fire long after that window closed, and sending to a closed
+;; window throws "Object has been destroyed" (see vinary.main.adblock/result! for the crash this mirrors).
+;; A dead capture is cleared so it is never retried.
+(defn- boot-wc
+  "The init!-captured webContents while it is still alive, else nil — dropping the capture on the way out so a
+   destroyed one is never consulted again."
+  ^js []
+  (let [^js wc (:wc @state)]
+    (or (windows/live wc)
+        (do (when wc (swap! state assoc :wc nil)) nil))))
+
+(defn- send-app!
+  "Push to the ACTIVE window's renderer, falling back to the (live) window captured at init! — which under the
+   daemon is the hidden pool window that is not registered while it is still unclaimed."
+  [^String channel payload]
+  (when-not (windows/send! channel payload)
+    (when-let [^js wc (boot-wc)] (.send wc channel payload))))
+
 (defn- push-state! []
-  (when-let [^js wc (or (windows/active-wc) (:wc @state))]
-    (.send wc "vv:ext-state"
-           (pr-str {:enabled?  (:enabled? @state)
-                    :installed (installed-list)}))))
+  (send-app! "vv:ext-state"
+             (pr-str {:enabled?  (:enabled? @state)
+                      :installed (installed-list)})))
 
 (defn- result! [channel m]
-  (when-let [^js wc (or (windows/active-wc) (:wc @state))] (.send wc channel (clj->js m))))
+  (send-app! channel (clj->js m)))
 
 ;; ---- runtime actions ----
 (defn- cache-path! [^js ext] (swap! state update :paths assoc (.-id ext) (.-path ext)))

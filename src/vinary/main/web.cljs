@@ -20,9 +20,11 @@
 
 (defn- web-preload [] (path/join js/__dirname ".." ".." "resources" "web-preload.js"))
 ;; the web view's OWNER window's renderer — where its relays (navigation, TOC, active heading, snapshot) go.
-;; `:win` tracks the window that last requested the view (set from event.sender in vv:http-show); it falls back
-;; to the active app window so a relay is never routed to a stale/hidden window. ^js return: extern-safe interop.
-(defn- app-wc    ^js []   (or (some-> ^js (:win @state) .-webContents) (windows/active-wc)))
+;; `:win` tracks the window that last requested the view (set from event.sender in vv:http-show); the owner is
+;; preferred (the view belongs to it) but liveness-checked through windows/live — a relay can arrive after that
+;; window closed, and sending to a closed window throws "Object has been destroyed" — then it falls back to the
+;; active app window so a relay is never routed to a stale/hidden window. ^js return: extern-safe interop.
+(defn- app-wc    ^js []   (or (windows/live (some-> ^js (:win @state) .-webContents)) (windows/active-wc)))
 
 (defn app-webcontents ^js [] (app-wc))
 

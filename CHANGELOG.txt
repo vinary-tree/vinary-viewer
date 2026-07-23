@@ -216,6 +216,27 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - The resident daemon crashed once every 24 hours with "TypeError: Object has been
+      destroyed", and its ad-block filter lists silently stopped updating -- one bug, two
+      symptoms. The scheduled ad-block refresh pushes its status ("Updating...") to a
+      window before it does anything else, and it resolved that window as "the active one,
+      else the webContents captured at init!" with no liveness check. The daemon survives
+      window-all-closed and binds its session services to the FIRST window, which with the
+      warm pool is a hidden one that is later claimed and closed -- so once every window
+      had closed, the timer sent to a destroyed webContents. That throw came out of a
+      timer callback, which is an uncaught main-process exception (a crash dialog + a
+      crash log, daily), and it happened BEFORE the engine was rebuilt, so no scheduled
+      refresh ever completed in a long-running daemon. Window resolution now skips
+      destroyed webContents everywhere (new windows/live + windows/send!, the targeted
+      counterpart to the windows/broadcast! added for the same class of bug in the
+      file-watcher path), a captured webContents is dropped once it dies rather than
+      retried, and the scheduler tick can no longer throw into the timer. The same
+      unguarded pattern is fixed in extensions, passwords, and the web view. With no
+      window on screen the refresh now runs to completion and simply displays nothing.
+      Verified by A/B: a pre-fix build (HEAD + only the new VV_ADBLOCK_REFRESH_MS knob)
+      writes the identical crash log on the first tick after its window closes; the fixed
+      build survives repeated ticks with no window and rebuilds a deleted
+      <userData>/adblock-engine.bin while none is open.
     - Three activity diagrams (activity-log-segmentation, activity-kbedit-undo,
       activity-link-hints) rendered with NO step colours and a yellow "this syntax is
       deprecated" banner baked into the committed SVG. PlantUML 1.2026.5 rejects the old

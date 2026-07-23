@@ -41,3 +41,23 @@ last cached filter engine is used; on a first run with no network, blocking is s
 
 The blocker is scoped to the web-browsing session only — never the app renderer, the PDF view, or
 `file://` tabs.
+
+### Scheduled refresh and windows
+
+The refresh timer belongs to the **process**, not to any window: under the resident `--daemon` it keeps
+running after every window has closed, so the engine is already fresh when the next `vv <file>` opens one.
+Status pushes are therefore addressed dynamically (`windows/send!` → the active window, falling back to the
+window captured at `init!` **only while it is still alive**); with no window on screen the refresh runs to
+completion and the status is simply not displayed. Sending to a window that has since closed throws
+`Object has been destroyed` out of the timer callback — an uncaught main-process exception, which is exactly
+the crash fixed in 0.3.0-dev.
+
+`VV_ADBLOCK_REFRESH_MS=<ms>` overrides the schedule (normally `:update-every-hours`, minimum 1 h) — a
+dev/testing escape hatch, in the same spirit as `VV_POOL` and `VV_GPU_RASTER`, so anything that only happens
+on a scheduled refresh can be exercised in seconds instead of a day:
+
+```sh
+# a daemon whose filter lists refresh every 5 s, isolated from your real instance
+XDG_CONFIG_HOME=/tmp/vv-cfg VV_POOL=0 VV_ADBLOCK_REFRESH_MS=5000 \
+  ./node_modules/.bin/electron . --daemon --user-data-dir=/tmp/vv-data
+```
