@@ -26,10 +26,25 @@
 (defn display-name [db id]
   (or (some #(when (= (:id %) id) (:name %)) builtins) id))           ; built-in label, or the custom name (= id)
 
+(defn entry-in
+  "The user-cfg for a set id, over the [:ui :keymaps] SLICE rather than the whole db.
+
+   The slice-shaped variants exist so a subscription can be LAYERED on the slice: `merge-user` walks the
+   whole keymap twice (a deep-merge plus two postwalks), which is far too expensive to redo on every
+   app-db change — and a plain db-reading sub does exactly that, which is enough to visibly slow a
+   streaming document down."
+  [ks id]
+  (if (builtin? id) {:extends (keyword id) :keymaps {}} (get-in ks [:sets id])))
+
+(defn modal-in?
+  "Whether set `id` is modal (vim-like), over the [:ui :keymaps] slice. See `entry-in`."
+  [ks id]
+  (not= :insert (:initial-mode (keymap/merge-user (entry-in ks id)) :insert)))
+
 (defn entry
   "The user-cfg for a set id: the stored custom map, or a synthetic {:extends id :keymaps {}} for a built-in."
   [db id]
-  (if (builtin? id) {:extends (keyword id) :keymaps {}} (get-in db [:ui :keymaps :sets id])))
+  (entry-in (get-in db [:ui :keymaps]) id))
 
 (defn effective-modes
   "The merged :modes of a set — what its bindings actually resolve to (for the editor; no install)."

@@ -86,8 +86,13 @@
            [:input.vv-tree-filter
             {:placeholder "Filter files…"
              :value       (or q "")
-             :on-focus    #(rf/dispatch [:input/set-in-input true])
-             :on-blur     #(rf/dispatch [:input/set-in-input false])
+             ;; :in-input? is no longer mirrored per-component — one document-level focusin/focusout
+             ;; tracker owns it (renderer.core/focus-tracker!) and the keymap resolver derives its own
+             ;; from document.activeElement. Hand-mirroring leaked: this input unmounts when the sidebar
+             ;; collapses, and Chromium fires no blur for a removed element, so the flag stuck true and
+             ;; swallowed every bare-key binding. ADR-0032.
+             ;; :on-focus #(rf/dispatch [:input/set-in-input true])
+             ;; :on-blur  #(rf/dispatch [:input/set-in-input false])
              :on-change   #(rf/dispatch [:tree/filter (.. % -target -value)])}]
            (if (seq projects)
              (for [p projects] ^{:key (:root p)} [project-tree p active ql])

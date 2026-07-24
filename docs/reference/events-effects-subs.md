@@ -74,14 +74,20 @@
 
 ### 1.7 In-page find
 
+Every `:find/*` request carries a **generation** (`:ui :find :gen`, bumped by `bump-gen`). Searching is
+asynchronous — it first materializes a PDF's text layers or drains a streamed document — so an earlier,
+shorter query's reply can land last; `:find/result` drops any reply whose generation is stale. The same
+counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-scroll-ownership-and-derived-input-focus.md).
+
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:find/toggle` | fx | — | `:ui :find :visible?` | `:ui :find :visible?` ← not | when hiding: `[:find/clear]` |
-| `:find/set-query` | fx | `q` | — | `:ui :find :query` ← q | `[:find/run q]` |
-| `:find/count` | db | `n` | — | `:ui :find :count` ← n; `:ui :find :idx` ← `(if (pos? n) 1 0)` | — |
-| `:find/idx` | db | `i` | — | `:ui :find :idx` ← i | — |
-| `:find/cycle` | fx | `dir` | — | — | `[:find/cycle dir]` |
-| `:find/close` | fx | — | — | `:ui :find :visible?` ← false | `[:find/clear]` |
+| `:find/toggle` | fx | — | `:ui :find :visible?`, `:ui :find :query` | `:ui :find :visible?` ← not; `:gen`++ | opening with a remembered query: `[:find/search {:q :gen}]`; closing: `[:find/clear]` |
+| `:find/set-query` | fx | `q` | `:ui :find :gen` | `:ui :find :query` ← q; `:gen`++ | `[:dispatch-later {:ms 100 :dispatch [:find/run gen]}]` |
+| `:find/run` | fx | `gen` | `:ui :find :gen`, `:query` | — | `[:find/search {:q :gen}]` — **only if `gen` is still current** (the debounce collapse) |
+| `:find/result` | db | `{:gen :count :idx}` | `:ui :find :gen` | `:ui :find :count` ← count; `:ui :find :idx` ← idx — **only if `gen` is current** | — |
+| `:find/cycle` | fx | `dir` | `:ui :find :gen` | — | `[:find/cycle {:dir :gen}]` |
+| `:find/reset` | fx | — | — | `:ui :find :count` ← 0; `:idx` ← 0; `:gen`++ (**query kept**) | `[:find/clear]` |
+| `:find/close` | fx | — | — | `:ui :find :visible?` ← false; `:gen`++ | `[:find/clear]` |
 
 ### 1.8 Table of contents
 
@@ -283,10 +289,10 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:scroll/restore` | `n` | remember a pending content scrollTop for the next render | — |
 | `:markdown/render` | `{:text :path :stamp :on-done}` | `md/render text` (unified pipeline → `Promise<{:html :toc :assets}>`) | `.then` → `(conj on-done result)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
 | `:theme/apply` | `theme` (string) | `set! (.-href #vv-theme-link) "css/themes/<theme>.css"` | — |
-| `:find/run` | `q` | `finder/search! q` | `[:find/count <count>]` |
-| `:find/cycle` | `dir` (+1/-1) | `finder/cycle! dir` | `[:find/idx <new-1-based-idx>]` |
-| `:find/clear` | `_` | `finder/clear!` (delete both highlights, reset state) | — |
-| `:toc/scroll` | `id` | `getElementById id` → `scrollIntoView {block:"start" behavior:"smooth"}` | — |
+| `:find/search` | `{:q :gen}` | `await pdf-cache/ensure-active!` (materialize PDF text layers / drain a stream) → `finder/search! q` | `[:find/result {:count :idx :gen}]` |
+| `:find/cycle` | `{:dir :gen}` | `finder/cycle! dir` (reconciles stale Ranges first — see `ensure-fresh!`) | `[:find/result {:count :idx :gen}]` — the **count** too, because a re-collect can change it |
+| `:find/clear` | `_` | `finder/clear!` (delete both highlights, disconnect the MutationObserver, reset state) | — |
+| `:toc/scroll` | `id` | `getElementById id` → `scroll/scroll-el-to! {:block :start :behavior "smooth"}` — a **confined** `.vv-content` scrollTo, never `el.scrollIntoView` (ADR-0032) | — |
 | `:vv/open` | `path` | `window.vv.open(path)` → `vv:open` IPC (guarded on `window.vv`) | — |
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
@@ -356,7 +362,8 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/theme` | `app-db` | theme name string |
 | `:ui/tree` | `app-db` | `{:root :files}` \| nil |
 | `:ui/tree-filter` | `app-db` | filter query string \| nil |
-| `:ui/find` | `app-db` | `{:visible? :query :count :idx}` |
+| `:ui/find` | `app-db` | `{:visible? :query :count :idx :gen}` — `:gen` is the request generation (ADR-0032) |
+| `:ui/find-context` | `:<- [:ui/active-content-path] :<- [:facet/type]` | `[path facet]` — the identity in-page find watches; a change dispatches `[:find/reset]` |
 | `:ui/active-heading` | `app-db` | active heading id \| nil |
 | `:ui/sidebar-visible?` **[input]** | `app-db` | bool |
 | `:ui/tree-selected` **[input]** | `app-db` | selected tree path \| nil |
@@ -371,7 +378,8 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:view/pdf-active?` | `app-db` | bool — the active view is a PDF (`= :pdf (zoom/context …)`); gates the PDF-only View-menu items (Fit, Invert PDF) |
 | `:input/mode` **[input]** | `app-db` | `:normal`/`:insert`/`:visual` |
 | `:input/pending` **[input]** | `app-db` | the pending key-sequence vector (`:ui :input :sequence`) |
-| `:input/in-input?` **[input]** | `app-db` | bool (focus is in a text input) |
+| `:input/in-input?` **[input]** | `app-db` | bool (focus is in a text input). **Display/derived only** — the keymap resolver computes its own from `document.activeElement` at keydown time; a cached flag leaks when a focused element unmounts (ADR-0032) |
+| `:input/modal-keymap?` **[input]** | `:<- [::keymaps-slice]` | bool — is the active keymap set modal (Vim-like)? Layered on the slice because answering it runs `merge-user`, which walks the whole keymap |
 | `:palette/state` **[input]** | `app-db` | `{:open? :source :prefix :query :items :selected}` |
 | `:history/can-back?` | `app-db` | `(and idx (pos? idx))` → bool |
 | `:history/can-forward?` | `app-db` | `(and idx (< idx (dec (count stack))))` → bool |

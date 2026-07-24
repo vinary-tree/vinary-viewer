@@ -746,6 +746,16 @@ async function main() {
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu == null`), 'View menu closed');
   console.log('[ok] zoom bar present + View PDF-only items hidden without a PDF');
 
+  // The scroll tracer PATCHES Element.prototype's scroll accessors, so it must never reach a shipped build.
+  // It is gated on goog.DEBUG (renderer.core/init); this asserts the gate BEHAVIOURALLY rather than trusting
+  // the optimizer. Same shape as the re-frame-10x check above. See ADR-0032 / docs/scientific/09.
+  const tracerPresent = await evalIn(win, `typeof window.__vvscrolltrace === 'function'`);
+  assert.strictEqual(tracerPresent, !releaseBuild,
+    releaseBuild
+      ? 'the DEV scroll tracer must be absent from a release build (it patches Element.prototype)'
+      : 'the DEV scroll tracer must be installed in a dev build');
+  console.log(`[ok] DEV scroll tracer ${releaseBuild ? 'absent from the release build' : 'installed in the dev build'}`);
+
   // Regression (Bug 1) — the zoom bar (:window-zoom) must seed from the REAL zoom factor at boot. On relaunch
   // Chromium restores the actual per-host zoom, but :window-zoom is ephemeral (default 1.0) and was only ever
   // written in reaction to a zoom action — so the bar wrongly read 100% until the first zoom. The renderer now
@@ -1191,13 +1201,26 @@ async function main() {
     t.textContent = 'leakrow'; t.setAttribute('style', 'position:fixed;left:6px;top:60px;width:48px;height:16px;z-index:99999');
     tree.appendChild(t);
     window.__vvHintClicked = false;
-    // the hidden find bar auto-focuses at boot (sets :in-input? true). Cycle a REAL input (the URI bar) through
-    // focus→blur so its on-blur dispatches :input/set-in-input false, then move focus into the content pane.
-    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    const uri = document.querySelector('.vv-uri-input'); if (uri) { uri.focus(); uri.blur(); }
-    const c = document.querySelector('.vv-content'); if (c) { c.setAttribute('tabindex', '-1'); c.focus(); }
+    // RETIRED WORKAROUND (ADR-0032) — kept commented, per the repo's comment-don't-delete rule, because it
+    // records a real bug and re-adding it would mask the regression the fix now guards against:
+    //
+    //   // the hidden find bar auto-focuses at boot (sets :in-input? true). Cycle a REAL input (the URI bar)
+    //   // through focus→blur so its on-blur dispatches :input/set-in-input false, then move focus into the
+    //   // content pane.
+    //   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    //   const uri = document.querySelector('.vv-uri-input'); if (uri) { uri.focus(); uri.blur(); }
+    //   const c = document.querySelector('.vv-content'); if (c) { c.setAttribute('tabindex','-1'); c.focus(); }
+    //
+    // The diagnosis in that comment was wrong: :ui/find/visible? defaults false (app/db.cljs), so nothing
+    // auto-focuses at boot. The stuck flag came from the Escape close a few hundred lines above — closing
+    // the find bar unmounted a FOCUSED input, and Chromium fires no blur for a removed element, so the
+    // hand-mirrored :in-input? stayed true and swallowed every bare printable key for the rest of the
+    // session. :in-input? is now derived from document.activeElement (input/resolver) and .vv-content
+    // carries tabindex="-1" in the app itself, so neither half of the workaround is needed.
+    const c = document.querySelector('.vv-content'); if (c) c.focus();
   })()`);
-  // a bare 'f' only resolves to :hint/start when NOT typing into an input; wait for :in-input? to clear first.
+  // a bare 'f' only resolves to :hint/start when NOT typing into an input. This must now be true WITHOUT
+  // any coaxing — it is the regression guard for the leak described above.
   await waitFor(() => evalIn(win, `!window.__vvdb().ui.input['in-input?']`), ':in-input? cleared before f');
 
   // Bug B1: 'f' (Vim) collects link hints scoped to the focused CONTENT pane — the sidebar tree must NOT leak in.

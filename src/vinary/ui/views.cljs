@@ -1017,6 +1017,11 @@
       :data-doc-key (cond (uri/http? uri) uri :else (:doc/path doc))
       ;; expose the document format so CSS can scope the prose font by kind (LaTeX → Latin Modern; app.css)
       :data-doc-kind (:doc/kind doc)
+      ;; PROGRAMMATICALLY focusable. A plain <div> cannot take focus at all, which silently made
+      ;; :focus/content (commands.cljs → input/fx :dom/focus) a no-op and left the find bar nowhere to hand
+      ;; the keyboard back to on close. -1 keeps it out of the Tab order. app.css suppresses the focus ring
+      ;; (this is never focused by tabbing, only by an explicit hand-off). ADR-0032.
+      :tab-index -1
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (cond
        (empty? tabs)               [watermark]
@@ -1253,14 +1258,13 @@
              {:value       shown
               :placeholder "Enter a file path or http(s):// URL"
               :spellCheck  false
+              ;; :in-input? is derived from document.activeElement by the keymap resolver (ADR-0032)
               :on-focus    (fn [^js e]
-                             (rf/dispatch [:input/set-in-input true])
                              (let [v (uri/display active-uri)]
                                (reset! draft v)
                                (.select (.-target e))
                                (rf/dispatch [:uri-complete/typed v])))
               :on-blur     (fn [_]
-                             (rf/dispatch [:input/set-in-input false])
                              (reset! draft nil)
                              (rf/dispatch [:uri-complete/clear]))
               :on-change   (fn [^js e]
@@ -1332,25 +1336,90 @@
          [passwords-ui/toolbar-button]
          [ext-toolbar/ext-toolbar]]))))
 
-(defn find-bar []
-  (let [{:keys [visible? query count idx]} @(rf/subscribe [:ui/find])]
-    (when visible?
-      [:div.vv-find
-       [:input.vv-find-input
-        {:placeholder "Find" :value query :auto-focus true
-         :on-focus    #(rf/dispatch [:input/set-in-input true])
-         :on-blur     #(rf/dispatch [:input/set-in-input false])
-         :on-change   #(rf/dispatch [:find/set-query (.. % -target -value)])
-         :on-key-down (fn [^js e]
-                        (case (.-key e)
-                          "Enter"  (do (.preventDefault e) (.stopPropagation e)
-                                       (rf/dispatch [:find/cycle (if (.-shiftKey e) -1 1)]))
-                          "Escape" (do (.stopPropagation e) (rf/dispatch [:find/close]))
-                          nil))}]
-       [:span.vv-find-count (if (pos? count) (str idx "/" count) "0/0")]
-       [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} (icons/icon :find-prev)]
-       [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} (icons/icon :find-next)]
-       [:button.vv-find-btn {:title "Close (Esc)" :on-click #(rf/dispatch [:find/close])} (icons/icon :close)]])))
+(defn- content-el ^js [] (.querySelector js/document ".vv-content"))
+
+(defn- release-find-keyboard!
+  "Hand the keyboard back to the content pane. Called before the bar closes and when a modal keymap commits
+   a search. `preventScroll` matters: without it the focus() itself scrolls the pane, which would make the
+   act of closing find move the reader's position (and would show up in the scroll tracer as a mystery
+   writer). Explicit rather than relying on the unmount, because Chromium fires no blur for a REMOVED
+   focused element — the leak that used to strand :in-input? at true (ADR-0032)."
+  []
+  (when-let [^js el (content-el)]
+    (.focus el #js {:preventScroll true})))
+
+(defn find-bar
+  "The in-page find bar.
+
+   Form-3 for two reasons. A stable prev-focus ref (the same pattern as vinary.ui.modal) means closing the
+   bar never strands the keyboard. And a did-update hook watching :ui/find-context resets find whenever a
+   different document or facet comes on screen — one derived identity instead of appending [:find/reset] to
+   the seven navigation events that can change what is shown, where a missed one would leave a stale match
+   counter painted over the wrong document. This component is rendered unconditionally (it returns nil when
+   hidden), so the hook fires on every such change. ADR-0032."
+  []
+  (let [prev-focus (atom nil)
+        last-ctx   (atom ::init)
+        ;; what the last render saw. A PLAIN atom, written during render and read by the lifecycle hook:
+        ;; subscribing from did-mount/did-update would be outside a reactive context (re-frame warns, and
+        ;; the value would not track), so the hook reads what render already legally derefed.
+        seen       (atom {:ctx ::init :count 0})
+        ;; ONE stable ref callback per instance — React never re-invokes it across re-renders
+        ref-fn (fn [^js el]
+                 (if el
+                   (reset! prev-focus (.-activeElement js/document))
+                   (let [^js prev @prev-focus]
+                     (if (and prev (.-isConnected prev) (not= prev (.-body js/document)))
+                       (.focus prev #js {:preventScroll true})
+                       (release-find-keyboard!)))))
+        watch-context!
+        (fn []
+          (let [{:keys [ctx count]} @seen
+                prev @last-ctx]
+            (reset! last-ctx ctx)
+            (when (and (not= prev ::init) (not= prev ctx) (pos? (or count 0)))
+              (rf/dispatch [:find/reset]))))
+        render
+        (fn []
+          ;; :ui/find-context is derefed on EVERY render (not only while the bar is visible) so the
+          ;; did-update hook sees a document switch even when find is closed — that is what keeps a stale
+          ;; count from reappearing the next time the bar is opened
+          (let [ctx @(rf/subscribe [:ui/find-context])
+                {:keys [visible? query count idx]} @(rf/subscribe [:ui/find])
+                ;; A MODAL keymap (Vim) binds the cycle keys to bare printable characters — `n` and `N`
+                ;; (resources/keymaps/vim.edn:28-29). While the query box holds focus those keys are typed
+                ;; into it and can never resolve to :search/next, so under a modal set Enter COMMITS: it
+                ;; keeps the bar and the highlights, and returns the keyboard to normal mode. Under a
+                ;; non-modal set Enter keeps its browser meaning (go to the next match) — there the cycle
+                ;; keys are F3 / Shift+F3, chords that reach the resolver regardless of focus.
+                modal? @(rf/subscribe [:input/modal-keymap?])]
+            (reset! seen {:ctx ctx :count count})
+            (when visible?
+              [:div.vv-find {:ref ref-fn}
+               [:input.vv-find-input
+                {:placeholder "Find" :value query :auto-focus true
+                 :on-change   #(rf/dispatch [:find/set-query (.. % -target -value)])
+                 :on-key-down (fn [^js e]
+                                (case (.-key e)
+                                  "Enter"  (do (.preventDefault e) (.stopPropagation e)
+                                               (if modal?
+                                                 (release-find-keyboard!)
+                                                 (rf/dispatch [:find/cycle (if (.-shiftKey e) -1 1)])))
+                                  "Escape" (do (.preventDefault e) (.stopPropagation e)
+                                               (release-find-keyboard!)
+                                               (rf/dispatch [:find/close]))
+                                  nil))}]
+               [:span.vv-find-count (if (pos? count) (str idx "/" count) "0/0")]
+               [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} (icons/icon :find-prev)]
+               [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} (icons/icon :find-next)]
+               [:button.vv-find-btn {:title "Close (Esc)"
+                                     :on-click (fn [_] (release-find-keyboard!) (rf/dispatch [:find/close]))}
+                (icons/icon :close)]])))]
+    (r/create-class
+     {:display-name          "vv-find-bar"
+      :component-did-mount   (fn [_] (watch-context!))
+      :component-did-update  (fn [_ _] (watch-context!))
+      :reagent-render        render})))
 
 ;; mode-line — REMOVED per user (2026-06-28): the Vim NORMAL/VISUAL + pending-keys badge floated over the
 ;; zoom bar and has no functional purpose in this interface. Kept (commented, not deleted) per the

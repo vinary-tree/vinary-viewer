@@ -3,6 +3,7 @@
    focus between the sidebar filter and the content pane. Pure-ish (touch the DOM only here)."
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [vinary.input.scroll-math :as sm]
             [vinary.input.keymaps-registry :as registry]))
 
 ;; install the keymap set with the given id into the live keymap atom. The MODE is now set synchronously in
@@ -42,7 +43,38 @@
 ;; auto-repeat) keeps advancing the target and produces continuous, smooth motion instead of the choppy
 ;; per-press `behavior:"smooth"` jumps (which interrupt each other on repeat). The target also accumulates
 ;; across the in-flight animation, so a single tap eases smoothly too.
-(defonce ^:private scroll-anim (atom nil))   ; {:el :top :left :raf} | nil
+(defonce ^:private scroll-anim (atom nil))   ; {:el :top :left :raf :frames} | nil
+
+(defn anim-snapshot
+  "DEV/test introspection of the easing loop: nil when idle, else the live target and how many frames it
+   has been chasing it. A frame count that keeps climbing while the view does not move is the signature of
+   a non-terminating chase (see docs/scientific/09-in-page-find-and-scroll-experiments.md)."
+  []
+  (when-let [{:keys [^js el top left frames]} @scroll-anim]
+    #js {:el     (when el (str (.-tagName el) "." (.-className el)))
+         :top    top
+         :left   left
+         :frames (or frames 0)
+         :now    (when el (.-scrollTop el))
+         :max    (when el (max 0 (- (.-scrollHeight el) (.-clientHeight el))))}))
+
+;; DEV-only per-frame log. The scroll tracer (vinary.renderer.scroll-trace) answers "who wrote?" from the
+;; OUTSIDE; this answers "why won't it stop?" from the INSIDE — it is the only place `top` and `dt` exist.
+;; Bounded, so a non-terminating loop cannot exhaust the renderer's memory while we watch it.
+(def ^:private anim-log-capacity 512)
+(defonce ^:private anim-log (atom (array)))
+
+(defn- log-frame! [ct top dt written after max-top reason]
+  (when ^boolean js/goog.DEBUG
+    (let [^js buf @anim-log]
+      (.push buf #js {:t (.now js/performance) :ct ct :top top :dt dt
+                      :written written :after after :maxTop max-top :reason (str reason)
+                      ;; a requested step that produced no movement — the sub-pixel-quantum signature
+                      :stuck (< (js/Math.abs (- after ct)) 0.001)})
+      (when (> (.-length buf) anim-log-capacity) (.shift buf)))))
+
+(defn anim-log-entries "DEV/test: the animator's per-frame ring buffer." [] (.slice ^js @anim-log))
+(defn anim-log-clear!  "DEV/test: empty the animator frame log." [] (reset! anim-log (array)) true)
 
 (defn- scrollable? [^js el]
   (and el (instance? js/Element el)
@@ -63,16 +95,43 @@
           content
           (or (.querySelector content ".cm-scroller") content)))))
 
+(defn cancel-scroll-anim!
+  "Abandon any in-flight chase. Cancels the pending frame so no orphan callback can keep stepping, then
+   drops the state. Idempotent, and safe to call from a hot input handler."
+  []
+  (when-let [{:keys [raf]} @scroll-anim]
+    (when raf (js/cancelAnimationFrame raf))
+    (reset! scroll-anim nil)))
+
+(defn- geom-of [^js el]
+  {:top      (.-scrollTop el)
+   :left     (.-scrollLeft el)
+   :max-top  (max 0 (- (.-scrollHeight el) (.-clientHeight el)))
+   :max-left (max 0 (- (.-scrollWidth el) (.-clientWidth el)))})
+
+;; One animation frame. All of the arithmetic — the live re-clamp, the sub-pixel step floor, the stall
+;; bail-out and the frame cap — lives in the pure vinary.input.scroll-math/frame, so the termination
+;; properties are unit-tested rather than trusted. This function is only the DOM edge: read geometry,
+;; write the decided offsets, re-arm or stop.
 (defn- anim-step! []
-  (let [{:keys [^js el top left]} @scroll-anim]
+  (let [{:keys [^js el frames prev] :as s} @scroll-anim]
     (if (or (nil? el) (not (.-isConnected el)))
-      (reset! scroll-anim nil)
-      (let [ct (.-scrollTop el) cl (.-scrollLeft el) dt (- top ct) dl (- left cl)]
-        (if (and (< (js/Math.abs dt) 0.5) (< (js/Math.abs dl) 0.5))
-          (do (set! (.-scrollTop el) top) (set! (.-scrollLeft el) left) (reset! scroll-anim nil))
-          (do (set! (.-scrollTop el) (+ ct (* dt 0.25)))
-              (set! (.-scrollLeft el) (+ cl (* dl 0.25)))
-              (swap! scroll-anim assoc :raf (js/requestAnimationFrame anim-step!))))))))
+      (cancel-scroll-anim!)
+      (let [geom (geom-of el)
+            d    (sm/frame {:top (:top s) :left (:left s)} geom prev (or frames 0))]
+        (set! (.-scrollTop el) (:top d))
+        (set! (.-scrollLeft el) (:left d))
+        (log-frame! (:top geom) (:aim-top d) (- (:aim-top d) (:top geom))
+                    (:top d) (.-scrollTop el) (:max-top geom) (:reason d))
+        (if (:done? d)
+          (do (when (and ^boolean js/goog.DEBUG (= :frame-cap (:reason d)))
+                (js/console.warn "[scroll] chase hit the frame cap — target was never reached"))
+              (reset! scroll-anim nil))          ; the pending frame is THIS one; nothing to cancel
+          (reset! scroll-anim
+                  (assoc s :top (:aim-top d) :left (:aim-left d)   ; store the RE-CLAMPED target
+                           :prev {:top (:top geom) :left (:left geom)}
+                           :frames (inc (or frames 0))
+                           :raf (js/requestAnimationFrame anim-step!))))))))
 
 (defn- ease-scroll!
   "Set the eased scroll target via `f-top`/`f-left` (each (fn [base-coord ^js el] → new-coord)), clamped
@@ -84,12 +143,35 @@
         max-left  (max 0 (- (.-scrollWidth el) (.-clientWidth el)))
         base-top  (if same? (:top s) (.-scrollTop el))
         base-left (if same? (:left s) (.-scrollLeft el))]
-    (reset! scroll-anim {:el   el
-                         :top  (-> (f-top base-top el)   (max 0) (min max-top))
-                         :left (-> (f-left base-left el) (max 0) (min max-left))
-                         :raf  (when same? (:raf s))})
+    ;; A chase on a DIFFERENT element must not leave its frame scheduled: the orphaned callback would fire,
+    ;; read the NEW state, and arm a second concurrent chain — two callbacks per frame, each stepping.
+    (when (and s (not same?) (:raf s)) (js/cancelAnimationFrame (:raf s)))
+    (reset! scroll-anim {:el     el
+                         :top    (-> (f-top base-top el)   (max 0) (min max-top))
+                         :left   (-> (f-left base-left el) (max 0) (min max-left))
+                         :prev   nil          ; a fresh target: last frame's geometry is no longer a stall
+                         :frames 0            ; and the frame budget restarts with it
+                         :raf    (when same? (:raf s))})
     (when-not (and same? (:raf s))
       (swap! scroll-anim assoc :raf (js/requestAnimationFrame anim-step!)))))
+
+;; ---- user input abandons a programmatic scroll -------------------------------------------------------
+;; Chromium cancels its own `behavior:"smooth"` scrolls the moment the user scrolls; a hand-rolled chase
+;; gets no such courtesy, so it must be wired explicitly. Without this, a chase that is merely SLOW (not
+;; broken) still fights the wheel for its duration.
+(defonce ^:private cancel-installed? (atom false))
+
+(defn install-scroll-cancel!
+  "Abandon an in-flight eased scroll as soon as the user scrolls or points at the document. Capture-phase
+   and passive: this never blocks or delays the input it observes."
+  []
+  (when-not @cancel-installed?
+    (reset! cancel-installed? true)
+    (let [opts #js {:capture true :passive true}
+          bail (fn [_] (cancel-scroll-anim!))]
+      (.addEventListener js/window "wheel" bail opts)
+      (.addEventListener js/window "touchstart" bail opts)
+      (.addEventListener js/window "pointerdown" bail opts))))
 
 (rf/reg-fx
  :dom/scroll
@@ -118,10 +200,14 @@
                 (.focus el)
                 (.select el))
      :tree    (some-> ^js (.querySelector js/document ".vv-tree-filter") .focus)
-     :content (some-> ^js (content-el) .focus)
+     ;; preventScroll: focusing a scroller normally scrolls it to reveal the focused thing, which would
+     ;; make "focus the content pane" silently move the reader's position (and would appear in the scroll
+     ;; tracer as an unattributed writer). Works now that .vv-content carries tabindex=-1 — before that
+     ;; this call was a silent no-op, since a plain <div> cannot take focus. ADR-0032.
+     :content (some-> ^js (content-el) (.focus #js {:preventScroll true}))
      :toggle  (let [active (.-activeElement js/document)
                     tree   (.querySelector js/document ".vv-tree-filter")]
                 (if (and tree (= active tree))
-                  (some-> ^js (content-el) .focus)
+                  (some-> ^js (content-el) (.focus #js {:preventScroll true}))
                   (some-> ^js tree .focus)))
      nil)))

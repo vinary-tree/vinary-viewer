@@ -112,8 +112,10 @@
             (if (seq ready-providers)
               [:select.vv-pw-select
                {:value (or @selected "")
-                :on-focus #(dispatch [:input/set-in-input true])
-                :on-blur #(dispatch [:input/set-in-input false])
+                ;; focus state is derived from document.activeElement by the resolver (ADR-0032); a <select>
+                ;; is in its keyboard-owner set, so bare keys still reach this control.
+                ;; :on-focus #(dispatch [:input/set-in-input true])
+                ;; :on-blur #(dispatch [:input/set-in-input false])
                 :on-change #(reset! selected (.. % -target -value))}
                (for [{:keys [id label status]} ready-providers]
                  ^{:key id}

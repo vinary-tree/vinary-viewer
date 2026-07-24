@@ -211,9 +211,16 @@
       (when-let [^js canvas (.querySelector div "canvas.vv-pdf-canvas")] (.remove canvas)))
     (swap! state update :rendered disj idx)))
 
+;; :text-built maps page index → the Promise of that page's text-layer render, NOT just the index.
+;;
+;; It used to be a set, conj'd SYNCHRONOUSLY here — before .render() resolved. So a second ensure-all-text!
+;; arriving while the first was still rendering saw every index already "built", resolved immediately, and
+;; in-page find then searched empty text layers and reported nothing. Since find awaits ensure-active! on
+;; every query, that was reachable by simply typing at a normal speed into the find box over a PDF.
+;; Holding the promise makes the second caller await the first caller's work.
 (defn- build-text-layer! [state idx ^js pg ^js vp]
-  (when-not (contains? (:text-built @state) idx)
-    (swap! state update :text-built conj idx)
+  (if-let [p (get (:text-built @state) idx)]
+    p
     (let [^js div (nth (:page-divs @state) idx)
           tdiv    (js/document.createElement "div")]
       (set! (.-className tdiv) "vv-pdf-text")
@@ -227,18 +234,26 @@
         (.setProperty "--total-scale-factor" (str (:scale @state)))
         (.setProperty "--scale-factor"       (str (:scale @state))))
       (.appendChild div tdiv)
-      (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
-                                         #js [#js {:textContentSource (.streamTextContent pg)
-                                                   :container tdiv :viewport vp}]))
-          (.catch (fn [_] (swap! state update :text-built disj idx)))))))
+      (let [p (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
+                                                 #js [#js {:textContentSource (.streamTextContent pg)
+                                                           :container tdiv :viewport vp}]))
+                  ;; a failed render must not leave a poisoned entry: drop it so a later ensure retries
+                  (.catch (fn [_] (swap! state update :text-built dissoc idx) nil)))]
+        (swap! state update :text-built assoc idx p)
+        p))))
 
-(defn- ensure-text-at! [state idx]
-  (when (and (not (:destroyed? @state)) (:doc @state) (not (contains? (:text-built @state) idx)))
-    (-> (.getPage ^js (:doc @state) (inc idx))
-        (.then (fn [^js pg]
-                 (when-not (:destroyed? @state)
-                   (build-text-layer! state idx pg (.getViewport pg #js {:scale (:scale @state)})))))
-        (.catch (fn [_] nil)))))
+(defn- ensure-text-at!
+  "A Promise that resolves once page `idx`'s text layer EXISTS. Returns the in-flight render when one is
+   already running, so concurrent callers await it instead of assuming it is finished."
+  [state idx]
+  (if (or (:destroyed? @state) (not (:doc @state)))
+    (js/Promise.resolve nil)
+    (or (get (:text-built @state) idx)
+        (-> (.getPage ^js (:doc @state) (inc idx))
+            (.then (fn [^js pg]
+                     (when-not (:destroyed? @state)
+                       (build-text-layer! state idx pg (.getViewport pg #js {:scale (:scale @state)})))))
+            (.catch (fn [_] nil))))))
 
 (defn- place! [^js el ^js vp rect]
   (let [vr (.convertToViewportRectangle vp rect)
@@ -423,7 +438,7 @@
                                           rects)))]
     (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
     ;; bump :gen so any in-flight getPage/render from the OLD layout bails instead of clobbering the new one
-    (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built #{}) (update :gen inc)))
+    (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built {}) (update :gen inc)))
     (doseq [^js div page-divs] (set! (.-innerHTML div) ""))
     (apply-layout! state)
     (when (and scroller anchor-idx) (scroll-to-page! state (inc anchor-idx)))
@@ -517,7 +532,7 @@
                      :sizes [] :rects [] :page-divs [] :toc-ids []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
-                     :rendered #{} :text-built #{} :tasks {} :observer nil :destroyed? false :gen 0})
+                     :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
         ensure-fn (fn [] (ensure-all-text! state))]
     (swap! state assoc :ensure-fn ensure-fn)
     (cache/set-ensurer! ensure-fn)

@@ -13,6 +13,7 @@
             [vinary.app.nav :as nav]
             [vinary.app.commands :as commands]
             [vinary.input.keys :as keys]
+            [vinary.renderer.text-edit :as text-edit]
             [vinary.input.keymap :as keymap]))
 
 (defonce ^:private pending (atom []))   ; the current key-sequence (synchronous, authoritative)
@@ -32,7 +33,12 @@
     (merge (nav/base-ctx db)
            {:mode          (get-in db [:ui :input :mode])
             :sequence      @pending
-            :in-input?     (get-in db [:ui :input :in-input?])
+            ;; DERIVED from document.activeElement, never read from app-db (ADR-0032). The app-db copy is
+            ;; maintained by focusin/focusout for display and for the palette, but it CANNOT be the
+            ;; authority: an input that unmounts while focused fires no blur, so the cached flag sticks
+            ;; `true` and silently swallows every bare printable binding — which is how closing the find
+            ;; bar with Esc used to kill Vim's `/`, `n`, `j` and `k` for the rest of the session.
+            :in-input?     (text-edit/text-field-focused?)
             :find-visible? (get-in db [:ui :find :visible?])
             :palette-open? (get-in db [:ui :palette :open?])
             ;; a blocking modal dialog owns the keyboard while open, so the resolver must not fire background
@@ -68,11 +74,20 @@
 (defn- run-command! [decision ctx]
   (commands/run (:command decision) ctx (some-> (:args decision) vec)))
 
+(defn- sync-mirror!
+  "Self-heal the app-db copy of :in-input? from the value we just derived. focusin/focusout cover ordinary
+   focus moves, but Chromium fires NEITHER when a focused element is simply removed from the DOM, so the
+   mirror can drift. Reconciling it on every keydown means it is correct by the time anything reads it."
+  [derived]
+  (when (not= derived (boolean (get-in @rfdb/app-db [:ui :input :in-input?])))
+    (rf/dispatch [:input/set-in-input derived])))
+
 (defn- handle [^js e]
   (when-let [token (keys/event->chord e (keys/mac?))]
     (let [ctx  (build-ctx)
           mode (:mode ctx)
           seqv @pending]
+      (sync-mirror! (boolean (:in-input? ctx)))
       ;; the palette owns all keys while open; and a bare printable key always reaches a focused input
       ;; (so typing a find query / vim "/" search works even in normal mode)
       (when-not (or (:palette-open? ctx)

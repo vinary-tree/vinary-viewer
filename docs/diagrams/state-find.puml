@@ -1,11 +1,12 @@
 @startuml state-find
 '' PlantUML over Mermaid because the find bar is a small finite-state machine with a count-parameterised
-'' state and self-looping cycle transitions; PlantUML state diagrams give composite/parameterised states,
+'' state, self-looping cycle transitions, and a Stale state reached by an external event (the document
+'' changing underneath the painted Ranges); PlantUML state diagrams give parameterised states,
 '' self-transitions, and per-state colour. Literal palette hexes: blue-violet #7590DB ephemeral :ui/find,
-'' green #67B11D the "matches present" (painted) state, grey for hidden.
+'' green #67B11D the "matches present" (painted) state, amber #B1951D stale, grey for hidden.
 !include _vv-theme.iuml
 
-title Find-bar state machine (:ui/find)\n{:visible? :query :count :idx}
+title Find-bar state machine (:ui/find)\n{:visible? :query :count :idx :gen}
 
 skinparam state {
   BackgroundColor APPDB_TINT
@@ -13,37 +14,52 @@ skinparam state {
 
 [*] --> Hidden
 
-state "Hidden" as Hidden #DDDDDD : visible? = false\nhighlights cleared
+state "Hidden" as Hidden #DDDDDD : visible? = false\nhighlights cleared  ·  **query REMEMBERED**
 state "Visible (empty)" as Empty APPDB_TINT : visible? = true\nquery = ""  ·  count = 0
+state "Debouncing" as Debounce #C7CFE8 : a keystroke landed\n:gen++ · [:find/run gen] scheduled 100 ms out
 state "Visible (matches: n)" as Matches MARKDOWN_TINT : visible? = true\ncount = n > 0  ·  <latex>\mathit{idx} \in 1..n</latex>\nhighlights painted
+state "Stale" as Stale #E8DCA8 : the DOM changed under the Ranges\n(live refresh · streamed append ·\nMathJax/mermaid post-pass · PDF text layer)
 
-Hidden  --> Empty   : Ctrl+F  /  [:find/toggle]
-Empty   --> Hidden  : Ctrl+F (toggle off) | Escape\n/ [:find/close] → clear!
+Hidden  --> Empty   : open  /  [:find/toggle]\n(query = "")
+Hidden  --> Debounce : open with a REMEMBERED query\n/ [:find/toggle] → :find/search
+Empty   --> Hidden  : toggle off | Escape\n/ [:find/close] → clear!
 
-Empty   --> Matches : type query (matches found)\n[:find/set-query] → search! → count n>0
-Empty   --> Empty   : type query (no match)\ncount = 0
-Matches --> Empty   : edit query → 0 matches\nor clear the field
-Matches --> Matches : type a new query\n(re-run search!, new n)
+Empty    --> Debounce : type  /  [:find/set-query]
+Matches  --> Debounce : edit the query
+Debounce --> Debounce : another keystroke\n(:gen++ — the older run is dropped)
+Debounce --> Matches  : [:find/result] with count n > 0\n**only if gen is still current**
+Debounce --> Empty    : [:find/result] with count = 0
 
-Matches --> Matches : Enter / ↓  [:find/cycle +1]\nShift+Enter / ↑  [:find/cycle -1]\n(see note)
+Matches --> Matches : cycle  [:find/cycle ±1]\nF3 / Shift+F3  ·  vim n / N  (see note)
 
-Matches --> Hidden  : Escape / ×  [:find/close]\n→ clear! (delete vv-find, vv-find-current)
-Matches --> Hidden  : Ctrl+F (toggle off)
+Matches --> Stale   : MutationObserver fires
+Stale   --> Matches : next search/cycle → **ensure-fresh!**\nre-collect, clamp the cursor
+Stale   --> Empty   : re-collect finds nothing
+
+Matches --> Hidden  : Escape / ×  [:find/close]\n→ clear! (delete both highlights)
+Matches --> Hidden  : toggle off
+Matches --> Empty   : **a different document or facet**\n[:find/reset] (watches :ui/find-context)
 
 note bottom of Matches #FFF6D6
-  cycle! wraps with modular arithmetic. Internally the
-  cursor is 0-based and steps by <latex>\mathit{dir} \in \{+1, -1\}</latex>:
+  cycle! wraps with modular arithmetic. Internally the cursor is
+  0-based and steps by <latex>\mathit{dir} \in \{+1, -1\}</latex>:
   <latex>\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n</latex>
-  Forward (Enter) is therefore, in the 1-based index the UI shows as "idx/n":
+  Forward is therefore, in the 1-based index the UI shows as "idx/n":
   <latex>\mathit{idx} := (\mathit{idx} \bmod n) + 1</latex>
-  and backward (Shift+Enter) is:
+  and backward is:
   <latex>\mathit{idx} := ((\mathit{idx} - 2) \bmod n) + 1</latex>
+
+  Under a MODAL keymap, Enter does not cycle — it COMMITS, returning
+  the keyboard to normal mode while the bar and highlights stay, so
+  that n / N (bare printable keys) can reach the resolver at all.
 end note
 
 legend right
   |= Colour |= State / concept |
-  |<#DDDDDD>&#160;&#160;&#160;&#160;| Hidden (find bar closed, highlights cleared) |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| Hidden (bar closed, highlights cleared, query kept) |
   |<#7590DB>&#160;&#160;&#160;&#160;| Visible, no current matches (app-db :ui/find) |
+  |<#C7CFE8>&#160;&#160;&#160;&#160;| Debouncing — a newer generation supersedes an older run |
   |<#67B11D>&#160;&#160;&#160;&#160;| Visible with painted matches (CSS highlights) |
+  |<#E8DCA8>&#160;&#160;&#160;&#160;| Stale — the DOM moved under the Ranges |
 endlegend
 @enduml

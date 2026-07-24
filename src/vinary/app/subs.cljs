@@ -94,6 +94,17 @@
 (rf/reg-sub :input/mode        (fn [db _] (get-in db [:ui :input :mode])))
 (rf/reg-sub :input/pending     (fn [db _] (get-in db [:ui :input :sequence])))
 (rf/reg-sub :input/in-input?   (fn [db _] (get-in db [:ui :input :in-input?])))
+;; Is the ACTIVE keymap set modal (Vim-like)? A modal set binds commands to bare printable characters, so
+;; any UI that holds keyboard focus has to hand it back for those bindings to be reachable at all — the
+;; find bar uses this to decide what Enter means (commit vs next match). See ADR-0032.
+;;
+;; LAYERED on the keymap slice on purpose: answering it runs merge-user, which deep-merges and postwalks
+;; the whole keymap. As a plain db-reading sub that would recompute on every app-db change — thousands of
+;; times while a document streams. Layered, it recomputes only when the keymap registry itself changes.
+(rf/reg-sub ::keymaps-slice (fn [db _] (get-in db [:ui :keymaps])))
+(rf/reg-sub :input/modal-keymap?
+            :<- [::keymaps-slice]
+            (fn [ks _] (registry/modal-in? ks (get ks :active "default"))))
 (rf/reg-sub :palette/state     (fn [db _] (get-in db [:ui :palette])))
 (rf/reg-sub :ui/uri-complete     (fn [db _] (get-in db [:ui :uri-complete])))
 (rf/reg-sub :ui/extensions-open? (fn [db _] (get-in db [:ui :extensions-open?])))
@@ -124,6 +135,14 @@
 (rf/reg-sub :ui/active-content-path :<- [:facet/active] :<- [:ui/active-path] :<- [:ui/active-uri]
             (fn [[af primary uri] _] (or (:path af) primary uri)))
 (rf/reg-sub :facet/type :<- [:facet/active] (fn [af _] (:type af)))
+
+;; "which document is on screen, in which view?" — the identity in-page find watches. When this changes, the
+;; painted highlights and the match counter describe something the user is no longer looking at, so find
+;; resets (:find/reset). One derived identity rather than a list of navigation events to keep in sync: a
+;; missed event would silently leave a stale counter over the wrong document. Deliberately includes the
+;; facet, so a preview↔source flip of the SAME file counts as a change (the path alone would not). ADR-0032.
+(rf/reg-sub :ui/find-context :<- [:ui/active-content-path] :<- [:facet/type]
+            (fn [[path facet] _] [path facet]))
 
 ;; the active document: the cached DataScript doc for the active tab's active CONTENT path (its facet, defaulting
 ;; to the primary uri). All :doc/* derivations below follow the shown facet automatically.

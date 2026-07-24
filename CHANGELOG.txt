@@ -216,6 +216,70 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Scrolling could get stuck after using in-page find: the view would move a few pixels
+      under the wheel and then snap straight back. The keyboard scroll animator eases the
+      pane toward a target by a quarter of the remaining distance per frame and stops when
+      that distance drops below half a pixel -- but this scroller SNAPS offsets to whole
+      pixels (measured: writing scrollTop + 0.4 moves nothing), so for a remaining distance
+      between 0.5 and 2 px the quarter-step rounded to zero movement, the distance never
+      shrank, and the loop re-armed forever, overwriting every user scroll one frame later.
+      The geometric decay must pass through that window on its way down, so EVERY scroll
+      command ended trapped. The arithmetic now lives in a pure, unit-tested namespace
+      (vinary.input.scroll-math) with four invariants: re-clamp the target against the live
+      scroll range each frame, never request a sub-pixel step, keep the settle threshold at
+      least as large as that step floor, and stop outright if a frame produced no movement.
+      A user wheel/touch/pointer now also abandons an in-flight programmatic scroll, the way
+      Chromium abandons its own smooth scrolls. See
+      docs/scientific/09-in-page-find-and-scroll-experiments.md.
+    - Closing the find bar with Escape silently killed most Vim keybindings for the rest of
+      the session -- `/` (open find), `n`/`N` (cycle matches) and `j`/`k` (scroll) all stopped
+      responding. Closing the bar unmounts an input that still holds focus, and Chromium
+      fires no blur event for a removed element, so the hand-mirrored "a text field is
+      focused" flag stayed true and the keymap resolver kept passing every bare printable key
+      to a field that no longer existed. Five other components carried the same latent leak.
+      The flag is no longer cached: it is derived from document.activeElement at keydown
+      time. Standard (Ctrl+F) and Emacs (C-s) were unaffected because their find bindings are
+      chords, not single characters -- which is why this looked like a Vim problem and was
+      not one. See docs/design-decisions/0032-scroll-ownership-and-derived-input-focus.md.
+    - Under Vim, `n`/`N` could never cycle matches at all. They are ordinary printable
+      characters, so with the query box focused they were typed into it, and the only way out
+      -- Escape -- closed find and cleared the highlights: there was no state in which they
+      could resolve. Enter now COMMITS the search under a modal keymap, keeping the bar and
+      the highlights while returning the keyboard to normal mode. Under a non-modal keymap
+      Enter keeps its browser meaning of "next match".
+    - In-page find missed most multi-word queries. Matches were confined to a single text
+      node, but rendered markup breaks text at every inline element -- so a phrase straddling
+      a `code` span or a link did not match -- and pdf.js emits one span per text run, so in
+      a PDF almost nothing multi-word matched. Find now flattens the visible text into one
+      whitespace-normalized buffer, searches that, and maps matches back onto Ranges that may
+      span nodes (the CSS Custom Highlight API already supported them). A wrapped source line
+      is matchable as typed; a query still cannot match across a paragraph, a table cell, or
+      a diff column.
+    - Find counted every equation twice and could focus a match nobody can see: MathJax emits
+      a hidden screen-reader MathML duplicate of each equation, and because it is hidden with
+      `clip` rather than `display:none` it has real layout boxes and passes every generic
+      visibility test. It is now excluded by name, as the copy-to-clipboard path already did.
+    - Find highlights were nearly invisible on the dark theme. They were painted with the
+      text-SELECTION colour (#444155 against a #292b2e page); every theme has defined a
+      purpose-built amber find palette since 0.1.0, which was simply never re-wired when find
+      moved from `mark` wrapping to the CSS Custom Highlight API. Over a PDF the highlight now
+      paints the background only -- the pdf.js text layer is transparent text over the
+      rendered canvas, so an opaque colour drew every matched glyph a second time.
+    - Cycling to a match could leave it off screen, and could scroll containers other than the
+      document: find used el.scrollIntoView, which scrolls every scrollable ancestor (an inner
+      `pre`, a wide table, a math block) and which targeted the match's whole parent block
+      rather than the match. All content scrolling now goes through one confined, unit-tested
+      offset formula shared with the Contents jump and the source/preview jump.
+    - Find could report a count for a query you had already replaced, and could keep painting
+      matches from a document you had navigated away from. Requests now carry a generation:
+      typing is debounced, a superseded run is dropped, and a stale asynchronous reply cannot
+      overwrite the counter. Re-opening find re-runs the remembered query instead of showing a
+      stale number over an unpainted document, and a live refresh, a streamed append or a PDF
+      zoom re-collects the matches instead of leaving the cursor walking detached nodes.
+    - Two smaller repairs fell out of the same work: "Focus content pane" (C-x 1 in Emacs,
+      C-w l in Vim) had been a silent no-op because a plain div cannot take focus -- the pane
+      now carries tabindex="-1"; and a second concurrent scroll-animation chain could be left
+      running whenever the animator switched target elements.
     - Launching `vinary-viewer` frequently opened two windows. Window-opening was triggered
       from four independent sites (the initial command-line open, the daemon socket open, an
       Electron second-instance, and macOS activate), each calling claim-window! directly with

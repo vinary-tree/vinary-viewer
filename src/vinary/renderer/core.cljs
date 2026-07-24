@@ -11,6 +11,9 @@
             [vinary.app.commands]
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
+            [vinary.input.fx :as input-fx]
+            [vinary.renderer.scroll-trace :as scroll-trace]
+            [vinary.renderer.find :as finder]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.profile :as profile]
             [vinary.renderer.math :as math]
@@ -305,6 +308,33 @@
                              :else nil))))
                      true))
 
+(defonce ^:private focus-tracker-installed? (atom false))
+
+(defn focus-tracker!
+  "Keep [:ui :input :in-input?] in step with what actually has focus, from ONE pair of document-level
+   listeners instead of per-component :on-focus/:on-blur handlers.
+
+   `focusout` is the load-bearing choice. React's `onBlur` never runs for an element that is REMOVED while
+   focused — Chromium fires no blur for a detached node — so every component that mirrored focus into
+   app-db by hand leaked a stuck `true` the moment it unmounted mid-focus. `focusout` bubbles and does fire
+   in the ordinary cases, and the `activeElement` re-read on the next microtask covers the removal case:
+   after a detach, focus has fallen back to <body>, which is not a text field.
+
+   The resolver does NOT read this value (it derives its own from document.activeElement at keydown time —
+   see vinary.input.resolver/build-ctx); this mirror exists so the state is observable to the UI and to
+   tests. ADR-0032."
+  []
+  (when-not @focus-tracker-installed?
+    (reset! focus-tracker-installed? true)
+    (let [sync! (fn [_]
+                  (js/queueMicrotask
+                   (fn []
+                     (let [now (boolean (text-edit/text-field-focused?))]
+                       (when (not= now (get-in @rfdb/app-db [:ui :input :in-input?]))
+                         (rf/dispatch [:input/set-in-input now]))))))]
+      (.addEventListener js/document "focusin" sync! true)
+      (.addEventListener js/document "focusout" sync! true))))
+
 (defonce ^:private ctrl-held-state (atom false))
 (defn ctrl-tracker!
   "Track whether Control is held (capture-phase; reads each event's ctrlKey so a missed keyup self-heals)
@@ -392,6 +422,22 @@
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (set! (.-__vvopen js/window) (fn [p] (rf/dispatch [:doc/open p])))   ; DEV/test: open a path in the active tab
   (set! (.-__vvsource js/window) (fn [] (rf/dispatch [:tab/toggle-source])))   ; DEV/test: flip the active tab's facet to source
+  (set! (.-__vvfindtoggle js/window) (fn [] (rf/dispatch [:find/toggle])))   ; DEV/test: open/close the find bar
+  ;; DEV/test: what find actually matched — the matched TEXT, each match's geometry, whether it is on
+  ;; screen, and how many Ranges are painted. The counter alone cannot tell "found 7 matches" apart from
+  ;; "found 7 matches and highlighted the wrong text", which is why the highlighting defects survived the
+  ;; smoke suite for so long.
+  (set! (.-__vvfind js/window) (fn [] (clj->js (finder/state-snapshot))))
+  ;; DEV-ONLY scroll instrumentation (ADR-0032 / docs/scientific/09). Two complementary seams: the tracer
+  ;; patches Element.prototype to answer "who wrote scrollTop?" from the outside; the animator log answers
+  ;; "why didn't the chase terminate?" from the inside. Both are gated on goog.DEBUG, and the release smoke
+  ;; asserts window.__vvscrolltrace is undefined, so the patch can never reach a shipped build.
+  (when ^boolean js/goog.DEBUG
+    (scroll-trace/expose!)
+    (set! (.-__vvscrollanim js/window) (fn [] (input-fx/anim-snapshot)))
+    (set! (.-__vvscrollanimlog js/window)
+          (fn [] #js {:entries (input-fx/anim-log-entries)
+                      :clear   (fn [] (input-fx/anim-log-clear!))})))
   (bridge!)
   (copy-shortcuts!)
   ;; MathJax typesets off-DOM (liteAdaptor) and we inject the SVG as a string, so MathJax never inserts its own
@@ -406,7 +452,11 @@
   (text-input-menu!)
   (hints!)
   (ctrl-tracker!)
+  (focus-tracker!)
   (key-scroll!)
+  ;; a user wheel/touch/pointer abandons any in-flight eased scroll, the way Chromium abandons its own
+  ;; behavior:"smooth" scrolls — otherwise a programmatic chase keeps overwriting the user's scroll
+  (input-fx/install-scroll-cancel!)
   (mount!)
   (js/requestAnimationFrame (fn [] (profile/mark! "paint")))   ; the empty app shell has painted
   ;; POOL PRELOAD: warm the lazily-loaded chunks on idle, so EVERY window — including hidden pool windows that

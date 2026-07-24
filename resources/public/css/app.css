@@ -56,6 +56,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   min-height: 0; min-width: 0; }
 .vv-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
   padding: 32px 45px; box-sizing: border-box; }
+/* the content pane carries tabindex="-1" so the keyboard can be handed BACK to it (closing the find bar,
+   :focus/content). It is never reached by tabbing, only by an explicit programmatic hand-off, so a focus
+   ring around the whole document would be noise. */
+.vv-content:focus, .vv-content:focus-visible { outline: none; }
 .vv-content-pdf { padding: 0; overflow: hidden; }   /* RETIRED with the native PDF view (ADR 0013) — now unused */
 /* web (http) view: the native WebContentsView is edge-to-edge — drop the document reading gutter */
 .vv-content.vv-content-web { padding: 0; overflow: hidden; }
@@ -586,8 +590,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-find-btn { background: transparent; color: var(--vv-fg); border: none; cursor: pointer;
   padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 .vv-find-btn:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
-::highlight(vv-find) { background-color: var(--vv-highlight); color: var(--vv-fg-strong); }
-::highlight(vv-find-current) { background-color: var(--vv-head2); color: var(--vv-bg1); }
+/* In-page find highlights. These use the theme's PURPOSE-BUILT find palette (--vv-find-*, defined in every
+   theme), not --vv-highlight: that is the text-SELECTION colour, and on the dark theme it is #444155
+   against a #292b2e page — very nearly invisible, which is what "the matches don't highlight properly"
+   turned out to mean. The amber pair was defined for find from the beginning and simply never wired up
+   when find moved from <mark> wrapping to the CSS Custom Highlight API. */
+::highlight(vv-find) { background-color: var(--vv-find-hit-bg); color: var(--vv-find-hit-fg); }
+::highlight(vv-find-current) { background-color: var(--vv-find-active-bg); color: var(--vv-fg-inverse); }
+/* The pdf.js text layer is transparent text laid over the rendered canvas (see .vv-pdf-text above), so an
+   opaque highlight colour paints the glyphs a SECOND time on top of the canvas ones — any sub-pixel
+   disagreement between the two reads as ghosting. Highlight the background only and let the canvas keep
+   drawing the text. */
+.vv-pdf-text::highlight(vv-find) { background-color: var(--vv-find-hit-bg); color: transparent; }
+.vv-pdf-text::highlight(vv-find-current) { background-color: var(--vv-find-active-bg); color: transparent; }
 
 /* tab strip */
 .vv-tabs { display: flex; flex: 0 0 auto; height: var(--vv-chrome-tabrow-h); box-sizing: border-box;

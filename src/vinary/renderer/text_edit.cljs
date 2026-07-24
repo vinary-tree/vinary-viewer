@@ -10,7 +10,10 @@
 
 (defn editable-target?
   "True when `el` is one of the app's editable TEXT fields: a text-like <input> or a <textarea>. Excludes
-   password / checkbox / etc. and contentEditable (the CodeMirror source view keeps its own richer menu)."
+   password / checkbox / etc. and contentEditable (the CodeMirror source view keeps its own richer menu).
+
+   NARROW on purpose — it decides whether the Cut/Copy/Paste menu applies. For 'does the keyboard belong
+   to a text field?' use `keyboard-owner-tag?` / `text-field-focused?` below, which are deliberately wider."
   [^js el]
   (when el
     (case (.-tagName el)
@@ -18,6 +21,38 @@
       "INPUT"    (contains? #{"text" "search" "url" "email" "tel" "number"}
                             (some-> (.-type el) str/lower-case))
       false)))
+
+;; ---- "does the keyboard belong to a text field?" -----------------------------------------------------
+;; A SECOND, wider predicate, kept here beside its narrow sibling so the two cannot drift. This one decides
+;; whether a bare printable key should reach what is focused instead of resolving to a keymap command, so
+;; it must say yes for things `editable-target?` says no to: a password box, a <select>, a contenteditable
+;; host, and the CodeMirror source view. Typing in any of those must not fire Vim's j/k/n.
+;;
+;; It is DERIVED from document.activeElement at the moment a key arrives, never cached. A cached copy is
+;; leak-by-construction: an element that unmounts while focused fires no blur event, so the flag sticks
+;; `true` forever and silently swallows every bare-key binding (ADR-0032).
+
+(def ^:private keyboard-owner-tags #{"INPUT" "TEXTAREA" "SELECT"})
+
+(defn keyboard-owner-tag?
+  "PURE. Does this tag name / contentEditable pair own the keyboard? Split out from the DOM walk so it can
+   be unit-tested without a document."
+  [tag content-editable?]
+  (boolean (or (contains? keyboard-owner-tags tag) content-editable?)))
+
+(defn keyboard-owner?
+  "True when `el` — or an ancestor — is a field that should receive bare printable keys itself.
+   `[contenteditable]` matches even `=\"false\"` (CodeMirror stamps that on .cm-content), which is why
+   .cm-editor is listed too: the source view owns its keyboard either way."
+  [^js el]
+  (boolean (and el (.-closest el)
+                (.closest el "input, textarea, select, [contenteditable], .cm-editor"))))
+
+(defn text-field-focused?
+  "Is the keyboard currently owned by a text field? The single source of truth for `:in-input?`."
+  []
+  (and (exists? js/document)
+       (keyboard-owner? (.-activeElement js/document))))
 
 (defn- vv ^js [] (.-vv js/window))
 

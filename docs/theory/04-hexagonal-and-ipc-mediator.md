@@ -63,10 +63,11 @@ each annotated with the external concern it adapts:
 | `:ds/transact` | `d/transact! conn tx` | **DataScript** store (the only write path) |
 | `:markdown/render` | run the unified pipeline; `.then`/`.catch` → dispatch | **async Markdown** rendering |
 | `:theme/apply` | set `#vv-theme-link` `<link>` href | **DOM / CSS** (live theme swap) |
-| `:find/run` | `finder/search!` → dispatch `[:find/count n]` | **DOM** (paint highlight Ranges) |
-| `:find/cycle` | `finder/cycle!` → dispatch `[:find/idx i]` | **DOM** (move focused match) |
+| `:find/search` | `await ensure-active!` → `finder/search!` → dispatch `[:find/result {…:gen}]` | **DOM** (paint highlight Ranges) |
+| `:find/cycle` | `finder/cycle!` → dispatch `[:find/result {…:gen}]` | **DOM** (move focused match) |
 | `:find/clear` | `finder/clear!` | **DOM** (remove highlights) |
-| `:toc/scroll` | `getElementById` + `scrollIntoView` | **DOM** (scroll to heading) |
+| `:toc/scroll` | `getElementById` + a **confined** `.vv-content` scrollTo (`scroll/scroll-el-to!`) | **DOM** (scroll to heading) |
+| `:dom/scroll` | `ease-scroll!` — the single cancellable, terminating scroll animator | **DOM** (scroll the focused pane) |
 | `:vv/open` | `window.vv.open path` | **IPC** → main (start watching/reading) |
 | `:vv/close` | `window.vv.close path` | **IPC** → main (stop watching) |
 

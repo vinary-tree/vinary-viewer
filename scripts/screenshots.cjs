@@ -415,7 +415,12 @@ const scenes = {
     await openDoc(win, state, REACTIVE, await payloadFor('markdown', REACTIVE), `Boolean(document.querySelector('.markdown-body'))`);
     await sendChord(win, 'F', ['control']);
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find bar');
-    await setInput(win, '.vv-find-input', 'reactive');
+    // a query that STRADDLES an inline element, so the shipped screenshot demonstrates cross-node
+    // matching rather than a single-word case the old matcher could also have handled (ADR-0032)
+    // this phrase STRADDLES an inline element in the fixture — "current `app-db` or" renders as three
+    // text nodes — so the shipped screenshot demonstrates cross-node matching rather than a single word
+    // the old single-text-node matcher could also have found (ADR-0032)
+    await setInput(win, '.vv-find-input', 'current app-db or');
     await waitFor(() => evalIn(win, `window.__vvdb().ui.find.count > 0`), 'find matches', 8000);
     await shoot(win, 'in-page-find');
   },

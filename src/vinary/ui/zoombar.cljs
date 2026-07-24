@@ -23,8 +23,10 @@
           [:div.vv-zoom-field
            [:input.vv-zoom-input
             {:value shown :spellCheck false :title "Zoom (%)"
-             :on-focus    (fn [^js e] (rf/dispatch [:input/set-in-input true]) (reset! draft (str pct)) (.select (.-target e)))
-             :on-blur     (fn [_]     (rf/dispatch [:input/set-in-input false]) (commit!))
+             ;; :in-input? is derived from document.activeElement by the keymap resolver (ADR-0032) — no
+             ;; per-component mirroring, which leaked whenever a focused field unmounted
+             :on-focus    (fn [^js e] (reset! draft (str pct)) (.select (.-target e)))
+             :on-blur     (fn [_]     (commit!))
              :on-change   (fn [^js e] (reset! draft (.. e -target -value)))
              :on-key-down (fn [^js e]
                             (case (.-key e)

@@ -692,36 +692,70 @@
  (fn [db [_ q]] (assoc-in db [:ui :tree-filter] q)))
 
 ;; ---- in-page find ----
+;; Every request carries a GENERATION. A search is asynchronous (it first materializes a PDF's text layers
+;; or drains a stream, so it covers the whole document rather than the rendered-so-far prefix), and typing
+;; issues one per keystroke — so without a generation the reply from an earlier, shorter query could land
+;; last and overwrite the counter for the query actually in the box. The same counter also collapses the
+;; debounce: a scheduled run that is no longer the newest simply drops.
+(def ^:private find-debounce-ms 100)
+
+(defn- bump-gen [db] (update-in db [:ui :find :gen] (fnil inc 0)))
+
 (rf/reg-event-fx
  :find/toggle
  (fn [{:keys [db]} _]
-   (let [vis (not (get-in db [:ui :find :visible?]))]
-     (cond-> {:db (assoc-in db [:ui :find :visible?] vis)}
-       (not vis) (assoc :fx [[:find/clear]])))))
+   (let [vis (not (get-in db [:ui :find :visible?]))
+         q   (get-in db [:ui :find :query])
+         db' (-> db (assoc-in [:ui :find :visible?] vis) bump-gen)]
+     (if vis
+       ;; re-opening with a query already in the box re-runs it, so the counter and the highlights match
+       ;; what is shown instead of being a stale number over an unpainted document
+       {:db db'
+        :fx (if (str/blank? q) [] [[:find/search {:q q :gen (get-in db' [:ui :find :gen])}]])}
+       {:db db' :fx [[:find/clear]]}))))
 
 (rf/reg-event-fx
  :find/set-query
  (fn [{:keys [db]} [_ q]]
-   {:db (assoc-in db [:ui :find :query] q)
-    :fx [[:find/run q]]}))
+   (let [db' (-> db (assoc-in [:ui :find :query] q) bump-gen)
+         gen (get-in db' [:ui :find :gen])]
+     {:db db'
+      :fx [[:dispatch-later {:ms find-debounce-ms :dispatch [:find/run gen]}]]})))
 
-(rf/reg-event-db
- :find/count
- (fn [db [_ n]] (-> db (assoc-in [:ui :find :count] n)
-                    (assoc-in [:ui :find :idx] (if (pos? n) 1 0)))))
+;; the debounce landing point: run only if this is still the newest request
+(rf/reg-event-fx
+ :find/run
+ (fn [{:keys [db]} [_ gen]]
+   (when (= gen (get-in db [:ui :find :gen]))
+     {:fx [[:find/search {:q (get-in db [:ui :find :query]) :gen gen}]]})))
 
+;; banks BOTH scalars at once. cycle! can change the COUNT as well as the index — reconciling stale ranges
+;; against a changed document is part of cycling — which the old count-only / index-only pair could not
+;; express, so a re-collect left the counter lying.
 (rf/reg-event-db
- :find/idx
- (fn [db [_ i]] (assoc-in db [:ui :find :idx] i)))
+ :find/result
+ (fn [db [_ {:keys [gen count idx]}]]
+   (if (or (nil? gen) (= gen (get-in db [:ui :find :gen])))
+     (-> db (assoc-in [:ui :find :count] count) (assoc-in [:ui :find :idx] idx))
+     db)))
 
 (rf/reg-event-fx
  :find/cycle
- (fn [_ [_ dir]] {:fx [[:find/cycle dir]]}))
+ (fn [{:keys [db]} [_ dir]]
+   {:fx [[:find/cycle {:dir dir :gen (get-in db [:ui :find :gen])}]]}))
+
+;; a different document is showing: drop the highlights and the counter, KEEP the query text so re-opening
+;; find re-runs it against what is now on screen
+(rf/reg-event-fx
+ :find/reset
+ (fn [{:keys [db]} _]
+   {:db (-> db (assoc-in [:ui :find :count] 0) (assoc-in [:ui :find :idx] 0) bump-gen)
+    :fx [[:find/clear]]}))
 
 (rf/reg-event-fx
  :find/close
  (fn [{:keys [db]} _]
-   {:db (assoc-in db [:ui :find :visible?] false)
+   {:db (-> db (assoc-in [:ui :find :visible?] false) bump-gen)
     :fx [[:find/clear]]}))
 
 ;; ---- table of contents ----

@@ -10,322 +10,319 @@
 
 ## 1 · What it is
 
-A find bar (`Ctrl+F`) that **highlights every occurrence** of your query inside the rendered
-document and lets you **cycle** between matches, scrolling each into view. The current match is
-highlighted in a distinct color from the rest. Crucially, the highlighting is done with the
-**CSS Custom Highlight API** — it paints over the text via `Range` objects **without mutating the
-document's DOM**. That matters because vinary-viewer writes the document body imperatively as one
-`innerHTML` blob ([feature 09](09-markdown-rendering.md)); a find implementation that wrapped
-matches in `<mark>` tags would fight that blob on every content update. Painting over Ranges
-composes cleanly: the document is untouched, and the highlights are a separate visual layer.
+A find bar that **highlights every occurrence** of your query inside the rendered document and lets you
+**cycle** between matches, scrolling each into view. The current match is highlighted in a distinct colour
+from the rest.
 
-The conceptual model — why the CSS Custom Highlight API, what a `Highlight`/`::highlight()` is,
-and how it sits beside the imperative body — is developed in
-[theory/06-find-css-custom-highlight.md](../theory/06-find-css-custom-highlight.md). This page
-walks the implementing code.
+Two properties shape the whole implementation:
+
+- **It never touches the document's DOM.** Highlighting is done with the **CSS Custom Highlight API** —
+  matches are painted over `Range` objects, so no `<mark>` element is spliced in. That matters because
+  vinary-viewer writes the document body imperatively as one `innerHTML` blob
+  ([feature 09](09-markdown-rendering.md)); a find implementation that wrapped matches in elements would
+  fight that blob on every content update. See [ADR-0003](../design-decisions/0003-ref-innerHTML-no-vdom-body.md).
+- **Matches may span markup.** Rendered text is broken at every inline element — `<code>`, `<a>`, `<em>`,
+  syntax-highlight tokens — and pdf.js emits **one `<span>` per text run**, so a matcher confined to a
+  single text node misses most multi-word queries and almost everything in a PDF. Find therefore flattens
+  the visible text into one buffer, searches that, and maps matches back onto **multi-node** Ranges.
+
+The conceptual model — why the CSS Custom Highlight API, and the flatten/scan/locate algorithms in literate
+form with their cost analysis — is developed in
+[theory/06-find-css-custom-highlight.md](../theory/06-find-css-custom-highlight.md). This page walks the
+implementing code.
 
 ---
 
 ## 2 · How to use it
 
-1. With a document open, press **`Ctrl+F`**. The find bar appears at the top-right of the content
-   area and is auto-focused.
-2. Type a query. All matches highlight as you type; the first match is focused and scrolled to
-   center. The counter shows `current / total` (e.g. `1/7`).
-3. **Next / previous match:** press **`Enter`** (next) or **`Shift+Enter`** (previous), or click
-   the `↑` / `↓` buttons. Cycling wraps around the ends.
-4. **Close:** press **`Esc`** or click `×`. The highlights clear.
+1. With a document open, press the find shortcut. It differs by keymap set
+   ([feature 15](15-custom-keybindings.md)):
 
-**Example.** Open a long Markdown file, `Ctrl+F`, type `reactive`. Every occurrence highlights;
-`Enter` walks you through them one by one, each scrolled to the middle of the viewport, with the
-focused one shown in the brighter "current" color. The match is case-insensitive, so `Reactive`
-and `reactive` both match.
+   | Keymap set | Open find | Next / previous match |
+   |---|---|---|
+   | **Standard** | `Ctrl+F` | `F3` / `Shift+F3`, or `Enter` / `Shift+Enter` in the box |
+   | **Vim** | `/` (also `SPC s s`) | `n` / `N` |
+   | **Emacs** | `C-s` (also `C-r`) | `F3` / `Shift+F3` |
+
+   The bar appears at the top-right of the content area and is auto-focused.
+
+2. Type a query. Matching is **case-insensitive**, and whitespace is normalized — so a phrase that the
+   source wrapped across two lines still matches when you type it on one. The counter shows
+   `current / total` (e.g. `1/7`). Searching is debounced, so a fast typist runs one search rather than one
+   per keystroke.
+
+3. **Next / previous match:** click the `↑` / `↓` buttons, or use the keys above. Cycling wraps around.
+
+4. **Commit (modal keymaps).** Under **Vim**, `Enter` *commits* the search: the bar and the highlights
+   stay, and the keyboard returns to normal mode so `n` / `N` work. This is not cosmetic — `n` and `N` are
+   ordinary printable characters, so while the query box holds focus they are typed into it and can never
+   reach the keymap. Under a non-modal set `Enter` keeps its browser meaning of "next match".
+
+5. **Close:** press `Esc` or click `×`. The highlights clear, the query is remembered, and the keyboard
+   returns to the document. Re-opening find re-runs the remembered query.
+
+**Example.** Open a long Markdown file, press the find shortcut, and type `reactive`. Every occurrence
+highlights in amber; the focused one is brighter. Cycling walks you through them one by one, each scrolled
+to the middle of the content pane.
 
 ---
 
 ## 3 · How it works internally
 
-Find spans a small re-frame slice (the bar's visibility/query/counter) and an imperative renderer
-module (`src/vinary/renderer/find.cljs`) that does the actual highlighting.
+Find spans four pieces:
 
-### The find bar view and its events
+| Piece | File | Responsibility |
+|---|---|---|
+| the bar | `src/vinary/ui/views.cljs` | render, focus, keyboard |
+| the state slice | `src/vinary/app/events.cljs`, `subs.cljs` | query, counter, request generation |
+| the pure core | `src/vinary/renderer/find_scan.cljs` | flatten, scan, locate — **no DOM** |
+| the DOM shell | `src/vinary/renderer/find.cljs` | walk, build Ranges, paint, scroll, invalidate |
 
-`find-bar` in `src/vinary/ui/views.cljs` reads the find slice and dispatches on input:
+### 3.1 · The find bar
+
+`find-bar` in `src/vinary/ui/views.cljs` is a form-3 component, for two reasons that both concern things
+React does *not* do for you:
+
+- **A stable prev-focus ref.** Focus is captured on mount and returned on unmount. Chromium fires no `blur`
+  for an element that is *removed* while focused, so an unmount is exactly the case that needs handling
+  explicitly. The same reference is why the Escape and `×` paths blur before dispatching.
+- **A did-update hook watching `:ui/find-context`.** When a different document or facet comes on screen,
+  find resets. Deriving that from one identity is deliberate: appending `[:find/reset]` to each of the
+  seven navigation events that can change what is shown would leave a stale counter painted over the wrong
+  document the first time one was missed.
 
 ```clojure
-(defn find-bar []
-  (let [{:keys [visible? query count idx]} @(rf/subscribe [:ui/find])]
-    (when visible?
-      [:div.vv-find
-       [:input.vv-find-input
-        {:placeholder "Find" :value query :auto-focus true
-         :on-change   #(rf/dispatch [:find/set-query (.. % -target -value)])
-         :on-key-down (fn [^js e]
-                        (case (.-key e)
-                          "Enter"  (do (.preventDefault e) (rf/dispatch [:find/cycle (if (.-shiftKey e) -1 1)]))
-                          "Escape" (rf/dispatch [:find/close])
-                          nil))}]
-       [:span.vv-find-count (if (pos? count) (str idx "/" count) "0/0")]
-       [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} "↑"]
-       [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} "↓"]
-       [:button.vv-find-btn {:title "Close (Esc)" :on-click #(rf/dispatch [:find/close])} "×"]])))
+"Enter"  (do (.preventDefault e) (.stopPropagation e)
+             (if modal?
+               (release-find-keyboard!)                              ; commit — see §2.4
+               (rf/dispatch [:find/cycle (if (.-shiftKey e) -1 1)])))
+"Escape" (do (.preventDefault e) (.stopPropagation e)
+             (release-find-keyboard!)
+             (rf/dispatch [:find/close]))
 ```
 
-- **`:ui/find`** — the app-db slice `{:visible? :query :count :idx}`. `idx` is the 1-based index of
-  the focused match for display; `count` is the total.
-- **`Enter` / `Shift+Enter`** — dispatch `[:find/cycle 1]` / `[:find/cycle -1]` (next / previous);
-  `(if (.-shiftKey e) -1 1)` picks the direction. `Esc` closes.
+`release-find-keyboard!` focuses `.vv-content` with `#js {:preventScroll true}`. Both halves matter: the
+pane carries `tabindex="-1"` so it *can* take focus (a plain `<div>` cannot, which is why the
+`:focus/content` command used to be a silent no-op), and `preventScroll` stops the focus itself from
+scrolling the pane — otherwise closing find would move the reader's position.
 
-`Ctrl+F` toggles the bar globally (it works even when the bar is not focused), from
-`src/vinary/renderer/core.cljs`:
+### 3.2 · The state slice and the request generation
 
-```clojure
-(defn keybindings! []
-  (.addEventListener js/window "keydown"
-                     (fn [^js e]
-                       (cond
-                         (and (.-ctrlKey e) (= (.-key e) "f"))
-                         (do (.preventDefault e) (rf/dispatch [:find/toggle]))
-                         (.-altKey e)
-                         (case (.-key e)
-                           "ArrowLeft"  (do (.preventDefault e) (rf/dispatch [:history/back]))
-                           "ArrowRight" (do (.preventDefault e) (rf/dispatch [:history/forward]))
-                           nil)
-                         :else nil))))
-```
-
-### The events: toggle, set-query, cycle, close
-
-From `src/vinary/app/events.cljs`:
+From `src/vinary/app/events.cljs`. Every request carries a **generation**:
 
 ```clojure
-(rf/reg-event-fx
- :find/toggle
- (fn [{:keys [db]} _]
-   (let [vis (not (get-in db [:ui :find :visible?]))]
-     (cond-> {:db (assoc-in db [:ui :find :visible?] vis)}
-       (not vis) (assoc :fx [[:find/clear]])))))
-
 (rf/reg-event-fx
  :find/set-query
  (fn [{:keys [db]} [_ q]]
-   {:db (assoc-in db [:ui :find :query] q)
-    :fx [[:find/run q]]}))
+   (let [db' (-> db (assoc-in [:ui :find :query] q) bump-gen)
+         gen (get-in db' [:ui :find :gen])]
+     {:db db'
+      :fx [[:dispatch-later {:ms find-debounce-ms :dispatch [:find/run gen]}]]})))
 
-(rf/reg-event-db
- :find/count
- (fn [db [_ n]] (-> db (assoc-in [:ui :find :count] n)
-                    (assoc-in [:ui :find :idx] (if (pos? n) 1 0)))))
+(rf/reg-event-fx                                    ; the debounce landing point
+ :find/run
+ (fn [{:keys [db]} [_ gen]]
+   (when (= gen (get-in db [:ui :find :gen]))       ; superseded → drop
+     {:fx [[:find/search {:q (get-in db [:ui :find :query]) :gen gen}]]})))
 
-(rf/reg-event-fx :find/cycle (fn [_ [_ dir]] {:fx [[:find/cycle dir]]}))
-
-(rf/reg-event-fx
- :find/close
- (fn [{:keys [db]} _]
-   {:db (assoc-in db [:ui :find :visible?] false)
-    :fx [[:find/clear]]}))
+(rf/reg-event-db                                    ; banks BOTH scalars
+ :find/result
+ (fn [db [_ {:keys [gen count idx]}]]
+   (if (or (nil? gen) (= gen (get-in db [:ui :find :gen])))
+     (-> db (assoc-in [:ui :find :count] count) (assoc-in [:ui :find :idx] idx))
+     db)))
 ```
 
-The pattern: **events keep state pure; the DOM work is in effects.** `:find/set-query` stores the
-query *and* requests the `:find/run` effect; `:find/count` records how many matches the effect
-reported and resets the displayed index to `1` (or `0` if none). Toggling off, or closing, fires
-`:find/clear` to remove the highlights.
+Why a generation is necessary: a search is **asynchronous**. Before scanning, find materializes a PDF's
+text layers or drains a streamed document to completion, so that it covers the whole document rather than
+the part that happens to be rendered. Two searches can therefore be in flight, and the reply from an
+earlier, shorter query can land last. The same counter collapses the debounce, so one mechanism serves both.
 
-The effects (in `src/vinary/app/fx.cljs`) are thin adapters to the `finder` module:
+`:find/result` banks the count **and** the index together. Cycling can change the count — reconciling stale
+Ranges against a changed document is part of cycling — which the earlier count-only / index-only event pair
+could not express.
+
+The effects, in `src/vinary/app/fx.cljs`:
 
 ```clojure
-(rf/reg-fx :find/run   (fn [q]   (rf/dispatch [:find/count (finder/search! q)])))
-(rf/reg-fx :find/cycle (fn [dir] (rf/dispatch [:find/idx (finder/cycle! dir)])))
-(rf/reg-fx :find/clear (fn [_]   (finder/clear!)))
+(rf/reg-fx :find/search
+           (fn [{:keys [q gen]}]
+             (-> (pdf-cache/ensure-active!)
+                 (.then (fn [_] (rf/dispatch [:find/result (assoc (finder/search! q) :gen gen)]))))))
+(rf/reg-fx :find/cycle (fn [{:keys [dir gen]}]
+                         (rf/dispatch [:find/result (assoc (finder/cycle! dir) :gen gen)])))
+(rf/reg-fx :find/clear (fn [_] (finder/clear!)))
 ```
 
-Each effect calls the imperative finder and dispatches the *result* (the count, or the new index)
-back into the loop, so the counter stays in sync without the finder knowing about re-frame.
+### 3.3 · The pure core — flatten, scan, locate
 
-### The finder: collect Ranges, paint Highlights
-
-`src/vinary/renderer/find.cljs` holds the matches and the focused index in a private atom (this is
-imperative DOM state, deliberately *outside* app-db):
+`src/vinary/renderer/find_scan.cljs` has no DOM dependency, so it is unit-tested in the `:node-test` build
+(`test/vinary/renderer/find_scan_test.cljs`). The DOM shell hands it a **token stream**:
 
 ```clojure
-(defonce ^:private state (atom {:ranges [] :idx 0}))
-(defn- content-root [] (.querySelector js/document ".vv-content"))
+{:kind :text :id <int> :s <string>}   ; a text node's data; :id indexes the shell's node table
+{:kind :soft}                         ; an inline-block / <br> boundary → one space
+{:kind :hard}                         ; a block boundary → a newline
 ```
 
-**Collecting matches** walks the text nodes under the content root and records a DOM `Range` for
-each case-insensitive substring hit:
+`build` folds that into `{:text <buffer> :segs <flat quads>}` — the buffer is lower-cased and
+whitespace-collapsed, and `segs` is a flat `[b n o len …]` table mapping buffer indices `[b, b+len)` to
+node `n` at offsets `[o, o+len)`. A quad is only started where contiguity breaks, so for ordinary prose the
+table is about as long as the number of text nodes.
+
+Two details are load-bearing:
+
+- **`safe-lower` lower-cases per code unit.** `"İ".toLowerCase()` is *two* UTF-16 units in JavaScript;
+  lower-casing a whole chunk would shift every index after such a character away from its node offset and
+  silently mis-highlight the rest of the document.
+- **Separators are what bound a match.** `normalize-query` trims, so a non-blank query never begins or ends
+  with whitespace and can never contain a newline. A match may therefore span a `:soft` separator (a
+  wrapped line, a pdf.js `<br>`) but never a `:hard` one (a paragraph, a table cell, a diff column).
+
+`scan` returns non-overlapping `[start end)` pairs; `locate` binary-searches the quads to map a buffer
+index back to `{:id :off}`; `match-endpoints` derives a Range's two ends, taking the **last character**
+rather than the end index — `e` may sit on a synthetic separator or one past the buffer, neither of which
+belongs to a node.
+
+### 3.4 · The DOM shell — what is searched
+
+`collect-tokens` walks the content pane with a `TreeWalker` over elements *and* text. Elements are `SKIP`ped
+(descend without yielding) except `<br>`, which becomes a soft boundary, and rejected subtrees, which are
+pruned outright.
+
+**What is not searched, and why:**
+
+| Excluded | Reason |
+|---|---|
+| `<script>`, `<style>`, `<noscript>`, `<template>` | not rendered text |
+| `<select>`, `<option>`, `<textarea>` | form controls, not document content |
+| SVG `<title>`, `<desc>`, `<metadata>`, `<defs>` | non-rendered content inside mermaid / MathJax / svgbob output |
+| `[hidden]`, `[aria-hidden="true"]` | explicitly hidden by the author |
+| `display: none`, `visibility: hidden` | not visible |
+| **`<mjx-assistive-mml>`** | MathJax's screen-reader MathML **duplicate** of every equation |
+
+The last row is the only content-specific entry in the subsystem, and it cannot be inferred: MathJax hides
+that element with `clip`, not `display:none`, so it has real layout boxes and passes every generic
+visibility test. Left in, every equation's text matched twice and cycling landed on an invisible node.
+`renderer.core` already strips the same element from copied selections, for the same reason.
+
+**Blocks that are merely off-screen ARE searched.** `content-visibility: auto` on a streamed document's
+blocks is a rendering optimisation, not a statement about the document, so find covers the whole thing.
+
+**Boundary classification** decides `:inline` / `:soft` / `:hard` from one computed-style resolution,
+memoized by element *shape* (`parentTag|parentClass|tag|class`) rather than identity — so a 7 000-record log
+or a 10 000-row split diff costs a handful of style resolutions, not thousands. It carries one escape hatch
+for CSS **blockification**:
 
 ```clojure
-(defn- collect-ranges [root query]
-  (let [q (str/lower-case query)
-        ql (count q)
-        ranges (array)]
-    (when (and root (pos? ql))
-      (let [walker (.createTreeWalker js/document root js/NodeFilter.SHOW_TEXT nil)]
-        (loop []
-          (let [node (.nextNode walker)]
-            (when node
-              (let [text (str/lower-case (or (.-textContent node) ""))]
-                (loop [from 0]
-                  (let [i (.indexOf text q from)]
-                    (when (>= i 0)
-                      (let [r (.createRange js/document)]
-                        (.setStart r node i)
-                        (.setEnd r node (+ i ql))
-                        (.push ranges r))
-                      (recur (+ i ql))))))
-              (recur))))))
-    (vec ranges)))
+;; an absolutely/fixed-positioned element computes to `display:block` whatever the author wrote.
+;; Trust the tag instead — a positioned <span> is still a text run.
+(and (contains? #{"absolute" "fixed"} p) (contains? inline-tags tag)) :inline
 ```
 
-Terms:
+Two worked examples pin it down. **pdf.js text runs** are `position:absolute` `<span>`s: without the escape
+hatch each would look like a block and multi-word phrases would stop matching in PDFs. **Split-diff cells**
+are `<span>`s inside a `display:grid` row, blockified for the opposite reason — they *are* separate columns,
+so a query must not run across the gutter.
 
-- **`TreeWalker(…, NodeFilter.SHOW_TEXT, nil)`** — a DOM iterator that visits only **text nodes**
-  under `root`. We never look at element nodes, so markup is ignored; only rendered text is
-  searched.
-- **`indexOf` loop within a single text node** — each match is found by lower-cased `indexOf`,
-  advancing `from` past each hit. A `Range` is created with `setStart`/`setEnd` at the match's
-  character offsets. Matches are confined to a *single text node* (the walker yields one node at a
-  time), so a query that spans a markup boundary is not matched — a deliberate simplicity.
-- **`Range`** — a [DOM Range](https://developer.mozilla.org/en-US/docs/Web/API/Range) is a
-  start/end pair of (node, offset). It is the unit the CSS Custom Highlight API paints.
+### 3.5 · Painting and scrolling
 
-**Painting** turns the Ranges into highlights via the CSS Custom Highlight API:
-
-```clojure
-(defn- supported? [] (and (exists? js/CSS) (.-highlights js/CSS) (exists? js/Highlight)))
-
-(defn- paint! [ranges idx]
-  (when (supported?)
-    (let [all (js/Highlight.)
-          cur (js/Highlight.)]
-      (doseq [r ranges] (.add all r))
-      (when (and (seq ranges) (< idx (count ranges))) (.add cur (nth ranges idx)))
-      (.set (.-highlights js/CSS) "vv-find" all)
-      (.set (.-highlights js/CSS) "vv-find-current" cur))))
-```
-
-- **`Highlight`** — a [`Highlight`](https://developer.mozilla.org/en-US/docs/Web/API/Highlight)
-  is a set of `Range`s registered under a name in the global `CSS.highlights` registry. Here `all`
-  holds every match; `cur` holds only the focused one.
-- **`CSS.highlights.set("vv-find", all)`** and **`…set("vv-find-current", cur)`** — registers the
-  two highlight sets under the names `vv-find` and `vv-find-current`.
-- **`supported?`** — guards the whole feature behind feature-detection (`CSS.highlights` and the
-  `Highlight` constructor). On an engine without the API, find degrades to a no-op rather than
-  erroring. vinary-viewer runs on modern Electron/Chromium, where the API is present.
-
-The styling lives in `resources/public/css/app.css` via the `::highlight()` pseudo-element:
+`paint!` is unchanged in shape: build a `Highlight` of all Ranges under `"vv-find"` and one of the focused
+Range under `"vv-find-current"`, and register both in `CSS.highlights`. The styling lives in
+`resources/public/css/app.css`:
 
 ```css
-::highlight(vv-find)         { background-color: var(--vv-highlight); color: var(--vv-fg-strong); }
-::highlight(vv-find-current) { background-color: var(--vv-head2);     color: var(--vv-bg1); }
+::highlight(vv-find)         { background-color: var(--vv-find-hit-bg);    color: var(--vv-find-hit-fg); }
+::highlight(vv-find-current) { background-color: var(--vv-find-active-bg); color: var(--vv-fg-inverse); }
 ```
 
-So all matches get the theme's selection color, and the **current** match gets the head2 accent —
-both themed via `--vv-*` like everything else ([feature 06](06-themes-and-live-switching.md)).
+These are the theme's **purpose-built find palette**, not `--vv-highlight` (the text-*selection* colour,
+which on the dark theme is `#444155` against a `#292b2e` page — very nearly invisible). A PDF-scoped rule
+drops the foreground colour: the pdf.js text layer is transparent text over the rendered canvas, so an
+opaque highlight paints the glyphs a second time and any sub-pixel disagreement reads as ghosting.
 
-### Searching and cycling
-
-`search!` recomputes matches, paints them, focuses and scrolls the first, and returns the count:
+Scrolling goes through the shared confined helper in `src/vinary/renderer/scroll.cljs` — **never**
+`el.scrollIntoView`, which scrolls every scrollable ancestor including inner `<pre>` and table scrollers,
+and which targets the match's parent *block* rather than the match. It is two-phase:
 
 ```clojure
-(defn search! [query]
-  (if (str/blank? query)
-    (do (clear!) 0)
-    (let [ranges (collect-ranges (content-root) query)]
-      (reset! state {:ranges ranges :idx 0})
-      (paint! ranges 0)
-      (scroll-to! ranges 0)
-      (count ranges))))
+(let [asked (scroll/scroll-rect-to! scroller rect {:block :center :behavior "auto"})]
+  (js/requestAnimationFrame
+   (fn [_]
+     (when (and asked (< (js/Math.abs (- (.-scrollTop scroller) asked)) 1.5))   ; user hasn't scrolled
+       …re-measure and correct…))))
 ```
 
-> **A naming note.** This function is `search!`, *renamed* from an earlier `run!` that shadowed
-> `clojure.core/run!`. Avoiding the shadow keeps `run!` available with its standard meaning
-> elsewhere in the namespace.
+The correction exists because scrolling a `content-visibility: auto` block into view is *what causes it to
+be laid out for the first time*, replacing its `contain-intrinsic-size` estimate with a real height. The
+guard skips the correction if the user scrolled in between — never fight them.
 
-`cycle!` advances the focused index with wraparound and re-paints/re-scrolls:
+### 3.6 · Invalidation
 
-```clojure
-(defn cycle! [dir]
-  (let [{:keys [ranges idx]} @state
-        n (count ranges)]
-    (if (pos? n)
-      (let [idx' (mod (+ idx dir) n)]
-        (swap! state assoc :idx idx')
-        (paint! ranges idx')
-        (scroll-to! ranges idx')
-        (inc idx'))
-      0)))
-```
+The shell holds its Ranges in a module atom, stamped with the content pane's `data-doc-key`, and watches
+the pane with a `MutationObserver`. Two situations get opposite responses:
 
-- $`\mathit{idx}' := \mathtt{(mod\ (+\ idx\ dir)\ n)}`$ — the wraparound: from the last match, `+1` wraps to `0`; from
-  the first, `-1` wraps to `n-1` (Clojure's `mod` returns a non-negative result). Returns the
-  **1-based** index `(inc idx')` for the counter display.
+| Situation | Response |
+|---|---|
+| the **doc-key changed** (a different document or facet) | the Ranges are meaningless — clear everything |
+| the same document, but nodes changed (live refresh, streamed append, a MathJax/mermaid post-pass, a PDF text layer arriving) | the query still means something — **re-collect** and keep the cursor, clamped to the new count |
 
-`scroll-to!` brings the focused match into view:
+Without this, `cycle!` walked detached nodes: the counter advanced while the view sat still, which is
+exactly what "navigating among matches does not work right" looked like.
 
-```clojure
-(defn- scroll-to! [ranges idx]
-  (when (and (seq ranges) (< idx (count ranges)))
-    (when-let [el (.. ^js (nth ranges idx) -startContainer -parentElement)]
-      (.scrollIntoView el #js {:block "center" :behavior "smooth"}))))
-```
-
-- **`-startContainer -parentElement`** — the element containing the match's start, scrolled to the
-  **center** of the viewport (`:block "center"`) with a smooth animation.
-
-`clear!` removes both highlight sets and resets the state:
-
-```clojure
-(defn clear! []
-  (when (supported?)
-    (.delete (.-highlights js/CSS) "vv-find")
-    (.delete (.-highlights js/CSS) "vv-find-current"))
-  (reset! state {:ranges [] :idx 0}))
-```
+`CSS.highlights.set` is not a DOM mutation, so painting cannot re-trigger the observer — a second, quieter
+payoff of the no-DOM-mutation design.
 
 ---
 
 ## 4 · Design notes / trade-offs
 
-- **Why the CSS Custom Highlight API instead of `<mark>` wrapping?** The document body is written
-  as one imperative `innerHTML` blob that is replaced wholesale on content change. Wrapping matches
-  in elements would (a) mutate that blob, fighting the next update, and (b) require careful
-  un-wrapping. Painting over `Range`s leaves the DOM untouched, so find and live-refresh
-  ([feature 01](01-live-refresh.md)) coexist with no interference. This is the central design
-  decision; see [theory/06](../theory/06-find-css-custom-highlight.md).
-- **Why hold match state in a module atom, not app-db?** The `Range`s are live DOM objects tied to
-  the current document nodes — not serializable, not time-travel-friendly. Keeping them out of
-  app-db respects the rule that app-db holds plain, replayable data; the finder owns its imperative
-  state and only reports scalars (count, index) back.
-- **Trade-off — single-text-node matches.** Matches cannot cross a markup boundary (e.g. a query
-  straddling a `<code>` span). This keeps `collect-ranges` simple and fast; cross-node matching is
-  a possible enhancement.
-- **Graceful degradation.** `supported?` guards every DOM call, so on an engine lacking the API
-  find quietly does nothing rather than throwing.
+- **Why the CSS Custom Highlight API instead of `<mark>` wrapping?** The document body is written as one
+  imperative `innerHTML` blob that is replaced wholesale on content change. Wrapping matches in elements
+  would mutate that blob, fight the next update, and require careful un-wrapping. This is the central design
+  decision; see [ADR-0003](../design-decisions/0003-ref-innerHTML-no-vdom-body.md) and
+  [theory/06](../theory/06-find-css-custom-highlight.md).
+- **Why hold match state in a module atom, not app-db?** The `Range`s are live DOM objects tied to current
+  nodes — not serializable, not time-travel-friendly. app-db holds plain, replayable data; the finder owns
+  its imperative state and reports only scalars back.
+- **Trade-off — `<br>` is a *soft* boundary.** That is what makes a phrase match across a pdf.js line wrap,
+  at the cost of also matching across an authored `<br>` in Markdown. One global rule, no per-format
+  branching.
+- **Trade-off — the walk resolves computed style.** Memoization by shape keeps it `O(#distinct shapes)`, but
+  it is a real cost that a single-text-node walk did not pay. Getting it wrong once pushed the Electron
+  smoke past its timeout on a streamed log; see
+  [scientific/09 §8.1](../scientific/09-in-page-find-and-scroll-experiments.md).
+- **Limitation — the source (code) view.** CodeMirror virtualizes: only the lines near the viewport exist in
+  the DOM, so find over a `:source` facet covers what is rendered, not the whole file. Use the preview facet,
+  or the editor's own search.
+- **Graceful degradation.** Every `CSS.highlights` call is guarded by a feature check, so on an engine
+  lacking the API find quietly paints nothing rather than throwing — and still never mutates the document.
 
-The enabling decision — writing the document body as one ref-managed `innerHTML` blob with no VDOM,
-which is *why* find must paint over Ranges rather than wrap matches — is recorded in
-[ADR-0003 ref-`innerHTML` body, no VDOM](../design-decisions/0003-ref-innerHTML-no-vdom-body.md).
-The conceptual model is in [theory/06](../theory/06-find-css-custom-highlight.md); see the
-[ADR index](../design-decisions/README.md) for the full list.
+The full defect history, with the measurements that isolated each cause, is
+[scientific/09](../scientific/09-in-page-find-and-scroll-experiments.md); the decisions that outlived it are
+[ADR-0032](../design-decisions/0032-scroll-ownership-and-derived-input-focus.md).
 
 ---
 
 ## 5 · Diagrams
 
-- **Sequence — type a query, cycle, close:** [`../diagrams/seq-find.puml`](../diagrams/seq-find.puml)
-  (written by the theory pillar). `Ctrl+F` → `:find/toggle`; keystroke → `:find/set-query` →
-  `:find/run` → `finder/search!` (TreeWalker → Ranges → `Highlight` → `CSS.highlights.set`) →
-  `:find/count`; `Enter` → `:find/cycle` → `finder/cycle!`; `Esc` → `:find/close` → `clear!`.
-- **State — the find bar:** [`../diagrams/state-find.puml`](../diagrams/state-find.puml)
-  (written by the theory pillar). States *Hidden → Visible(empty) → Matching(idx/total)*, with
-  cycle self-loops and the close transition back to *Hidden* clearing highlights.
+- **Sequence — type a query, cycle, close:** [`../diagrams/seq-find.puml`](../diagrams/seq-find.puml).
+  Shortcut → `:find/toggle`; keystroke → `:find/set-query` → debounce → `:find/run` (generation guard) →
+  `:find/search` → `ensure-active!` → `finder/search!` → `:find/result`; cycle → `ensure-fresh!` → possible
+  re-collect → confined scroll; `Esc` → `:find/close` → `clear!`.
+- **State — the find bar:** [`../diagrams/state-find.puml`](../diagrams/state-find.puml). *Hidden →
+  Debouncing → Matching(idx/total)*, with a *Stale* state entered when the document changes underneath.
+- **Activity — how a match is collected:**
+  [`../diagrams/activity-find-collect.puml`](../diagrams/activity-find-collect.puml). TreeWalker → filter →
+  token stream → buffer + segments → scan → locate → Ranges → `Highlight`, split into swimlanes at the
+  pure/DOM boundary.
 
 ![In-page find sequence](../diagrams/seq-find.svg)
 
 ![Find-bar state machine](../diagrams/state-find.svg)
 
-Palette: **blue-violet** = the `:ui/find` app-db slice, **blue** = re-frame events/effects,
-**teal** = the renderer (the finder module + the painted highlights). See
+![How a match is collected](../diagrams/activity-find-collect.svg)
+
+Palette: **blue-violet** = the `:ui/find` app-db slice, **blue** = re-frame events/effects, **teal** = the
+renderer (the finder module + the painted highlights). See
 [`../diagrams/_vv-theme.iuml`](../diagrams/_vv-theme.iuml).

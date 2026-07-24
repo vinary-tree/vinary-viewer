@@ -161,28 +161,32 @@
 ;; the :pdf/reflow effect is registered in vinary.renderer.pdf (a renderer-only ns; keeping it there avoids
 ;; pulling pdf.js — which touches `document` at load — into the DOM-free :node-test build).
 
-;; in-page find (imperative DOM highlight, dispatches counts/index back into the loop). For a PDF, first
-;; materialize ALL text layers so find covers the whole document (canvases are windowed; text is not).
-(rf/reg-fx :find/run
-           (fn [q]
+;; in-page find (imperative DOM highlight, dispatches the count + index back into the loop). For a PDF,
+;; first materialize ALL text layers, and for a streamed document drain it, so find covers the WHOLE
+;; document rather than the part that happens to be rendered. That await is why the result carries a
+;; generation: it makes the effect asynchronous, so replies can land out of order.
+;;
+;; The effect is :find/search and the EVENT that schedules it is :find/run — re-frame keeps the two
+;; registries separate, but one keyword for both would read as a loop.
+(rf/reg-fx :find/search
+           (fn [{:keys [q gen]}]
              (-> (pdf-cache/ensure-active!)
-                 (.then (fn [_] (rf/dispatch [:find/count (finder/search! q)]))))))
-(rf/reg-fx :find/cycle (fn [dir] (rf/dispatch [:find/idx (finder/cycle! dir)])))
+                 (.then (fn [_] (rf/dispatch [:find/result (assoc (finder/search! q) :gen gen)]))))))
+(rf/reg-fx :find/cycle (fn [{:keys [dir gen]}]
+                         (rf/dispatch [:find/result (assoc (finder/cycle! dir) :gen gen)])))
 (rf/reg-fx :find/clear (fn [_]   (finder/clear!)))
 
 ;; scroll a heading/section (by id) to the top of the content. Use a CONFINED scroll of the .vv-content
 ;; scroller (not el.scrollIntoView, which scrolls every scrollable ancestor up to the viewport and can scroll
-;; #app itself when a tall PDF overflows it — pushing the menu bar out of the clipped viewport). .scrollTo
-;; targets only .vv-content, so chrome outside it never moves. Same offset formula the scroll-spy uses.
+;; #app itself when a tall PDF overflows it — pushing the menu bar out of the clipped viewport). The offset
+;; formula now lives in vinary.renderer.scroll/confined-top, shared with the source→preview jump and with
+;; in-page find, and unit-tested there; `:block :start :margin 0` is exactly what this call site always did.
 (rf/reg-fx
  :toc/scroll
  (fn [id]
    (if-let [^js el (.getElementById js/document id)]
-     (if-let [^js c (.closest el ".vv-content")]
-       (.scrollTo c #js {:top      (+ (.-scrollTop c)
-                                      (- (.. el getBoundingClientRect -top)
-                                         (.. c getBoundingClientRect -top)))
-                         :behavior "smooth"})
+     (if (.closest el ".vv-content")
+       (scroll/scroll-el-to! el {:block :start :behavior "smooth"})
        (.scrollIntoView el #js {:block "start" :behavior "smooth"}))            ; fallback: not inside a scroller
      ;; no DOM anchor: a source Contents "L<line>" id — scroll the CodeMirror source view to that line.
      (when-let [[_ n] (re-matches #"L(\d+)" (str id))]

@@ -27,7 +27,7 @@ Concretely, the project validates five classes of property, each with its own in
 | 2 | **Bounded memory** | Does a stream's working set stay `$`O(1)`$` in document length? | [02 — Bounded-memory streaming validation](02-bounded-memory-streaming-validation.md) |
 | 3 | **Algebraic law** | Do the parser's weights actually form a semiring? | [03 — Semiring algebraic laws](03-semiring-algebraic-laws.md) |
 | 4 | **Security invariance** | Is per-block sanitization identical to whole-document sanitization? | [04 — Sanitizer context-freedom](04-sanitizer-context-freedom.md) |
-| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md) |
+| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md) |
 
 Runtime performance benchmarking is a **documented, deliberate gap** — the project ships no `perf`/`hyperfine`
 harness today. [07 — Measurement methodology](07-measurement-methodology.md) writes down the methodology that

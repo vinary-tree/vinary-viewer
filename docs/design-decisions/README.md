@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0030**.
+The next free number is **0033**.
 
 ---
 
@@ -88,6 +88,8 @@ The next free number is **0030**.
 | [0028](0028-composable-rendering-features.md) | Composable rendering features (native deterministic recognizers) — explored, then reversed | Superseded |
 | [0029](0029-mature-parsers-shared-ir-features.md) | Mature parsers + a shared IR/feature layer (reverses 0028); Org gap-closing; backend parity gate; weighted PDF reflow; HTML facet | Accepted |
 | [0030](0030-fallback-project-roots.md) | Fallback project roots: a file in no git repository adopts its containing directory (bounded BFS walk, realpath'd root, containment-aware merge, Remove from Files) | Accepted |
+| [0031](0031-per-content-type-fonts-and-ligatures.md) | Per-content-type preview fonts (Noto Sans prose, Latin Modern for LaTeX, Fira Code mono) with a code-ligature toggle | Accepted |
+| [0032](0032-scroll-ownership-and-derived-input-focus.md) | One scroll owner (confined `scrollTo`, a terminating cancellable animator), input focus **derived** from `document.activeElement` rather than cached, and cross-node find | Accepted |
 
 ---
 
@@ -145,6 +147,12 @@ The **later fifteen** (0013–0027) build capability on that core without distur
 - **0030** closes the last gap in the **Files tab**: a file belonging to no git repository adopts its
   containing directory as a project root, so the sidebar works for scratch notes and standalone documents
   exactly as it does inside a checkout.
+- **0032** is the first ADR that is not about *rendering* at all but about **ownership of shared mutable
+  state** — the scroll position and keyboard focus. Both had accumulated several independent writers, and
+  both produced defects that no single subsystem could be blamed for. It establishes one confined scroll
+  formula with one cancellable, provably-terminating animator, and makes "is a text field focused?" a
+  *derived* question rather than a cached flag. Its find-side half also removes the single-text-node
+  restriction that **0003**'s `innerHTML` body had made convenient but never required.
 
 Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
 core, which is why they compose without conflict.

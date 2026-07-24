@@ -1,0 +1,86 @@
+@startuml activity-find-collect
+'' PlantUML over Mermaid because this is a control flow with several filter branches AND swimlane ownership
+'' that is the point of the design — everything in the second lane is DOM-free and unit-tested, everything
+'' in the first and third touches the DOM. Mermaid cannot express coloured lanes plus a banner-free,
+'' byte-reproducible SVG. Palette: green #67B11D DOM work, blue-violet #7590DB the pure core,
+'' amber/red for the rejected paths.
+!include _vv-theme.iuml
+
+title How a match is collected — from the content pane to a painted Range
+
+|#DCEBD4|DOM shell (renderer.find)|
+start
+:query normalized;
+if (blank query?) then (yes)
+  :clear! — delete both highlights,\ndisconnect the observer; <<ERROR_TINT>>
+  stop
+else (no)
+endif
+:TreeWalker over .vv-content\n(SHOW_ELEMENT | SHOW_TEXT); <<MARKDOWN_FILL>>
+
+repeat :next node;
+  if (text node?) then (yes)
+    :emit {:kind :text :id i :s data}; <<MARKDOWN_TINT>>
+    if (nearest HARD ancestor changed?) then (yes)
+      :emit {:kind :hard}  → "\n" in the buffer; <<MARKDOWN_TINT>>
+    else (no)
+      if (parent is inline-block?) then (yes)
+        :emit {:kind :soft}  → " " in the buffer; <<MARKDOWN_TINT>>
+      else (no)
+      endif
+    endif
+  else (element)
+    if (script/style/template/form control?\nSVG title/desc/metadata/defs?\n[hidden] or aria-hidden?\n**<mjx-assistive-mml>**?) then (reject)
+      :FILTER_REJECT — prune the whole subtree; <<ERROR_TINT>>
+    else (keep)
+      :one memoized getComputedStyle\nkeyed by parentTag|parentClass|tag|class; <<MAIN_TINT>>
+      if (display:none or visibility:hidden?) then (yes)
+        :FILTER_REJECT; <<ERROR_TINT>>
+      else (no)
+        if (<br>?) then (yes)
+          :emit {:kind :soft}; <<MARKDOWN_TINT>>
+        else (no)
+          :FILTER_SKIP — descend, yield nothing; <<MAIN_FILL>>
+        endif
+      endif
+    endif
+  endif
+repeat while (more nodes?) is (yes) not (no)
+
+|#DDE1F0|pure core (renderer.find-scan) — no DOM, unit-tested|
+:**build** — fold the token stream into\nB (lower-cased, whitespace-collapsed)\n+ segment quads [b n o len]; <<APPDB_FILL>>
+note right
+  SAFE-LOWER is length-preserving:
+  "İ".toLowerCase() is TWO UTF-16 units,
+  which would desynchronise every index
+  after it from its node offset.
+end note
+:**scan** — non-overlapping indexOf over B; <<APPDB_TINT>>
+note right
+  normalize-query TRIMS, so a match can
+  never begin or end on a separator — and
+  can never contain "\n". A match may span
+  a :soft boundary, never a :hard one.
+end note
+:**locate** — binary-search the quads at\n<latex>s</latex> and <latex>e-1</latex>, inverting <latex>\lambda</latex>; <<APPDB_TINT>>
+
+|#DCEBD4|DOM shell (renderer.find)|
+if (both endpoints resolved?) then (no)
+  :drop this match; <<ERROR_TINT>>
+else (yes)
+  :Range.setStart / setEnd —\n**may span nodes**; <<MARKDOWN_FILL>>
+endif
+:Highlight.add <latex>\forall</latex> matches\nCSS.highlights.set "vv-find" / "vv-find-current"; <<MARKDOWN_FILL>>
+:**confined** scrollTo the focused Range's rect\n(never el.scrollIntoView); <<MARKDOWN_TINT>>
+:re-measure on the next frame and correct —\na content-visibility block only gets a real\nheight once it is scrolled into view; <<MAIN_TINT>>
+stop
+
+legend right
+  |= Colour |= Lane / concept |
+  |<#DCEBD4>&#160;&#160;&#160;&#160;| DOM shell — walk, Ranges, painting, scrolling |
+  |<#DDE1F0>&#160;&#160;&#160;&#160;| pure core — flatten, scan, locate (DOM-free, unit-tested) |
+  |<#67B11D>&#160;&#160;&#160;&#160;| a step that produces a token, a Range, or a highlight |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| style resolution / geometry (the memoized, costly part) |
+  |<#E0211D>&#160;&#160;&#160;&#160;| rejected — not searchable text |
+endlegend
+@enduml

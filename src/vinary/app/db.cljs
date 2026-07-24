@@ -49,7 +49,9 @@
                  :undo    []           ; command stack (vinary.input.kbedit-history)
                  :redo    []}
         :hints {:active? false :targets [] :typed ""}   ; Vimium-style link hints
-        :find {:visible? false :query "" :count 0 :idx 0}
+        ;; :gen is the request generation — see the :find/* events. It makes a stale asynchronous reply
+        ;; identifiable, and doubles as the debounce collapse.
+        :find {:visible? false :query "" :count 0 :idx 0 :gen 0}
         ;; in-renderer PDF view-state (zoom scale / fit mode / dark-invert); fit + invert persist in settings.edn
         :pdf {:scale 1.0 :fit :width :invert? false}
         ;; a tab's view FACET (which collocated representation is showing, as preview/source) lives on its tab

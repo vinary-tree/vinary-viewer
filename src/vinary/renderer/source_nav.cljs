@@ -5,7 +5,8 @@
    the .vv-content preview pane to it, using the SAME offset math as the :toc/scroll fx so chrome outside the
    scroller never moves. Kept free of re-frame and of per-content-type selectors (the shared-subsystem rule — a
    per-type selector once silently broke the PDF scroll-spy). A pending-line atom carries a jump across the
-   source-view→preview REMOUNT that toggling :view-source? triggers, consumed once the preview mounts.")
+   source-view→preview REMOUNT that toggling :view-source? triggers, consumed once the preview mounts."
+  (:require [vinary.renderer.scroll :as scroll]))
 
 (defn nearest-line-index
   "Index into `lines` (a NON-DECREASING vector of 1-based source line numbers, in document order — the order
@@ -71,9 +72,7 @@
           (let [lines (mapv (fn [i] (or (parse-line (.getAttribute (aget els i) "data-vv-source-start-line")) 0))
                             (range n))]
             (when-let [idx (nearest-line-index lines line)]
-              (let [^js el (aget els idx)]
-                (.scrollTo content
-                           #js {:top      (+ (.-scrollTop content)
-                                             (- (.. el getBoundingClientRect -top)
-                                                (.. content getBoundingClientRect -top)))
-                                :behavior "smooth"})))))))))
+              ;; the offset formula lives in vinary.renderer.scroll/confined-top, shared with the :toc/scroll
+              ;; fx and in-page find, and unit-tested there; :block :start reproduces what this did inline
+              (scroll/scroll-rect-to! content (.getBoundingClientRect ^js (aget els idx))
+                                      {:block :start :behavior "smooth"}))))))))
