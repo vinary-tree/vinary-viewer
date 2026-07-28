@@ -3,7 +3,9 @@
    command is reified data {:id :title :category :dispatch|:handler :when :arg :prompt}; `run` resolves
    a command id against the current resolution context and dispatches the corresponding re-frame event.
    (Command pattern: invokers — keymap, palette, mouse — are decoupled from the actions.)"
-  (:require [re-frame.core :as rf]))
+  (:require [re-frame.core :as rf]
+            [re-frame.db :as rfdb]
+            [vinary.app.nav :as nav]))
 
 ;; predicate registry: ctx -> bool. The resolver assembles ctx from subs so predicates stay pure.
 (def predicates
@@ -119,3 +121,18 @@
   "All command specs whose :when passes for ctx (populates the command palette)."
   [ctx]
   (->> (vals registry) (filter #(allowed? (:id %) ctx)) (sort-by :title)))
+
+(defn palette-ctx
+  "Resolution context for RUNNING a palette selection.
+
+   Reads app-db directly because it is called from a click/Enter handler, which is outside any reactive
+   context — subscribing there would warn and would not track. The palette's candidate LIST is built from
+   subscriptions instead (`:palette/candidates`), which is the reactive half of the same question.
+
+   `:in-input?` is forced true so a palette selection can never resolve to a command gated on the keyboard
+   being free: the query box holds focus whenever this is called."
+  []
+  (let [db @rfdb/app-db]
+    (assoc (nav/base-ctx db)
+           :find-visible? (get-in db [:ui :find :visible?])
+           :in-input?     true)))

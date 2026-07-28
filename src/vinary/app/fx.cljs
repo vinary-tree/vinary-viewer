@@ -15,7 +15,21 @@
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
             [vinary.renderer.pdf-cache :as pdf-cache]
+            [vinary.renderer.input-trace :as input-trace]
+            [vinary.async.scheduler :as sched]
             [vinary.renderer.find :as finder]))
+
+;; ---- deferral, shared ---------------------------------------------------------------------------------
+;; The generic edge onto vinary.async.scheduler, so every widget that needs "do this once typing stops"
+;; expresses it the same way. Distinct from re-frame's own :dispatch-later in the way that matters here:
+;; ONE live timer per :key, replaced on each arming, and genuinely cancellable. The pattern it replaces —
+;; schedule a timer per keystroke and let the stale ones fire into a generation check — leaves one timer
+;; per character alive and cannot express cancellation at all.
+(rf/reg-fx :async/debounce
+           (fn [{:keys [key ms dispatch]}]
+             (sched/debounce! key ms #(rf/dispatch dispatch))))
+
+(rf/reg-fx :async/cancel (fn [key] (sched/cancel! key)))
 
 ;; content-pane view position: a cofx reads the leaving view's position — both the preview pixel scrollTop AND the
 ;; source viewport line (each nav event saves the one its facet makes authoritative, via nav/capture-pos — so a
@@ -168,12 +182,19 @@
 ;;
 ;; The effect is :find/search and the EVENT that schedules it is :find/run — re-frame keeps the two
 ;; registries separate, but one keyword for both would read as a loop.
+;;
+;; `input-trace/mark!` closes the keystroke→work-settled interval for the DEV latency tracer. It is a
+;; no-op until the tracer has been installed (goog.DEBUG only), so this costs a boolean deref in a
+;; release build.
 (rf/reg-fx :find/search
            (fn [{:keys [q gen]}]
              (-> (pdf-cache/ensure-active!)
-                 (.then (fn [_] (rf/dispatch [:find/result (assoc (finder/search! q) :gen gen)]))))))
+                 (.then (fn [_]
+                          (finder/search! q (fn [res]
+                                              (rf/dispatch [:find/result (assoc res :gen gen)])
+                                              (input-trace/mark! "find/search"))))))))
 (rf/reg-fx :find/cycle (fn [{:keys [dir gen]}]
-                         (rf/dispatch [:find/result (assoc (finder/cycle! dir) :gen gen)])))
+                         (finder/cycle! dir #(rf/dispatch [:find/result (assoc % :gen gen)]))))
 (rf/reg-fx :find/clear (fn [_]   (finder/clear!)))
 
 ;; scroll a heading/section (by id) to the top of the content. Use a CONFINED scroll of the .vv-content
@@ -236,24 +257,25 @@
 (rf/reg-fx :vv/http-zoom-set (fn [f]    (when-let [^js v (vv)] (when (.-httpZoomSet v)  (.httpZoomSet v f)))))
 (rf/reg-fx :vv/devtools      (fn [_]    (when-let [^js v (vv)] (when (.-toggleDevtools v) (.toggleDevtools v)))))
 (rf/reg-fx :vv/copy          (fn [text] (when-let [^js v (vv)] (when (.-copyText v)     (.copyText v (str text))))))
-(defonce ^:private settings-save-timer (atom nil))
 (rf/reg-fx :vv/save-settings
-           ;; debounced — the sidebar resize splitter writes :sidebar-width on every mousemove
+           ;; debounced — the sidebar resize splitter writes :sidebar-width on every mousemove, and every
+           ;; character typed into a Preferences field writes a font name. Through the shared scheduler:
+           ;; the hand-rolled clear-timer/set-timer pair this replaces was one of the four ad-hoc deferral
+           ;; idioms vinary.async.scheduler exists to unify.
            (fn [edn]
-             (when-let [t @settings-save-timer] (js/clearTimeout t))
-             (reset! settings-save-timer
-                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveSettings v) (.saveSettings v edn)))) 300))))
+             (sched/debounce! ::save-settings 300
+                              (fn [] (when-let [^js v (vv)] (when (.-saveSettings v) (.saveSettings v edn)))))))
 (rf/reg-fx :vv/save-keymap   (fn [edn]  (when-let [^js v (vv)] (when (.-saveKeymap v) (.saveKeymap v edn)))))
-(defonce ^:private recent-save-timer (atom nil))
 (rf/reg-fx :vv/save-recent
            ;; debounced (Alt+Up/Down and breadcrumb clicks can rewrite the trail rapidly)
            (fn [edn]
-             (when-let [t @recent-save-timer] (js/clearTimeout t))
-             (reset! recent-save-timer
-                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveRecent v) (.saveRecent v edn)))) 300))))
+             (sched/debounce! ::save-recent 300
+                              (fn [] (when-let [^js v (vv)] (when (.-saveRecent v) (.saveRecent v edn)))))))
 
 ;; URI-bar path completion: invoke main (request/response); debounced for live typing, immediate for Enter.
-(defonce ^:private complete-timer (atom nil))
+;; The debounce protects the MAIN process, not the renderer: `complete` there does a readdir plus a statSync
+;; per entry, so one request per character would put a synchronous filesystem walk on the main process for
+;; every keystroke.
 (rf/reg-fx :vv/complete-path
            (fn [{:keys [input tag]}]
              (let [go (fn [] (when-let [^js v (vv)]
@@ -262,9 +284,10 @@
                                      (.then (fn [res] (rf/dispatch [:uri-complete/result tag (js->clj res :keywordize-keys true)])))
                                      (.catch (fn [_] nil))))))]
                (if (= tag :enter)
-                 (go)
-                 (do (when-let [t @complete-timer] (js/clearTimeout t))
-                     (reset! complete-timer (js/setTimeout go 90)))))))
+                 ;; Enter is a commit, not typing: run it now, and cancel any live typing request so a
+                 ;; late reply cannot re-open the dropdown over a navigation that has already happened
+                 (do (sched/cancel! ::complete-path) (go))
+                 (sched/debounce! ::complete-path 90 go)))))
 (rf/reg-fx :uri-complete/error-timeout
            (fn [_] (js/setTimeout #(rf/dispatch [:uri-complete/clear-error]) 2500)))
 
@@ -284,12 +307,10 @@
 (rf/reg-fx :vv/password-fill       (fn [item] (when-let [^js v (vv)] (when (.-passwordFill v) (.passwordFill v (clj->js item))))))
 (rf/reg-fx :vv/password-save       (fn [payload] (when-let [^js v (vv)] (when (.-passwordSave v) (.passwordSave v (clj->js payload))))))
 (rf/reg-fx :vv/password-dismiss-save (fn [token] (when-let [^js v (vv)] (when (.-passwordDismissSave v) (.passwordDismissSave v token)))))
-(defonce ^:private ext-config-save-timer (atom nil))
 (rf/reg-fx :vv/save-ext-config    ; debounced — toggles can fire rapidly
            (fn [edn]
-             (when-let [t @ext-config-save-timer] (js/clearTimeout t))
-             (reset! ext-config-save-timer
-                     (js/setTimeout (fn [] (when-let [^js v (vv)] (when (.-saveExtConfig v) (.saveExtConfig v edn)))) 300))))
+             (sched/debounce! ::save-ext-config 300
+                              (fn [] (when-let [^js v (vv)] (when (.-saveExtConfig v) (.saveExtConfig v edn)))))))
 (rf/reg-fx :vv/open-path     (fn [p]    (when-let [^js v (vv)] (when (.-openPath v)     (.openPath v p)))))
 (rf/reg-fx :vv/open-external (fn [url]  (when-let [^js v (vv)] (when (.-openExternal v) (.openExternal v url)))))
 (rf/reg-fx :devtools/re-frame-10x (fn [visible?] (set-re-frame-10x! visible?)))

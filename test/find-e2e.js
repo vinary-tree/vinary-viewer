@@ -50,6 +50,10 @@ app.commandLine.appendSwitch('ozone-platform', 'x11');
 // straddles an inline <code> boundary, which the single-text-node matcher cannot see.
 const MD = path.join(SCRATCH, 'scroll-anchor.md');
 const PDF = path.join(SCRATCH, 'find.pdf');
+// Deliberately far OVER the streaming threshold, unlike MD above: the typist-latency scenario needs a
+// document whose flatten genuinely costs hundreds of milliseconds, because a gate that never provokes the
+// expensive path cannot catch it coming back (docs/scientific/10).
+const BIG = path.join(SCRATCH, 'typist-latency.md');
 
 // A multi-page PDF with REAL extractable text. test/fixtures/smoke.pdf is a single short page, so it can
 // never be taller than the viewport and cannot exercise scrolling at all. Each page emits the phrase
@@ -106,6 +110,15 @@ function writeFixtures() {
   paras.push('An equation with a unique token: $\\alpha_{zzqqx}$\n');
   fs.writeFileSync(MD, paras.join('\n'));
   fs.writeFileSync(PDF, makeTextPdf(6));
+
+  const big = ['# Typist latency fixture\n'];
+  for (let i = 0; i < 4000; i++) {
+    big.push(`## Section ${i}\n`);
+    big.push(`Paragraph ${i} — the quick brown fox jumps over the lazy dog, repeatedly and at length so ` +
+             `that this document is far past the streaming threshold and the flatten cost is measurable. ` +
+             `Filler token ${i} alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu.\n`);
+  }
+  fs.writeFileSync(BIG, big.join('\n'));
 }
 
 require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app
@@ -497,6 +510,125 @@ async function correctnessScenario(win, { file, kind, ready, check, phrase, othe
   await until(wc, FIND_OPEN, (v) => v === false, `${kind} find closes at the end`);
 }
 
+// ---- typist latency (ADR-0033, docs/scientific/10) --------------------------------------------------
+//
+// The two defects this gate exists to catch, restated as the properties they violate:
+//
+//   RC1  a keystroke may never be undone by a later re-render committing older state
+//   RC2  no work started by a keystroke may occupy the main thread long enough to make the next one late
+//
+// Both are measured with REAL keys through the browser-process input pipeline, at a cadence a person
+// actually types at. 150 ms/char (~80 WPM) is the interesting one precisely because it is SLOWER than the
+// debounce: every character lands a search, which is the regime the original defect lived in. A faster
+// cadence collapses the whole burst into one search and would pass vacuously.
+
+const TYPE_CADENCE_MS = 150;
+
+// The threshold is derived, not guessed. Measured on this harness: the pre-fix engine blocked the main
+// thread for 440–480 ms per keystroke on this fixture; the fixed one shows 29–66 ms, against an
+// environmental floor of ~90 ms under xvfb (window occluded, no vsync, so unrelated frame work lands
+// here too). 200 ms sits above the floor with margin and less than half of the regression it must catch.
+const MAX_LAG_MS = 200;
+
+function typeChar(win, ch) {
+  const wc = win.webContents;
+  wc.sendInputEvent({ type: 'keyDown', keyCode: ch });
+  wc.sendInputEvent({ type: 'char', keyCode: ch });
+  wc.sendInputEvent({ type: 'keyUp', keyCode: ch });
+}
+
+// Perceived lag, measured FROM OUTSIDE the renderer.
+//
+// The obvious in-page metric (`performance.now() - event.timeStamp`) is right for a physical keyboard but
+// useless here: Electron stamps an INJECTED event when the renderer dispatches it, not when the browser
+// process sent it, so it reads ~0 however blocked the renderer is. Confirmed while building this gate —
+// a saturated main thread still reported a 4 ms queue. Round-tripping a trivial executeJavaScript from
+// the main process measures the same quantity honestly: these queue behind a blocked renderer exactly as
+// keystrokes do, so the worst round trip is the worst time a character would wait to appear.
+function probeResponsiveness(win, intervalMs = 25) {
+  const wc = win.webContents;
+  const trips = [];
+  let stopped = false;
+  const inflight = [];
+  const loop = async () => {
+    while (!stopped) {
+      const t = Date.now();
+      inflight.push(wc.executeJavaScript('1', true)
+        .then(() => trips.push(Date.now() - t))
+        .catch(() => { /* window torn down mid-probe */ }));
+      await sleep(intervalMs);
+    }
+    await Promise.all(inflight);
+  };
+  const done = loop();
+  return { trips, stop: async () => { stopped = true; await done; return trips; } };
+}
+
+// Empty a field through the native setter + a bubbling `input`, so the widget's own state follows. Needed
+// because find deliberately KEEPS its query across documents, so "did every character survive?" would
+// otherwise compare the typed phrase against leftovers.
+const CLEAR_FIELD = (sel) => `(() => {
+  const e = document.querySelector(${JSON.stringify(sel)});
+  if (!e) return false;
+  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(e, '');
+  e.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+})()`;
+
+const FOCUS_FIELD = (sel) => `(() => {
+  const e = document.querySelector(${JSON.stringify(sel)});
+  if (!e) return false; e.focus(); return document.activeElement === e;
+})()`;
+
+/**
+ * Type `phrase` into `selector` at a human cadence and assert both properties.
+ * Returns the measurements so the run can report them even when everything passes.
+ */
+async function typistCheck(win, { label, selector, phrase, check, settleMs = 4000 }) {
+  const wc = win.webContents;
+  win.focus();
+  wc.focus();
+  assert.strictEqual(await evalIn(wc, FOCUS_FIELD(selector)), true, `${label}: could not focus ${selector}`);
+  await evalIn(wc, CLEAR_FIELD(selector));
+  await sleep(400);
+  await evalIn(wc, FOCUS_FIELD(selector));
+  await evalIn(wc, `window.__vvinputtrace && window.__vvinputtrace().clear()`);
+  await sleep(150);
+
+  const probe = probeResponsiveness(win);
+  for (const ch of phrase) {
+    typeChar(win, ch);
+    await sleep(TYPE_CADENCE_MS);
+  }
+  await sleep(settleMs);
+  const trips = await probe.stop();
+
+  const finalValue = await evalIn(wc,
+    `(() => { const e = document.querySelector(${JSON.stringify(selector)}); return e ? e.value : null; })()`);
+  const clobbers = await evalIn(wc,
+    `window.__vvinputtrace ? window.__vvinputtrace().clobbers().map((w) => ({ field: w.field, from: w.from, to: w.to })) : []`);
+  const maxLag = trips.length ? Math.max(...trips) : 0;
+
+  check(`${label}: ASSERT T1 — every character typed at ${TYPE_CADENCE_MS} ms survives`, () => {
+    assert.strictEqual(finalValue, phrase,
+      `typed ${JSON.stringify(phrase)} but the field holds ${JSON.stringify(finalValue)} — a re-render ` +
+      `committed older state over it (programmatic writes seen: ${JSON.stringify(clobbers)})`);
+  });
+
+  check(`${label}: ASSERT T2 — no re-render takes a character back out of the field`, () => {
+    assert.deepStrictEqual(clobbers, [],
+      'a programmatic .value write discarded characters the user had already typed');
+  });
+
+  check(`${label}: ASSERT T3 — the renderer stays responsive while typing (max ${MAX_LAG_MS} ms)`, () => {
+    assert.ok(maxLag < MAX_LAG_MS,
+      `worst round trip was ${maxLag} ms over ${trips.length} probes; work started by a keystroke is ` +
+      'blocking the main thread long enough to make the next character late');
+  });
+
+  return { maxLag, probes: trips.length, finalValue, clobbers };
+}
+
 // ---- run --------------------------------------------------------------------------------------------
 
 async function run() {
@@ -566,11 +698,63 @@ async function run() {
     console.log(`  · skipped ASSERT H11 (no assistive MathML to exclude: ${JSON.stringify(mathProbe)})`);
   }
   if (failed.length > seen) await dumpDiagnostics(wc, 'correctness');
+  seen = failed.length;
+
+  // ---- typist latency: the two properties the async-input rewrite exists to guarantee ---------------
+  console.log('\n=== typist latency ===');
+  const latency = {};
+
+  // (a) in-page find over a document big enough that flattening it costs hundreds of milliseconds. This
+  //     is the user's original report: characters arriving late, and some not at all.
+  await open(wc, BIG);
+  await until(wc, `Boolean(document.querySelector('.vv-content'))`, (v) => v === true, 'big fixture mounts');
+  await sleep(1500);
+  await sendChord(win, 'F', ['control']);
+  await openFindOrForce(win, 'find bar for the typist check');
+  // warm the document first: the very first search materialises the whole stream, and typing INTO that
+  // window would measure an idle renderer rather than the steady state a user types in
+  await evalIn(wc, SET_QUERY('warmup'));
+  await until(wc, `${VVFIND}.chars`, (v) => typeof v === 'number' && v > 100000, 'the whole stream is searchable');
+  await evalIn(wc, SET_QUERY(''));
+  await sleep(500);
+  latency.find = await typistCheck(win, { label: 'find (1.1 MB doc)', selector: '.vv-find-input',
+                                          phrase: 'quick brown', check });
+  // the buffer must actually be being REUSED — the whole reason the per-keystroke cost collapsed
+  const findState = await evalIn(wc, VVFIND);
+  check('find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes', () => {
+    assert.strictEqual(findState.cached, true,
+      `the last search re-walked the DOM (dirty=${findState.dirty}); the incremental path is not engaging, ` +
+      `so every character costs a full flatten again (cpuMs=${findState.cpuMs}, chars=${findState.chars})`);
+  });
+  await sendChord(win, 'F', ['control']);
+  await until(wc, FIND_OPEN, (v) => v === false, 'find closes after the typist check');
+
+  // (b) the sidebar file-tree filter — where the clobber was first caught red-handed (`views` → `vews`,
+  //     with the tracer recording the write as `vi` → `v`). It needs a REAL repository listing to be the
+  //     stress case it was, so open a file from this checkout rather than from the scratch dir.
+  await open(wc, path.join(ROOT, 'README.md'));
+  await until(wc, `(() => { const p = window.__vvdb().ui.projects; return Boolean(p && p.length); })()`,
+              (v) => v === true, 'the git tree loads');
+  await until(wc, `Boolean(document.querySelector('.vv-tree-filter'))`, (v) => v === true, 'tree filter mounts');
+  await sleep(500);
+  latency.tree = await typistCheck(win, { label: 'file-tree filter', selector: '.vv-tree-filter',
+                                          phrase: 'views', check, settleMs: 2000 });
+  await evalIn(wc, CLEAR_FIELD('.vv-tree-filter'));
+
+  if (failed.length > seen) {
+    console.error('\n--- typist diagnostics ---');
+    console.error(JSON.stringify(latency, null, 2));
+    console.error('input trace summary:',
+      JSON.stringify(await evalIn(wc, `window.__vvinputtrace ? window.__vvinputtrace().summary() : null`), null, 2));
+  }
 
   console.log('\n--- environment ---');
   console.log(`hardware acceleration : ${GPU ? 'ON (VV_FIND_E2E_GPU=1)' : 'OFF (disableHardwareAcceleration)'}`);
   console.log(`markdown probe        : ${JSON.stringify(mdProbe)}`);
   console.log(`pdf probe             : ${JSON.stringify(pdfProbe)}`);
+  console.log(`typist cadence        : ${TYPE_CADENCE_MS} ms/char, lag budget ${MAX_LAG_MS} ms`);
+  console.log(`typist find           : max lag ${latency.find.maxLag} ms over ${latency.find.probes} probes`);
+  console.log(`typist tree filter    : max lag ${latency.tree.maxLag} ms over ${latency.tree.probes} probes`);
 
   console.log(`\nfind-e2e: ${passed.length} passed, ${failed.length} failed`);
   if (failed.length) {

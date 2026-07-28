@@ -48,7 +48,9 @@ implementing code.
 
 2. Type a query. Matching is **case-insensitive**, and whitespace is normalized — so a phrase that the
    source wrapped across two lines still matches when you type it on one. The counter shows
-   `current / total` (e.g. `1/7`). Searching is debounced, so a fast typist runs one search rather than one
+   `current / total` (e.g. `1/7`). The query box is a `vinary.ui.text-input/async-input`, so it owns its own
+   DOM value and a re-render can never take a typed character back out of it (ADR-0033). Searching is
+   debounced and **chunked**, so a fast typist runs one search rather than one
    per keystroke.
 
 3. **Next / previous match:** click the `↑` / `↓` buttons, or use the keys above. Cycling wraps around.
@@ -117,7 +119,8 @@ From `src/vinary/app/events.cljs`. Every request carries a **generation**:
    (let [db' (-> db (assoc-in [:ui :find :query] q) bump-gen)
          gen (get-in db' [:ui :find :gen])]
      {:db db'
-      :fx [[:dispatch-later {:ms find-debounce-ms :dispatch [:find/run gen]}]]})))
+      :fx [[:async/debounce {:key find-debounce-key :ms find-debounce-ms
+                             :dispatch [:find/run gen]}]]})))
 
 (rf/reg-event-fx                                    ; the debounce landing point
  :find/run
@@ -136,7 +139,18 @@ From `src/vinary/app/events.cljs`. Every request carries a **generation**:
 Why a generation is necessary: a search is **asynchronous**. Before scanning, find materializes a PDF's
 text layers or drains a streamed document to completion, so that it covers the whole document rather than
 the part that happens to be rendered. Two searches can therefore be in flight, and the reply from an
-earlier, shorter query can land last. The same counter collapses the debounce, so one mechanism serves both.
+earlier, shorter query can land last.
+
+The generation used to double as the debounce. It no longer does, and the split is deliberate (ADR-0033):
+`:async/debounce` keeps **one live timer per key** and genuinely cancels it, so a superseded request stops
+instead of firing into a check that discards it. The generation stays because it answers the *other*
+question — a search that has already begun cannot be un-begun, and its reply must still be recognised as
+stale when it lands. `:find/close` and `:find/reset` also emit `:async/cancel`, so a debounce armed by the
+last character cannot land after the bar is gone.
+
+The interval is **40 ms**, down from 100. The search is chunked now, so arming it costs a frame of sliced
+work that the next keystroke cancels, rather than a full document walk that must be waited out; the
+debounce is there to avoid churning that work per character, not to protect the thread from it.
 
 `:find/result` banks the count **and** the index together. Cycling can change the count — reconciling stale
 Ranges against a changed document is part of cycling — which the earlier count-only / index-only event pair
@@ -308,8 +322,11 @@ The full defect history, with the measurements that isolated each cause, is
 
 - **Sequence — type a query, cycle, close:** [`../diagrams/seq-find.puml`](../diagrams/seq-find.puml).
   Shortcut → `:find/toggle`; keystroke → `:find/set-query` → debounce → `:find/run` (generation guard) →
-  `:find/search` → `ensure-active!` → `finder/search!` → `:find/result`; cycle → `ensure-fresh!` → possible
+  `:find/search` → `ensure-active!` → `finder/search!` → `:find/result`; cycle → reconcile → possible
   re-collect → confined scroll; `Esc` → `:find/close` → `clear!`.
+- **Activity — one keystroke, two lifetimes:**
+  [`../diagrams/activity-async-text-input.puml`](../diagrams/activity-async-text-input.puml). The
+  synchronous keystroke path against the sliced, cancellable job it arms (ADR-0033).
 - **State — the find bar:** [`../diagrams/state-find.puml`](../diagrams/state-find.puml). *Hidden →
   Debouncing → Matching(idx/total)*, with a *Stale* state entered when the document changes underneath.
 - **Activity — how a match is collected:**

@@ -1,7 +1,9 @@
 (ns vinary.app.uri
   "URI helpers. A tab's :uri is the canonical address it shows — an absolute local file path
    (\"/home/u/README.md\") or an http(s) URL. Local paths are displayed file://-prefixed in the URI bar."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [vinary.search.query :as query]
+            [vinary.search.scan :as scan]))
 
 (defn http? [uri] (boolean (and uri (re-find #"(?i)^https?://" uri))))
 (defn archive? [uri] (str/starts-with? (str uri) "vv-archive://"))
@@ -167,10 +169,14 @@
     (if (neg? i) ["" text] [(subs text 0 (inc i)) (subs text (inc i))])))
 
 (defn matches-prefix?
-  "Case-insensitive basename prefix match for completion, hiding dotfiles unless `base` starts with '.'."
+  "Case-insensitive basename prefix match for completion, hiding dotfiles unless `base` starts with '.'.
+
+   The prefix test itself is `vinary.search.scan/prefix?`, shared with every other search surface; the
+   dotfile rule is this call site's own and stays here, because it is a statement about filesystems rather
+   than about matching."
   [name base]
   (and (or (str/starts-with? base ".") (not (str/starts-with? name ".")))
-       (str/starts-with? (str/lower-case name) (str/lower-case base))))
+       (scan/prefix? (query/fold-simple name) (query/fold-simple base))))
 
 (defn common-prefix
   "Longest common string prefix of a sequence of strings (\"\" for an empty sequence or no shared prefix).
@@ -190,11 +196,14 @@
    most-recent-first). Returns at most `cap` URLs. Powers the address bar's history completion for web
    pages (the filesystem path completion is for local files)."
   [history text cap]
-  (let [q (str/lower-case (str text))]
+  (let [q (query/fold-simple (str text))]
     (if (str/blank? q)
       []
       (->> history
-           (filter #(str/includes? (str/lower-case %) q))
-           (sort-by (fn [u] (if (str/starts-with? (str/lower-case u) q) 0 1)))
+           (map (fn [u] [u (query/fold-simple u)]))
+           (filter (fn [[_ f]] (scan/substring? f q)))
+           ;; prefix matches first — they are the ones the ghost suggestion can complete inline — and
+           ;; `sort-by` is stable, so most-recent-first order survives inside each group
+           (sort-by (fn [[_ f]] (if (scan/prefix? f q) 0 1)))
            (take cap)
-           vec))))
+           (mapv first)))))

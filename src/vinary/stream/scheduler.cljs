@@ -11,6 +11,7 @@
    as records arrive."
   (:require [re-frame.core :as rf]
             [clojure.string :as str]
+            [vinary.async.scheduler :as sched :refer [ric]]
             [vinary.stream.transport :as transport]
             [vinary.stream.sink :as sink]
             [vinary.stream.protocol :as proto]
@@ -21,6 +22,9 @@
 (def ^:private toc-cap 1000)                                  ; bound the outline so a log of errors can't grow it unboundedly
 (def ^:private log-level-re #"(?i)\b(ERROR|WARN|WARNING|FATAL|CRITICAL)\b")
 (def ^:private md-drain-batch 48)                             ; top-level Markdown blocks committed per idle frame
+;; …and per frame while find-materialize is rushing. Sized so a 1.1 MB document (≈8 000 blocks) lands in
+;; ~10 frames rather than ~170, without any single frame becoming a visible stall.
+(def ^:private md-rush-batch 768)
 
 (defn- parser-for [kind]
   (case kind
@@ -46,19 +50,9 @@
                               :id    (:id (node/node-meta rec))})))
         blocks))
 
-(defn- ric
-  "Schedule the next commit tick. When the window is VISIBLE, pump on animation frames — a steady ~60fps cadence
-   that eliminates the idle-starvation gaps (requestIdleCallback could drip batches up to 100 ms apart under
-   main-thread load, which read as the 'slow/clunky' stutter). When HIDDEN (rAF is paused by the browser) or
-   without rAF, fall back to requestIdleCallback with a :timeout so a backgrounded stream still progresses."
-  [f]
-  (if (and (exists? js/document)
-           (= "visible" (.-visibilityState js/document))
-           (exists? js/requestAnimationFrame))
-    (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)})))
-    (if (exists? js/requestIdleCallback)
-      (js/requestIdleCallback f #js {:timeout 100})
-      (js/requestAnimationFrame (fn [_] (f #js {:timeRemaining (fn [] 8)}))))))
+;; `ric` — the visible/hidden-aware tick — now lives in vinary.async.scheduler, where the chunked find
+;; uses it too. It was written here first; sharing it rather than copying it is the point of that
+;; namespace.
 
 (defn start!
   "Begin streaming `path` (of `kind`) into DOM `node`; returns a controller atom → pass to stop!. Two engines:
@@ -110,7 +104,11 @@
                     (.then (fn [batch]
                              (when (alive?)
                                (handle batch)
-                               ;; find-materialize rushes the pull loop (no idle wait between batches)
+                               ;; find-materialize rushes the pull loop (no idle wait between batches).
+                               ;; Skipping `ric` here is safe in a way that skipping it in `drain` is not:
+                               ;; every iteration still awaits `transport/pull!`, an IPC round trip whose
+                               ;; reply arrives as a task, so the event loop — and therefore input — runs
+                               ;; between batches regardless.
                                (when-not (:done batch) (if @(:rush? @ctrl) (tick nil) (ric tick))))))
                     (.catch (fn [_] (finish!))))))
             ;; ---- progressive engine (markdown) ----
@@ -118,12 +116,25 @@
               (when (alive?)
                 (if (>= idx total)
                   (finish!)
-                  (let [end (min total (+ idx md-drain-batch))]
+                  (let [rush? @(:rush? @ctrl)
+                        end (min total (+ idx (if rush? md-rush-batch md-drain-batch)))]
                     (emit-blocks (subvec blocks idx end))
                     (rf/dispatch [:stream/progress path (/ end total)])
-                    ;; find-materialize tight-loops the remaining blocks (no idle wait) so the whole doc is in
-                    ;; the DOM before the search runs; otherwise pace one block-batch per idle frame
-                    (if @(:rush? @ctrl) (drain blocks total end) (ric (fn [_] (drain blocks total end))))))))
+                    ;; Two paces, and which one is right depends on WHY we are committing.
+                    ;;
+                    ;; Ordinary streaming paints for a reader, so it paces to the display: `ric`, one
+                    ;; modest batch per frame. Producing DOM faster than the screen can show it buys
+                    ;; nothing.
+                    ;;
+                    ;; find-materialize is not painting for a reader — it is racing to get the whole
+                    ;; document into the DOM so a search can cover it. So it takes a bigger batch AND the
+                    ;; input-paced yield, which resumes on the next task instead of the next frame. What it
+                    ;; must NOT do is what `rush?` used to do: recur straight into `drain`, committing
+                    ;; every remaining block in a single task. On a 1.1 MB document that is a multi-second
+                    ;; freeze, and it is triggered by the very first character typed into find.
+                    (if rush?
+                      (sched/yield! (fn [] (drain blocks total end)))
+                      (ric (fn [_] (drain blocks total end))))))))
             ;; progressive engine (markdown, pdf-reflow): opts :blocks-fn is a 0-arg fn → Promise<{:blocks :toc
             ;; :assets}> rendered whole (full document context = byte-parity), committed across idle frames.
             (start-progressive []

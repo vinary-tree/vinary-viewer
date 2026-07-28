@@ -28,50 +28,50 @@
    quad is only started where contiguity breaks, so for ordinary prose |segs| ≈ the number of text nodes,
    not the number of characters. The explicit `len` is what lets `locate` reject an index that fell on a
    synthetic separator rather than silently attributing it to the preceding node."
-  (:require [clojure.string :as str]))
+  (:require [vinary.search.cursor :as cursor]
+            [vinary.search.query :as query]
+            [vinary.search.scan :as sscan]))
 
 (defn- ws? [c]
   (or (= c " ") (= c "\n") (= c "\t") (= c "\r") (= c "\f") (= c " ")))
 
-(defn safe-lower
-  "Lower-case `s` WITHOUT changing its length.
+(def safe-lower
+  "Lower-case `s` WITHOUT changing its length — `vinary.search.query/fold-strict`.
 
-   `String.prototype.toLowerCase` is not length-preserving in JavaScript: \"İ\" (U+0130) lowercases to two
-   UTF-16 units. Lower-casing a whole chunk would therefore desynchronise every buffer index after such a
-   character from its node offset, silently mis-highlighting the rest of the document. So we lower per code
-   unit and keep the original wherever the result is not exactly one unit."
-  [s]
-  (let [n (count s)
-        out (js/Array. n)]
-    (dotimes [i n]
-      (let [c (.charAt s i)
-            l (.toLowerCase c)]
-        (aset out i (if (= 1 (.-length l)) l c))))
-    (.join out "")))
+   Kept as a name here because the length-preservation invariant is a property of THIS buffer (its indices
+   map back to DOM text-node offsets) and the unit tests that pin it read better next to the code that
+   depends on it. The implementation is shared: the terminal finder and every filter widget fold through
+   the same namespace, which is where the ASCII fast path and the \"İ\" counterexample are documented."
+  query/fold-strict)
 
 (defn normalize-query
-  "Lower-case, collapse whitespace runs to a single space, and trim. Returns \"\" for nil/blank input,
-   which every caller treats as 'clear'."
+  "Lower-case (length-preservingly), collapse whitespace runs to a single space, and trim. Returns \"\"
+   for nil/blank input, which every caller treats as 'clear'."
   [q]
-  (if (string? q)
-    (-> (safe-lower q)
-        (str/replace #"\s+" " ")
-        (str/trim))
-    ""))
+  (query/normalize q :strict))
 
-(defn build
-  "Fold a token stream into {:text <buffer> :segs <flat triples>}.
+(defn builder
+  "A fresh incremental buffer builder: feed it tokens with `feed!`, close it with `finish`.
 
-   The buffer is lower-cased (length-preservingly) and whitespace-collapsed; separators are emitted only
-   BETWEEN real text, never at the ends, so a normalized query can never match across a paragraph break."
-  [tokens]
-  (let [out  (array)                    ; string chunks, joined once
-        segs (array)                    ; flat [b n o len] quads
-        st   #js {:pos 0                ; |buffer| so far
+   Incremental rather than a single fold over a token vector because the DOM walk that produces those
+   tokens has to be sliced across frames on a large document (vinary.renderer.find), and materializing the
+   whole token vector first would both reinstate the pause it exists to avoid and allocate a map per text
+   node for no reason. `build` below is the batch wrapper, so the pure tests keep their original shape."
+  []
+  #js {:out  (array)                    ; string chunks, joined once
+       :segs (array)                    ; flat [b n o len] quads
+       :st   #js {:pos 0                ; |buffer| so far
                   :pending nil          ; :soft | :hard — a separator not yet emitted
                   :started false        ; has any real text been emitted?
                   :node nil             ; contiguity: the (node, offset) the next char must have
-                  :off 0}]
+                  :off 0}})
+
+(defn feed!
+  "Fold one token into `b`. Tokens are {:kind :text :id :s} | {:kind :soft} | {:kind :hard}."
+  [^js b t]
+  (let [^js out  (.-out b)
+        ^js segs (.-segs b)
+        ^js st   (.-st b)]
     (letfn [(emit! [chunk id off n-consumed]
               ;; `chunk` is what goes into the BUFFER; `n-consumed` is how much of the node it covers.
               ;; They differ only for a normalized lone whitespace (a node's "\n" becomes a buffer " "),
@@ -95,48 +95,56 @@
               (when (.-started st)
                 (when (or (= kind :hard) (nil? (.-pending st)))
                   (set! (.-pending st) kind))))]
-      (doseq [t tokens]
-        (case (:kind t)
-          :hard (mark! :hard)
-          :soft (mark! :soft)
-          :text
-          (let [s (or (:s t) "")
-                id (:id t)
-                n (count s)]
-            (loop [i 0]
-              (when (< i n)
-                (if (ws? (.charAt s i))
-                  (let [j (loop [j i] (if (and (< j n) (ws? (.charAt s j))) (recur (inc j)) j))]
-                    (when (.-started st)
-                      (if (and (= 1 (- j i)) (nil? (.-pending st)))
-                        ;; a LONE whitespace character inside a node (the overwhelmingly common case — one
-                        ;; per source line wrap): emit a space that still maps to this node's offset, so
-                        ;; the run stays contiguous and no new quad is needed. That is what keeps |segs|
-                        ;; proportional to nodes rather than to words.
-                        (emit! " " id i 1)
-                        (mark! :soft)))
-                    (recur j))
-                  (let [j (loop [j i] (if (and (< j n) (not (ws? (.charAt s j)))) (recur (inc j)) j))]
-                    (flush-separator!)
-                    (emit! (.substring s i j) id i (- j i))
-                    (set! (.-started st) true)
-                    (recur j)))))))
-        nil))
-    {:text (.join out "") :segs segs}))
+      (case (:kind t)
+        :hard (mark! :hard)
+        :soft (mark! :soft)
+        :text
+        (let [s (or (:s t) "")
+              id (:id t)
+              n (count s)]
+          (loop [i 0]
+            (when (< i n)
+              (if (ws? (.charAt s i))
+                (let [j (loop [j i] (if (and (< j n) (ws? (.charAt s j))) (recur (inc j)) j))]
+                  (when (.-started st)
+                    (if (and (= 1 (- j i)) (nil? (.-pending st)))
+                      ;; a LONE whitespace character inside a node (the overwhelmingly common case — one
+                      ;; per source line wrap): emit a space that still maps to this node's offset, so
+                      ;; the run stays contiguous and no new quad is needed. That is what keeps |segs|
+                      ;; proportional to nodes rather than to words.
+                      (emit! " " id i 1)
+                      (mark! :soft)))
+                  (recur j))
+                (let [j (loop [j i] (if (and (< j n) (not (ws? (.charAt s j)))) (recur (inc j)) j))]
+                  (flush-separator!)
+                  (emit! (.substring s i j) id i (- j i))
+                  (set! (.-started st) true)
+                  (recur j))))))
+        nil)))
+  nil)
 
-(defn scan
-  "All non-overlapping, case-insensitive matches of the NORMALIZED query `q` in the buffer `text`, as
-   [start end) index pairs in buffer order. Returns [] for a blank query."
-  [text q]
-  (if (or (nil? text) (nil? q) (= "" q))
-    []
-    (let [ql (count q)
-          step (max 1 ql)]
-      (loop [from 0 acc (transient [])]
-        (let [i (.indexOf text q from)]
-          (if (neg? i)
-            (persistent! acc)
-            (recur (+ i step) (conj! acc [i (+ i ql)]))))))))
+(defn finish
+  "Close `b` into {:text <buffer> :segs <flat quads>}. The chunks are joined once, here."
+  [^js b]
+  {:text (.join ^js (.-out b) "") :segs (.-segs b)})
+
+(defn build
+  "Fold a token stream into {:text <buffer> :segs <flat triples>}.
+
+   The buffer is lower-cased (length-preservingly) and whitespace-collapsed; separators are emitted only
+   BETWEEN real text, never at the ends, so a normalized query can never match across a paragraph break."
+  [tokens]
+  (let [b (builder)]
+    (doseq [t tokens] (feed! b t))
+    (finish b)))
+
+(def scan
+  "All non-overlapping matches of the NORMALIZED query `q` in the buffer `text`, as [start end) index
+   pairs in buffer order — `vinary.search.scan/scan-all`. Both are already folded, so it folds neither.
+
+   Shared with the terminal finder, which ran a byte-identical loop over each rendered line. See that
+   namespace for why non-overlapping matching makes incremental narrowing unsound."
+  sscan/scan-all)
 
 (defn locate
   "Map buffer index `i` back to {:id <node id> :off <offset in that node>}, or nil when `i` falls on a
@@ -171,14 +179,12 @@
     (when (and a b)
       {:start a :end {:id (:id b) :off (inc (:off b))}})))
 
-(defn step-idx
-  "Advance a 0-based cursor over `n` matches by `dir` (+1/-1), wrapping at both ends. nil when n = 0."
-  [n idx dir]
-  (when (pos? n)
-    (mod (+ (or idx 0) dir) n)))
+(def step-idx
+  "Advance a 0-based cursor over `n` matches by `dir` (+1/-1), wrapping at both ends. nil when n = 0.
+   `vinary.search.cursor/step`, shared with the terminal finder."
+  cursor/step)
 
-(defn clamp-idx
-  "Keep a cursor in range after a re-collect changed the match count. nil when nothing matches."
-  [n idx]
-  (when (pos? n)
-    (min (max 0 (or idx 0)) (dec n))))
+(def clamp-idx
+  "Keep a cursor in range after a re-collect changed the match count. nil when nothing matches.
+   `vinary.search.cursor/clamp`."
+  cursor/clamp)

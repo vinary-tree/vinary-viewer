@@ -12,7 +12,9 @@
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
             [vinary.input.fx :as input-fx]
+            [vinary.async.scheduler :as sched]
             [vinary.renderer.scroll-trace :as scroll-trace]
+            [vinary.renderer.input-trace :as input-trace]
             [vinary.renderer.find :as finder]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.profile :as profile]
@@ -236,7 +238,6 @@
                        true)))
 
 (defonce ^:private math-select-installed? (atom false))
-(defonce ^:private math-select-raf (atom nil))
 
 (defn- update-math-selection! []
   (let [sel        (.getSelection js/window)
@@ -256,12 +257,11 @@
   []
   (when-not @math-select-installed?
     (reset! math-select-installed? true)
+    ;; sched/coalesce! — selectionchange fires continuously during a drag, and one re-classification per
+    ;; painted frame is all that can be seen. The third copy of the latch idiom, now the shared primitive
+    ;; (ADR-0033).
     (.addEventListener js/document "selectionchange"
-                       (fn [_]
-                         (when-not @math-select-raf
-                           (reset! math-select-raf
-                                   (js/requestAnimationFrame
-                                    (fn [_] (reset! math-select-raf nil) (update-math-selection!)))))))))
+                       (fn [_] (sched/coalesce! ::math-selection update-math-selection!)))))
 
 (defn mouse-nav!
   "Mouse thumb buttons: button 3 → Back, button 4 → Forward (like a browser). preventDefault on the
@@ -428,12 +428,21 @@
   ;; "found 7 matches and highlighted the wrong text", which is why the highlighting defects survived the
   ;; smoke suite for so long.
   (set! (.-__vvfind js/window) (fn [] (clj->js (finder/state-snapshot))))
+  ;; DEV/test: is a debounce still armed for this key? Lets a latency test wait for the app to go quiet
+  ;; instead of sleeping a fixed amount, so what it measures is the app rather than the harness's
+  ;; patience. Takes the key as a string ("find/search", "tree/filter", …).
+  (set! (.-__vvpending js/window)
+        (fn [k] (sched/pending? (keyword k))))
   ;; DEV-ONLY scroll instrumentation (ADR-0032 / docs/scientific/09). Two complementary seams: the tracer
   ;; patches Element.prototype to answer "who wrote scrollTop?" from the outside; the animator log answers
   ;; "why didn't the chase terminate?" from the inside. Both are gated on goog.DEBUG, and the release smoke
   ;; asserts window.__vvscrolltrace is undefined, so the patch can never reach a shipped build.
+  ;; DEV-ONLY input-latency instrumentation (docs/scientific/10). Installed BEFORE mount! so the value
+  ;; accessor is patched before React's input-value tracker installs its per-node descriptor over it —
+  ;; either order works (both delegate), but this one keeps the stack traces in a clobber record short.
   (when ^boolean js/goog.DEBUG
     (scroll-trace/expose!)
+    (input-trace/expose!)
     (set! (.-__vvscrollanim js/window) (fn [] (input-fx/anim-snapshot)))
     (set! (.-__vvscrollanimlog js/window)
           (fn [] #js {:entries (input-fx/anim-log-entries)

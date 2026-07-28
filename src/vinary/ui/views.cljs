@@ -15,6 +15,8 @@
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.ui.tabs :as tabs]
+            [vinary.ui.text-input :as text-input]
+            [vinary.async.scheduler :as sched]
             [vinary.ui.icons :as icons]
             [vinary.ui.platform :as platform]
             [vinary.ui.sidebar :as sidebar]
@@ -617,7 +619,6 @@
   (let [node (atom nil) view (atom nil) path* (atom nil)
         toc*    (atom nil)        ; the current source Contents outline (L<line> ids), read by the scroll-spy
         last*   (atom ::none)     ; last-dispatched active id — skip redundant dispatches on every scroll frame
-        pending? (atom false)     ; rAF throttle (mirrors renderer.toc/spy-pending)
         build*  (atom 0)          ; build generation: the @codemirror source-view chunk loads async (cm/ensure!),
                                   ; so a stale in-flight build (superseded by a rebuild, or an unmount) must not
                                   ; mount an orphan EditorView — each build! takes a token, destroy! bumps it
@@ -626,11 +627,12 @@
               ;; the source analog of renderer.toc/spy!: mark the section at/above the editor viewport top. Reuses
               ;; the pure toc/active-heading with the entry :line as its :offset and the viewport-top line as the
               ;; scroll position (a ~2-line reading margin). Dispatches only on change (local last*, no app-db read).
-              (when (and @view (seq @toc*) (not @pending?))
-                (reset! pending? true)
-                (js/requestAnimationFrame
+              ;; sched/coalesce! — one response per painted frame, however many scroll events arrive; the
+              ;; same primitive renderer.toc/spy! uses, rather than a third copy of the latch (ADR-0033)
+              (when (and @view (seq @toc*))
+                (sched/coalesce!
+                 ::source-spy
                  (fn []
-                   (reset! pending? false)
                    (when-let [v @view]
                      (let [top    (cm/viewport-top-line v)
                            hs     (->> @toc* (mapv (fn [e] {:id (:id e) :offset (:line e)})) (sort-by :offset))
@@ -1396,9 +1398,15 @@
             (reset! seen {:ctx ctx :count count})
             (when visible?
               [:div.vv-find {:ref ref-fn}
-               [:input.vv-find-input
-                {:placeholder "Find" :value query :auto-focus true
-                 :on-change   #(rf/dispatch [:find/set-query (.. % -target -value)])
+               ;; async-input, not a bare controlled :input — the query box must never have a character
+               ;; taken back out of it by a re-render carrying older state (ADR-0033, docs/scientific/10).
+               ;; Enter and Escape stay HERE rather than moving to :on-commit/:on-cancel because find's
+               ;; meaning for them is conditional on the keymap being modal, and both call preventDefault,
+               ;; which is exactly the signal async-input honours to keep its hands off.
+               [text-input/async-input
+                {:value       query
+                 :on-change   #(rf/dispatch [:find/set-query %])
+                 :attrs       {:class "vv-find-input" :placeholder "Find" :auto-focus true}
                  :on-key-down (fn [^js e]
                                 (case (.-key e)
                                   "Enter"  (do (.preventDefault e) (.stopPropagation e)

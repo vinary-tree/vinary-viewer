@@ -5,24 +5,33 @@
   (:require [re-frame.core :as rf]
             [vinary.ui.access-keys :as access]
             [vinary.stream.flag :as stream-flag]
+            [vinary.ui.text-input :as text-input]
             [vinary.ui.modal :as modal]))
 
+;; async-input for both editable fields: applying a font change re-measures every figure and Mermaid
+;; diagram on screen, and doing that between two keystrokes is what let a re-render commit a stale value
+;; over the box — typing `Noto Sans` produced `Not Sans` (ADR-0033, docs/scientific/10). The apply is now
+;; debounced in :settings/set, and the field owns its own DOM value regardless.
 (defn- text-field [label access-key k value placeholder access-active?]
   [:div.vv-pref-row
    [:label.vv-pref-label [access/label label access-key access-active?]]
-   [:input.vv-pref-input
-    (merge {:type "text" :value (or value "") :placeholder placeholder :spellCheck false
-            :on-change #(rf/dispatch [:settings/set k (.. % -target -value)])}
-           (access/access-attrs access-key))]])
+   [text-input/async-input
+    {:value     (or value "")
+     :on-change #(rf/dispatch [:settings/set k %])
+     :attrs     (merge {:class "vv-pref-input" :type "text" :placeholder placeholder :spellCheck false}
+                       (access/access-attrs access-key))}]])
 
 (defn- num-field [label access-key k value access-active?]
   [:div.vv-pref-row
    [:label.vv-pref-label [access/label label access-key access-active?]]
-   [:input.vv-pref-input.vv-pref-num
-    (merge {:type "number" :min 8 :max 40 :value (or value "")
-            :on-change #(let [n (js/parseInt (.. % -target -value) 10)]
-                          (when-not (js/isNaN n) (rf/dispatch [:settings/set k n])))}
-           (access/access-attrs access-key))]])
+   [text-input/async-input
+    ;; the MODEL is a number but the FIELD is text: `:value` is stringified so the echo test compares like
+    ;; with like, and a value that does not parse (mid-edit, an empty box) simply does not commit
+    {:value     (if (some? value) (str value) "")
+     :on-change #(let [n (js/parseInt % 10)]
+                   (when-not (js/isNaN n) (rf/dispatch [:settings/set k n])))
+     :attrs     (merge {:class "vv-pref-input vv-pref-num" :type "number" :min 8 :max 40}
+                       (access/access-attrs access-key))}]])
 
 (defn- check-field
   "A boolean preference rendered as a checkbox; persists via :settings/set like the text/number fields."

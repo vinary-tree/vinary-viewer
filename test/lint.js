@@ -21,6 +21,8 @@ const jsFiles = [
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
   'test/git-tree-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
   'test/tui-smoke.js', 'test/daemon-smoke.js',
+  // the in-page-find / typist-latency gate, and the benchmark that produced its threshold (ADR-0033)
+  'test/find-e2e.js', 'scripts/bench-input-latency.cjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the
   // socket path/helpers both import (scripts/vv-open.mjs was previously unchecked here)
   'scripts/vv-open.mjs', 'scripts/vv-daemon.mjs', 'scripts/daemon-socket.mjs',

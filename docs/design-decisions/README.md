@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0033**.
+The next free number is **0034**.
 
 ---
 
@@ -90,6 +90,7 @@ The next free number is **0033**.
 | [0030](0030-fallback-project-roots.md) | Fallback project roots: a file in no git repository adopts its containing directory (bounded BFS walk, realpath'd root, containment-aware merge, Remove from Files) | Accepted |
 | [0031](0031-per-content-type-fonts-and-ligatures.md) | Per-content-type preview fonts (Noto Sans prose, Latin Modern for LaTeX, Fira Code mono) with a code-ligature toggle | Accepted |
 | [0032](0032-scroll-ownership-and-derived-input-focus.md) | One scroll owner (confined `scrollTo`, a terminating cancellable animator), input focus **derived** from `document.activeElement` rather than cached, and cross-node find | Accepted |
+| [0033](0033-asynchronous-text-input.md) | Text fields own their own DOM value; one keyed scheduler (`debounce!`/`coalesce!`/`slice!`/`cancel!`) replaces four deferral idioms; find flattens incrementally; one configurable search model replaces five matchers | Accepted |
 
 ---
 
@@ -153,6 +154,13 @@ The **later fifteen** (0013–0027) build capability on that core without distur
   formula with one cancellable, provably-terminating animator, and makes "is a text field focused?" a
   *derived* question rather than a cached flag. Its find-side half also removes the single-text-node
   restriction that **0003**'s `innerHTML` body had made convenient but never required.
+- **0033** continues that theme one level up: the shared mutable state it takes ownership of is a text
+  field's own value, and the shared *policy* it establishes is when work may run. It closes the defect
+  **0032** left behind — that rewrite made find correct and, in doing so, made it expensive — by reusing
+  the flattened buffer across keystrokes and slicing what remains under a frame budget. The same three
+  moves recur: one owner (a locally owned field value), one mechanism (`vinary.async.scheduler` absorbing
+  four hand-rolled deferral idioms), one model (`vinary.search.*` absorbing five hand-rolled matchers,
+  with the semantics as a parameter rather than a hard-coded choice per widget).
 
 Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
 core, which is why they compose without conflict.

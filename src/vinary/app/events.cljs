@@ -687,17 +687,36 @@
  (fn [db [_ root]]
    (update-in db [:ui :projects] projects/remove-project root)))
 
-(rf/reg-event-db
+;; Debounced, because committing the query is what re-narrows and re-folds every path of every open
+;; project (:tree/filtered). The field itself never waits — vinary.ui.text-input owns its DOM value — so
+;; the only thing this defers is the LIST catching up, once per pause instead of once per character.
+(def ^:private tree-debounce-ms 90)
+
+(rf/reg-event-fx
  :tree/filter
+ (fn [_ [_ q]]
+   {:fx [[:async/debounce {:key :tree/filter :ms tree-debounce-ms :dispatch [:tree/filter-commit q]}]]}))
+
+(rf/reg-event-db
+ :tree/filter-commit
  (fn [db [_ q]] (assoc-in db [:ui :tree-filter] q)))
 
 ;; ---- in-page find ----
 ;; Every request carries a GENERATION. A search is asynchronous (it first materializes a PDF's text layers
 ;; or drains a stream, so it covers the whole document rather than the rendered-so-far prefix), and typing
 ;; issues one per keystroke — so without a generation the reply from an earlier, shorter query could land
-;; last and overwrite the counter for the query actually in the box. The same counter also collapses the
-;; debounce: a scheduled run that is no longer the newest simply drops.
-(def ^:private find-debounce-ms 100)
+;; last and overwrite the counter for the query actually in the box.
+;;
+;; The generation is no longer ALSO the debounce: :async/debounce keeps one live timer per key and cancels
+;; it, so a superseded request stops instead of firing into a check that discards it. The generation stays
+;; because it answers the other question — an in-flight search that has already begun cannot be un-begun,
+;; and its reply must still be recognised as stale when it lands (find-e2e ASSERT H10).
+;;
+;; 40 ms, down from 100: the search is chunked now (vinary.renderer.find), so arming it costs a frame of
+;; sliced work that the next keystroke cancels, not a full document walk that must be waited out. The
+;; debounce is here to avoid churning that work per character, not to protect the thread from it.
+(def ^:private find-debounce-ms 40)
+(def ^:private find-debounce-key :find/search)
 
 (defn- bump-gen [db] (update-in db [:ui :find :gen] (fnil inc 0)))
 
@@ -712,7 +731,10 @@
        ;; what is shown instead of being a stale number over an unpainted document
        {:db db'
         :fx (if (str/blank? q) [] [[:find/search {:q q :gen (get-in db' [:ui :find :gen])}]])}
-       {:db db' :fx [[:find/clear]]}))))
+       ;; closing cancels a pending debounce as well as clearing the paint: without it, a search armed by
+       ;; the last character typed would land after the bar is gone and re-paint highlights over a
+       ;; document the user is no longer searching
+       {:db db' :fx [[:async/cancel find-debounce-key] [:find/clear]]}))))
 
 (rf/reg-event-fx
  :find/set-query
@@ -720,7 +742,7 @@
    (let [db' (-> db (assoc-in [:ui :find :query] q) bump-gen)
          gen (get-in db' [:ui :find :gen])]
      {:db db'
-      :fx [[:dispatch-later {:ms find-debounce-ms :dispatch [:find/run gen]}]]})))
+      :fx [[:async/debounce {:key find-debounce-key :ms find-debounce-ms :dispatch [:find/run gen]}]]})))
 
 ;; the debounce landing point: run only if this is still the newest request
 (rf/reg-event-fx
@@ -750,13 +772,13 @@
  :find/reset
  (fn [{:keys [db]} _]
    {:db (-> db (assoc-in [:ui :find :count] 0) (assoc-in [:ui :find :idx] 0) bump-gen)
-    :fx [[:find/clear]]}))
+    :fx [[:async/cancel find-debounce-key] [:find/clear]]}))
 
 (rf/reg-event-fx
  :find/close
  (fn [{:keys [db]} _]
    {:db (-> db (assoc-in [:ui :find :visible?] false) bump-gen)
-    :fx [[:find/clear]]}))
+    :fx [[:async/cancel find-debounce-key] [:find/clear]]}))
 
 ;; ---- table of contents ----
 ;; jump to a section: in the web view (HTTP) ask its preload to scroll; in Markdown scroll the content
@@ -1005,13 +1027,31 @@
       :fx (cond-> [[:fonts/apply settings]]
             (:theme s) (conj [:theme/apply (:theme s)]))})))
 
-;; change one setting (a font family/size) → apply + persist
+;; Change one setting (a font family/size) → apply + persist.
+;;
+;; The db write is immediate — the dialog must reflect the choice at once — but APPLYING it is debounced.
+;; :fonts/apply re-measures every figure and every Mermaid diagram on screen whenever a size changes
+;; (figures/refit-all!, mermaid/refit-all!), and running that per character typed into a font field is
+;; what made the Preferences inputs drop keys: typing `Noto Sans` produced `Not Sans`, with the tracer
+;; recording the clobbering write as `Noto` → `Not` (docs/scientific/10). Live preview is kept — the user
+;; asked for it — it simply lands once per pause instead of once per character.
+;;
+;; `pr-str` moves behind the same debounce: serialising the whole settings map per keystroke was pure
+;; waste, since only :vv/save-settings (itself debounced) ever reads the string.
+(def ^:private settings-apply-ms 150)
+
 (rf/reg-event-fx
  :settings/set
  (fn [{:keys [db]} [_ k v]]
-   (let [settings (assoc (get-in db [:ui :settings]) k v)]
-     {:db (assoc-in db [:ui :settings] settings)
-      :fx [[:fonts/apply settings] [:vv/save-settings (pr-str settings)]]})))
+   {:db (assoc-in db [:ui :settings k] v)
+    :fx [[:async/debounce {:key :settings/apply :ms settings-apply-ms
+                           :dispatch [:settings/apply]}]]}))
+
+(rf/reg-event-fx
+ :settings/apply
+ (fn [{:keys [db]} _]
+   (let [settings (get-in db [:ui :settings])]
+     {:fx [[:fonts/apply settings] [:vv/save-settings (pr-str settings)]]})))
 
 ;; ---- recent navigation memory (recent.edn): dir→child trail + recent-files MRU ----
 (rf/reg-event-db

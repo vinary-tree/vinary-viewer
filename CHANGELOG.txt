@@ -111,6 +111,20 @@ Added
       Markdown and Org too.
 
 Changed
+    - Deferral and matching each got one implementation instead of five. Four hand-rolled
+      deferral idioms (a dispatch-later plus a generation counter, a requestAnimationFrame-or-
+      idle tick, a boolean latch plus one rAF in three copies, and clear-timer/set-timer in
+      two more) became vinary.async.scheduler: keyed debounce! / coalesce! / slice! / cancel!, with
+      cancellation available for the first time and two deliberately distinct paces -- one
+      that follows the display, for painting a streaming document, and one that follows the
+      input queue, for computation. Five hand-rolled matchers (in-page find, the file-tree
+      filter, the command palette, the address bar, and the terminal finder) became
+      vinary.search.*, where the matching MODE is a parameter -- substring, subsequence,
+      prefix, word-prefix or regular expression -- rather than a choice welded into each
+      widget. The defaults reproduce exactly what each widget did before, so this lands with
+      no user-visible change; switching the file tree to fuzzy matching, or ranking the
+      palette by relevance, is now one keyword against a tested model. See
+      docs/design-decisions/0033-asynchronous-text-input.md.
     - The installer (install.sh) no longer aborts when an optional tree-sitter grammar
       cannot be downloaded or built: the failing grammar is skipped and the install
       finishes, then the installer prints exactly which grammars were skipped and how to
@@ -216,6 +230,42 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Typing into a text field no longer lags, and no longer loses characters. Two separate
+      defects wore one symptom, and they were in different widgets.
+
+      LATE CHARACTERS. In-page find rebuilt the entire flattened document buffer -- a full
+      TreeWalker pass, a getComputedStyle per distinct element shape, and a per-character
+      case fold -- on every debounce landing, even when the document had not changed at all.
+      Measured at 450 ms of blocked main thread per keystroke on a 1.1 MB document, with a
+      480 ms worst-case wait for a character to appear. The buffer is now reused while the
+      same document, the same content element, and no intervening mutation hold (theory/06
+      had already stated that it depends only on the DOM and not on the query; nothing acted
+      on it), and the work that remains is sliced under an 8 ms frame budget and abandoned
+      the moment the next character arrives. Per-keystroke cost on that document: 450 ms ->
+      5.3 ms. Worst wait: 480 ms -> 75 ms.
+
+      MISSING CHARACTERS. Four fields -- the file-tree filter, the command palette, the find
+      query box and the Preferences font fields -- were controlled React inputs whose value
+      came from application state, so the character the browser had just inserted was
+      authoritative only until React's next commit. Typing "views" into the file-tree filter
+      produced "vews"; typing "Noto Sans" into a font field produced "Not Sans". Every text
+      field now owns its own DOM value locally, so a re-render cannot subtract a character.
+
+      Notably, a blocked main thread is NOT what dropped characters -- find blocked for
+      450 ms per keystroke and never lost one, while the tree filter lost characters with no
+      long task at all. The clobber needs the widget's OWN render to be slow, which is why it
+      could not be fixed by making the app faster; it had to stop being possible.
+
+      Also fixed along the way: find's "make the whole document searchable first" hook
+      committed every remaining block of a streaming document in a single task (a
+      multi-second freeze triggered by the first character typed); the Preferences live font
+      preview re-measured every figure and Mermaid diagram on every character rather than
+      once per pause; and two permanently-subscribed subscriptions ran a DataScript query
+      plus a 22-attribute pull on every app-db write, so every character typed anywhere in
+      the app paid for four queries that could not have changed their answer.
+
+      See docs/design-decisions/0033-asynchronous-text-input.md and
+      docs/scientific/10-input-latency-experiments.md.
     - Scrolling could get stuck after using in-page find: the view would move a few pixels
       under the wheel and then snap straight back. The keyboard scroll animator eases the
       pane toward a target by a quarter of the remaining distance per frame and stops when

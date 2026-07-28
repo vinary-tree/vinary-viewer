@@ -39,6 +39,7 @@
     "pdfjs:check": "node scripts/check-pdfjs.mjs",
     "grammars:sync": "node scripts/sync-grammars.mjs",
     "grammars:check": "node scripts/check-grammars.mjs",
+    "bench:input": "shadow-cljs compile main renderer && xvfb-run -a -s \"-screen 0 1400x1000x24\" electron --no-sandbox scripts/bench-input-latency.cjs",
     "screenshots": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && xvfb-run -a -s \"-screen 0 1280x1024x24\" electron --no-sandbox scripts/screenshots.cjs",
     "screenshots:display": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && electron --no-sandbox scripts/screenshots.cjs",
     "test": "shadow-cljs compile test && node dist/test/test.js && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && npm run test:cli && npm run test:tui",

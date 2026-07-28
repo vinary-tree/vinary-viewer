@@ -1,0 +1,83 @@
+@startuml activity-async-text-input
+'' PlantUML over Mermaid because this is a control flow with two INDEPENDENT lifetimes running against one
+'' another — a keystroke's synchronous path and a sliced background job that outlives it — and PlantUML's
+'' fork/partition plus per-step fills express that; Mermaid's flowchart cannot show the cancellation edge
+'' without inventing a node for it. Literal palette hexes come from _vv-theme.iuml: teal #2D9574 renderer/
+'' view, blue #4F97D7 re-frame, blue-violet #7590DB app-db, green #67B11D the DOM, red #E0211D the defect.
+!include _vv-theme.iuml
+
+title Asynchronous text input — one keystroke, two lifetimes (ADR-0033)
+
+|#E3F2ED|the keystroke (synchronous, must finish in microseconds)|
+start
+:browser inserts the character
+into the field's DOM value; <<#C7E8DE>>
+:async-input **on-change**; <<#C7E8DE>>
+note right
+  The field's value is owned LOCALLY from
+  here on. `draft` shadows the model, and the
+  value is recorded in `pending` so the model
+  echoing it back is recognised as ours and
+  not mistaken for an external push.
+end note
+:dispatch a CHEAP event
+(assoc-in and nothing else); <<#C4D9EB>>
+:arm the shared debounce
+**scheduler/debounce!**; <<#C4D9EB>>
+stop
+
+|#E8F0F8|the work (asynchronous, sliced, cancellable)|
+start
+:debounce lands
+(one live timer per key —
+re-arming REPLACES it); <<#C4D9EB>>
+
+if (a valid flattened\nbuffer is cached?) then (yes — the common case)
+  :reuse it; <<#D7EEC1>>
+else (no)
+  fork
+    :**slice!** ::collect
+    walk the DOM, feed the
+    incremental buffer builder; <<#D7EEC1>>
+    note right
+      Keyed SEPARATELY from matching, and
+      deliberately NOT cancelled when the query
+      changes: the buffer depends only on the
+      DOM. Cancelling it per keystroke meant a
+      large document never finished flattening
+      while the user typed.
+    end note
+    :store the buffer, stamped with
+    the mutation counter it was built at; <<#D7EEC1>>
+  end fork
+endif
+
+fork
+  :**slice!** ::match
+  scan (native indexOf), then
+  build Ranges in batches; <<#D7EEC1>>
+fork again
+  -[#E0211D]-> next keystroke arrives;
+  :**cancel!** ::match
+  the superseded job stops
+  between slices and reports nothing; <<#F0C0BF>>
+  detach
+end fork
+
+:paint highlights, scroll to the first match; <<#D7EEC1>>
+:publish the count into app-db; <<#C5CFEA>>
+stop
+
+legend right
+  |= &#160;&#160;&#160; |= meaning |
+  |<#C7E8DE>| renderer / view |
+  |<#C4D9EB>| re-frame event, effect, scheduler |
+  |<#C5CFEA>| app-db |
+  |<#D7EEC1>| DOM work (walk, Ranges, highlights) |
+  |<#F0C0BF>| cancellation — the superseded path |
+  The invariant: **no step in the lower lane occupies the main thread for more**
+  **than the frame budget without yielding**, and every one of them is abandoned
+  the moment the next character arrives.
+endlegend
+
+@enduml

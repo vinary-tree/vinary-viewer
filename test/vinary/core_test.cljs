@@ -34,7 +34,9 @@
             [vinary.renderer.media :as media]
             [vinary.ui.access-keys :as access]
             [vinary.ui.context-menu :as context-menu]
-            [vinary.ui.palette :as palette]
+            [vinary.app.palette :as palette]
+            [vinary.search.config :as search-config]
+            [vinary.search.match :as smatch]
             [vinary.ui.keybindings-editor :as kbe]
             [vinary.ui.menu-focus :as menu-focus]
             [vinary.ui.menubar :as menubar]
@@ -1033,14 +1035,20 @@
       (is (some #{"Close Below"} (labels :vertical))))))
 
 ;; ---- command palette: the fuzzy matcher + candidate sources ----
+(def ^:private palette-opts (search-config/mode-for :palette))
+
+(defn- palette-labels [source q projects]
+  (mapv (comp :label :item) (palette/candidates source q projects nil palette-opts)))
+
 (deftest palette-fuzzy-match
-  (testing "order-preserving, case-insensitive subsequence match"
-    (is (true?  (palette/fuzzy? "" "anything")))            ; empty query always matches
-    (is (true?  (palette/fuzzy? "abc" "aXbXc")))            ; chars appear in order
-    (is (true?  (palette/fuzzy? "ABC" "a-b-c")))            ; query case-insensitive
-    (is (true?  (palette/fuzzy? "ot" "Open in new Tab")))   ; spread across words
-    (is (false? (palette/fuzzy? "cba" "abc")))              ; wrong order
-    (is (false? (palette/fuzzy? "abcd" "abc")))))           ; query longer than the target
+  (testing "order-preserving, case-insensitive subsequence match (now vinary.search.match :subsequence)"
+    (let [hit? (fn [q s] (some? (smatch/match s q palette-opts)))]
+      (is (true?  (hit? "" "anything")))            ; empty query always matches
+      (is (true?  (hit? "abc" "aXbXc")))            ; chars appear in order
+      (is (true?  (hit? "ABC" "a-b-c")))            ; query case-insensitive
+      (is (true?  (hit? "ot" "Open in new Tab")))   ; spread across words
+      (is (false? (hit? "cba" "abc")))              ; wrong order
+      (is (false? (hit? "abcd" "abc"))))))          ; query longer than the target
 
 (deftest palette-candidates
   (testing ":file source maps the git tree, fuzzy-filters by label, caps at 60"
@@ -1048,14 +1056,15 @@
       (is (= [{:label "readme.md" :path "/p/readme.md" :kind :file}
               {:label "core.cljs" :path "/p/core.cljs" :kind :file}
               {:label "deps.edn"  :path "/p/deps.edn"  :kind :file}]
-             (palette/candidates :file "" projects)))
-      (is (= ["core.cljs"] (mapv :label (palette/candidates :file "cor" projects))))
-      (is (= 60 (count (palette/candidates :file ""
-                                           [{:root "/p" :files (mapv #(str "f" % ".md") (range 100))}]))))))
+             (mapv :item (palette/candidates :file "" projects nil palette-opts))))
+      (is (= ["core.cljs"] (palette-labels :file "cor" projects)))
+      (is (= 60 (count (palette/candidates
+                        :file "" [{:root "/p" :files (mapv #(str "f" % ".md") (range 100))}]
+                        nil palette-opts))))))
   (testing ":theme source lists both themes, fuzzy-filtered"
-    (is (= ["Spacemacs Dark" "Spacemacs Light"] (mapv :label (palette/candidates :theme "" nil))))
+    (is (= ["Spacemacs Dark" "Spacemacs Light"] (palette-labels :theme "" nil)))
     (is (= [{:label "Spacemacs Light" :theme "spacemacs-light" :kind :theme}]
-           (palette/candidates :theme "light" nil)))))
+           (mapv :item (palette/candidates :theme "light" nil nil palette-opts))))))
 
 ;; ---- context menu: items adapt to the right-clicked target kind ----
 (deftest context-menu-items-for

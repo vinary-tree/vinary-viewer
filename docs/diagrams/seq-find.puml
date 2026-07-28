@@ -34,7 +34,7 @@ User -> UI : type "the needle phrase"
 UI -> RF : [:find/set-query q]
 activate RF
 RF -> DB : :query q, **:gen++**
-RF -> RF : :dispatch-later 100 ms → [:find/run gen]
+RF -> RF : fx :async/debounce {key :find/search, 40 ms}\n**one live timer per key — re-arming REPLACES it**
 deactivate RF
 ...debounce...
 RF -> RF : [:find/run gen] — **drop unless gen = :ui/find/:gen**
@@ -43,15 +43,15 @@ activate FX
 FX -> FX : await **pdf-cache/ensure-active!**\n(materialize PDF text layers · drain a stream)
 FX -> F : **finder/search! q**
 activate F
-F -> F : collect-tokens: TreeWalker over .vv-content\nreject <script>/<style>/hidden/**<mjx-assistive-mml>**\nclassify :inline / :soft / :hard  (memoized by shape)
-F -> S : **build** tokens → {buffer, segment quads}
-F -> S : **scan** buffer for the normalized query
+F -> F : **cached buffer?** same doc, same root, no mutation since\n→ **reuse it** (the ordinary keystroke: 9 ms, not 304)\nelse **slice!** ::collect — TreeWalker over .vv-content,\nreject <script>/<style>/hidden/**<mjx-assistive-mml>**,\nclassify :inline / :soft / :hard (memoized by shape),\n**yielding every 8 ms**. NOT cancelled by a new query.
+F -> S : **feed!** each token into the incremental builder\n(no token vector is ever materialized)
+F -> S : **scan** buffer for the normalized query — **slice!** ::match,\ncancelled outright by the next keystroke
 S --> F : <latex>[s, e)</latex> index pairs
 F -> S : **locate** — invert <latex>\lambda</latex> at <latex>s</latex> and <latex>e-1</latex>
 S --> F : (node, offset) pairs → **multi-node** Ranges
-F -> H : Highlight.add(range) <latex>\forall</latex> matches\nCSS.highlights.set "vv-find" / "vv-find-current"
+F -> H : Highlight.add(range) <latex>\forall</latex> matches, **in batches**\nCSS.highlights.set "vv-find" / "vv-find-current"
 F -> H : **confined** scrollTo the Range's rect\n(:block :center — never el.scrollIntoView)
-F --> FX : {:count n :idx 1}
+F --> FX : on-result {:count n :idx 1}\n//a superseded run never calls back//
 deactivate F
 FX -> RF : [:find/result {count idx **gen**}]
 deactivate FX
@@ -67,7 +67,7 @@ RF -> FX : fx :find/cycle {dir gen}
 activate FX
 FX -> F : **finder/cycle! dir**
 activate F
-F -> F : **ensure-fresh!** — doc-key changed → clear;\nMutationObserver dirty → **re-collect**, clamp cursor
+F -> F : **reconcile** — doc-key changed → clear;\nmutation counter moved → **re-collect** (sliced), clamp cursor
 F -> S : step-idx: <latex>\mathit{idx} := (\mathit{idx} + \mathit{dir}) \bmod n</latex>
 F -> H : repaint "vv-find-current" + confined scroll
 F --> FX : {:count n' :idx i}   //count too — a re-collect can change it//

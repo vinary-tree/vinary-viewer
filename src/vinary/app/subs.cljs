@@ -5,8 +5,12 @@
   (:require [re-frame.core :as rf]
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
+            [vinary.app.commands :as commands]
             [vinary.app.nav :as nav]
+            [vinary.app.palette :as palette]
+            [vinary.app.tree-model :as tree-model]
             [vinary.app.uri :as uri]
+            [vinary.search.config :as search-config]
             [vinary.app.zoom :as zoom]
             [vinary.input.keymaps-registry :as registry]))
 
@@ -105,7 +109,48 @@
 (rf/reg-sub :input/modal-keymap?
             :<- [::keymaps-slice]
             (fn [ks _] (registry/modal-in? ks (get ks :active "default"))))
+;; The file tree, already narrowed and folded into its nested shape.
+;;
+;; LAYERED, for the same reason ::keymaps-slice above is: doing it in the view's render function re-folded
+;; every path of every open project on every keystroke — thousands of str/splits and assoc-ins before
+;; React had begun reconciling, which is what let a re-render land between two characters and take one
+;; back out of the field (docs/scientific/10). Layered, it recomputes only when the projects or the filter
+;; actually change.
+(rf/reg-sub
+ :tree/filtered
+ :<- [:ui/projects] :<- [:ui/tree-filter] :<- [:ui/settings]
+ (fn [[projects q settings] _]
+   (tree-model/filtered projects q (search-config/mode-for :tree settings))))
+
 (rf/reg-sub :palette/state     (fn [db _] (get-in db [:ui :palette])))
+
+;; The command-resolution context, assembled from subs so the predicates stay pure.
+;;
+;; It reads :ui/find, which changes on every character typed into the find bar — but the MAP it produces
+;; only changes when :visible? flips, so re-frame's equality check stops the recomputation right here and
+;; :palette/candidates below is not disturbed.
+(rf/reg-sub
+ ::palette-ctx
+ :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
+ :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
+ (fn [[tabs active-tab active-path back? fwd? find] _]
+   {:tabs tabs :active-tab active-tab :active-path active-path
+    :can-back? back? :can-forward? fwd?
+    :find-visible? (:visible? find)
+    ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being
+    ;; free must not be offered
+    :in-input? true}))
+
+;; The palette's rows. Layered, and short-circuited when the palette is closed, so the ~6 500-file :file
+;; source costs nothing until it is actually on screen (ADR-0033).
+(rf/reg-sub
+ :palette/candidates
+ :<- [:palette/state] :<- [:ui/projects] :<- [:ui/settings] :<- [::palette-ctx]
+ (fn [[{:keys [open? source query]} projects settings ctx] _]
+   (if-not open?
+     []
+     (palette/candidates source query projects (commands/all-visible ctx)
+                         (search-config/mode-for :palette settings)))))
 (rf/reg-sub :ui/uri-complete     (fn [db _] (get-in db [:ui :uri-complete])))
 (rf/reg-sub :ui/extensions-open? (fn [db _] (get-in db [:ui :extensions-open?])))
 (rf/reg-sub :ui/extensions       (fn [db _] (get-in db [:ui :extensions])))
@@ -128,7 +173,29 @@
 ;; the active tab's effective view facet {:path :type} (its chosen collocated representation, or the default) and
 ;; the derived CONTENT path — the file the pane / Contents / find operate on. This differs from the tab's primary
 ;; uri when a sibling facet is shown in place. See vinary.app.facet.
-(rf/reg-sub :facet/active (fn [db _] (facet/resolve-facet db)))
+;;
+;; LAYERED, and for the same reason ::keymaps-slice is. As plain db subs, `:facet/active` and
+;; `:view/switch` below each ran a DataScript `d/q` plus a 22-attribute `d/pull` on EVERY app-db write —
+;; and both are permanently subscribed (the toolbar mounts `:view/switch` unconditionally; the find bar
+;; derefs `:ui/find-context` on every render even while hidden). Every character typed anywhere in the app
+;; therefore paid for four DataScript queries that could not possibly have changed their answer.
+;;
+;; ::facet-inputs is four cheap map lookups whose RESULT is what re-frame compares, so a keystroke stops
+;; at this layer instead of reaching the content cache. `:doc/group` was already layered this way, and
+;; supplies the one genuinely DataScript-dependent input both need.
+(rf/reg-sub
+ ::facet-inputs
+ (fn [db _]
+   {:facet   (nav/facet db)
+    :primary (nav/active-path db)
+    :mru     (nav/facet-mru db)
+    :pref    (get-in db [:ui :settings :collocated-default] :pdf)}))
+
+(rf/reg-sub
+ :facet/active
+ :<- [::facet-inputs] :<- [:doc/group]
+ (fn [[{:keys [facet primary pref]} group] _]
+   (facet/active-facet facet group primary pref)))
 ;; …falling back to the raw active-uri (not just the local file-path) so a doc transacted under an http(s) URL —
 ;; a PDF opened from a web-view link, whose bytes main downloaded under its URL — resolves and renders in pdf.js
 ;; (a normal http page has no doc entity, so :doc/active stays nil there and the web view still shows it).
@@ -164,13 +231,12 @@
 (rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] (fn [tab _] (nav/effective-diff-view (:diff-view tab))))
 
 ;; the complete render model for the [Preview ▾ | Source ▾] toolbar combo (both buttons' modes/options/active).
-;; A plain db sub: recomputes on any app-db change including the :ds/rev bump that follows a content transaction.
+;; Layered on ::facet-inputs + :doc/group — see the note there for why it must not be a plain db sub.
 (rf/reg-sub
  :view/switch
- (fn [db _]
-   (let [primary (nav/active-path db)]
-     (facet/view-model (nav/facet db) (facet/group-of (ds/snapshot) primary) primary
-                       (get-in db [:ui :settings :collocated-default] :pdf) (nav/facet-mru db)))))
+ :<- [::facet-inputs] :<- [:doc/group]
+ (fn [[{:keys [facet primary pref mru]} group] _]
+   (facet/view-model facet group primary pref mru)))
 
 ;; the persisted default representation for docs that have a collocated PDF (Settings toggle reads this)
 (rf/reg-sub :ui/collocated-default :<- [:ui/settings] (fn [s _] (get s :collocated-default :pdf)))

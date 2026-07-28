@@ -756,6 +756,25 @@ async function main() {
       : 'the DEV scroll tracer must be installed in a dev build');
   console.log(`[ok] DEV scroll tracer ${releaseBuild ? 'absent from the release build' : 'installed in the dev build'}`);
 
+  // The input tracer patches HTMLInputElement.prototype's `value` accessor for the same class of reason,
+  // and carries the same obligation: it must never reach a shipped build. Gated in the same goog.DEBUG
+  // block in renderer.core/init, and asserted behaviourally here rather than by trusting the optimizer.
+  // See ADR-0033 / docs/scientific/10.
+  const inputTracerPresent = await evalIn(win, `typeof window.__vvinputtrace === 'function'`);
+  assert.strictEqual(inputTracerPresent, !releaseBuild,
+    releaseBuild
+      ? 'the DEV input tracer must be absent from a release build (it patches HTMLInputElement.prototype)'
+      : 'the DEV input tracer must be installed in a dev build');
+  console.log(`[ok] DEV input tracer ${releaseBuild ? 'absent from the release build' : 'installed in the dev build'}`);
+
+  // …whereas find's own cost counters are DELIBERATELY not gated: a release build is the one whose latency
+  // actually matters, and they are three numbers already sitting in the finder's state atom (ADR-0033).
+  const findStats = await evalIn(win, `(() => { const f = window.__vvfind && window.__vvfind();
+    return f ? { ms: typeof f.ms, cpuMs: typeof f.cpuMs, chars: typeof f.chars, cached: typeof f.cached } : null; })()`);
+  assert.deepStrictEqual(findStats, { ms: 'number', cpuMs: 'number', chars: 'number', cached: 'boolean' },
+    'window.__vvfind() must report its cost counters in every build, release included');
+  console.log('[ok] find cost counters available in this build (release-safe by design)');
+
   // Regression (Bug 1) — the zoom bar (:window-zoom) must seed from the REAL zoom factor at boot. On relaunch
   // Chromium restores the actual per-host zoom, but :window-zoom is ephemeral (default 1.0) and was only ever
   // written in reaction to a zoom action — so the bar wrongly read 100% until the first zoom. The renderer now

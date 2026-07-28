@@ -84,10 +84,27 @@
           (assoc-in [:ui :palette :query] "")
           (assoc-in [:ui :palette :selected] 0))))
 
-(rf/reg-event-db :palette/close (fn [db _] (assoc-in db [:ui :palette :open?] false)))
+;; closing cancels a pending query commit, so a debounce armed by the last character cannot land after the
+;; overlay is gone and leave a stale query behind for the next time it opens
+(rf/reg-event-fx
+ :palette/close
+ (fn [{:keys [db]} _]
+   {:db (assoc-in db [:ui :palette :open?] false)
+    :fx [[:async/cancel :palette/query]]}))
+
+;; Debounced for the same reason the file-tree filter is: committing the query is what re-ranks the
+;; candidate pool (:palette/candidates), which for the :file source spans every open project. The box
+;; itself never waits — vinary.ui.text-input owns its DOM value — so only the LIST trails, once per pause.
+(def ^:private palette-debounce-ms 90)
+
+(rf/reg-event-fx
+ :palette/set-query
+ (fn [_ [_ q]]
+   {:fx [[:async/debounce {:key :palette/query :ms palette-debounce-ms
+                           :dispatch [:palette/set-query-commit q]}]]}))
 
 (rf/reg-event-db
- :palette/set-query
+ :palette/set-query-commit
  (fn [db [_ q]] (-> db (assoc-in [:ui :palette :query] q) (assoc-in [:ui :palette :selected] 0))))
 
 (rf/reg-event-db

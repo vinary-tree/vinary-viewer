@@ -227,6 +227,14 @@ Total: $`O(T + M \log N)`$ — the same order as the single-node matcher it repl
 per-keystroke constant**, because searching is debounced and the buffer depends only on the DOM, not on the
 query.
 
+That last clause was a statement of possibility until ADR-0033 acted on it. The buffer is now genuinely
+**reused** across keystrokes — while the same document, the same content element, and no intervening
+mutation hold — so an ordinary keystroke costs $`O(T)`$ for the native `indexOf` plus $`O(M)`$ for the
+Ranges, and pays the $`O(T + \Sigma)`$ walk only when the DOM has actually changed. Measured at
+**304 ms → 9 ms** per keystroke on an 808 kB document
+([scientific/10](../scientific/10-input-latency-experiments.md)). The walk and the Range construction are
+also sliced under a frame budget, so neither term is paid in one uninterruptible block.
+
 The $`O(\Sigma)`$ row is not a footnote. The first version of this walk called `Element.checkVisibility()`
 per element; on a 7 005-record streamed log that forced layout tens of thousands of times and pushed the
 whole Electron smoke past its timeout. Folding visibility and boundary classification into one memoized
@@ -294,8 +302,12 @@ re-enter as events, so the core stays pure (Theory 01/04).
 Both carry a **generation**. Searching is asynchronous — `ensure-active!` first materializes a PDF's text
 layers or drains a streamed document, so that find covers the whole document rather than the rendered
 prefix — which means two searches can be in flight and an earlier, shorter query's reply can land last.
-`:find/result` drops any reply whose generation is not current. The same counter collapses the input
-debounce, so one mechanism serves both concerns.
+`:find/result` drops any reply whose generation is not current.
+
+The counter used to collapse the input debounce as well. Those are now two mechanisms, deliberately
+(ADR-0033): `:async/debounce` keeps one live timer per key and genuinely cancels it, so a superseded
+request never runs; the generation guards the case a cancellation cannot reach — a search that has already
+begun and whose reply lands after a newer one's.
 
 Both effects report `{:count :idx}` rather than a single scalar, because **cycling can change the count**:
 reconciling stale Ranges against a changed document is part of cycling, and a count-only / index-only event
@@ -314,8 +326,9 @@ pair could not express it.
   **shapes**, not elements.
 - Invalidation distinguishes "different document" (clear) from "same document, changed nodes"
   (re-collect) — and cannot feed back on itself, because painting is not a mutation.
-- Results re-enter through `:find/result` with a **generation**, which drops stale asynchronous replies and
-  doubles as the debounce.
+- Results re-enter through `:find/result` with a **generation**, which drops stale asynchronous replies.
+  Cancelling a *pending* request is the debounce's job (`vinary.async.scheduler`); the generation covers
+  only the request that had already started.
 
 Next: [Theory 07 — the Command history model](07-command-history-model.md).
 

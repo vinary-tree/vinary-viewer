@@ -227,45 +227,63 @@ Details:
 project, narrowing its flat file list *before* building the nested tree:
 
 ```clojure
-(defn- project-tree [{:keys [root files]} active ql]
-  (let [shown (cond->> files ql (filter #(str/includes? (str/lower-case %) ql)))]
-    (when (seq shown)
-      [:details.vv-project {:open true}
-       [:summary.vv-project-name {:on-context-menu (ctx! :project root)}
-        (icons/folder-icon) (last (str/split root #"/"))]
-       (nodes->hiccup (build-tree shown) root active (boolean ql) root)])))
+;; the MODEL — vinary.app.tree-model, pure and behind the :tree/filtered subscription
+(defn filtered [projects q match-opts]
+  (let [blank? (str/blank? q)
+        m      (when-not blank? (match/matcher q match-opts))]
+    (into []
+          (keep (fn [{:keys [root files]}]
+                  (let [shown (if blank? (vec files) (filterv #(some? (m %)) files))]
+                    (when (seq shown)
+                      {:root root :files shown :nodes (build-tree shown) :filtered? (not blank?)}))))
+          projects)))
+
+;; the VIEW — vinary.ui.tree, which now only renders what it is given
+(defn- project-tree [{:keys [root nodes filtered?]} active]
+  [:details.vv-project {:open true}
+   [:summary.vv-project-name {:on-context-menu (ctx! :project root)}
+    (icons/folder-icon) (last (str/split root #"/"))]
+   (nodes->hiccup nodes root active filtered? root)])
 
 (defn file-tree []
-  ;; … (a Reagent class whose :component-did-update calls reveal-active!)
-  (let [projects @(rf/subscribe [:ui/projects])
-        active   @(rf/subscribe [:ui/active-path])
-        q        @(rf/subscribe [:ui/tree-filter])
-        ql       (some-> q str/trim str/lower-case not-empty)]
+  ;; … (a Reagent class whose :component-did-update calls reveal-active! — only when the ACTIVE PATH changed)
+  (let [shown  @(rf/subscribe [:tree/filtered])
+        active @(rf/subscribe [:ui/active-path])
+        any?   (seq @(rf/subscribe [:ui/projects]))]
     [:div.vv-tree
-     [:input.vv-tree-filter
-      {:placeholder "Filter files…"
-       :value       (or q "")
-       :on-change   #(rf/dispatch [:tree/filter (.. % -target -value)])}]
-     (if (seq projects)
-       (for [p projects] ^{:key (:root p)} [project-tree p active ql])
+     [text-input/async-input
+      {:value     (or @(rf/subscribe [:ui/tree-filter]) "")
+       :on-change #(rf/dispatch [:tree/filter %])
+       :attrs     {:class "vv-tree-filter" :placeholder "Filter files…"}}]
+     (if any?
+       (for [p shown] ^{:key (:root p)} [project-tree p active])
        [:div.vv-sidebar-empty "No files open"])]))
 ```
 
-- **`ql`** — the normalized query: trimmed, lower-cased, and `not-empty` (so a blank or
-  whitespace-only filter becomes `nil`, i.e. "no filter"). Defined before use so the rest of the
-  function can branch on it.
-- **`shown` via `cond->>`** — when `ql` is non-nil, keep only paths whose lower-cased form
-  `str/includes?` the query. This is a plain case-insensitive substring match over the full
-  root-relative path, so typing `theme` matches `resources/public/css/themes/…`.
-- **`(when (seq shown) …)`** — a project with no matches renders nothing, so filtering naturally
-  hides whole projects rather than leaving empty headers behind.
-- **`(boolean ql)` as the `open?` argument** — when a filter is active, every folder is rendered
-  expanded, so the matching files (which may be deep) are immediately visible. With no filter,
-  folders start collapsed.
+- **The narrowing and folding are a `reg-sub`, not render-time work.** They used to run inside
+  `file-tree`'s render: every keystroke re-folded every path of every open project — thousands of
+  `str/split`s and an `assoc-in` each — before React had begun reconciling. That is not merely wasteful;
+  it is what let a re-render land *between* two keystrokes and commit a stale value back over the field,
+  turning `views` into `vews` (ADR-0033, [scientific/10](../scientific/10-input-latency-experiments.md)).
+  Layered, `:tree/filtered` recomputes only when the projects or the committed query actually change.
+- **`async-input`, not a controlled `<input>`.** The field owns its own DOM value, so the ~90 ms filter
+  debounce is invisible to the typist and no re-render can subtract a character.
+- **Matching goes through `vinary.search.match`**, configured by `vinary.search.config`. The default
+  reproduces the previous behaviour exactly — a case-insensitive substring match over the full
+  root-relative path, so typing `theme` matches `resources/public/css/themes/…` — and switching the tree
+  to fuzzy matching is now one keyword rather than a new matcher.
+- **A project with no matches is omitted by the model**, so filtering naturally hides whole projects
+  rather than leaving empty headers behind. The view renders what it is given.
+- **`:filtered?` is carried out of the model** rather than recomputed in the view, because it drives
+  whether folders render expanded: a filtered tree opens everything so deep matches are visible, an
+  unfiltered one does not.
 - **`:project` (not `:dir`) on the header** — the project header's context menu can **Remove from
   Files**, which a directory node's cannot; the distinct target kind is what selects that menu.
-- **`reveal-active!`** — on every activation the active file's ancestor `<details>` are expanded
-  (additively — never collapsing others) and it is scrolled into view.
+- **`reveal-active!`** — on activation the active file's ancestor `<details>` are expanded (additively —
+  never collapsing others) and it is scrolled into view. It runs **only when the active path changed**: it
+  does a `querySelector`, a parent walk and a `scrollIntoView` (a forced layout), and running it on every
+  re-render meant paying for it on every character typed into the filter, to reveal a file that had not
+  moved.
 
 Because filtering removes non-matching *files* from the flat list before `build-tree`, folders
 that end up with no children simply do not appear — there is no separate "prune empty folders"

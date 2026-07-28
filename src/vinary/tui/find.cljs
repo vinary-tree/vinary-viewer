@@ -3,7 +3,10 @@
    escape bytes never corrupt match offsets; highlighting then re-inserts reverse-video (`ESC[7m … ESC[27m`) at the
    raw indices for those visible columns, composing with any existing SGR colour (ESC[27m clears ONLY reverse, and
    each line is highlighted independently so no style leaks across rows). No terminal I/O — unit-testable."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [vinary.search.cursor :as cursor]
+            [vinary.search.query :as query]
+            [vinary.search.scan :as scan]))
 
 (def ^:private ESC (str (char 27)))          ; the ESC byte, no literal control char in source
 (def ^:private sgr-re #"\[[0-9;]*m|\]8;;[^]*(?:|\\)")
@@ -12,21 +15,24 @@
 
 (defn search
   "Find every case-insensitive match of `q` across `lines`. Returns a vector of {:line :col :len} in VISIBLE
-   (ANSI-stripped) column coordinates, in reading order."
+   (ANSI-stripped) column coordinates, in reading order.
+
+   The per-line scan is `vinary.search.scan/scan-all`, shared with the GUI finder, which ran the identical
+   loop over its flattened document buffer. The folding is `:strict` for the same reason it is there: a
+   returned column is mapped back to a raw byte offset by `highlight`, so a fold that changed a line's
+   length would re-insert the reverse-video escapes in the wrong places."
   [lines q]
   (if (str/blank? q)
     []
-    (let [ql (str/lower-case q) n (count q)]
-      (->> lines
-           (map-indexed
-            (fn [i line]
-              (let [vis (str/lower-case (strip line))]
-                (loop [from 0 acc []]
-                  (if-let [idx (str/index-of vis ql from)]
-                    (recur (+ idx (max 1 n)) (conj acc {:line i :col idx :len n}))
-                    acc)))))
-           (apply concat)
-           vec))))
+    (let [qf (query/fold-strict q)
+          n  (count q)]
+      (into []
+            (comp (map-indexed
+                   (fn [i line]
+                     (map (fn [[s _]] {:line i :col s :len n})
+                          (scan/scan-all (query/fold-strict (strip line)) qf))))
+                  cat)
+            lines))))
 
 (defn- escape-ranges
   "[start end) byte ranges of every ANSI escape in `s` (via a stateful JS regex), so the highlighter can copy them
@@ -70,9 +76,13 @@
 
 (defn current [find] (when-let [i (:idx find)] (nth (:matches find) i nil)))
 
+;; the wrapping cursor is vinary.search.cursor, shared with the GUI finder. It returns nil for an empty
+;; match list, so "step over nothing" is a decision made here (leave the session alone) rather than one
+;; inherited from whichever copy of the arithmetic happened to be in scope.
 (defn- step [find d]
-  (let [ms (:matches find)]
-    (if (seq ms) (assoc find :idx (mod (+ (or (:idx find) 0) d) (count ms))) find)))
+  (if-let [idx (cursor/step (count (:matches find)) (:idx find) d)]
+    (assoc find :idx idx)
+    find))
 (defn next-match [find] (step find 1))
 (defn prev-match [find] (step find -1))
 

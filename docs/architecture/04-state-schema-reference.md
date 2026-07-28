@@ -113,6 +113,7 @@ Important slices:
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. Merge rules live in `vinary.app.projects`. |
 | `[:ui :settings]` | Persisted settings loaded from `settings.edn`. |
+| `[:ui :settings :search-modes]` | Optional `{surface → mode}` override for the shared search model — `:find`, `:tui`, `:tree`, `:palette`, `:uri` → `:substring` \| `:subsequence` \| `:prefix` \| `:word-prefix` \| `:regex`. Read through `vinary.search.config/mode-for`, which ignores a mode this build does not implement, so a stale or hand-edited settings file cannot produce a matcher that silently matches nothing. Absent by default (ADR-0033). |
 | `[:ui :keymaps]` | Persisted keymap registry loaded from `keybindings.edn`. |
 | `[:ui :input]` | Modal/chord resolver display state. |
 | `[:ui :kbedit]` | Keybinding editor state and undo/redo stacks. |

@@ -96,6 +96,15 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 | `vinary.app.fx` | re-frame effects — the only place async/IO/DataScript-mutation touches the world (effects at the edge). |
 | `vinary.app.subs` | Subscriptions over app-db and DataScript snapshots. |
 | `vinary.app.commands` | Command registry used by keybindings and the palette. |
+| `vinary.app.tree-model` | Pure model behind the file tree: fold flat repo-relative paths into a nested structure, and narrow it by a filter (ADR-0033). |
+| `vinary.app.palette` | Pure candidate model for the command palette — ranks raw strings and materialises an item only for survivors. |
+| `vinary.async.scheduler` | The one cancellable, budgeted job runner: `debounce!` (one live timer per key), `coalesce!` (one response per painted frame), `slice!` (step under a frame budget), `cancel!`, and the two paces — `ric` (display) and `yield!` (input queue). |
+| `vinary.async.budget` | The substitutable clock behind the frame budget, so the budgeting arithmetic is testable without sleeping. |
+| `vinary.search.query` | Case folding and query normalisation. Two strategies with names: `:strict` (length-preserving, required wherever an index maps back to a source position) and `:simple`. |
+| `vinary.search.scan` | Non-overlapping substring scanning and the match predicates — the loop that previously existed verbatim in the GUI and terminal finders. |
+| `vinary.search.match` | The configurable matcher: five modes (`:substring` `:subsequence` `:prefix` `:word-prefix` `:regex`), one result shape `{:score :spans}`, optional relevance ranking. |
+| `vinary.search.cursor` | The wrapping match cursor shared by both finders. |
+| `vinary.search.config` | Which matching mode each search surface uses — the single place that choice is made. |
 
 ![Renderer components](../diagrams/component-renderer.svg)
 
@@ -140,7 +149,8 @@ find, scroll, and the pdf.js / CodeMirror engines.
 | `vinary.renderer.pdf-layout` | Pure, DOM-free PDF geometry/zoom/outline helpers (unit-tested). |
 | `vinary.renderer.pdf-cache` | PDF byte cache (keyed by `:doc/path`, not DataScript) + the in-page-find text-materialization hook; deliberately free of any `pdfjs-dist` require. |
 | `vinary.renderer.virtual-layout` | Pure, DOM-free vertical-stack geometry shared by the in-renderer PDF view and the streaming preview body (pre-estimated sibling spacer). |
-| `vinary.renderer.find` | CSS Custom Highlight API in-page search (`search!`/`cycle!`/`clear!`). |
+| `vinary.renderer.find` | CSS Custom Highlight API in-page search (`search!`/`cycle!`/`clear!`). Asynchronous and sliced: flattening and matching run under separate scheduler keys, and the flattened buffer is reused while the DOM is unchanged (ADR-0033). |
+| `vinary.renderer.input-trace` | DEV-only text-input latency tracer (`window.__vvinputtrace`): keystroke queue delay, programmatic `.value` writes that discard typed characters, and long tasks. `goog.DEBUG`-gated. |
 | `vinary.renderer.media` | Local media URL cache-busting and source helpers for Markdown previews. |
 | `vinary.renderer.syntax` | Read-only source view: a CodeMirror 6 editor highlighted by web-tree-sitter grammars; grammar registry, source selection, and source⇄line scroll helpers. |
 | `vinary.renderer.hints` | Vimium-style link hints for the content pane: collect visible targets, assign labels, follow a chosen target. |
@@ -157,12 +167,13 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.views` | Main shell, content strategy (per-kind view selection), Markdown body lifecycle, toolbar, status/modeline; hosts the in-pane directory browser (`:doc/kind = "directory"`) and the Ctrl-hover breadcrumb URI bar. |
 | `vinary.ui.tabs` | The tab strip + the shared tab-item used by the horizontal strip and the sidebar's vertical Tabs list. |
 | `vinary.ui.sidebar` | The left sidebar shell: a tabbed pane hosting the multi-project Files tree and the Contents (TOC) outline. |
-| `vinary.ui.tree` | The git file-tree (the sidebar's Files tab), one `{:root :files}` per project, filtering, and reveal-active. |
+| `vinary.ui.tree` | The git file-tree (the sidebar's Files tab). The VIEW only — narrowing and folding live in `vinary.app.tree-model` behind the `:tree/filtered` sub (ADR-0033). |
+| `vinary.ui.text-input` | The one text `<input>` whose DOM value is owned locally, so a re-render can never take a typed character back out of it. Used by the find bar, tree filter, palette, and Preferences fields. |
 | `vinary.ui.context-menu` | The themed right-click context menu: targets and actions. |
 | `vinary.ui.menubar` | The custom, theme-matched menu bar (File / View / Settings / Help), incl. the `View ▸ Fit` radio submenu. |
 | `vinary.ui.menu-focus` | Pure helpers for keyboard focus inside custom menus (skipping separators/disabled rows). |
 | `vinary.ui.zoombar` | The always-visible bottom zoom bar: − / editable % field / preset dropdown / +, dispatching the context-aware `[:view/zoom …]`. |
-| `vinary.ui.palette` | Command palette / fuzzy finder: one overlay, three sources (`:command`/`:file`/`:theme`). |
+| `vinary.ui.palette` | Command palette / fuzzy finder: one overlay, three sources (`:command`/`:file`/`:theme`). The overlay only — candidate assembly lives in `vinary.app.palette` behind the `:palette/candidates` sub. |
 | `vinary.ui.settings` | The Preferences dialog: variable + fixed-width fonts, sizes, and view prefs (theme lives here too). |
 | `vinary.ui.extensions` | Settings ▸ Extensions dialog: ad-blocking controls + the Chrome-extension manager. |
 | `vinary.ui.ext-toolbar` | Browser-action toolbar (extension icons in the address-bar row; click → open popup). |
@@ -244,7 +255,7 @@ latency + bounded memory on large documents. Default-on for the streamable kinds
 | Namespace | Responsibility |
 |-----------|----------------|
 | `vinary.stream.protocol` | The `StreamParser` contract: a document that arrives as a sequence of batches → incremental IR blocks. |
-| `vinary.stream.scheduler` | Drives a stream into the DOM: open a transport session, then on each idle tick pull one batch, parse it, and commit its blocks. |
+| `vinary.stream.scheduler` | Drives a stream into the DOM: open a transport session, then on each idle tick pull one batch, parse it, and commit its blocks. Its tick (`ric`) now lives in `vinary.async.scheduler` and is shared with the chunked find. |
 | `vinary.stream.sink` | Append-mode render sink: lower IR blocks to HTML and append them to the stream body. |
 | `vinary.stream.transport` | Renderer-side pull client for the main-process stream sessions (`window.vv.stream{Open,Pull,Close}`). |
 | `vinary.stream.flag` | The document-streaming feature gate (which kinds stream, and the size threshold). |

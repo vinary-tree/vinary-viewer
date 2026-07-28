@@ -68,7 +68,8 @@
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
 | `:tree/received` | db | `{:root :files}` | — | `:ui :tree` ← `{:root :files(vec)}` | — |
-| `:tree/filter` | db | `q` | — | `:ui :tree-filter` ← q | — |
+| `:tree/filter` | fx | `q` | — | — | `[:async/debounce {:key :tree/filter :ms 90 :dispatch [:tree/filter-commit q]}]` |
+| `:tree/filter-commit` | db | `q` | — | `:ui :tree-filter` ← q | — |
 | `:tree/move` **[input]** | db | `dir` | `:ui :tree`, `:ui :tree-filter`, `:ui :tree-selected` | `:ui :tree-selected` ← next visible path (wrapping over the **filtered** list) | — |
 | `:tree/activate` **[input]** | fx | — | `:ui :tree-selected` | — | when selected: dispatch `[:doc/open sel]` |
 
@@ -82,8 +83,8 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
 | `:find/toggle` | fx | — | `:ui :find :visible?`, `:ui :find :query` | `:ui :find :visible?` ← not; `:gen`++ | opening with a remembered query: `[:find/search {:q :gen}]`; closing: `[:find/clear]` |
-| `:find/set-query` | fx | `q` | `:ui :find :gen` | `:ui :find :query` ← q; `:gen`++ | `[:dispatch-later {:ms 100 :dispatch [:find/run gen]}]` |
-| `:find/run` | fx | `gen` | `:ui :find :gen`, `:query` | — | `[:find/search {:q :gen}]` — **only if `gen` is still current** (the debounce collapse) |
+| `:find/set-query` | fx | `q` | `:ui :find :gen` | `:ui :find :query` ← q; `:gen`++ | `[:async/debounce {:key :find/search :ms 40 :dispatch [:find/run gen]}]` |
+| `:find/run` | fx | `gen` | `:ui :find :gen`, `:query` | — | `[:find/search {:q :gen}]` — **only if `gen` is still current**. The generation no longer doubles as the debounce (ADR-0033): `:async/debounce` cancels a superseded request outright, and the generation now guards only against an already-started search replying late. |
 | `:find/result` | db | `{:gen :count :idx}` | `:ui :find :gen` | `:ui :find :count` ← count; `:ui :find :idx` ← idx — **only if `gen` is current** | — |
 | `:find/cycle` | fx | `dir` | `:ui :find :gen` | — | `[:find/cycle {:dir :gen}]` |
 | `:find/reset` | fx | — | — | `:ui :find :count` ← 0; `:idx` ← 0; `:gen`++ (**query kept**) | `[:find/clear]` |
@@ -136,7 +137,8 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | --- | --- | --- | --- | --- | --- |
 | `:palette/open` | db | `{:keys [source prefix]}` | — | `:ui :palette` ← `{:open? true :source (or source :command) :prefix (or prefix "") :query "" :selected 0}` | — |
 | `:palette/close` | db | — | — | `:ui :palette :open?` ← false | — |
-| `:palette/set-query` | db | `q` | — | `:ui :palette :query` ← q, `:selected` ← 0 | — |
+| `:palette/set-query` | fx | `q` | — | — | `[:async/debounce {:key :palette/query :ms 90 :dispatch [:palette/set-query-commit q]}]` |
+| `:palette/set-query-commit` | db | `q` | — | `:ui :palette :query` ← q, `:selected` ← 0 | — |
 | `:palette/move` | db | `dir n` | `:ui :palette :selected` | `:ui :palette :selected` ← `(mod (+ sel dir) (max 1 n))` | — |
 
 > **Palette UI.** The palette **events + state + `:palette/state` sub** are backed by the rendered
@@ -285,11 +287,13 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 
 | Effect | Arg | Side effect | Re-dispatch |
 | --- | --- | --- | --- |
+| `:async/debounce` | `{:key :ms :dispatch}` | `vinary.async.scheduler/debounce!` — **one live timer per `:key`**, replaced on each arming and genuinely cancellable (ADR-0033) | the given `:dispatch`, once `:ms` have passed with no re-arming |
+| `:async/cancel` | `key` | `vinary.async.scheduler/cancel!` — clears the pending timer and invalidates any running sliced job for that key | — |
 | `:ds/transact` | `tx` (tx-data vector) | `d/transact! ds/conn tx` (the sole DataScript write path) | — (the conn listener dispatches `[:ds/changed]`) |
 | `:scroll/restore` | `n` | remember a pending content scrollTop for the next render | — |
 | `:markdown/render` | `{:text :path :stamp :on-done}` | `md/render text` (unified pipeline → `Promise<{:html :toc :assets}>`) | `.then` → `(conj on-done result)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
 | `:theme/apply` | `theme` (string) | `set! (.-href #vv-theme-link) "css/themes/<theme>.css"` | — |
-| `:find/search` | `{:q :gen}` | `await pdf-cache/ensure-active!` (materialize PDF text layers / drain a stream) → `finder/search! q` | `[:find/result {:count :idx :gen}]` |
+| `:find/search` | `{:q :gen}` | `await pdf-cache/ensure-active!` (materialize PDF text layers / drain a stream) → `finder/search! q on-result` — **sliced and cancellable**; a superseded run never calls back (ADR-0033) | `[:find/result {:count :idx :gen}]` |
 | `:find/cycle` | `{:dir :gen}` | `finder/cycle! dir` (reconciles stale Ranges first — see `ensure-fresh!`) | `[:find/result {:count :idx :gen}]` — the **count** too, because a re-collect can change it |
 | `:find/clear` | `_` | `finder/clear!` (delete both highlights, disconnect the MutationObserver, reset state) | — |
 | `:toc/scroll` | `id` | `getElementById id` → `scroll/scroll-el-to! {:block :start :behavior "smooth"}` — a **confined** `.vv-content` scrollTo, never `el.scrollIntoView` (ADR-0032) | — |
@@ -415,6 +419,10 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | Sub | Inputs | Output |
 | --- | --- | --- |
 | `:tabs` | `:<- [:ui/tabs]` | app-db tab vector |
+| `:tree/filtered` | `:<- [:ui/projects]` `:<- [:ui/tree-filter]` `:<- [:ui/settings]` | `[{:root :files :nodes :filtered?}]` — each project narrowed by the filter and already folded into its nested shape. **Layered**: folding every path of every project inside the view's render function is what let a re-render land between two keystrokes (ADR-0033) |
+| `:palette/candidates` | `:<- [:palette/state]` `:<- [:ui/projects]` `:<- [:ui/settings]` `:<- [::palette-ctx]` | `[{:item :score :spans}]`, empty while the palette is closed. Ranks raw strings and materialises an item only for survivors, so the cap bounds allocation rather than only the display |
+| `:facet/active` | `:<- [::facet-inputs]` `:<- [:doc/group]` | the active tab's effective facet `{:path :type}`. **Layered** — as a plain db-sub it ran a `d/q` plus a 22-attribute `d/pull` on every app-db write, and it is permanently subscribed |
+| `:view/switch` | `:<- [::facet-inputs]` `:<- [:doc/group]` | the `[Preview ▾ \| Source ▾]` toolbar model. Layered for the same reason as `:facet/active` |
 | `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-path]` | `ds/active-doc` → the pulled doc entity \| nil. **The `d/pull` vector in `vinary.app.ds/active-doc` is authoritative:** `:doc/path :doc/kind :doc/text :doc/html :doc/toc :doc/assets :doc/entries :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta :doc/sourceable? :doc/data-url :doc/reflow-html :doc/pdf-sibling :doc/source-sibling :doc/diff-split-html :doc/streaming? :doc/stream-progress :doc/stream-note`. A **new `:doc/*` attribute is invisible to views until it is added there.** |
 | `:doc/kind` | `:<- [:doc/active]` | the active document's kind — selects the `content-view` Strategy |
 | `:doc/toc` | `:<- [:ui/active-uri]` `:<- [:doc/active]` `:<- [:ui/web-toc]` | HTTP page headings from `:ui/web-toc`, else the stored `:doc/toc` outline (Markdown/Org/LaTeX/office headings, a PDF font-size outline, or a source-code outline) |

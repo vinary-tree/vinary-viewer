@@ -12,9 +12,9 @@
    is keyed by both the scroller identity and content-view's reactive :data-doc-key. A doc switch changes the
    key → cached returns [] → spy! does not dispatch until the new doc's renderer refreshes."
   (:require [re-frame.core :as rf]
-            [re-frame.db :as rfdb]))
+            [re-frame.db :as rfdb]
+            [vinary.async.scheduler :as sched]))
 
-(defonce ^:private spy-pending (atom false))
 (defonce ^:private offset-cache (atom {:content nil :doc-key nil :headings []}))
 
 (defn- doc-key-of [^js content]
@@ -68,13 +68,13 @@
    when this scroller actually owns anchors for the current doc, so it never clobbers the web view's own
    active-heading (or a non-outline preview's empty highlight)."
   [^js content]
-  (when-not @spy-pending
-    (reset! spy-pending true)
-    (js/requestAnimationFrame
-     (fn []
-       (reset! spy-pending false)
-       (let [hs (cached content)]
-         (when (seq hs)
-           (let [active (active-heading hs (.-scrollTop content))]
-             (when (not= active (get-in @rfdb/app-db [:ui :active-heading]))
-               (rf/dispatch [:toc/active-heading active])))))))))
+  ;; sched/coalesce! — one response per painted frame, however many scroll events arrive. This was the
+  ;; boolean-latch-plus-rAF idiom, written out here and copied twice more (ADR-0033).
+  (sched/coalesce!
+   ::spy
+   (fn []
+     (let [hs (cached content)]
+       (when (seq hs)
+         (let [active (active-heading hs (.-scrollTop content))]
+           (when (not= active (get-in @rfdb/app-db [:ui :active-heading]))
+             (rf/dispatch [:toc/active-heading active]))))))))

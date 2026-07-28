@@ -12,6 +12,12 @@
 - `npm run compile:cli` / `compile:tui`: build the `vv --cli` / `vv --tui` terminal renderers.
 - `npm test`: compile the `test` build and run it, then the ssh-config / ssh-transport / content-service / git-tree / cli / tui smokes. `npm run test:electron` (and `test:electron:release`) drive the app end-to-end.
 - `node test/lint.js`: run JS parse checks, CSS brace balance, and `--vv-*` theme-variable checks.
+- `npm run test:find-e2e`: the in-page-find + **typist-latency** gate — types real keys at 150 ms/char over
+  a 1.1 MB document and the repository's own file tree, and asserts every character survives, that no
+  re-render takes one back out of the field, that the renderer stays responsive, and that find's flattened
+  buffer is actually being reused (ADR-0033).
+- `npm run bench:input`: the input-latency benchmark behind those thresholds. Pin it, per the standing
+  benchmarking practice: `taskset -c 2-9 npm run bench:input`.
 
 ## Coding Style & Naming Conventions
 Use idiomatic ClojureScript with two-space indentation, kebab-case vars/functions, and namespace-to-file mapping such as `vinary.input.keymaps-registry` in `src/vinary/input/keymaps_registry.cljs`. Keep renderer filesystem access behind the existing `contextBridge`/IPC boundary; the renderer should operate on plain JSON/EDN data. JavaScript files use CommonJS, `'use strict'`, and minimal dependencies. CSS custom properties use the `--vv-*` prefix and must be defined by every theme in `resources/public/css/themes/`.

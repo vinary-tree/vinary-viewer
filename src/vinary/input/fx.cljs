@@ -3,6 +3,7 @@
    focus between the sidebar filter and the content pane. Pure-ish (touch the DOM only here)."
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [vinary.async.scheduler :as sched]
             [vinary.input.scroll-math :as sm]
             [vinary.input.keymaps-registry :as registry]))
 
@@ -15,16 +16,14 @@
  (fn [id]
    (registry/install-for! @rfdb/app-db id)))
 
-;; persist the keymap registry EDN to disk, debounced (editor edits stream fast; coalesce the writes)
-(defonce ^:private save-timer (atom nil))
+;; persist the keymap registry EDN to disk, debounced (editor edits stream fast; coalesce the writes).
+;; Through the shared scheduler — one live timer per key, genuinely cancellable (ADR-0033).
 (rf/reg-fx
  :keymap/persist
  (fn [edn]
-   (when @save-timer (js/clearTimeout @save-timer))
-   (reset! save-timer
-           (js/setTimeout (fn [] (when-let [^js v (.-vv js/window)]
-                                   (when (.-saveKeymap v) (.saveKeymap v edn))))
-                          400))))
+   (sched/debounce! ::keymap-persist 400
+                    (fn [] (when-let [^js v (.-vv js/window)]
+                             (when (.-saveKeymap v) (.saveKeymap v edn)))))))
 
 ;; sequence timeout (abandon a half-typed chord/leader after timeout-ms)
 (rf/reg-fx
