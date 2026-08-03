@@ -155,6 +155,7 @@ find, scroll, and the pdf.js / CodeMirror engines.
 | `vinary.renderer.syntax` | Read-only source view: a CodeMirror 6 editor highlighted by web-tree-sitter grammars; grammar registry, source selection, and source⇄line scroll helpers. |
 | `vinary.renderer.hints` | Vimium-style link hints for the content pane: collect visible targets, assign labels, follow a chosen target. |
 | `vinary.renderer.history-input` | Coalescing for browser-style history commands that can arrive through multiple native input channels. |
+| `vinary.renderer.tree-reveal` | Coalesced post-render Files-tree action: expand the active row's ancestor folders additively and reveal the row after active-path or project-arrival events. |
 
 ---
 

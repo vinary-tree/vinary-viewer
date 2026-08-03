@@ -246,16 +246,17 @@ project, narrowing its flat file list *before* building the nested tree:
    (nodes->hiccup nodes root active filtered? root)])
 
 (defn file-tree []
-  ;; … (a Reagent class whose :component-did-update calls reveal-active! — only when the ACTIVE PATH changed)
-  (let [shown  @(rf/subscribe [:tree/filtered])
-        active @(rf/subscribe [:ui/active-path])
-        any?   (seq @(rf/subscribe [:ui/projects]))]
+  ;; … (the view schedules reveal-active! when its active-path argument changes;
+  ;;    :tree/received schedules the same post-render effect after project arrival)
+  (let [shown    @(rf/subscribe [:tree/filtered])
+        active   @(rf/subscribe [:ui/active-path])
+        projects @(rf/subscribe [:ui/projects])]
     [:div.vv-tree
      [text-input/async-input
       {:value     (or @(rf/subscribe [:ui/tree-filter]) "")
        :on-change #(rf/dispatch [:tree/filter %])
        :attrs     {:class "vv-tree-filter" :placeholder "Filter files…"}}]
-     (if any?
+     (if (seq projects)
        (for [p shown] ^{:key (:root p)} [project-tree p active])
        [:div.vv-sidebar-empty "No files open"])]))
 ```
@@ -280,10 +281,12 @@ project, narrowing its flat file list *before* building the nested tree:
 - **`:project` (not `:dir`) on the header** — the project header's context menu can **Remove from
   Files**, which a directory node's cannot; the distinct target kind is what selects that menu.
 - **`reveal-active!`** — on activation the active file's ancestor `<details>` are expanded (additively —
-  never collapsing others) and it is scrolled into view. It runs **only when the active path changed**: it
-  does a `querySelector`, a parent walk and a `scrollIntoView` (a forced layout), and running it on every
-  re-render meant paying for it on every character typed into the filter, to reveal a file that had not
-  moved.
+  never collapsing others) and it is scrolled into view. Active-path changes schedule it from the tree
+  component lifecycle; `:tree/received` schedules the same `:tree/reveal-active` effect as an explicit
+  event continuation, because command-line activation can precede the asynchronous `vv:tree` reply. Both
+  triggers coalesce through Reagent's post-render queue, so there is one action after the row commits—no
+  polling, request retry, or whole-project comparison in render. Filter commits schedule nothing, avoiding
+  the `querySelector`, parent walk, and `scrollIntoView` forced layout while typing.
 
 Because filtering removes non-matching *files* from the flat list before `build-tree`, folders
 that end up with no children simply do not appear — there is no separate "prune empty folders"

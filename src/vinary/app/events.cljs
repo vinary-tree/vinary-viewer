@@ -674,11 +674,13 @@
 ;; multi-project file trees: accumulate one {:root :files} per project — a git root, or the containing
 ;; directory of a file that belongs to no repository (:synthetic?). The merge rules (update in place;
 ;; a covered synthetic root merges into its coverer rather than duplicating it) live in
-;; vinary.app.projects so they are testable without a DOM.
-(rf/reg-event-db
+;; vinary.app.projects so they are testable without a DOM. The explicit effect is the reactive continuation:
+;; after the project state commits and Reagent renders it, reveal the already-active command-line document.
+(rf/reg-event-fx
  :tree/received
- (fn [db [_ entry]]
-   (update-in db [:ui :projects] projects/merge-project entry)))
+ (fn [{:keys [db]} [_ entry]]
+   {:db (update-in db [:ui :projects] projects/merge-project entry)
+    :fx [[:tree/reveal-active nil]]}))
 
 ;; drop a project from the sidebar (project-header context menu). It returns if a file under it is
 ;; opened again — send-tree! runs from main's open!, not from a watcher refresh.

@@ -143,16 +143,18 @@ verifiable only in pieces.
 auto-invokes `vinary.main.core/main` on load — so the entire production chain runs:
 
 ```
-__vvopen(path) → [:doc/open] → load-fx → vv:open → main open! → send-tree!
+CLI argv → startup/doc-uris → vv:open-files → [:files/opened] → [:doc/open]
+__vvopen(path) ───────────────────────────────────────────────→ [:doc/open]
+  → load-fx → vv:open → main open! → send-tree!
   → repo-tree (git) OR dir-walk/dir-tree (synthetic) → vv:tree → [:tree/received]
   → projects/merge-project → [:ui :projects] → ui.tree renders <details.vv-project>
 ```
 
 It asserts against **both** `window.__vvdb()` (app-db verbatim) and the real sidebar DOM, and drives
-the project-header context menu with genuine `MouseEvent`s — covering the synthetic root, its walk
-exclusions, containment absorption, git-root coexistence, the directory-is-its-own-root rule, and
-**Remove from Files** end to end. Its fixture is a throwaway temp directory outside any repository,
-created and removed by the harness.
+the project-header context menu with genuine `MouseEvent`s — covering command-line startup selection,
+ancestor expansion + reveal, the synthetic root, its walk exclusions, containment absorption, git-root
+coexistence, the directory-is-its-own-root rule, and **Remove from Files** end to end. Its fixture and
+isolated `$XDG_CONFIG_HOME` are throwaway directories removed by the harness.
 
 ```bash
 npm run test:tree-e2e     # shadow-cljs compile main renderer && xvfb-run -a electron … test/tree-e2e.js

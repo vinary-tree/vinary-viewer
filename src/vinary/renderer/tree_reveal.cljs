@@ -1,0 +1,33 @@
+(ns vinary.renderer.tree-reveal
+  "Post-render DOM action for the Files tree. State changes remain declarative in re-frame/Reagent; this
+   namespace owns the one imperative edge needed after React commits: open the active row's ancestors and
+   bring it into view. Multiple triggers in one render frame coalesce into one action."
+  (:require [reagent.core :as r]))
+
+(defonce ^:private scheduled? (atom false))
+
+(defn reveal-active!
+  "Expand the active file's ancestor <details> additively and scroll the row into view. With no argument,
+   resolve the currently mounted Files tree. Returns true when an active row was revealed."
+  ([]
+   (when (exists? js/document)
+     (reveal-active! (.querySelector js/document ".vv-tree"))))
+  ([^js root-el]
+   (when root-el
+     (when-let [^js a (.querySelector root-el ".vv-file-active")]
+       (loop [el (.-parentNode a)]
+         (when (and el (not (identical? el root-el)))
+           (when (= "DETAILS" (.-tagName el)) (set! (.-open el) true))
+           (recur (.-parentNode el))))
+       (.scrollIntoView a #js {:block "nearest"})
+       true))))
+
+(defn schedule!
+  "Schedule one reveal after Reagent's queued render commits. Repeated active/tree events in the same frame
+   share the pending callback; this is event follow-up scheduling, not polling or request retry."
+  []
+  (when (compare-and-set! scheduled? false true)
+    (r/after-render
+     (fn []
+       (reset! scheduled? false)
+       (reveal-active!)))))

@@ -16,6 +16,7 @@
             [vinary.renderer.source-nav :as source-nav]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.input-trace :as input-trace]
+            [vinary.renderer.tree-reveal :as tree-reveal]
             [vinary.async.scheduler :as sched]
             [vinary.renderer.find :as finder]))
 
@@ -38,6 +39,10 @@
 (rf/reg-cofx :view-pos (fn [cofx _] (assoc cofx :view-pos {:scroll (scroll/current)
                                                            :line   (cm/current-viewport-line)})))
 (rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
+
+;; `:tree/received` commits project data first, then this schedules the DOM follow-up after Reagent has rendered
+;; the new row. Active-path changes use the same coalesced scheduler from the tree component lifecycle.
+(rf/reg-fx :tree/reveal-active (fn [_] (tree-reveal/schedule!)))
 
 ;; send a user-typed SSH secret straight to main (vv:ssh-prompt-reply) — the ONLY secret-bearing channel; the
 ;; value came from the prompt modal's local state and is never stored in app-db.

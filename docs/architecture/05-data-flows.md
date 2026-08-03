@@ -17,11 +17,14 @@ re-frame events/effects, DataScript, and views.
 6. Main `service/open!` reads/classifies the path, sends `vv:content`, sends
    `vv:tree` — the file's git root, or its containing directory as a synthetic
    root when it belongs to no repository — and ensures the file is watched.
-7. Renderer receives `vv:content` and dispatches `[:content/received payload]`.
-8. `:content/received` caches content in DataScript and starts Markdown render
+7. Renderer receives `vv:tree`; `:tree/received` merges the project and schedules
+   a coalesced post-render reveal. This expands the active file's ancestors after
+   the asynchronous row commits, including when command-line activation happened first.
+8. Renderer receives `vv:content` and dispatches `[:content/received payload]`.
+9. `:content/received` caches content in DataScript and starts Markdown render
    when needed.
-9. `:content/rendered` stores `:doc/html`, `:doc/toc`, and `:doc/assets`.
-10. Subscriptions recompute through `:ds/rev`, and the content view paints.
+10. `:content/rendered` stores `:doc/html`, `:doc/toc`, and `:doc/assets`.
+11. Subscriptions recompute through `:ds/rev`, and the content view paints.
 
 ---
 

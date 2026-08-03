@@ -3462,6 +3462,63 @@ async function main() {
   assert.strictEqual(loneHasCombo, false, 'a lone PDF (no collocated source) shows NO Preview/Source buttons');
   console.log('[ok] a lone PDF shows no view-switch buttons (nothing to toggle)');
 
+  // Command-line opens arrive over vv:open-files before main's asynchronous vv:tree reply. The active-path
+  // render therefore has no matching row; :tree/received must schedule one post-render reveal when the row
+  // appears instead of leaving every ancestor <details> closed. Keep the Files panel mounted across both
+  // deliveries so this exercises that exact lifecycle ordering.
+  await evalIn(win, `(() => { const r=document.querySelector('.vv-sidebar-rail'); if(r) r.click(); return true; })()`);
+  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-sidebar-tab').length > 0`),
+    'sidebar is visible for the delayed command-line tree regression');
+  await evalIn(win, `(() => { const t=[...document.querySelectorAll('.vv-sidebar-tab')]
+    .find(x=>x.textContent.trim()==='Files'); if(t) t.click(); return Boolean(t); })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-tree'))`),
+    'Files tree is mounted before the command-line document activates');
+
+  const revealRoot = path.join(ROOT, 'test', 'fixtures', 'delayed-tree-project');
+  const revealRelA = 'src/features/deep/opened.md';
+  const revealRelB = 'next/branch/other.md';
+  const revealPathA = path.join(revealRoot, ...revealRelA.split('/'));
+  const revealPathB = path.join(revealRoot, ...revealRelB.split('/'));
+  for (const [p, title] of [[revealPathA, 'Delayed tree'], [revealPathB, 'Loaded tree']]) {
+    state.contentByPath.set(p, { path: p, kind: 'markdown', text: `# ${title}\n`, stamp: Date.now() });
+  }
+  const revealSnapshot = (target) => `(() => {
+    const target=${JSON.stringify(target)};
+    const a=[...document.querySelectorAll('.vv-file')]
+      .find(x=>x.getAttribute('data-path')===target);
+    if(!a) return {path:null, active:false, opens:[]};
+    const opens=[];
+    for(let el=a.parentElement; el && !el.classList.contains('vv-tree'); el=el.parentElement) {
+      if(el.matches('details.vv-dir')) opens.push(Boolean(el.open));
+    }
+    return {path:a.getAttribute('data-path'), active:a.classList.contains('vv-file-active'), opens};
+  })()`;
+
+  win.webContents.send('vv:open-files', { paths: [revealPathA], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => { const ui=window.__vvdb().ui;
+    const t=ui.tabs.find(x=>x.id===ui['active-tab']);
+    return t?.uri===${JSON.stringify(revealPathA)} && !document.querySelector('.vv-file-active'); })()`),
+    'command-line path is active before its project tree exists');
+  win.webContents.send('vv:tree', { root: revealRoot, files: [revealRelA, revealRelB] });
+  await waitFor(() => evalIn(win, `(${revealSnapshot(revealPathA)}).active`),
+    'the delayed tree renders the active command-line row');
+  const delayedReveal = await evalIn(win, revealSnapshot(revealPathA));
+  assert.strictEqual(delayedReveal.opens.length, 3, 'the delayed active row has three directory ancestors');
+  assert.ok(delayedReveal.opens.every(Boolean),
+    `every delayed active-row ancestor must expand, got ${JSON.stringify(delayedReveal.opens)}`);
+  console.log('[ok] a delayed command-line tree payload expands to + reveals the already-active document');
+
+  // The original, tree-already-loaded activation path remains intact, and reveal is additive: activating B
+  // opens its branch without collapsing the branch that the delayed reveal opened for A.
+  win.webContents.send('vv:open-files', { paths: [revealPathB], 'focus-first': true });
+  await waitFor(() => evalIn(win, `(() => { const s=${revealSnapshot(revealPathB)};
+    return s.active && s.opens.length===2 && s.opens.every(Boolean); })()`),
+    'an active-path change expands a row in an already-loaded tree');
+  const retainedReveal = await evalIn(win, revealSnapshot(revealPathA));
+  assert.ok(retainedReveal.opens.every(Boolean),
+    `revealing another file must not collapse existing folders, got ${JSON.stringify(retainedReveal.opens)}`);
+  console.log('[ok] tree reveal still follows later activations and remains additive');
+
   // The CSP is a security control, not advice: a blocked resource is a bug, and it only ever surfaced as one
   // more red line among the re-frame warnings. Injecting MathJax's stylesheet tripped `font-src` this way.
   assert.deepStrictEqual(state.cspViolations, [],

@@ -9,7 +9,9 @@
 // (dist/main/main.js) from INSIDE an Electron process — which is the only way it can be required, since it
 // auto-invokes vinary.main.core/main on load — so the whole production chain executes:
 //
-//   __vvopen(path) → [:doc/open] → load-fx → vv:open → main open! → send-tree!
+//   CLI argv → startup/doc-uris → vv:open-files → [:files/opened] → [:doc/open]
+//   __vvopen(path) ───────────────────────────────────────────────→ [:doc/open]
+//     → load-fx → vv:open → main open! → send-tree!
 //     → repo-tree (git) OR dir-walk/dir-tree (synthetic) → vv:tree → [:tree/received]
 //     → projects/merge-project → [:ui :projects] → ui.tree renders <details.vv-project>
 //
@@ -33,6 +35,12 @@ const ROOT = path.resolve(__dirname, '..');
 // realpath'd because dir-tree realpaths the root it adopts (macOS hands out /var/… symlinked to
 // /private/var/…, which would otherwise make every root comparison a false negative).
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-')));
+const CLI_DOC = path.join(ROOT, 'src', 'vinary', 'ui', 'tree.cljs');
+
+// Keep persisted user settings (especially :sidebar-visible?) out of the harness: the CLI reveal assertion
+// requires the default Files panel to be mounted before startup activation, and tests must never read/write the
+// developer's real config. The nested repository file supplies three directory ancestors to expand.
+process.env.XDG_CONFIG_HOME = path.join(SCRATCH, 'config');
 
 function writeFixture() {
   const mk = (rel, body) => {
@@ -49,7 +57,11 @@ function writeFixture() {
   mk('.hidden/x.md', 'hidden dir — must be excluded\n');
 }
 
-require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app
+// xvfb invokes `electron --no-sandbox <app>`, leaving the Chromium switch in argv[1]. Production is
+// `electron <app> <document>`, the shape startup/doc-uris intentionally parses (user args begin at index 2).
+// Chromium has already consumed its switch, so normalize only the argv presented to the required real main.
+process.argv.splice(1, process.argv.length - 1, __filename, CLI_DOC);
+require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app with one genuine CLI document arg
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -59,7 +71,9 @@ const HEADERS =
 
 async function waitForWindow() {
   for (let i = 0; i < 300; i++) {
-    const [w] = BrowserWindow.getAllWindows();
+    // main refills its warm pool as soon as it opens the visible startup window. BrowserWindow's global list
+    // contains that hidden, empty pool window too; the command-line document belongs to the visible claim.
+    const w = BrowserWindow.getAllWindows().find((candidate) => candidate.isVisible());
     if (w && !w.webContents.isLoading()) return w;
     await sleep(100);
   }
@@ -90,6 +104,40 @@ async function run() {
 
   const passed = [];
   const check = (name, fn) => { fn(); passed.push(name); console.log(`  ✓ ${name}`); };
+
+  // ---- the REAL command-line startup reveals its active file --------------------------------------
+  await until(wc,
+              `(() => { const ui=window.__vvdb().ui; const t=ui.tabs.find(x=>x.id===ui['active-tab']);
+                return t && t.uri; })()`,
+              (uri) => uri === CLI_DOC,
+              'the command-line document to become the active startup tab');
+  await until(wc, `Boolean(document.querySelector('.vv-tree'))`, (v) => v === true,
+              'the default Files panel to remain mounted during startup');
+  const cliReveal = await until(
+    wc,
+    `(() => {
+      const target=${JSON.stringify(CLI_DOC)};
+      const a=[...document.querySelectorAll('.vv-file')].find(x=>x.getAttribute('data-path')===target);
+      if(!a) return {active:false, opens:[], visible:false};
+      const opens=[];
+      for(let el=a.parentElement; el && !el.classList.contains('vv-tree'); el=el.parentElement) {
+        if(el.matches('details.vv-dir')) opens.push(Boolean(el.open));
+      }
+      const body=a.closest('.vv-sidebar-body');
+      const ar=a.getBoundingClientRect(), br=body && body.getBoundingClientRect();
+      return {active:a.classList.contains('vv-file-active'), opens,
+              visible:Boolean(br && ar.top>=br.top && ar.bottom<=br.bottom)};
+    })()`,
+    (state) => state && state.active && state.opens.length === 3
+      && state.opens.every(Boolean) && state.visible,
+    'the command-line document row to render, expand, and become visible in its repository tree');
+  check('the real command-line launch selects its corresponding file-tree row', () => {
+    assert.strictEqual(cliReveal.active, true);
+  });
+  check('the real command-line launch expands every ancestor and scrolls the row into view', () => {
+    assert.ok(cliReveal.opens.every(Boolean), `ancestor open states = ${JSON.stringify(cliReveal.opens)}`);
+    assert.strictEqual(cliReveal.visible, true, 'the active command-line row must be visible in the sidebar');
+  });
 
   // ---- a file in NO repo adopts its containing directory -----------------------------------------
   await open(wc, path.join(SCRATCH, 'sub', 'a.md'));

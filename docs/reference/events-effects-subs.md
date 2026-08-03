@@ -67,10 +67,10 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:tree/received` | db | `{:root :files}` | — | `:ui :tree` ← `{:root :files(vec)}` | — |
+| `:tree/received` | fx | `{:root :files :synthetic?}` | `:ui :projects` | merge into `:ui :projects` | `[:tree/reveal-active nil]` — a post-render continuation that expands/reveals an already-active command-line file once its asynchronous tree arrives |
 | `:tree/filter` | fx | `q` | — | — | `[:async/debounce {:key :tree/filter :ms 90 :dispatch [:tree/filter-commit q]}]` |
 | `:tree/filter-commit` | db | `q` | — | `:ui :tree-filter` ← q | — |
-| `:tree/move` **[input]** | db | `dir` | `:ui :tree`, `:ui :tree-filter`, `:ui :tree-selected` | `:ui :tree-selected` ← next visible path (wrapping over the **filtered** list) | — |
+| `:tree/move` **[input]** | db | `dir` | `:ui :projects`, `:ui :tree-filter`, `:ui :tree-selected` | `:ui :tree-selected` ← next visible path (wrapping over the **filtered** list) | — |
 | `:tree/activate` **[input]** | fx | — | `:ui :tree-selected` | — | when selected: dispatch `[:doc/open sel]` |
 
 ### 1.7 In-page find
@@ -291,6 +291,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:async/cancel` | `key` | `vinary.async.scheduler/cancel!` — clears the pending timer and invalidates any running sliced job for that key | — |
 | `:ds/transact` | `tx` (tx-data vector) | `d/transact! ds/conn tx` (the sole DataScript write path) | — (the conn listener dispatches `[:ds/changed]`) |
 | `:scroll/restore` | `n` | remember a pending content scrollTop for the next render | — |
+| `:tree/reveal-active` | `_` | coalesce through Reagent's post-render queue, then expand the active Files-row ancestors additively and scroll it into view; no polling or request retry | — |
 | `:markdown/render` | `{:text :path :stamp :on-done}` | `md/render text` (unified pipeline → `Promise<{:html :toc :assets}>`) | `.then` → `(conj on-done result)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
 | `:theme/apply` | `theme` (string) | `set! (.-href #vv-theme-link) "css/themes/<theme>.css"` | — |
 | `:find/search` | `{:q :gen}` | `await pdf-cache/ensure-active!` (materialize PDF text layers / drain a stream) → `finder/search! q on-result` — **sliced and cancellable**; a superseded run never calls back (ADR-0033) | `[:find/result {:count :idx :gen}]` |
