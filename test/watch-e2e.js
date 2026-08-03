@@ -69,6 +69,19 @@ function renderedText(win) {
   return evalIn(win, `document.querySelector('.vv-content .markdown-body')?.textContent || ''`);
 }
 
+function projectFiles(win) {
+  return evalIn(win, `(window.__vvdb()?.ui?.projects || [])
+    .find((project) => project.root === ${JSON.stringify(SCRATCH)})?.files || []`);
+}
+
+async function waitForTreeFile(win, relativePath, present, label) {
+  return until(
+    () => projectFiles(win),
+    (files) => files.includes(relativePath) === present,
+    label
+  );
+}
+
 async function waitForText(win, token, label) {
   return until(() => renderedText(win), (text) => text.includes(token), label);
 }
@@ -98,6 +111,37 @@ async function run() {
   ]);
   console.log('[ok] one file change refreshes every retaining renderer window');
 
+  // Tree watchers have separate ownership: one shared depth-0 watcher per expanded directory, with the
+  // owner set reconciled from each mounted Files view. A structural add must fan out to both windows.
+  const treeBoth = path.join(SCRATCH, 'tree-both.md');
+  fs.writeFileSync(treeBoth, '# both expanded\n');
+  await Promise.all([
+    waitForTreeFile(first, 'tree-both.md', true, 'tree add fan-out to the first window'),
+    waitForTreeFile(second, 'tree-both.md', true, 'tree add fan-out to the second window')
+  ]);
+  console.log('[ok] one structural change refreshes every window with that directory expanded');
+
+  // Collapse only the first root. Its renderer must leave the shared watch's owner set without tearing down
+  // the second owner's subscription or receiving the second owner's future scoped updates.
+  await evalIn(first, `document.querySelector(
+    ${JSON.stringify(`details.vv-project[data-root=${JSON.stringify(SCRATCH)}] > summary`)})?.click(); true`);
+  await until(
+    () => evalIn(first, `(() => { const d=document.querySelector(
+      ${JSON.stringify(`details.vv-project[data-root=${JSON.stringify(SCRATCH)}]`)});
+      return d ? Boolean(d.open) : null; })()`),
+    (open) => open === false,
+    'the first window project root to collapse'
+  );
+  await sleep(350);
+  const secondOnly = path.join(SCRATCH, 'tree-second-only.md');
+  fs.writeFileSync(secondOnly, '# only second expanded\n');
+  await waitForTreeFile(second, 'tree-second-only.md', true,
+    'the remaining expanded owner to receive a structural update');
+  await sleep(500);
+  assert.ok(!(await projectFiles(first)).includes('tree-second-only.md'),
+    'a collapsed window must not receive another owner\'s automatic tree refresh');
+  console.log('[ok] collapsing one window releases only its tree-watcher ownership');
+
   // The old implementation's single destination was the most recent opener. Destroy it without renderer-side
   // cleanup IPC, then prove the surviving owner still receives the next edit and therefore still owns the watch.
   second.close();
@@ -106,6 +150,17 @@ async function run() {
   fs.writeFileSync(DOC, '# Shared watch\n\nversion-three\n');
   await waitForText(first, 'version-three', 'surviving owner refresh after the other window closes');
   console.log('[ok] destroying one owner preserves the shared watcher and routes refresh to the survivor');
+
+  // Re-expansion first reconciles everything missed while collapsed, then installs a new sole-owner watcher.
+  await evalIn(first, `document.querySelector(
+    ${JSON.stringify(`details.vv-project[data-root=${JSON.stringify(SCRATCH)}] > summary`)})?.click(); true`);
+  await waitForTreeFile(first, 'tree-second-only.md', true,
+    'the collapsed survivor to reconcile before reopening');
+  await sleep(350);
+  fs.writeFileSync(path.join(SCRATCH, 'tree-first-reacquired.md'), '# sole owner\n');
+  await waitForTreeFile(first, 'tree-first-reacquired.md', true,
+    'the surviving window to reacquire automatic tree refresh');
+  console.log('[ok] re-expansion after owner destruction reacquires a clean sole-owner tree watcher');
 }
 
 app.whenReady().then(() =>

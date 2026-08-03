@@ -34,7 +34,7 @@ window/view work. Renderer code never imports these namespaces.
 | Namespace | Responsibility |
 |-----------|----------------|
 | `vinary.main.core` | Electron app/window lifecycle: creates the sandboxed renderer window + contextBridge preload, wires the menu, and opens the initial argv file. |
-| `vinary.main.service` | Main-process IO service: read files, push content over the Mediator IPC seam, retained-file watcher reconciliation, Markdown asset watchers, git tree, sibling-PDF/source detection. Registers the file / streaming / diff-source / remote-asset / retained-file `vv:*` handlers. |
+| `vinary.main.service` | Main-process IO service: reads/content pushes, retained-document and asset watchers, git/synthetic trees, expansion-scoped shallow tree-watcher ownership, and sibling-PDF/source detection. Registers the file/stream/tree refresh/retention `vv:*` handlers. |
 | `vinary.main.service-util` | Pure, electron/DOM-free routing helpers for the IO service (so the node `:test` build can assert routing without Electron). |
 | `vinary.main.content_service.js` | *(JS)* Electron-free content engine: bounded paged reads for large logs / delimited tables, office (docx via mammoth, ODF) + workbook parsing, log sniffing, byte/line **streaming sessions** (`streamOpen`/`Pull`/`Close`), remote SFTP reads, and diff-source + remote-asset resolution. Reused verbatim by vv-cli/vv-tui. |
 | `vinary.main.file-kind` | Pure file-kind classifier (extension → `kind`) shared by the service and tests; also `remote-uri?` / `archive-uri?` / `pdf-sibling-path` / `source-sibling-paths`. |
@@ -72,7 +72,7 @@ window/view work. Renderer code never imports these namespaces.
 
 | File | Responsibility |
 |------|----------------|
-| `resources/preload.js` | Exposes `window.vv` via `contextBridge`; all renderer↔main IPC crosses here (89 `vv:*` channels). |
+| `resources/preload.js` | Exposes `window.vv` via `contextBridge`; all renderer↔main IPC crosses here (95 `vv:*` channels). |
 | `resources/web-preload.js` | Runs inside the HTTP web view (isolated): reports the heading outline + active heading, scrolls on TOC jumps and forwarded page keys, and runs the native password-form observer + self-contained link hints. |
 
 See [ipc-channels.md](ipc-channels.md).
@@ -97,6 +97,7 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 | `vinary.app.subs` | Subscriptions over app-db and DataScript snapshots. |
 | `vinary.app.commands` | Command registry used by keybindings and the palette. |
 | `vinary.app.tree-model` | Pure model behind the file tree: fold flat repo-relative paths into a nested structure, and narrow it by a filter (ADR-0033). |
+| `vinary.app.tree-state` | Pure controlled-disclosure model: known/ancestor/effective expansion scopes, pruning, active-file reveal scopes, and remembered open roots (ADR-0034). |
 | `vinary.app.palette` | Pure candidate model for the command palette — ranks raw strings and materialises an item only for survivors. |
 | `vinary.async.scheduler` | The one cancellable, budgeted job runner: `debounce!` (one live timer per key), `coalesce!` (one response per painted frame), `slice!` (step under a frame budget), `cancel!`, and the two paces — `ric` (display) and `yield!` (input queue). |
 | `vinary.async.budget` | The substitutable clock behind the frame budget, so the budgeting arithmetic is testable without sleeping. |
@@ -155,7 +156,7 @@ find, scroll, and the pdf.js / CodeMirror engines.
 | `vinary.renderer.syntax` | Read-only source view: a CodeMirror 6 editor highlighted by web-tree-sitter grammars; grammar registry, source selection, and source⇄line scroll helpers. |
 | `vinary.renderer.hints` | Vimium-style link hints for the content pane: collect visible targets, assign labels, follow a chosen target. |
 | `vinary.renderer.history-input` | Coalescing for browser-style history commands that can arrive through multiple native input channels. |
-| `vinary.renderer.tree-reveal` | Coalesced post-render Files-tree action: expand the active row's ancestor folders additively and reveal the row after active-path or project-arrival events. |
+| `vinary.renderer.tree-reveal` | Coalesced post-render Files-tree scroll: reveal the active row after declarative ancestor expansion has committed. |
 
 ---
 
@@ -168,7 +169,7 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.views` | Main shell, content strategy (per-kind view selection), Markdown body lifecycle, toolbar, status/modeline; hosts the in-pane directory browser (`:doc/kind = "directory"`) and the Ctrl-hover breadcrumb URI bar. |
 | `vinary.ui.tabs` | The tab strip + the shared tab-item used by the horizontal strip and the sidebar's vertical Tabs list. |
 | `vinary.ui.sidebar` | The left sidebar shell: a tabbed pane hosting the multi-project Files tree and the Contents (TOC) outline. |
-| `vinary.ui.tree` | The git file-tree (the sidebar's Files tab). The VIEW only — narrowing and folding live in `vinary.app.tree-model` behind the `:tree/filtered` sub (ADR-0033). |
+| `vinary.ui.tree` | The Files tree view: controlled refresh-before-open `<details>`, automatic watcher-scope sync, and file navigation. Narrowing/folding and expansion arithmetic live in pure app models (ADRs 0033/0034). |
 | `vinary.ui.text-input` | The one text `<input>` whose DOM value is owned locally, so a re-render can never take a typed character back out of it. Used by the find bar, tree filter, palette, and Preferences fields. |
 | `vinary.ui.context-menu` | The themed right-click context menu: targets and actions. |
 | `vinary.ui.menubar` | The custom, theme-matched menu bar (File / View / Settings / Help), incl. the `View ▸ Fit` radio submenu. |

@@ -52,6 +52,10 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 | `vv:close` | `close(path)` | string path | `vinary.main.service` | Close an individual watcher path. Kept for compatibility; retained sync is authoritative. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained path set. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a document. |
+| `vv:tree-roots` | `syncTreeRoots(roots)` | visible root vector | `vinary.main.service` | Reconcile this window's visible project roots; only roots previously offered by main are accepted. |
+| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `vinary.main.service` | Reconcile shallow file-tree watchers to the mounted Files view's effective expanded directories. |
+| `vv:tree-refresh` *(invoke)* | `refreshTree(request)` | `{root, path}` → tree payload | `vinary.main.service` | Explicitly list one visible root/directory. The path must remain beneath its offered root. |
+| `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every project root visible in this window. |
 | `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
 | `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
 | `vv:load-pdf-bytes` *(invoke)* | `loadPdfBytes(path)` | string path | `content_service` | Load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch; no new tab). |
@@ -144,7 +148,7 @@ Every `on*` API returns an unsubscribe function.
 |---------|-----------------|---------|----------------|
 | `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?}` | `[:content/received payload]` |
 | `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
-| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?}` | `[:tree/received payload]` |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated payload]` |

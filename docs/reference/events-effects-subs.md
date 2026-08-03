@@ -67,7 +67,13 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:tree/received` | fx | `{:root :files :synthetic?}` | `:ui :projects` | merge into `:ui :projects` | `[:tree/reveal-active nil]` — a post-render continuation that expands/reveals an already-active command-line file once its asynchronous tree arrives |
+| `:tree/received` | fx | `{:root :files :synthetic? :scope?}` | `:ui :projects`, tree-open scopes | full project merge or exact scoped-subtree replacement; prune stale scopes | sync visible roots, dispatch declarative active reveal |
+| `:tree/expand` → `:tree/expand-ready` / `-failed` | fx | `root directory` / scope + reply | projects, open/pending scopes | mark pending; on success commit subtree + open scope atomically; failure leaves closed | `:vv/refresh-tree` |
+| `:tree/collapse` | db | `root directory` | tree-open scopes | remove the persistent open scope (effective descendants close too) | Files lifecycle later syncs the reduced watcher set |
+| `:tree/refresh` / `:tree/refresh-all` | fx | `{root path}` / — | visible projects | apply one scoped/full reply or every visible-root reply | `:vv/refresh-tree` / `:vv/refresh-all-trees` |
+| `:tree/sync-expanded` | fx | effective scope set | — | — | `:vv/sync-tree-expanded` |
+| `:tree/reveal-active` | fx | — | active path, projects | add its known ancestor scopes declaratively | post-render scroll-only `:tree/reveal-active` effect |
+| `:tree/restore-ready` | fx | per-root results | projects, remembered root scopes | apply successful listings, close failed roots, clear restoring gate | sync roots and reveal active row |
 | `:tree/filter` | fx | `q` | — | — | `[:async/debounce {:key :tree/filter :ms 90 :dispatch [:tree/filter-commit q]}]` |
 | `:tree/filter-commit` | db | `q` | — | `:ui :tree-filter` ← q | — |
 | `:tree/move` **[input]** | db | `dir` | `:ui :projects`, `:ui :tree-filter`, `:ui :tree-selected` | `:ui :tree-selected` ← next visible path (wrapping over the **filtered** list) | — |
@@ -291,7 +297,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:async/cancel` | `key` | `vinary.async.scheduler/cancel!` — clears the pending timer and invalidates any running sliced job for that key | — |
 | `:ds/transact` | `tx` (tx-data vector) | `d/transact! ds/conn tx` (the sole DataScript write path) | — (the conn listener dispatches `[:ds/changed]`) |
 | `:scroll/restore` | `n` | remember a pending content scrollTop for the next render | — |
-| `:tree/reveal-active` | `_` | coalesce through Reagent's post-render queue, then expand the active Files-row ancestors additively and scroll it into view; no polling or request retry | — |
+| `:tree/reveal-active` | `_` | coalesce through Reagent's post-render queue, then scroll the already-declaratively-expanded active Files row into view | — |
 | `:markdown/render` | `{:text :path :stamp :on-done}` | `md/render text` (unified pipeline → `Promise<{:html :toc :assets}>`) | `.then` → `(conj on-done result)`; `.catch` → `[:content/error {:path :message "render error: …"}]` |
 | `:theme/apply` | `theme` (string) | `set! (.-href #vv-theme-link) "css/themes/<theme>.css"` | — |
 | `:find/search` | `{:q :gen}` | `await pdf-cache/ensure-active!` (materialize PDF text layers / drain a stream) → `finder/search! q on-result` — **sliced and cancellable**; a superseded run never calls back (ADR-0033) | `[:find/result {:count :idx :gen}]` |
@@ -302,6 +308,11 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
+| `:vv/sync-tree-roots` | root vector | `window.vv.syncTreeRoots(roots)` → `vv:tree-roots` IPC | — |
+| `:vv/sync-tree-expanded` | `[{root, path}]` | `window.vv.syncTreeExpanded(scopes)` → `vv:tree-expanded` IPC | — |
+| `:vv/refresh-tree` | `{root path on-success on-failure}` | invoke `window.vv.refreshTree`; convert the listing/error at the edge | configured success/failure event |
+| `:vv/refresh-all-trees` | `{on-success on-failure}` | invoke `window.vv.refreshAllTrees` | configured success/failure event |
+| `:vv/refresh-trees` | `{scopes on-complete}` | invoke per-scope refreshes with `Promise.all`, retaining individual failures | configured completion event with result vector |
 | `:vv/save-recent` | `edn` (EDN string) | **debounced 300 ms**, then `window.vv.saveRecent(edn)` → `vv:recent-save` IPC (persists the dir→child trail + recent-files MRU to `recent.edn`) | — |
 | `:vv/http-toc-goto` | `id` | `window.vv.httpTocGoto(id)` → `vv:http-toc-goto` IPC | — |
 | `:vv/complete-path` | `input` | `window.vv.completePath(input)` ⮐ → URI-bar completion data (SFTP-aware) | `[:uri-complete/set …]` |
@@ -396,6 +407,7 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/collocated-default` | `app-db` | the `collocated-default` preference (`:pdf` \| `:document`) — which face a doc with a sibling PDF opens as |
 | `:ui/settings` | `app-db` | the persisted settings map (`settings.edn`) |
 | `:ui/projects` | `app-db` | the git-rooted file trees |
+| `:ui/tree-open` / `:ui/tree-expanding` / `:ui/tree-restoring?` | `app-db` | persistent disclosure scopes / refresh-before-open pending scopes / Files-remount refresh gate |
 | `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents`) and its width |
 | `:ui/menu-focus` / `:ui/menu-submenu` / `:ui/menu-submenu-focus` | `app-db` | menu-bar keyboard traversal state |
 | `:ui/access-keys-active?` | `app-db` | bool — the Alt-held access-key underlines are showing |

@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('vv', {
   close: (path) => ipcRenderer.send('vv:close', path),
   syncRetainedFiles: (paths) => ipcRenderer.send('vv:retained-files', paths),
   watchAssets: (docPath, paths) => ipcRenderer.send('vv:watch-assets', { docPath, paths }),
+  syncTreeRoots: (roots) => ipcRenderer.send('vv:tree-roots', roots),
+  syncTreeExpanded: (scopes) => ipcRenderer.send('vv:tree-expanded', scopes),
+  refreshTree: (request) => ipcRenderer.invoke('vv:tree-refresh', request),
+  refreshAllTrees: () => ipcRenderer.invoke('vv:tree-refresh-all'),
   requestKeymap: () => ipcRenderer.send('vv:keymap-request'),
   requestGrammars: () => ipcRenderer.send('vv:grammars-request'),
   // RETIRED native-PDF seam (no main listener after ADR 0013 — PDFs now render in-renderer via pdf.js);

@@ -17,9 +17,9 @@ re-frame events/effects, DataScript, and views.
 6. Main `service/open!` reads/classifies the path, sends `vv:content`, sends
    `vv:tree` — the file's git root, or its containing directory as a synthetic
    root when it belongs to no repository — and ensures the file is watched.
-7. Renderer receives `vv:tree`; `:tree/received` merges the project and schedules
-   a coalesced post-render reveal. This expands the active file's ancestors after
-   the asynchronous row commits, including when command-line activation happened first.
+7. Renderer receives `vv:tree`; `:tree/received` merges the project, declaratively opens the active
+   file's known ancestor scopes, and schedules a coalesced post-render scroll after the row commits.
+   This also covers command-line activation that happened before the asynchronous tree payload.
 8. Renderer receives `vv:content` and dispatches `[:content/received payload]`.
 9. `:content/received` caches content in DataScript and starts Markdown render
    when needed.
@@ -43,7 +43,23 @@ keybindings, or scroll.
 
 ---
 
-## 3. Tab navigation
+## 3. Files-tree structural refresh
+
+1. `tree-state/effective-expanded` derives mounted directory scopes from persistent disclosure intent,
+   filter-forced paths, ancestor state, pending refresh gates, and visible projects.
+2. The Files component sends those scopes through `vv:tree-expanded`; main reconciles them into shared,
+   depth-0 Chokidar watchers. Collapse or unmount sends a smaller/empty set and releases ownership.
+3. A direct `add`, `unlink`, `addDir`, `unlinkDir`, or `.gitignore` change schedules a scoped re-list.
+4. Main sends `vv:tree` with root-relative `:scope`; `projects/apply-tree-update` replaces only that subtree.
+5. A direct user expansion first invokes `vv:tree-refresh`. `:tree/expand-ready` commits both the new
+   subtree and open scope, so stale contents never render expanded.
+6. Directory/project/Files-tab context menus invoke scoped, full-root, or all-visible-root refreshes.
+
+Ordinary file-content saves stay on §2's retained-document path and do not re-list the Files tree.
+
+---
+
+## 4. Tab navigation
 
 | Event | Flow |
 |-------|------|
@@ -58,7 +74,7 @@ the complete ownership set derived from all remaining tab histories.
 
 ---
 
-## 4. Markdown render and asset watch
+## 5. Markdown render and asset watch
 
 1. `:content/received` sees `kind = "markdown"` and emits `:markdown/render`.
 2. `vinary.renderer.markdown/render` runs unified/remark/rehype.
@@ -73,7 +89,7 @@ the complete ownership set derived from all remaining tab histories.
 
 ---
 
-## 5. In-renderer PDF and the native web view
+## 6. In-renderer PDF and the native web view
 
 PDFs render **in the renderer** via pdf.js ([ADR-0013](../design-decisions/0013-in-renderer-pdfjs.md)) —
 canvas + text/link layers in the DOM, *not* a main-owned view. Only HTTP/HTTPS (and local `.html`) content
@@ -88,7 +104,7 @@ The renderer owns tabs and history; the web view owns its own document scrolling
 
 ---
 
-## 6. Settings and keybindings
+## 7. Settings and keybindings
 
 Settings:
 
@@ -108,7 +124,7 @@ Keybindings:
 
 ---
 
-## 7. Error flow
+## 8. Error flow
 
 | Error source | Flow |
 |--------------|------|
@@ -121,7 +137,7 @@ content path clears it.
 
 ---
 
-## 8. Open a directory and update the trail
+## 9. Open a directory and update the trail
 
 Directories are navigation targets that open *in-tab* and reuse the file-open
 plumbing (no new IPC). The flow also maintains the persisted **trail** that powers
@@ -155,7 +171,7 @@ plumbing (no new IPC). The flow also maintains the persisted **trail** that powe
 
 ---
 
-## 9. Streaming a large document
+## 10. Streaming a large document
 
 For a document past the per-kind size threshold, the batch flow of §1 is replaced by a bounded-memory pull
 loop ([ADR-0018](../design-decisions/0018-document-streaming-pipeline.md),
@@ -172,7 +188,7 @@ loop ([ADR-0018](../design-decisions/0018-document-streaming-pipeline.md),
 5. On teardown (unmount / tab switch / live-refresh) the controller closes the session over
    `vv:stream-close`, and the main session registry returns to zero (no fd leak).
 
-## 10. Remote files and terminal render
+## 11. Remote files and terminal render
 
 - **Remote (`ssh://` / `sftp://`).** The open flow of §1 is unchanged except that `service` routes the URI to
   `openRemoteUri`, a virtual backend (`main.ssh` / `ssh_transport.js`) that reads over SFTP and feeds the same

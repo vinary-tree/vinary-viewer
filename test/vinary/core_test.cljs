@@ -1072,8 +1072,14 @@
     (testing "each target kind yields its expected items"
       (is (= #{"Open" "Open in new tab" "Copy file path" "Copy file name"}
              (labels (context-menu/items-for {:kind :file :path "/x/a.md"} false false))))
-      (is (contains? (labels (context-menu/items-for {:kind :dir :path "/x/d"} false false))
+      (is (contains? (labels (context-menu/items-for {:kind :dir :root "/x" :path "/x/d"} false false))
                      "Open in file manager"))
+      (is (contains? (labels (context-menu/items-for {:kind :dir :root "/x" :path "/x/d"} false false))
+                     "Refresh"))
+      (is (contains? (labels (context-menu/items-for {:kind :project :root "/x" :path "/x"} false false))
+                     "Refresh"))
+      (is (= #{"Refresh All"}
+             (labels (context-menu/items-for {:kind :files-tab} false false))))
       (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false false))
                      "Open in system browser"))
       (is (contains? (labels (context-menu/items-for {:kind :http :path "https://x" :text "X"} false false))

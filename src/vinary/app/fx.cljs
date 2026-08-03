@@ -244,6 +244,66 @@
            (fn [paths]
              (when-let [^js vv (.-vv js/window)]
                (when (.-syncRetainedFiles vv) (.syncRetainedFiles vv (clj->js (or paths [])))))))
+(rf/reg-fx :vv/sync-tree-roots
+           (fn [roots]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-syncTreeRoots vv) (.syncTreeRoots vv (clj->js (or roots [])))))))
+(rf/reg-fx :vv/sync-tree-expanded
+           (fn [scopes]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-syncTreeExpanded vv) (.syncTreeExpanded vv (clj->js (or scopes [])))))))
+
+(defn- tree-refresh-error [e]
+  (or (some-> e .-message) (str e) "tree refresh failed"))
+
+(rf/reg-fx
+ :vv/refresh-tree
+ (fn [{:keys [root path on-success on-failure]}]
+   (if-let [^js vv (.-vv js/window)]
+     (if (.-refreshTree vv)
+       (-> (.refreshTree vv (clj->js {:root root :path path}))
+           (.then (fn [entry]
+                    (rf/dispatch (conj (vec on-success)
+                                       (js->clj entry :keywordize-keys true)))))
+           (.catch (fn [e]
+                     (rf/dispatch (conj (vec on-failure) (tree-refresh-error e))))))
+       (rf/dispatch (conj (vec on-failure) "tree refresh API unavailable")))
+     (rf/dispatch (conj (vec on-failure) "tree bridge unavailable")))))
+
+(rf/reg-fx
+ :vv/refresh-all-trees
+ (fn [{:keys [on-success on-failure]}]
+   (if-let [^js vv (.-vv js/window)]
+     (if (.-refreshAllTrees vv)
+       (-> (.refreshAllTrees vv)
+           (.then (fn [entries]
+                    (rf/dispatch (conj (vec on-success)
+                                       (js->clj entries :keywordize-keys true)))))
+           (.catch (fn [e]
+                     (rf/dispatch (conj (vec on-failure) (tree-refresh-error e))))))
+       (rf/dispatch (conj (vec on-failure) "tree refresh API unavailable")))
+     (rf/dispatch (conj (vec on-failure) "tree bridge unavailable")))))
+
+(rf/reg-fx
+ :vv/refresh-trees
+ (fn [{:keys [scopes on-complete]}]
+   (if-let [^js vv (.-vv js/window)]
+     (if (.-refreshTree vv)
+       (let [requests
+             (mapv (fn [{:keys [root path] :as scope}]
+                     (-> (.refreshTree vv (clj->js {:root root :path path}))
+                         (.then (fn [entry]
+                                  {:scope scope :entry (js->clj entry :keywordize-keys true)}))
+                         (.catch (fn [e]
+                                   {:scope scope :error (tree-refresh-error e)}))))
+                   scopes)]
+         (-> (js/Promise.all (into-array requests))
+             (.then (fn [results]
+                      (rf/dispatch (conj (vec on-complete) (vec results)))))))
+       (rf/dispatch (conj (vec on-complete)
+                          (mapv (fn [scope] {:scope scope :error "tree refresh API unavailable"}) scopes))))
+     (rf/dispatch (conj (vec on-complete)
+                        (mapv (fn [scope] {:scope scope :error "tree bridge unavailable"}) scopes))))))
 ;; ask the HTTP web view's preload to scroll to a heading id (Contents/TOC click on an HTML page)
 (rf/reg-fx :vv/http-toc-goto
            (fn [id] (when-let [^js vv (.-vv js/window)] (when (.-httpTocGoto vv) (.httpTocGoto vv id)))))

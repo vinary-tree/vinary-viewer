@@ -6,7 +6,7 @@
 > [architecture/03-ipc-protocol.md](../architecture/03-ipc-protocol.md). The
 > concrete renderer-facing API is `window.vv`, exposed by
 > [`resources/preload.js`](../../resources/preload.js), which is the
-> **authoritative** source for this catalog (89 distinct `vv:*` channels).
+> **authoritative** source for this catalog (95 distinct `vv:*` channels).
 
 All renderer code talks to main through `window.vv`. The renderer never imports
 `ipcRenderer`, `fs`, or `child_process` directly. A separate isolated preload,
@@ -29,6 +29,10 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:close` | `close(path)` | `path` string | `service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace the sending window's retained local-file set. Watchers/assets are released only after no live window retains the path. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `service/watch-assets!` | Watch local media assets referenced by a retained Markdown/Org/LaTeX document. |
+| `vv:tree-roots` | `syncTreeRoots(roots)` | root string array | `service/sync-tree-roots!` | Reconcile the sending window's visible Files projects; unoffered roots are rejected. |
+| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `service/sync-tree-expanded!` | Reconcile shared depth-0 watchers to effective expanded directories; collapse/unmount releases ownership. |
+| `vv:tree-refresh` ⮐ | `refreshTree(request)` | `{root, path}` → `{root, files, synthetic?, scope?}` | `service/refresh-tree-request` | Re-list one directory beneath a visible, previously offered project root. |
+| `vv:tree-refresh-all` ⮐ | `refreshAllTrees()` | none → tree payload array | `service/refresh-all-tree-requests` | Re-list every project root visible in the sending window. |
 | `vv:content-page` ⮐ | `contentPage(request)` | `{path, kind, stamp, page, meta?}` → page payload with `hasPrev`/`hasNext` | `content_service.contentPage` | Fetch one bounded page for a large log or delimited-table preview. |
 | `vv:stream-open` ⮐ | `streamOpen(req)` | `{path, mode:"lines"\|"bytes"}` → `{sessionId, size, mode}` | `content_service.streamOpen` | Open a bounded-memory pull-cursor stream session (local `fs` or SFTP read-stream). |
 | `vv:stream-pull` ⮐ | `streamPull(req)` | `{sessionId}` → `{seq, done, progress, lines?\|text?, error?, partial?}` | `content_service.streamPull` | Pull the next batch (credit-1). `partial` flags a mid-stream drop (e.g. dropped SSH). |
@@ -131,7 +135,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 |---------|----------------------|---------|-----------------------|---------|
 | `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, dataUrl?, sourceable?, paged?, pdfSibling?, sourceSibling?}` | `[:content/received …]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first `:page`; a doc collocated with an exported PDF carries `:pdfSibling` (and a PDF its `:sourceSibling`). |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error …]` | Deliver read/render errors. |
-| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?}` | `[:tree/received …]` | Deliver file-tree data (one project per root). `synthetic? true` marks a root inferred from a file's containing directory rather than found by git. |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received …]` | Deliver a full project listing or a scoped automatic update. `scope` is root-relative; its files remain root-relative. `synthetic? true` marks an inferred non-git root. |
 | `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. |
 | `vv:grammars` | `onGrammars(cb)` | EDN **text** `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
 | `vv:settings` | `onSettings(cb)` | EDN **text** | `[:settings/received …]` | Deliver persisted settings. |

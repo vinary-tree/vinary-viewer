@@ -173,8 +173,9 @@ The key invariant is separation of concerns:
   and transient interaction state.
 - DataScript owns only bounded content entities such as `:doc/html`,
   `:doc/toc`, `:doc/assets`, `:doc/text`, and `:doc/error`.
-- Main owns file watchers and media watchers, and releases them when the
-  renderer sends the updated retained-file set.
+- Main owns retained-file/media watchers and the Files tree's shallow directory watchers. Document
+  watchers follow retained tab histories; tree watchers follow only effectively expanded directories
+  and are released on collapse, ancestor collapse, or Files-view unmount.
 
 This is why live refresh can repaint content without discarding scroll position,
 history, keybindings, or other UI state.

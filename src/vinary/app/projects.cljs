@@ -9,18 +9,55 @@
    opening a handful of files under one directory would stack up overlapping trees of the same files."
   (:require [clojure.string :as str]))
 
+(defn normalized-path
+  "A comparison form for an absolute local path. Main owns canonicalisation; renderer only has to make
+   Windows' `\\` separator agree with git's `/`-separated relative entries. The original string remains
+   the project identity sent back over IPC."
+  [p]
+  (when p (str/replace (str p) #"\\" "/")))
+
+(defn same-path?
+  "Separator-independent local-path equality (without inventing filesystem case-sensitivity rules)."
+  [a b]
+  (boolean (and a b (= (normalized-path a) (normalized-path b)))))
+
+(defn join-path
+  "Join an absolute renderer path to a `/`-relative child without doubling POSIX or Windows root
+   separators. This deliberately preserves `root`'s spelling because it is also the project/IPC identity."
+  [root relative]
+  (let [relative (str relative)]
+    (if (str/blank? relative)
+      root
+      (str root (if (re-find #"[\\/]$" (str root)) "" "/") relative))))
+
+(defn- child-prefix [parent]
+  (if (str/ends-with? parent "/") parent (str parent "/")))
+
 (defn under?
-  "Is `child` at or beneath `parent`? Compared on segment boundaries, so \"/a/bc\" is NOT under \"/a/b\"."
+  "Is `child` at or beneath `parent`? Separators are normalised and comparison is on segment boundaries,
+   so both Windows paths work and `/a/bc` is NOT under `/a/b`."
   [child parent]
-  (boolean (and child parent
-                (or (= child parent)
-                    (str/starts-with? child (str parent "/"))))))
+  (let [child  (normalized-path child)
+        parent (normalized-path parent)]
+    (boolean (and child parent
+                  (or (= child parent)
+                      (str/starts-with? child (child-prefix parent)))))))
+
+(defn relative-path
+  "`child` relative to `parent`, using `/`, or nil when it is outside `parent`. Exact equality returns
+   the empty string. This is renderer-side path arithmetic only; MAIN still validates every IPC path with
+   Node's platform-native `path.relative`."
+  [child parent]
+  (let [child  (normalized-path child)
+        parent (normalized-path parent)]
+    (when (under? child parent)
+      (if (= child parent) "" (subs child (count (child-prefix parent)))))))
 
 (defn- rebase-prefix
   "The path of `root` relative to the `parent` that contains it, with a trailing \"/\" — the prefix that
    turns root-relative paths into parent-relative ones. `parent` must strictly contain `root`."
   [parent root]
-  (str (subs root (inc (count parent))) "/"))
+  (str (relative-path root parent) "/"))
 
 (defn- merge-subtree
   "Refresh `parent`'s listing with a freshly walked subtree rooted at `entry`'s root: every existing path
@@ -38,8 +75,8 @@
        reordering the sidebar;
      • a synthetic root covered by a known SYNTHETIC root does not become a second tree; instead its
        freshly walked subtree is merged into that root, so the file just opened is always visible;
-     • a synthetic root covered by a GIT root is dropped outright — git re-lists the whole repository on
-       every open of its own, so its listing is never stale;
+     • a synthetic root covered by a GIT root is dropped outright — the git root is authoritative and its
+       incoming payload is already a complete repository listing;
      • otherwise it is appended, and any SYNTHETIC root it now covers is absorbed (the broader view wins,
        so /notes/sub followed by /notes leaves one tree rather than two overlapping ones).
    Containment only ever removes synthetic roots: a git repository nested inside a browsed directory is a
@@ -69,6 +106,24 @@
               (filterv #(not (and (:synthetic? %) (under? (:root %) root))) projects)
               projects)
             entry))))
+
+(defn apply-tree-update
+  "Apply a main-process tree payload. A payload without :scope is a full project entry and follows
+   `merge-project`'s root/containment rules. A scoped payload keeps the exact project identity and
+   replaces only root-relative files beneath that directory; if the project disappeared while an
+   async refresh was in flight, the stale scoped reply is ignored."
+  [projects {:keys [root scope files] :as entry}]
+  (if (nil? scope)
+    (merge-project projects entry)
+    (let [projects (vec projects)
+          idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))
+          prefix   (when-not (str/blank? scope) (str scope "/"))]
+      (if (nil? idx)
+        projects
+        (let [old  (:files (nth projects idx))
+              keep? (if prefix #(not (str/starts-with? % prefix)) (constantly false))]
+          (assoc-in projects [idx :files]
+                    (into (filterv keep? old) (vec files))))))))
 
 (defn remove-project
   "Drop the project rooted at `root` from the list. The root returns if a file under it is opened again —

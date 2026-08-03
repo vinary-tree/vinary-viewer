@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0034**.
+The next free number is **0035**.
 
 ---
 
@@ -91,6 +91,7 @@ The next free number is **0034**.
 | [0031](0031-per-content-type-fonts-and-ligatures.md) | Per-content-type preview fonts (Noto Sans prose, Latin Modern for LaTeX, Fira Code mono) with a code-ligature toggle | Accepted |
 | [0032](0032-scroll-ownership-and-derived-input-focus.md) | One scroll owner (confined `scrollTo`, a terminating cancellable animator), input focus **derived** from `document.activeElement` rather than cached, and cross-node find | Accepted |
 | [0033](0033-asynchronous-text-input.md) | Text fields own their own DOM value; one keyed scheduler (`debounce!`/`coalesce!`/`slice!`/`cancel!`) replaces four deferral idioms; find flattens incrementally; one configurable search model replaces five matchers | Accepted |
+| [0034](0034-expansion-scoped-file-tree-watchers.md) | Expansion-scoped shallow file-tree watchers, refresh-before-open controlled disclosures, and explicit subtree/root/all refresh | Accepted |
 
 ---
 

@@ -1,13 +1,13 @@
 (ns vinary.renderer.tree-reveal
-  "Post-render DOM action for the Files tree. State changes remain declarative in re-frame/Reagent; this
-   namespace owns the one imperative edge needed after React commits: open the active row's ancestors and
-   bring it into view. Multiple triggers in one render frame coalesce into one action."
+  "Post-render DOM action for the Files tree. Expansion is declarative app-db state; this namespace owns
+   only the imperative edge needed after React commits: bring the active row into view. Multiple triggers
+   in one render frame coalesce into one action."
   (:require [reagent.core :as r]))
 
 (defonce ^:private scheduled? (atom false))
 
 (defn reveal-active!
-  "Expand the active file's ancestor <details> additively and scroll the row into view. With no argument,
+  "Scroll the active file into view after its controlled ancestor disclosures render. With no argument,
    resolve the currently mounted Files tree. Returns true when an active row was revealed."
   ([]
    (when (exists? js/document)
@@ -15,10 +15,6 @@
   ([^js root-el]
    (when root-el
      (when-let [^js a (.querySelector root-el ".vv-file-active")]
-       (loop [el (.-parentNode a)]
-         (when (and el (not (identical? el root-el)))
-           (when (= "DETAILS" (.-tagName el)) (set! (.-open el) true))
-           (recur (.-parentNode el))))
        (.scrollIntoView a #js {:block "nearest"})
        true))))
 

@@ -25,12 +25,16 @@
 (defonce ^:private window-owners (atom {}))  ; webContents.id -> {:wc wc :paths #{retained doc paths}}
 (defonce ^:private doc-assets (atom {}))      ; markdown doc path -> #{local media paths}
 (defonce ^:private asset-watchers (atom {}))  ; local media path -> {:watcher chokidar :owners #{doc paths}}
+(defonce ^:private tree-windows (atom {}))    ; wc.id -> {:wc :offered {root entry} :visible #{root} :expanded #{[root dir]}}
+(defonce ^:private tree-watchers (atom {}))   ; [root dir] -> {:watcher :owners #{wc.id} :timer timeout? :synthetic?}
 
 (def ^:private watch-options
   (clj->js {:ignoreInitial true
             :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))
 
 ;; ---- git file-tree (sidebar) ----
+(declare directory? reconcile-tree-watchers!)
+
 (defn- git [args cwd]
   (try
     (str/trim (cp/execFileSync "git" (clj->js args)
@@ -38,19 +42,31 @@
                                          :maxBuffer (* 64 1024 1024) :stdio ["ignore" "pipe" "ignore"]})))
     (catch :default _ nil)))
 
+(defn- repo-files
+  "The navigable file listing for an already-resolved git root, or nil when git fails."
+  [root]
+  (when-let [out (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)]
+    ;; `--cached` describes the index, so a tracked path deleted/renamed only in the working tree remains
+    ;; in that output. Remove git's deleted set while keeping the rename destination from `--others`.
+    (when-let [deleted-out (git ["ls-files" "--deleted"] root)]
+      (let [deleted (into #{} (remove str/blank?) (str/split deleted-out #"\n"))]
+        (into []
+              (comp (remove str/blank?) (remove deleted))
+              (str/split out #"\n"))))))
+
 (defn- repo-tree
   "The git repository containing file-path, as {:root <abs> :files [repo-relative…]}, or nil if not
    in a repo / git unavailable."
   [file-path]
-  (let [dir  (path/dirname file-path)
+  (let [dir  (if (directory? file-path) file-path (path/dirname file-path))
         root (git ["rev-parse" "--show-toplevel"] dir)]
     (when (and root (not (str/blank? root)))
       ;; --cached (tracked) + --others (untracked) --exclude-standard (drop .gitignore'd/excluded clutter):
       ;; shows files you're actively creating — including the one you just opened — while keeping build
-      ;; output / node_modules out. --cached and --others are disjoint, so no de-duplication is needed.
-      (let [out   (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)
-            files (when out (vec (remove str/blank? (str/split out #"\n"))))]
-        {:root root :files (or files [])}))))
+      ;; output / node_modules out. repo-files also subtracts --deleted because the index still names a
+      ;; tracked path whose working-tree file was deleted or renamed without being staged.
+      (when-let [files (repo-files root)]
+        {:root root :files files :synthetic? false}))))
 
 (defn- kind-of [^String path]
   (file-kind/kind-of grammars/source? path))
@@ -65,13 +81,60 @@
 (defn- directory? [path]
   (try (and (not (archive-uri? path)) (.isDirectory (.statSync fs path))) (catch :default _ false)))
 
+(defn- offer-tree! [^js wc entry]
+  (let [id (.-id wc)]
+    (swap! tree-windows
+           (fn [windows]
+             (let [window (get windows id {:wc wc :offered {} :visible #{} :expanded #{}})]
+               (assoc windows id (-> window
+                                     (assoc :wc wc)
+                                     (assoc-in [:offered (:root entry)]
+                                               (select-keys entry [:root :synthetic?])))))))))
+
+(defn- send-tree-entry! [^js wc entry]
+  (when (and entry wc (try (not (.isDestroyed wc)) (catch :default _ false)))
+    (offer-tree! wc entry)
+    (.send wc "vv:tree" (clj->js entry))))
+
 (defn- send-tree!
   "Send the sidebar tree for a path: its git repository when it has one, else its containing directory as a
    synthetic project root, so a file outside every repo still gets a Files tab. The fallback walk lives in
    vinary.main.dir-walk, which is Electron-free and therefore node-testable."
   [^js wc file-path]
   (when-let [t (or (repo-tree file-path) (dir-walk/dir-tree file-path (directory? file-path)))]
-    (.send wc "vv:tree" (clj->js t))))
+    (send-tree-entry! wc t)))
+
+(defn- relative-scope
+  "A root-relative `/` path for directory, or nil when directory escapes root."
+  [root directory]
+  (let [rel (try (.relative path root directory) (catch :default _ nil))]
+    (when (and (string? rel)
+               (not (.isAbsolute path rel))
+               (not= rel "..")
+               (not (str/starts-with? rel (str ".." (.-sep path)))))
+      (str/replace rel #"\\" "/"))))
+
+(defn- prefix-files [scope files]
+  (if (str/blank? scope)
+    (vec files)
+    (let [prefix (str scope "/")]
+      (filterv #(str/starts-with? % prefix) files))))
+
+(defn- tree-entry-for
+  "List one visible project root, optionally scoped to an expanded descendant directory. Scoped
+   payloads keep every file root-relative so renderer replacement never needs platform path logic."
+  [root synthetic? directory]
+  (when-let [scope (relative-scope root directory)]
+    (if synthetic?
+      (let [subfiles (dir-walk/walk-dir directory)
+            files    (if (str/blank? scope)
+                       subfiles
+                       (mapv #(str scope "/" %) subfiles))]
+        (cond-> {:root root :files files :synthetic? true}
+          (not (str/blank? scope)) (assoc :scope scope)))
+      (when-let [files (repo-files root)]
+        (cond-> {:root root :files (prefix-files scope files) :synthetic? false}
+          (not (str/blank? scope)) (assoc :scope scope))))))
 
 (defn- entry->map
   "One directory child as plain data for the renderer's directory view. Symlinks are flagged and
@@ -240,14 +303,142 @@
                   (when (live-webcontents? wc) wc))))
         (retention/owner-ids-for @window-owners path)))
 
+;; ---- expansion-scoped Files-tree watchers ----------------------------------------------------------
+(declare refresh-watched-tree! ensure-window!)
+
+(def ^:private tree-refresh-debounce-ms 150)
+
+(defn- stop-tree-watcher! [scope]
+  (when-let [{:keys [watcher timer]} (get @tree-watchers scope)]
+    (when timer (js/clearTimeout timer))
+    (.close ^js watcher)
+    (swap! tree-watchers dissoc scope)))
+
+(defn- schedule-tree-refresh! [scope]
+  (when-let [{:keys [timer]} (get @tree-watchers scope)]
+    (when timer (js/clearTimeout timer))
+    (let [timer (js/setTimeout #(refresh-watched-tree! scope) tree-refresh-debounce-ms)]
+      (when (.-unref timer) (.unref timer))
+      (swap! tree-watchers assoc-in [scope :timer] timer))))
+
+(defn- start-tree-watcher! [[root directory :as scope] owners synthetic?]
+  ;; Every expanded directory owns one SHALLOW subscription. Descendants become watched only when their
+  ;; disclosures are effectively open in the mounted Files view and renderer syncs them separately.
+  (let [w (watch directory (clj->js {:ignoreInitial true :depth 0 :followSymlinks false}))]
+    (doseq [event ["add" "unlink" "addDir" "unlinkDir"]]
+      (.on w event (fn [_] (schedule-tree-refresh! scope))))
+    ;; A gitignore edit can alter membership without adding/removing the ignore file itself. Other content
+    ;; changes leave the file-derived tree identical and deliberately do not re-list it.
+    (.on w "change" (fn [changed]
+                       (when (= ".gitignore" (path/basename changed))
+                         (schedule-tree-refresh! scope))))
+    (swap! tree-watchers assoc scope {:watcher w :owners owners :timer nil
+                                      :synthetic? (boolean synthetic?)})
+    ;; `ignoreInitial` deliberately suppresses the directory's existing children, but that also creates a
+    ;; listing→subscription race: an entry created after expansion's explicit listing and before chokidar is
+    ;; ready can be classified as initial. One ready-time reconciliation closes that gap.
+    (.once w "ready" (fn [] (schedule-tree-refresh! scope)))))
+
+(defn- desired-tree-watcher-owners []
+  (reduce-kv
+   (fn [acc id {:keys [expanded]}]
+     (reduce (fn [m scope] (update m scope (fnil conj #{}) id)) acc expanded))
+   {}
+   @tree-windows))
+
+(defn- scope-source [[root _directory] owners]
+  (some (fn [id] (get-in @tree-windows [id :offered root :synthetic?])) owners))
+
+(defn- reconcile-tree-watchers! []
+  (let [desired (desired-tree-watcher-owners)
+        old     (set (keys @tree-watchers))
+        new     (set (keys desired))]
+    (doseq [scope (set/difference old new)] (stop-tree-watcher! scope))
+    (doseq [[scope owners] desired]
+      (let [synthetic? (boolean (scope-source scope owners))]
+        (if-let [entry (get @tree-watchers scope)]
+          (if (= synthetic? (:synthetic? entry))
+            (swap! tree-watchers assoc-in [scope :owners] owners)
+            (do (stop-tree-watcher! scope)
+                (start-tree-watcher! scope owners synthetic?)))
+          (start-tree-watcher! scope owners synthetic?))))))
+
+(defn- live-tree-window [id]
+  (let [^js wc (get-in @tree-windows [id :wc])]
+    (when (and wc (try (not (.isDestroyed wc)) (catch :default _ false))) wc)))
+
+(defn- refresh-watched-tree! [[root directory :as scope]]
+  (when-let [{:keys [owners synthetic?]} (get @tree-watchers scope)]
+    (swap! tree-watchers assoc-in [scope :timer] nil)
+    (when-let [entry (tree-entry-for root synthetic? directory)]
+      (let [entry (cond-> entry
+                    ;; The root listing is complete, but marking it as the empty relative scope tells the
+                    ;; renderer this is an automatic exact-root replacement, not a new-project arrival.
+                    (= root directory) (assoc :scope ""))]
+        (doseq [id owners]
+          (when (contains? (get-in @tree-windows [id :expanded] #{}) scope)
+            (when-let [wc (live-tree-window id)]
+              (send-tree-entry! wc entry))))))))
+
+(defn- offered-visible-root [^js wc root]
+  (let [id (.-id wc)]
+    (when (contains? (get-in @tree-windows [id :visible] #{}) root)
+      (get-in @tree-windows [id :offered root]))))
+
+(defn- sync-tree-roots! [^js wc roots]
+  (let [id      (ensure-window! wc)
+        offered (set (keys (get-in @tree-windows [id :offered] {})))
+        visible (set/intersection offered (->> roots (filter string?) set))]
+    (swap! tree-windows update id
+           (fn [window]
+             (let [window (or window {:wc wc :offered {} :expanded #{}})]
+               (-> window
+                   (assoc :wc wc :visible visible)
+                   (update :expanded #(into #{} (filter (fn [[root _]] (contains? visible root))) %))))))
+    (reconcile-tree-watchers!)))
+
+(defn- sync-tree-expanded! [^js wc scopes]
+  (let [id      (ensure-window! wc)
+        visible (get-in @tree-windows [id :visible] #{})
+        valid   (into #{}
+                      (keep (fn [{:keys [root path]}]
+                              (when (and (string? root) (string? path)
+                                         (contains? visible root)
+                                         (some? (relative-scope root path)))
+                                [root path])))
+                      scopes)]
+    (swap! tree-windows assoc-in [id :expanded] valid)
+    (reconcile-tree-watchers!)))
+
+(defn- refresh-tree-request [^js wc {:keys [root path]}]
+  (when-not (and (string? root) (string? path))
+    (throw (js/Error. "invalid tree refresh request")))
+  (let [offer (offered-visible-root wc root)]
+    (when-not offer (throw (js/Error. "tree root is not visible in this window")))
+    (when-not (some? (relative-scope root path))
+      (throw (js/Error. "tree refresh path escapes its project root")))
+    (or (tree-entry-for root (:synthetic? offer) path)
+        (throw (js/Error. "tree listing failed")))))
+
+(defn- refresh-all-tree-requests [^js wc]
+  (let [id (.-id wc)]
+    (into []
+          (keep (fn [root]
+                  (let [offer (get-in @tree-windows [id :offered root])]
+                    (tree-entry-for root (:synthetic? offer) root))))
+          (get-in @tree-windows [id :visible] #{}))))
+
 (defn- release-window! [id]
   (let [paths (retention/paths-for @window-owners id)]
     (swap! window-owners retention/drop-owner id)
+    (swap! tree-windows dissoc id)
+    (reconcile-tree-watchers!)
     (doseq [path paths]
       (when-not (retained? path) (unwatch-file! path)))))
 
 (defn- ensure-window! [^js wc]
   (let [id (owner-id wc)]
+    (swap! tree-windows update id #(or % {:wc wc :offered {} :visible #{} :expanded #{}}))
     (when-not (contains? @window-owners id)
       (swap! window-owners retention/sync-owner id wc #{})
       ;; Process-lifetime watchers must not retain a dead window. One listener per owner
@@ -473,6 +664,18 @@
   (.handle ipcMain "vv:stream-close" (fn [_e req] (.streamClose content-service req)))
   (.handle ipcMain "vv:complete-path"
            (fn [_e raw] (if (file-kind/remote-uri? raw) (complete-remote raw) (clj->js (complete raw)))))
+  ;; Files-tree ownership is independent of document retention: projects persist in the sidebar after their
+  ;; tabs close, while automatic subscriptions exist only for effectively expanded directories.
+  (.on ipcMain "vv:tree-roots"
+       (fn [^js e roots] (sync-tree-roots! (.-sender e) (js->clj roots))))
+  (.on ipcMain "vv:tree-expanded"
+       (fn [^js e scopes]
+         (sync-tree-expanded! (.-sender e) (js->clj scopes :keywordize-keys true))))
+  (.handle ipcMain "vv:tree-refresh"
+           (fn [^js e req]
+             (clj->js (refresh-tree-request (.-sender e) (js->clj req :keywordize-keys true)))))
+  (.handle ipcMain "vv:tree-refresh-all"
+           (fn [^js e] (clj->js (refresh-all-tree-requests (.-sender e)))))
   ;; resolve a diff's referenced files (relative to the diff, walking up ancestors) → {rel → content}, for the
   ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"

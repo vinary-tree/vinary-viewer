@@ -332,6 +332,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-dir-name { cursor: pointer; padding: 2px 6px; color: var(--vv-meta); white-space: nowrap;
   list-style-position: inside; outline: none; }
 .vv-dir-name:hover { background: var(--vv-bg-code); }
+.vv-dir-refreshing { cursor: progress; opacity: .72; }
 .vv-file { display: block; padding: 2px 6px 2px 20px; color: var(--vv-fg); text-decoration: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .vv-file:hover { background: var(--vv-bg-code); color: var(--vv-head1); }

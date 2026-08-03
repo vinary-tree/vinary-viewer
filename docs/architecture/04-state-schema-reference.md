@@ -69,6 +69,9 @@ Current default shape:
       :sidebar-width 280
       :sidebar-tab :files
       :tree-selected nil
+      :tree-open #{}               ; persistent #{[project-root absolute-directory]} disclosure intent
+      :tree-expanding #{}          ; scopes waiting for refresh-before-open
+      :tree-restoring? false       ; returning to Files waits for remembered-root refresh
       :dir-selected nil             ; highlighted directory-entry path (Enter / Alt+Down opens it)
       :tabs []
       :active-tab nil
@@ -112,6 +115,9 @@ Important slices:
 | `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. Merge rules live in `vinary.app.projects`. |
+| `[:ui :tree-open]` | Persistent disclosure intent as `[project-root absolute-directory]` scopes. Effective expansion additionally requires every ancestor and a mounted/visible Files tree. |
+| `[:ui :tree-expanding]` | Scopes whose explicit expansion is awaiting a main-process listing; they remain rendered closed. |
+| `[:ui :tree-restoring?]` | Returning from a hidden/unmounted Files view is refreshing remembered open roots before the tree remounts. |
 | `[:ui :settings]` | Persisted settings loaded from `settings.edn`. |
 | `[:ui :settings :search-modes]` | Optional `{surface → mode}` override for the shared search model — `:find`, `:tui`, `:tree`, `:palette`, `:uri` → `:substring` \| `:subsequence` \| `:prefix` \| `:word-prefix` \| `:regex`. Read through `vinary.search.config/mode-for`, which ignores a mode this build does not implement, so a stale or hand-edited settings file cannot produce a matcher that silently matches nothing. Absent by default (ADR-0033). |
 | `[:ui :keymaps]` | Persisted keymap registry loaded from `keybindings.edn`. |

@@ -94,17 +94,26 @@
                          (.addEventListener js/window "mousemove" on-move)
                          (.addEventListener js/window "mouseup" on-up))}])))
 
+(defn- files-context! [^js e]
+  (.preventDefault e)
+  (.stopPropagation e)
+  (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
+                                    :target {:kind :files-tab}}]))
+
 (defn sidebar []
   (let [visible? @(rf/subscribe [:ui/sidebar-visible?])
         width    @(rf/subscribe [:ui/sidebar-width])
-        tab      @(rf/subscribe [:ui/sidebar-tab])]
+        tab      @(rf/subscribe [:ui/sidebar-tab])
+        restoring? @(rf/subscribe [:ui/tree-restoring?])]
     (if-not visible?
       ;; collapsed → a thin rail with a re-open affordance
       [:div.vv-sidebar-rail {:title "Show sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :expand)]
       [:div.vv-sidebar {:style {:width (str (or width 280) "px")}}
        [:div.vv-sidebar-tabs
-        [:div.vv-sidebar-tab {:class    (when (= tab :files) "vv-sidebar-tab-active")
-                              :on-click #(rf/dispatch [:sidebar/tab :files])} (icons/icon :section-files) "Files"]
+        [:div.vv-sidebar-tab {:class           (when (= tab :files) "vv-sidebar-tab-active")
+                              :on-click        #(rf/dispatch [:sidebar/tab :files])
+                              :on-context-menu files-context!}
+         (icons/icon :section-files) "Files"]
         [:div.vv-sidebar-tab {:class    (when (= tab :contents) "vv-sidebar-tab-active")
                               :on-click #(rf/dispatch [:sidebar/tab :contents])} (icons/icon :section-contents) "Contents"]
         [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
@@ -115,5 +124,7 @@
         (case tab
           :contents [contents-panel]
           :tabs     [tabs-panel]
-          [tree/file-tree])]
+          (if restoring?
+            [:div.vv-sidebar-empty "Refreshing files…"]
+            [tree/file-tree]))]
        [resize-handle]])))

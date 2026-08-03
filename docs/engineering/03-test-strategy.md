@@ -90,6 +90,8 @@ framework. They fall into three groups by host.
 | Harness | Drives |
 |---------|--------|
 | [`electron-smoke.js`](../../test/electron-smoke.js) | The flagship. Boots the **real renderer** (`resources/public/index.html`) in Electron, wires `vv:stream-*` to the **real** `content_service.js` (genuine `createReadStream`/`readline` batching + the session registry), and asserts: streamed `innerHTML` is **byte-identical** to batch over a corpus; the mid-stream scrollbar spacer sizes the whole document ([ADR-0023](../design-decisions/0023-streaming-scrollbar-and-pacing.md)); the session registry returns to `0` after teardown (**no fd/session leak**); DevTools opens with no main-process crash; and re-frame-10x is hidden by default. |
+| [`tree-e2e.js`](../../test/tree-e2e.js) | Boots the compiled renderer and **real main service** against synthetic and git fixtures. It covers scoped structural refresh, add/delete/rename (including unstaged tracked git paths), refresh-before-open DOM ordering, watcher release, watcher-ready reconciliation, directory/project context-menu Refresh, and Files-tab Refresh All. |
+| [`watch-e2e.js`](../../test/watch-e2e.js) | Boots two real windows over the same path and proves one shallow tree watcher fans out to every retaining renderer, releases owners independently on collapse/window destruction, coexists with retained-document watchers, and is reacquired on expansion. |
 | [`extensions-smoke.js`](../../test/extensions-smoke.js) | The Chrome-extension + ad-block runtime ([ADR-0015](../design-decisions/0015-scoped-extension-runtime-gpl-free.md)): `session.extensions.loadExtension` loads the unpacked MV3 fixture, its content script injects into a matched HTTP page, its action popup loads with native `chrome.*` (runtime/storage/action), and the native ad-blocker fetches filter lists (network-gated). |
 | [`daemon-smoke.js`](../../test/daemon-smoke.js) | The resident-daemon control seam ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)): `vv1 ping` reports the pid/version/**loaded-bundle mtime**/window count `install.sh` verifies against; the v0.2 open message still opens a window; an unknown command opens none; `vv1 stop` exits the process and frees the socket **and** the single-instance lock; and `vv` retires a stale **idle** daemon but never one with a window open. It also guards the backward-compatibility contract that makes all this safe — a control frame must not parse as JSON, or probing a pre-`vv1` daemon would open a stray window on it. Spawns real daemons under a private `XDG_RUNTIME_DIR` and a renamed mirror app (its own userData → its own lock), so it cannot disturb the developer's live daemon. |
 
@@ -106,7 +108,7 @@ framework. They fall into three groups by host.
 | Harness | Drives |
 |---------|--------|
 | [`content-service-smoke.js`](../../test/content-service-smoke.js) | `content_service.js` — the main-process file reader — against real archives (`tar-stream`, `zlib`, `yauzl`) with a hand-rolled `crc32`, proving archive listing/extraction and content classification. |
-| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The v0.2 sidebar file-tree fix at its seam: `repo-tree` (in `service.cljs`) lists with `git ls-files --cached --others --exclude-standard`, so a newly-created, uncommitted, non-ignored file **appears** while `.gitignore`'d clutter does not. It exercises the exact git command against a throwaway repo, asserts `service.cljs` still issues it, and asserts `send-tree!` still falls back to `dir-walk/dir-tree` when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)). |
+| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The sidebar file-tree git seam: `repo-files` lists with `git ls-files --cached --others --exclude-standard` and subtracts `git ls-files --deleted`, so new non-ignored files appear while ignored clutter and deleted/unstaged-renamed tracked paths do not linger. It exercises both exact commands against a throwaway repo and asserts `send-tree!` still falls back to `dir-walk/dir-tree` when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)). |
 | [`ssh-config-smoke.js`](../../test/ssh-config-smoke.js) | Hermetic unit tests for `ssh_config.js` (pure, no fs/net): `parseSshUri` for `ssh://` / `sftp://` authority, port, user, and home-relative path handling ([ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)). |
 | [`ssh-transport-smoke.js`](../../test/ssh-transport-smoke.js) | `ssh_transport.js` end-to-end against the **hermetic in-process ssh2 SFTP fixture** (no network, no external host); also asserts ssh2 runs **pure-JS** (no native crypto addon) and that `AddKeysToAgent` adds a key to a throwaway ssh-agent. |
 
@@ -127,7 +129,7 @@ shadow-cljs compile test && node dist/test/test.js \
 ```
 
 The Electron smokes are separate scripts (`test:electron`, `test:electron:release`,
-`test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`) because they require a running
+`test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`, `test:watch-e2e`) because they require a running
 Electron with a display — a proposed CI matrix runs them under Xvfb (see
 [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
 
@@ -151,10 +153,11 @@ __vvopen(path) ─────────────────────�
 ```
 
 It asserts against **both** `window.__vvdb()` (app-db verbatim) and the real sidebar DOM, and drives
-the project-header context menu with genuine `MouseEvent`s — covering command-line startup selection,
-ancestor expansion + reveal, the synthetic root, its walk exclusions, containment absorption, git-root
-coexistence, the directory-is-its-own-root rule, and **Remove from Files** end to end. Its fixture and
-isolated `$XDG_CONFIG_HOME` are throwaway directories removed by the harness.
+context menus with genuine `MouseEvent`s. Besides project-root behavior, it covers automatic structural
+add/rename/delete refresh, the no-content-save-relist invariant, child/ancestor/tab watcher release,
+refresh-before-open at the first DOM `open` mutation, watcher-ready race reconciliation, and manual
+directory/project/Files-tab refresh end to end. Its watched fixture and isolated `$XDG_CONFIG_HOME` are
+separate throwaway directories removed by the harness.
 
 ```bash
 npm run test:tree-e2e     # shadow-cljs compile main renderer && xvfb-run -a electron … test/tree-e2e.js

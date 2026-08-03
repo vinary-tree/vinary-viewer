@@ -50,6 +50,11 @@ function git(args, cwd, env) {
 function listFiles(args, cwd, env) {
   return new Set(git(args, cwd, env).trim().split('\n').filter(Boolean));
 }
+function repoFiles(cwd, env) {
+  const listed = listFiles(['ls-files', '--cached', '--others', '--exclude-standard'], cwd, env);
+  const deleted = listFiles(['ls-files', '--deleted'], cwd, env);
+  return new Set([...listed].filter((file) => !deleted.has(file)));
+}
 function run(cmd, cwd, env) {                 // setup commands: swallow stdout/stderr
   execFileSync('git', cmd, { cwd, env, stdio: ['ignore', 'ignore', 'ignore'] });
 }
@@ -96,10 +101,29 @@ function main() {
     const rawLines = git(NEW, root, env).trim().split('\n').filter(Boolean);
     assert.strictEqual(rawLines.length, files.size, '--cached/--others disjoint: no duplicate paths');
 
+    // A working-tree-only rename leaves the old tracked path in `--cached` and exposes the destination via
+    // `--others`. repo-files subtracts `ls-files --deleted` so a watcher refresh replaces, rather than
+    // duplicates, the row before the user stages anything.
+    const oldTracked = path.join(persist, 'tracked-note.md');
+    const renamedTracked = path.join(persist, 'renamed-note.md');
+    fs.renameSync(oldTracked, renamedTracked);
+    const rawAfterRename = listFiles(NEW, root, env);
+    assert.ok(rawAfterRename.has('docs/persistence/tracked-note.md'),
+      '--cached alone retains the deleted side of an unstaged rename');
+    assert.ok(rawAfterRename.has('docs/persistence/renamed-note.md'),
+      '--others includes the unstaged rename destination');
+    const effectiveAfterRename = repoFiles(root, env);
+    assert.ok(!effectiveAfterRename.has('docs/persistence/tracked-note.md'),
+      'repo-files removes the deleted side of an unstaged rename');
+    assert.ok(effectiveAfterRename.has('docs/persistence/renamed-note.md'),
+      'repo-files keeps the unstaged rename destination');
+
     // bind this behavioral test to the shipped code: repo-tree must still issue these exact flags
     const src = fs.readFileSync(SERVICE, 'utf8');
     assert.ok(/\[\s*"ls-files"\s+"--cached"\s+"--others"\s+"--exclude-standard"\s*\]/.test(src),
       'service.cljs repo-tree must call git with --cached --others --exclude-standard');
+    assert.ok(/\[\s*"ls-files"\s+"--deleted"\s*\]/.test(src),
+      'service.cljs repo-files must subtract tracked paths deleted from the working tree');
 
     // …and that a file in NO repo still gets a tree: send-tree! must fall back to the synthetic root.
     // The fallback's own behavior is covered against real directories by the node :test build

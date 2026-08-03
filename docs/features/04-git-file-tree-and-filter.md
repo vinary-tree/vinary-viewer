@@ -15,8 +15,9 @@ tab. A project is one of two things:
 
 - a **git repository**, listed with `git ls-files --cached --others --exclude-standard`, so it shows
   everything in the repo **except** `.gitignore`d clutter — tracked files **plus**
-  untracked-but-not-ignored ones. A file you just created, including the one you opened, shows up
-  immediately, while build output and `node_modules` stay out;
+  untracked-but-not-ignored ones, minus tracked paths deleted from the working tree. A file you just
+  created, including the one you opened, shows up immediately, a deleted or unstaged-renamed path does
+  not linger, and build output and `node_modules` stay out;
 - for a file that belongs to **no** repository, its **containing directory**, walked directly. This is a
   *synthetic* root: an inference rather than a fact, which is why it behaves slightly differently when
   roots overlap (§4). Scratch notes in `/tmp`, a downloaded PDF, a standalone `.org` file — all are
@@ -39,10 +40,13 @@ leaving the previewer: open one file, then jump around from the sidebar.
 2. The sidebar shows the project (its top folder name as the header) as a collapsible tree.
 3. **Open a file:** click its entry. It opens in a tab (or activates an existing tab). Ctrl+click opens
    it in a new tab.
-4. **Collapse/expand a folder:** click the folder name (it is a native `<details>`/`<summary>`).
+4. **Collapse/expand a folder:** click the folder name. Opening waits for a fresh directory listing,
+   then reveals the directory and its new children together.
 5. **Filter:** type in the *Filter files…* box. The tree shrinks to matching files across every open
    project, and every folder on the path to a match is expanded so you can see them.
-6. **Remove a project:** right-click a project header → **Remove from Files**. It returns if you open a
+6. **Refresh explicitly:** right-click a directory or project header → **Refresh**. Right-click the
+   **Files** tab itself → **Refresh All** to re-list every project tree currently in Files.
+7. **Remove a project:** right-click a project header → **Remove from Files**. It returns if you open a
    file under it again.
 
 **Example.** Open `vv src/vinary/main/core.cljs`. The sidebar shows the whole repo. Type `theme` into
@@ -59,8 +63,8 @@ restore the full tree.
 
 ### MAIN process: find the project, list its files
 
-`src/vinary/main/service.cljs` tries git first. It shells out twice — once to find the repository root,
-once to list its tracked **and untracked-but-not-ignored** files:
+`src/vinary/main/service.cljs` tries git first. It finds the repository root, lists tracked plus
+untracked-but-not-ignored paths, and subtracts tracked paths deleted from the working tree:
 
 ```clojure
 (defn- git [args cwd]
@@ -70,13 +74,20 @@ once to list its tracked **and untracked-but-not-ignored** files:
                                          :maxBuffer (* 64 1024 1024) :stdio ["ignore" "pipe" "ignore"]})))
     (catch :default _ nil)))
 
+(defn- repo-files [root]
+  (when-let [out (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)]
+    (when-let [deleted-out (git ["ls-files" "--deleted"] root)]
+      (let [deleted (into #{} (remove str/blank?) (str/split deleted-out #"\n"))]
+        (into []
+              (comp (remove str/blank?) (remove deleted))
+              (str/split out #"\n"))))))
+
 (defn- repo-tree [file-path]
-  (let [dir  (path/dirname file-path)
+  (let [dir  (if (directory? file-path) file-path (path/dirname file-path))
         root (git ["rev-parse" "--show-toplevel"] dir)]
     (when (and root (not (str/blank? root)))
-      (let [out   (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)
-            files (when out (vec (remove str/blank? (str/split out #"\n"))))]
-        {:root root :files (or files [])}))))
+      (when-let [files (repo-files root)]
+        {:root root :files files :synthetic? false}))))
 ```
 
 Terms:
@@ -92,7 +103,8 @@ Terms:
 - **`git ls-files --cached --others --exclude-standard`** — prints every file worth navigating, one
   per line, as **repo-relative** paths: `--cached` lists tracked files, `--others` lists untracked
   files, and `--exclude-standard` drops anything matched by `.gitignore` / `.git/info/exclude` / the
-  global excludes. `--cached` and `--others` are disjoint, so there are no duplicates to remove.
+  global excludes. `--cached` describes the index, so it can still name a tracked path deleted or
+  renamed only in the working tree; `git ls-files --deleted` supplies the set `repo-files` subtracts.
 
 When `repo-tree` returns `nil`, the **synthetic root** takes over
 ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)):
@@ -132,27 +144,49 @@ That is what lets the `:node-test` build exercise the **real** walk against real
 in [`test/vinary/main/dir_walk_test.cljs`](../../test/vinary/main/dir_walk_test.cljs), rather than a
 hand-copied mirror of it.
 
+### MAIN process: watch only expanded directories
+
+The renderer sends its *effective* expanded scopes through `syncTreeExpanded`. Main reconciles those
+`[root directory]` scopes into shared Chokidar watchers with `depth 0`: an expanded directory watches
+only its immediate children. Opening a child gives that child its own watcher; collapsing it, collapsing
+an ancestor, hiding the sidebar, switching away from Files, removing the project, or destroying the
+window releases its ownership.
+
+The watchers listen for `add`, `unlink`, `addDir`, and `unlinkDir`, plus `.gitignore` changes. A normal
+content save does not re-list the file tree — retained-document watchers remain responsible for preview
+refresh. When a tree watcher fires, main returns a root-relative payload with `:scope`; the renderer
+replaces only that subtree. Every new watcher also performs one ready-time reconciliation so a file
+created between the expansion listing and Chokidar becoming ready cannot be missed. See
+[ADR-0034](../design-decisions/0034-expansion-scoped-file-tree-watchers.md).
+
 ### RENDERER: store the tree
 
 `src/vinary/renderer/core.cljs` routes `vv:tree` into a re-frame event, and the event folds it into the
 project list:
 
 ```clojure
-(rf/reg-event-db
- :tree/received
- (fn [db [_ entry]]
-   (update-in db [:ui :projects] projects/merge-project entry)))
+(defn apply-tree-update [projects {:keys [root scope files] :as entry}]
+  (if (nil? scope)
+    (merge-project projects entry)
+    (let [projects (vec projects)
+          idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))
+          prefix   (when-not (str/blank? scope) (str scope "/"))]
+      (if (nil? idx)
+        projects ; a late scoped reply cannot resurrect a removed project
+        (let [old   (:files (nth projects idx))
+              keep? (if prefix #(not (str/starts-with? % prefix)) (constantly false))]
+          (assoc-in projects [idx :files]
+                    (into (filterv keep? old) (vec files))))))))
 ```
 
 `[:ui :projects]` is a **vector** of `{:root :files :synthetic?}`, one entry per open project. Each
-project's flat `:files` vector is kept as-is; the nesting is computed in the view (a derived shape), so
-there is no second copy to maintain. The merge rules — which decide whether an arriving root joins the
-sidebar, refreshes an entry already there, or is swallowed by one that overlaps it — live in the pure
-`vinary.app.projects` namespace and are covered in §4.
+project's flat `:files` vector is kept as-is; nesting is derived by `vinary.app.tree-model`, so there is
+no second copy to maintain. Full payloads use the project merge rules in §4. Scoped watcher/manual
+payloads keep the exact project identity and replace only files beneath their segment-bounded prefix.
 
 ### RENDERER: fold flat paths into a nested tree
 
-`src/vinary/ui/tree.cljs` turns each project's flat root-relative paths into a nested map with one
+`src/vinary/app/tree_model.cljs` turns each project's flat root-relative paths into a nested map with one
 `assoc-in` per file:
 
 ```clojure
@@ -186,21 +220,25 @@ naturally because `assoc-in` shares the common prefix of the key path. The resul
 
 ### RENDERER: render nodes to collapsible hiccup
 
-`nodes->hiccup` walks the nested map and emits native `<details>` for folders and `<a>` for files
-(abridged — the full version also wires the right-click context menu and platform-dependent
-single/double-click opening):
+`nodes->hiccup` walks the nested map and emits controlled native `<details>` for folders and `<a>` for
+files (abridged):
 
 ```clojure
-(defn- nodes->hiccup [children root active open? dir-prefix]
+(defn- nodes->hiccup [children root active expanded expanding dir-prefix]
   (into [:<>]
         (for [[k v] (sort-by (fn [[k v]] [(if (:children v) 0 1) (str/lower-case k)]) children)]
           ^{:key k}
           (if (:children v)
-            (let [dpath (str dir-prefix "/" k)]
-              [:details.vv-dir (when open? {:open true})
-               [:summary.vv-dir-name {:on-context-menu (ctx! :dir dpath)} (icons/folder-icon) k]
-               (nodes->hiccup (:children v) root active open? dpath)])
-            (let [full (str root "/" (:file v))]
+            (let [dpath (str dir-prefix "/" k)
+                  scope [root dpath]
+                  open? (contains? expanded scope)]
+              [:details.vv-dir {:open open?}
+               [:summary.vv-dir-name
+                {:aria-busy (contains? expanding scope)
+                 :on-click (summary-click! root dpath open?)}
+                (icons/folder-icon) k]
+               (nodes->hiccup (:children v) root active expanded expanding dpath)])
+            (let [full (projects/join-path root (:file v))]
               [:a.vv-file {:class    (when (= full active) "vv-file-active")
                            :title    full
                            :on-click #(rf/dispatch [:doc/open full])}
@@ -212,11 +250,14 @@ Details:
 - **Sort key `[(if (:children v) 0 1) (str/lower-case k)]`** — folders (`0`) sort before files
   (`1`), then alphabetically (case-insensitively). This gives the familiar "folders first, then
   files, A→Z" ordering.
-- **`[:details.vv-dir (when open? {:open true}) …]`** — a native collapsible disclosure. When
-  `open?` is true (set during filtering, below) the folder renders expanded (`:open true`);
-  otherwise it starts collapsed and the user toggles it. Using `<details>` means the
-  collapse/expand state is handled by the browser — no extra re-frame state per folder.
-- **`full` path** — the click target is reconstructed as `root + "/" + :file` (an absolute path),
+- **Controlled `:open`.** Persistent intent lives in `[:ui :tree-open]`; `tree-state/effective-expanded`
+  removes scopes whose ancestors or Files view are closed and adds filter-forced paths. The rendered
+  attribute is therefore also the exact watcher set sent to main.
+- **Refresh before open.** `summary-click!` cancels the browser's immediate native toggle and dispatches
+  `:tree/expand`. Its IPC reply updates the subtree and adds the open scope in one event. A failure clears
+  the busy state and leaves the directory closed, so stale children never flash open.
+- **`full` path** — the click target is reconstructed with `projects/join-path root :file` (an absolute
+  path without a doubled POSIX/Windows root separator),
   because MAIN's `open!`/`close!` and the `:doc/path` identity use absolute paths. Clicking
   dispatches `[:doc/open full]`, which sends `vv:open` to MAIN ([feature 02](02-multi-tab-previews.md)).
 - **`.vv-file-active`** — highlights the entry for the currently active document.
@@ -238,27 +279,15 @@ project, narrowing its flat file list *before* building the nested tree:
                       {:root root :files shown :nodes (build-tree shown) :filtered? (not blank?)}))))
           projects)))
 
-;; the VIEW — vinary.ui.tree, which now only renders what it is given
-(defn- project-tree [{:keys [root nodes filtered?]} active]
-  [:details.vv-project {:open true}
-   [:summary.vv-project-name {:on-context-menu (ctx! :project root)}
-    (icons/folder-icon) (last (str/split root #"/"))]
-   (nodes->hiccup nodes root active filtered? root)])
-
+;; the VIEW — vinary.ui.tree renders the derived model and controlled expansion set
 (defn file-tree []
-  ;; … (the view schedules reveal-active! when its active-path argument changes;
-  ;;    :tree/received schedules the same post-render effect after project arrival)
-  (let [shown    @(rf/subscribe [:tree/filtered])
-        active   @(rf/subscribe [:ui/active-path])
-        projects @(rf/subscribe [:ui/projects])]
-    [:div.vv-tree
-     [text-input/async-input
-      {:value     (or @(rf/subscribe [:ui/tree-filter]) "")
-       :on-change #(rf/dispatch [:tree/filter %])
-       :attrs     {:class "vv-tree-filter" :placeholder "Filter files…"}}]
-     (if (seq projects)
-       (for [p shown] ^{:key (:root p)} [project-tree p active])
-       [:div.vv-sidebar-empty "No files open"])]))
+  (let [shown     @(rf/subscribe [:tree/filtered])
+        projects  @(rf/subscribe [:ui/projects])
+        open      @(rf/subscribe [:ui/tree-open])
+        expanding @(rf/subscribe [:ui/tree-expanding])
+        expanded  (tree-state/effective-expanded projects shown open expanding)]
+    [file-tree-view shown @(rf/subscribe [:ui/active-path]) projects
+     @(rf/subscribe [:ui/tree-filter]) open expanding expanded]))
 ```
 
 - **The narrowing and folding are a `reg-sub`, not render-time work.** They used to run inside
@@ -275,18 +304,15 @@ project, narrowing its flat file list *before* building the nested tree:
   to fuzzy matching is now one keyword rather than a new matcher.
 - **A project with no matches is omitted by the model**, so filtering naturally hides whole projects
   rather than leaving empty headers behind. The view renders what it is given.
-- **`:filtered?` is carried out of the model** rather than recomputed in the view, because it drives
-  whether folders render expanded: a filtered tree opens everything so deep matches are visible, an
-  unfiltered one does not.
+- **`:filtered?` is carried out of the model** rather than recomputed in the view. It contributes the
+  matching project's known directory scopes to `effective-expanded`, so deep matches remain visible;
+  clearing the filter returns to persistent disclosure intent.
 - **`:project` (not `:dir`) on the header** — the project header's context menu can **Remove from
   Files**, which a directory node's cannot; the distinct target kind is what selects that menu.
-- **`reveal-active!`** — on activation the active file's ancestor `<details>` are expanded (additively —
-  never collapsing others) and it is scrolled into view. Active-path changes schedule it from the tree
-  component lifecycle; `:tree/received` schedules the same `:tree/reveal-active` effect as an explicit
-  event continuation, because command-line activation can precede the asynchronous `vv:tree` reply. Both
-  triggers coalesce through Reagent's post-render queue, so there is one action after the row commits—no
-  polling, request retry, or whole-project comparison in render. Filter commits schedule nothing, avoiding
-  the `querySelector`, parent walk, and `scrollIntoView` forced layout while typing.
+- **`:tree/reveal-active`** adds the active file's ancestor scopes declaratively (never collapsing
+  others); the post-render `tree-reveal` helper now only scrolls the committed row into view. Command-line
+  activation can still precede the asynchronous project payload, so project receipt dispatches the same
+  reveal event.
 
 Because filtering removes non-matching *files* from the flat list before `build-tree`, folders
 that end up with no children simply do not appear — there is no separate "prune empty folders"
@@ -305,8 +331,8 @@ shows. `vinary.app.projects/merge-project` resolves overlaps with three rules:
 2. a synthetic root covered by a known **synthetic** root does not become a second tree; its freshly
    walked subtree is **merged into** that root, re-based onto it (`/notes/sub`'s `c.md` becomes
    `/notes`'s `sub/c.md`);
-3. a synthetic root covered by a **git** root is **dropped** — git re-lists the whole repository on every
-   open of its own, so it is never stale;
+3. a synthetic root covered by a **git** root is **dropped** — the incoming git payload is already a
+   complete repository listing;
 4. otherwise it is appended, and any **synthetic** root it now covers is **absorbed** — the broader view
    wins, so `/notes/sub` followed by `/notes` leaves one tree rather than two overlapping ones.
 
@@ -328,8 +354,8 @@ Containment is compared on **segment boundaries**, so `/a/bc` is *not* under `/a
 
 - **Why `git ls-files` rather than reading the directory, when there is a repo?** With `--cached
   --others --exclude-standard` it gives precisely the files worth navigating — tracked **plus**
-  untracked-but-not-ignored — while still ignoring build output, `node_modules`, and anything
-  `.gitignore`d, for free by reusing git's own ignore engine. It is fast even on large repos; the
+  untracked-but-not-ignored — and `--deleted` removes stale working-tree paths, while still ignoring
+  build output, `node_modules`, and anything `.gitignore`d by reusing git's own ignore engine. It is fast even on large repos; the
   working-tree walk that `--others` adds is bounded (the heavy ignored dirs are pruned first) and
   blocks the main process only briefly — the same synchronous-`execFileSync` trade-off noted below.
 - **Why walk the directory at all, rather than showing nothing?** Because the failure was silent and
@@ -337,9 +363,11 @@ Containment is compared on **segment boundaries**, so `/a/bc` is *not* under `/a
   sidebar for non-repo directories means the Files tab behaves the same way whether or not a folder
   happens to be a checkout. See [ADR-0030](../design-decisions/0030-fallback-project-roots.md) for the
   alternatives weighed (list only the opened file; immediate children only; exact-root dedup only).
-- **Why `<details>`/`<summary>` for folders?** Native disclosure widgets keep the open/closed
-  state in the DOM, so vinary-viewer does not have to track a per-folder expansion map in app-db.
-  Less state, less to keep in sync.
+- **Why controlled `<details>`/`<summary>`?** Native semantics and accessibility are retained, while
+  app-db control makes refresh-before-open atomic and gives main an exact watcher-ownership set.
+- **Why shallow expansion-scoped watchers?** They refresh the part of the tree being browsed without
+  turning every project root into a recursive subscription. Collapsed and hidden branches reconcile
+  lazily on their next expansion/restoration.
 - **Why filter the flat list, not the nested tree?** Filtering strings is trivial and unambiguous;
   pruning a nested tree would require a recursive walk that keeps ancestors of matches. Narrowing
   the flat list and rebuilding gets the same result with simpler code.
@@ -368,9 +396,9 @@ See the [ADR index](../design-decisions/README.md) for the full list.
 - **Sequence — building and rendering the tree:** [`../diagrams/seq-tree.puml`](../diagrams/seq-tree.puml)
   (written by the architecture pillar). Open file → MAIN `git rev-parse` + `git ls-files --cached --others
   --exclude-standard`, **or** the synthetic directory walk when there is no repo →
-  `vv:tree {:root :files :synthetic?}` → `:tree/received` (merge into the project list) → `build-tree`
-  (flat → nested) → `nodes->hiccup` (`<details>`/`<a>`), with the filter branch narrowing the flat list
-  and force-expanding folders.
+  `vv:tree {:root :files :synthetic? :scope?}` → `:tree/received` (full merge or scoped replacement) →
+  `build-tree` (flat → nested) → controlled `nodes->hiccup` (`<details>`/`<a>`), with the filter branch
+  narrowing the flat list and force-expanding matching paths.
 
 ![File-tree sequence](../diagrams/seq-tree.svg)
 

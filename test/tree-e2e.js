@@ -27,6 +27,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -35,12 +36,14 @@ const ROOT = path.resolve(__dirname, '..');
 // realpath'd because dir-tree realpaths the root it adopts (macOS hands out /var/… symlinked to
 // /private/var/…, which would otherwise make every root comparison a false negative).
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-')));
+const GIT_SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-git-e2e-')));
+const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-config-')));
 const CLI_DOC = path.join(ROOT, 'src', 'vinary', 'ui', 'tree.cljs');
 
 // Keep persisted user settings (especially :sidebar-visible?) out of the harness: the CLI reveal assertion
 // requires the default Files panel to be mounted before startup activation, and tests must never read/write the
 // developer's real config. The nested repository file supplies three directory ancestors to expand.
-process.env.XDG_CONFIG_HOME = path.join(SCRATCH, 'config');
+process.env.XDG_CONFIG_HOME = CONFIG_HOME;
 
 function writeFixture() {
   const mk = (rel, body) => {
@@ -55,6 +58,16 @@ function writeFixture() {
   mk('.dotfile.md', 'a hidden FILE — git ls-files lists these, so must we\n');
   mk('node_modules/dep/index.js', 'heavy dir — must be excluded\n');
   mk('.hidden/x.md', 'hidden dir — must be excluded\n');
+
+  execFileSync('git', ['-c', 'init.defaultBranch=main', 'init', '-q'], {
+    cwd: GIT_SCRATCH, stdio: ['ignore', 'ignore', 'ignore']
+  });
+  fs.writeFileSync(path.join(GIT_SCRATCH, 'open.md'), '# git fixture\n');
+  fs.writeFileSync(path.join(GIT_SCRATCH, 'tracked-rename.md'), '# rename me\n');
+  fs.writeFileSync(path.join(GIT_SCRATCH, 'tracked-delete.md'), '# delete me\n');
+  execFileSync('git', ['add', 'open.md', 'tracked-rename.md', 'tracked-delete.md'], {
+    cwd: GIT_SCRATCH, stdio: ['ignore', 'ignore', 'ignore']
+  });
 }
 
 // xvfb invokes `electron --no-sandbox <app>`, leaving the Chromium switch in argv[1]. Production is
@@ -274,14 +287,318 @@ async function run() {
     assert.ok(byRoot(returned, SCRATCH), 'the synthetic root is re-adopted on the next open');
   });
 
+  // ---- expanded-directory watchers are shallow and structural -------------------------------------
+  // Let renderer :tree/received → syncTreeRoots and the mounted controlled tree → syncTreeExpanded settle,
+  // then mutate a direct child WITHOUT opening it. The expanded project root owns a depth-0 watcher.
+  await sleep(900);
+  const autoAdded = path.join(SCRATCH, 'auto-added.md');
+  fs.writeFileSync(autoAdded, '# automatic root refresh\n');
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, SCRATCH)?.files.includes('auto-added.md'),
+                   'an added direct child to arrive through the expanded-root watcher');
+  check('an expanded project root automatically refreshes when a direct child is added', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('auto-added.md'));
+  });
+
+  const autoRenamed = path.join(SCRATCH, 'auto-renamed.md');
+  fs.renameSync(autoAdded, autoRenamed);
+  ps = await until(wc, PROJECTS,
+                   (p) => { const files = byRoot(p, SCRATCH)?.files || [];
+                     return files.includes('auto-renamed.md') && !files.includes('auto-added.md'); },
+                   'a renamed direct child to replace its old path');
+  check('rename events replace the old tree path with the new one', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('auto-renamed.md'));
+  });
+
+  fs.unlinkSync(autoRenamed);
+  ps = await until(wc, PROJECTS,
+                   (p) => !(byRoot(p, SCRATCH)?.files || []).includes('auto-renamed.md'),
+                   'a deleted direct child to leave the tree');
+  check('unlink events remove deleted paths from an expanded directory', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('auto-renamed.md'));
+  });
+
+  const addedDir = path.join(SCRATCH, 'auto-dir');
+  fs.mkdirSync(addedDir);
+  fs.writeFileSync(path.join(addedDir, 'inside.md'), '# directory add\n');
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, SCRATCH)?.files.includes('auto-dir/inside.md'),
+                   'an added directory and its file to arrive through the root watcher');
+  check('addDir events refresh an expanded directory with the new subtree', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('auto-dir/inside.md'));
+  });
+
+  const renamedDir = path.join(SCRATCH, 'auto-dir-renamed');
+  fs.renameSync(addedDir, renamedDir);
+  ps = await until(wc, PROJECTS,
+                   (p) => { const files=byRoot(p,SCRATCH)?.files||[];
+                     return files.includes('auto-dir-renamed/inside.md')
+                       && !files.includes('auto-dir/inside.md'); },
+                   'a renamed directory subtree to replace its old path');
+  check('directory rename events replace every old subtree path', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('auto-dir-renamed/inside.md'));
+  });
+
+  fs.rmSync(renamedDir, { recursive: true });
+  ps = await until(wc, PROJECTS,
+                   (p) => !(byRoot(p, SCRATCH)?.files || []).some((f) => f.startsWith('auto-dir-renamed/')),
+                   'a deleted directory subtree to leave the tree');
+  check('unlinkDir events remove a deleted subtree', () => {
+    assert.ok(!(byRoot(ps, SCRATCH)?.files || []).some((f) => f.startsWith('auto-dir-renamed/')));
+  });
+
+  // Ordinary saves are handled by the retained-document watcher, not the Files-tree watcher. Observe the
+  // public onTree channel directly so an identical re-list cannot hide behind app-db value equality.
+  await wc.executeJavaScript(`window.__vvTreePushes=0; window.vv.onTree(()=>window.__vvTreePushes++); true`);
+  fs.writeFileSync(path.join(SCRATCH, 'b.md'), '# B\ncontent-only edit\n');
+  await sleep(650);
+  const contentOnlyPushes = await wc.executeJavaScript('window.__vvTreePushes');
+  check('ordinary file-content saves do not rebuild the Files tree', () => {
+    assert.strictEqual(contentOnlyPushes, 0);
+  });
+
+  // Exercise the distinct git-backed listing through the same real watcher path. Unstaged tracked
+  // deletion/rename is especially important: --cached still reports the old index path, so repo-files must
+  // subtract `git ls-files --deleted` while retaining the untracked rename destination.
+  await open(wc, path.join(GIT_SCRATCH, 'open.md'));
+  ps = await until(wc, PROJECTS, (p) => p.some((x) => x.root === GIT_SCRATCH),
+                   'the throwaway git project to join the Files tree');
+  check('a throwaway git repository uses a non-synthetic project root', () => {
+    assert.strictEqual(Boolean(byRoot(ps, GIT_SCRATCH)['synthetic?']), false);
+  });
+  await sleep(500);
+  fs.writeFileSync(path.join(GIT_SCRATCH, 'untracked-added.md'), '# git add event\n');
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, GIT_SCRATCH)?.files.includes('untracked-added.md'),
+                   'an untracked git file to arrive automatically');
+  check('expanded git roots automatically include new untracked files', () => {
+    assert.ok(byRoot(ps, GIT_SCRATCH).files.includes('untracked-added.md'));
+  });
+
+  fs.renameSync(path.join(GIT_SCRATCH, 'tracked-rename.md'),
+                path.join(GIT_SCRATCH, 'tracked-renamed.md'));
+  ps = await until(wc, PROJECTS,
+                   (p) => { const files=byRoot(p,GIT_SCRATCH)?.files||[];
+                     return files.includes('tracked-renamed.md') && !files.includes('tracked-rename.md'); },
+                   'an unstaged tracked-file rename to replace the cached path');
+  check('git refresh removes the deleted side of an unstaged tracked rename', () => {
+    assert.ok(byRoot(ps, GIT_SCRATCH).files.includes('tracked-renamed.md'));
+  });
+
+  fs.unlinkSync(path.join(GIT_SCRATCH, 'tracked-delete.md'));
+  ps = await until(wc, PROJECTS,
+                   (p) => !(byRoot(p,GIT_SCRATCH)?.files||[]).includes('tracked-delete.md'),
+                   'an unstaged tracked-file deletion to leave the git tree');
+  check('git refresh removes unstaged tracked deletions', () => {
+    assert.ok(!byRoot(ps, GIT_SCRATCH).files.includes('tracked-delete.md'));
+  });
+
+  // ---- refresh-before-open: collapsed descendants stay stale, then open atomically with fresh data --------
+  const subPath = path.join(SCRATCH, 'sub');
+  const subSelector = `details.vv-dir[data-path=${JSON.stringify(subPath)}]`;
+  const subOpen = await wc.executeJavaScript(`Boolean(document.querySelector(${JSON.stringify(subSelector)})?.open)`);
+  if (subOpen) {
+    await wc.executeJavaScript(`document.querySelector(${JSON.stringify(subSelector)}+' > summary').click(); true`);
+    await until(wc, `Boolean(document.querySelector(${JSON.stringify(subSelector)})) &&
+                     !document.querySelector(${JSON.stringify(subSelector)}).open`, (v) => v === true,
+                'the nested sub directory to collapse');
+  }
+  await sleep(350); // let syncTreeExpanded release the nested watcher
+  fs.writeFileSync(path.join(subPath, 'appears-on-expand.md'), '# created while collapsed\n');
+  await sleep(650);
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('a collapsed child does not refresh for mutations below it', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('sub/appears-on-expand.md'));
+  });
+
+  // Capture the first open-attribute transition. At that exact DOM commit the refreshed row must already exist;
+  // this catches a stale flash that a later steady-state assertion could miss.
+  await wc.executeJavaScript(`(() => {
+    const d=document.querySelector(${JSON.stringify(subSelector)});
+    window.__vvExpandSnapshots=[];
+    const o=new MutationObserver(() => {
+      if(d.open) window.__vvExpandSnapshots.push({
+        has:Boolean([...d.querySelectorAll('.vv-file')].find(x=>x.dataset.path===${JSON.stringify(path.join(subPath, 'appears-on-expand.md'))}))
+      });
+    });
+    o.observe(d,{attributes:true,attributeFilter:['open']}); window.__vvExpandObserver=o;
+    d.querySelector(':scope > summary').click();
+    return {open:d.open,pending:d.querySelector(':scope > summary').getAttribute('aria-busy')};
+  })()`);
+  const expandedFresh = await until(
+    wc,
+    `(() => ({open:Boolean(document.querySelector(${JSON.stringify(subSelector)})?.open),
+              snaps:window.__vvExpandSnapshots || [],
+              files:((${PROJECTS}).find(x=>x.root===${JSON.stringify(SCRATCH)})||{files:[]}).files}))()`,
+    (s) => s.open && s.files.includes('sub/appears-on-expand.md') && s.snaps.length > 0,
+    'the collapsed directory to refresh and then open');
+  check('expansion renders open only after its refreshed child is present', () => {
+    assert.strictEqual(expandedFresh.snaps[0].has, true,
+                       `first open snapshot was ${JSON.stringify(expandedFresh.snaps)}`);
+  });
+  await wc.executeJavaScript('window.__vvExpandObserver?.disconnect(); true');
+
+  // Once open, its own depth-0 watcher sees direct structural changes.
+  fs.writeFileSync(path.join(subPath, 'while-expanded.md'), '# watched child\n');
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, SCRATCH)?.files.includes('sub/while-expanded.md'),
+                   'an expanded nested directory watcher to refresh');
+  check('an expanded nested directory automatically refreshes its direct children', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('sub/while-expanded.md'));
+  });
+
+  // Collapsing an already-watched child releases its subscription. Re-expanding performs the gated refresh,
+  // so the change becomes visible as part of the same commit that opens it again.
+  await wc.executeJavaScript(`document.querySelector(${JSON.stringify(`${subSelector} > summary`)}).click(); true`);
+  await until(wc, `!document.querySelector(${JSON.stringify(subSelector)}).open`, (v) => v === true,
+              'the watched child directory to collapse');
+  await sleep(350);
+  fs.writeFileSync(path.join(subPath, 'after-child-collapse.md'), '# watcher released\n');
+  await sleep(650);
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('collapsing an expanded child disables its automatic refresh', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('sub/after-child-collapse.md'));
+  });
+  await wc.executeJavaScript(`document.querySelector(${JSON.stringify(subSelector)}+' > summary').click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, SCRATCH)?.files.includes('sub/after-child-collapse.md'),
+                   'the collapsed child to refresh on re-expansion');
+  check('re-expanding a child refreshes changes missed while collapsed', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('sub/after-child-collapse.md'));
+  });
+
+  // An open descendant remains remembered when its project ancestor closes, but it is no longer effective:
+  // both the root and child watchers must disappear until the ancestor is refreshed and rendered open again.
+  const scratchProjectSelector = `details.vv-project[data-root=${JSON.stringify(SCRATCH)}]`;
+  await wc.executeJavaScript(`document.querySelector(${JSON.stringify(scratchProjectSelector)}+' > summary').click(); true`);
+  await until(wc, `!document.querySelector(${JSON.stringify(scratchProjectSelector)}).open`, (v) => v === true,
+              'the scratch project ancestor to collapse');
+  await sleep(350);
+  fs.writeFileSync(path.join(SCRATCH, 'after-parent-collapse.md'), '# root watcher released\n');
+  fs.writeFileSync(path.join(subPath, 'after-parent-collapse.md'), '# descendant watcher released\n');
+  await sleep(650);
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('collapsing an ancestor disables its descendant watchers', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('after-parent-collapse.md'));
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('sub/after-parent-collapse.md'));
+  });
+  await wc.executeJavaScript(`document.querySelector(${JSON.stringify(scratchProjectSelector)}+' > summary').click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => { const files=byRoot(p,SCRATCH)?.files||[];
+                     return files.includes('after-parent-collapse.md')
+                       && files.includes('sub/after-parent-collapse.md'); },
+                   'the collapsed project to refresh before reopening');
+  check('re-expanding an ancestor refreshes its complete project tree', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('after-parent-collapse.md'));
+  });
+
+  // The Files component unmounts on another sidebar tab, which sends an empty effective-expansion set. Returning
+  // to Files refreshes remembered open project roots while the body shows its small restoration placeholder.
+  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-sidebar-tab')]
+    .find(x=>x.textContent.trim()==='Contents')).click(); true`);
+  await until(wc, "!document.querySelector('.vv-tree')", (v) => v === true,
+              'the Files tree to unmount on the Contents tab');
+  await sleep(350);
+  fs.writeFileSync(path.join(SCRATCH, 'while-files-hidden.md'), '# hidden Files tab\n');
+  await sleep(650);
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('another sidebar tab suspends automatic Files-tree refresh', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('while-files-hidden.md'));
+  });
+  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-sidebar-tab')]
+    .find(x=>x.textContent.trim()==='Files')).click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => byRoot(p, SCRATCH)?.files.includes('while-files-hidden.md'),
+                   'remembered project roots to refresh when Files returns');
+  check('returning to Files refreshes remembered roots before showing their trees', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('while-files-hidden.md'));
+  });
+  await sleep(500); // let the restored watchers' one ready-time race-closing reconciliation settle
+
+  // ---- manual refresh scopes -----------------------------------------------------------------------
+  // Inject a deliberately stale project model without touching disk. A nested Refresh must replace only
+  // `sub/`, retaining the unrelated sentinel; a project Refresh must then replace the entire listing.
+  wc.send('vv:tree', { root: SCRATCH,
+                       files: ['b.md', 'sub/fake.md', 'sibling/stale.md'],
+                       synthetic: true, 'synthetic?': true });
+  await until(wc, PROJECTS, (p) => byRoot(p, SCRATCH)?.files.includes('sub/fake.md'),
+              'the deliberately stale subtree fixture');
+  const subSummarySelector = `${subSelector} > summary`;
+  await wc.executeJavaScript(`document.querySelector(${JSON.stringify(subSummarySelector)}).dispatchEvent(
+    new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:70,clientY:70})); true`);
+  await until(wc,
+              "[...document.querySelectorAll('.vv-ctx-menu .vv-menu-item-label')].map(x=>x.textContent)",
+              (ls) => ls.includes('Refresh'), 'the nested directory Refresh menu item');
+  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-ctx-menu .vv-menu-item')]
+    .find(x=>x.textContent.trim()==='Refresh')).click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => { const files=byRoot(p,SCRATCH)?.files||[];
+                     return files.includes('sub/a.md') && !files.includes('sub/fake.md'); },
+                   'the manual subtree refresh');
+  check('directory Refresh replaces only its subtree', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('sibling/stale.md'),
+              'an unrelated sibling must survive a scoped refresh');
+  });
+
+  const scratchHeaderIndex = (await wc.executeJavaScript(HEADERS)).findIndex((h) => h.includes(scratchName));
+  await wc.executeJavaScript(`document.querySelectorAll('.vv-project-name')[${scratchHeaderIndex}].dispatchEvent(
+    new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:75,clientY:75})); true`);
+  const projectRefreshLabels = await until(
+    wc, "[...document.querySelectorAll('.vv-ctx-menu .vv-menu-item-label')].map(x=>x.textContent)",
+    (ls) => ls.includes('Refresh'), 'the project Refresh menu item');
+  check('project headers offer Refresh', () => assert.ok(projectRefreshLabels.includes('Refresh')));
+  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-ctx-menu .vv-menu-item')]
+    .find(x=>x.textContent.trim()==='Refresh')).click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => !(byRoot(p, SCRATCH)?.files || []).includes('sibling/stale.md'),
+                   'the full project refresh to discard the stale sibling');
+  check('project Refresh replaces the complete root listing', () => {
+    assert.ok(!byRoot(ps, SCRATCH).files.includes('sibling/stale.md'));
+  });
+
+  const filesTab = "[...document.querySelectorAll('.vv-sidebar-tab')].find(x=>x.textContent.trim()==='Files')";
+  await wc.executeJavaScript(`(${filesTab}).dispatchEvent(
+    new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})); true`);
+  const filesLabels = await until(
+    wc, "[...document.querySelectorAll('.vv-ctx-menu .vv-menu-item-label')].map(x=>x.textContent)",
+    (ls) => ls.includes('Refresh All'), 'the Files-tab Refresh All menu item');
+  check('the Files tab itself offers Refresh All', () => assert.ok(filesLabels.includes('Refresh All')));
+  wc.send('vv:tree', { root: SCRATCH, files: ['b.md', 'fake-all.md'], 'synthetic?': true });
+  wc.send('vv:tree', { root: ROOT, files: ['fake-root-all.md'], 'synthetic?': false });
+  wc.send('vv:tree', { root: GIT_SCRATCH, files: ['fake-git-all.md'], 'synthetic?': false });
+  await until(wc, PROJECTS,
+              (p) => byRoot(p, SCRATCH)?.files.includes('fake-all.md')
+                && byRoot(p, ROOT)?.files.includes('fake-root-all.md')
+                && byRoot(p, GIT_SCRATCH)?.files.includes('fake-git-all.md'),
+              'the stale fixtures for every visible tree');
+  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-ctx-menu .vv-menu-item')]
+    .find(x=>x.textContent.trim()==='Refresh All')).click(); true`);
+  ps = await until(wc, PROJECTS,
+                   (p) => !(byRoot(p, SCRATCH)?.files || []).includes('fake-all.md')
+                     && !(byRoot(p, ROOT)?.files || []).includes('fake-root-all.md')
+                     && !(byRoot(p, GIT_SCRATCH)?.files || []).includes('fake-git-all.md'),
+                   'Refresh All to replace every visible project listing');
+  check('Files-tab Refresh All refreshes every visible tree', () => {
+    assert.ok(byRoot(ps, SCRATCH).files.includes('sub/a.md'));
+    assert.ok(byRoot(ps, ROOT).files.includes('README.md'));
+    assert.ok(byRoot(ps, GIT_SCRATCH).files.includes('open.md'));
+  });
+
   console.log(`\ntree-e2e: ${passed.length} checks passed`);
 }
 
 app.whenReady().then(() =>
   run()
-    .then(() => { fs.rmSync(SCRATCH, { recursive: true, force: true }); app.exit(0); })
+    .then(() => {
+      fs.rmSync(SCRATCH, { recursive: true, force: true });
+      fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
+      fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      app.exit(0);
+    })
     .catch((err) => {
       console.error('\ntree-e2e FAILED:\n', err && err.stack ? err.stack : err);
       fs.rmSync(SCRATCH, { recursive: true, force: true });
+      fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
+      fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(1);
     }));

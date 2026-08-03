@@ -4,6 +4,7 @@
    :content/rendered. Tab open/activate/close drive the multi-tab model. A content update never
    touches scroll/UI state (that's in app-db) — that's how live-refresh preserves where you are."
   (:require [re-frame.core :as rf]
+            [clojure.set :as set]
             [clojure.string :as str]
             [goog.string :as gstr]
             [cljs.reader :as reader]
@@ -13,6 +14,7 @@
             [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
             [vinary.app.projects :as projects]
+            [vinary.app.tree-state :as tree-state]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
             [vinary.renderer.pdf-layout :as pdf-layout]
@@ -676,23 +678,129 @@
      {:db (-> db (assoc-in [:ui :theme] theme) (assoc-in [:ui :settings] settings))
       :fx [[:theme/apply theme] [:vv/save-settings (pr-str settings)]]})))
 
-;; multi-project file trees: accumulate one {:root :files} per project — a git root, or the containing
-;; directory of a file that belongs to no repository (:synthetic?). The merge rules (update in place;
-;; a covered synthetic root merges into its coverer rather than duplicating it) live in
-;; vinary.app.projects so they are testable without a DOM. The explicit effect is the reactive continuation:
-;; after the project state commits and Reagent renders it, reveal the already-active command-line document.
+;; ---- Files tree: project data + controlled expansion -----------------------------------------------
+(defn- tree-root-sync-fx [projects]
+  [:vv/sync-tree-roots (mapv :root projects)])
+
+(defn- prune-tree-ui [db]
+  (let [projects (get-in db [:ui :projects])]
+    (-> db
+        (update-in [:ui :tree-open] #(tree-state/prune-scopes projects (or % #{})))
+        (update-in [:ui :tree-expanding] #(tree-state/prune-scopes projects (or % #{}))))))
+
+(defn- apply-tree-entry [db entry]
+  (let [before   (into #{} (map :root) (get-in db [:ui :projects]))
+        projects (projects/apply-tree-update (get-in db [:ui :projects]) entry)
+        after    (into #{} (map :root) projects)
+        added    (set/difference after before)]
+    (-> db
+        (assoc-in [:ui :projects] projects)
+        ;; A newly delivered project may render open immediately: this very payload is its fresh listing.
+        (update-in [:ui :tree-open] (fnil into #{}) (map (fn [root] [root root]) added))
+        prune-tree-ui)))
+
+;; Main pushes both initial/full entries and scoped updates produced by expanded-directory watchers.
+;; The post-render continuation opens the active row's ancestors declaratively, then scrolls it.
 (rf/reg-event-fx
  :tree/received
  (fn [{:keys [db]} [_ entry]]
-   {:db (update-in db [:ui :projects] projects/merge-project entry)
-    :fx [[:tree/reveal-active nil]]}))
+   (let [db' (apply-tree-entry db entry)]
+     {:db db'
+      :fx (cond-> [(tree-root-sync-fx (get-in db' [:ui :projects]))]
+            ;; Scoped watcher updates must not tug sidebar scroll back to the active row. Initial project
+            ;; arrivals still reveal it (notably when command-line activation won the race with vv:tree).
+            (nil? (:scope entry)) (conj [:dispatch [:tree/reveal-active]]))})))
 
 ;; drop a project from the sidebar (project-header context menu). It returns if a file under it is
 ;; opened again — send-tree! runs from main's open!, not from a watcher refresh.
-(rf/reg-event-db
+(rf/reg-event-fx
  :tree/remove-project
- (fn [db [_ root]]
-   (update-in db [:ui :projects] projects/remove-project root)))
+ (fn [{:keys [db]} [_ root]]
+   (let [db' (-> db
+                 (update-in [:ui :projects] projects/remove-project root)
+                 prune-tree-ui)]
+     {:db db' :fx [(tree-root-sync-fx (get-in db' [:ui :projects]))]})))
+
+(rf/reg-event-fx
+ :tree/reveal-active
+ (fn [{:keys [db]} _]
+   (let [scopes (tree-state/active-scopes (get-in db [:ui :projects]) (nav/active-path db))]
+     {:db (cond-> db (seq scopes) (update-in [:ui :tree-open] (fnil into #{}) scopes))
+      :fx [[:tree/reveal-active nil]]})))
+
+(rf/reg-event-fx
+ :tree/expand
+ (fn [{:keys [db]} [_ root directory]]
+   (let [scope [root directory]]
+     (when-not (or (contains? (get-in db [:ui :tree-open] #{}) scope)
+                   (contains? (get-in db [:ui :tree-expanding] #{}) scope))
+       {:db (update-in db [:ui :tree-expanding] (fnil conj #{}) scope)
+        :fx [[:vv/refresh-tree {:root root :path directory
+                                :on-success [:tree/expand-ready scope]
+                                :on-failure [:tree/expand-failed scope]}]]}))))
+
+(rf/reg-event-fx
+ :tree/expand-ready
+ (fn [{:keys [db]} [_ scope entry]]
+   ;; A project can be removed while the invoke is in flight; only a still-pending expansion may reopen.
+   (if-not (contains? (get-in db [:ui :tree-expanding] #{}) scope)
+     {:db db}
+     (let [db'   (-> db (apply-tree-entry entry)
+                     (update-in [:ui :tree-expanding] disj scope))
+           known (tree-state/directory-scopes (get-in db' [:ui :projects]))
+           db'   (cond-> db' (contains? known scope) (update-in [:ui :tree-open] conj scope))]
+       {:db db'}))))
+
+(rf/reg-event-db
+ :tree/expand-failed
+ (fn [db [_ scope _message]]
+   (update-in db [:ui :tree-expanding] disj scope)))
+
+(rf/reg-event-db
+ :tree/collapse
+ (fn [db [_ root directory]]
+   (update-in db [:ui :tree-open] disj [root directory])))
+
+(rf/reg-event-fx
+ :tree/refresh
+ (fn [_ [_ {:keys [root path]}]]
+   {:fx [[:vv/refresh-tree {:root root :path path
+                            :on-success [:tree/refresh-ready root]
+                            :on-failure [:tree/refresh-failed]}]]}))
+
+(rf/reg-event-fx
+ :tree/refresh-ready
+ (fn [{:keys [db]} [_ requested-root entry]]
+   ;; Removing a project is authoritative for the current sidebar. A reply that was already in flight may
+   ;; refresh an extant root, but it must not resurrect the root after Remove from Files.
+   (if-not (some #(= requested-root (:root %)) (get-in db [:ui :projects]))
+     {:db db}
+     (let [db' (apply-tree-entry db entry)]
+       {:db db' :fx [(tree-root-sync-fx (get-in db' [:ui :projects]))]}))))
+
+(rf/reg-event-db :tree/refresh-failed (fn [db _] db))
+
+(rf/reg-event-fx
+ :tree/refresh-all
+ (fn [_ _]
+   {:fx [[:vv/refresh-all-trees {:on-success [:tree/refresh-all-ready]
+                                 :on-failure [:tree/refresh-all-failed]}]]}))
+
+(rf/reg-event-fx
+ :tree/refresh-all-ready
+ (fn [{:keys [db]} [_ entries]]
+   (let [present (into #{} (map :root) (get-in db [:ui :projects]))
+         ;; As above, Refresh All operates on the set that is still present when its reply commits.
+         db'     (reduce apply-tree-entry db (filter #(contains? present (:root %)) entries))]
+     {:db db' :fx [(tree-root-sync-fx (get-in db' [:ui :projects]))]})))
+
+(rf/reg-event-db :tree/refresh-all-failed (fn [db _] db))
+
+(rf/reg-event-fx
+ :tree/sync-expanded
+ (fn [_ [_ scopes]]
+   {:fx [[:vv/sync-tree-expanded
+          (mapv (fn [[root directory]] {:root root :path directory}) scopes)]]}))
 
 ;; Debounced, because committing the query is what re-narrows and re-folds every path of every open
 ;; project (:tree/filtered). The field itself never waits — vinary.ui.text-input owns its DOM value — so
@@ -815,15 +923,52 @@
  (fn [{:keys [db view-pos]} _]
    (when-let [id (nav/nth-id db -1)] (activate-tab-result db view-pos id))))
 
+(defn- files-restore-result [db]
+  (let [scopes (tree-state/open-project-roots (get-in db [:ui :projects])
+                                               (get-in db [:ui :tree-open] #{}))
+        db'    (-> db
+                   (assoc-in [:ui :sidebar-visible?] true)
+                   (assoc-in [:ui :sidebar-tab] :files)
+                   (assoc-in [:ui :tree-restoring?] (boolean (seq scopes))))]
+    (cond-> {:db db'}
+      (seq scopes) (assoc :fx [[:vv/refresh-trees {:scopes scopes
+                                                   :on-complete [:tree/restore-ready]}]]))))
+
+(rf/reg-event-fx
+ :tree/restore-ready
+ (fn [{:keys [db]} [_ results]]
+   (let [db' (reduce (fn [state {:keys [entry]}]
+                       (if entry (apply-tree-entry state entry) state))
+                     db results)
+         db' (reduce (fn [state {:keys [scope error]}]
+                       (if error
+                         (update-in state [:ui :tree-open] disj [(:root scope) (:path scope)])
+                         state))
+                     db' results)
+         db' (assoc-in db' [:ui :tree-restoring?] false)]
+     {:db db'
+      :fx [(tree-root-sync-fx (get-in db' [:ui :projects]))
+           [:dispatch [:tree/reveal-active]]]})))
+
 (rf/reg-event-fx
  :sidebar/toggle
  (fn [{:keys [db]} _]
    (let [vis      (not (get-in db [:ui :sidebar-visible?]))
-         settings (assoc (get-in db [:ui :settings]) :sidebar-visible? vis)]
-     {:db (-> db (assoc-in [:ui :sidebar-visible?] vis) (assoc-in [:ui :settings] settings))
-      :fx [[:vv/save-settings (pr-str settings)]]})))
+         settings (assoc (get-in db [:ui :settings]) :sidebar-visible? vis)
+         base     (-> db (assoc-in [:ui :sidebar-visible?] vis) (assoc-in [:ui :settings] settings))
+         result   (if (and vis (= :files (get-in db [:ui :sidebar-tab])))
+                    (files-restore-result base)
+                    {:db base})]
+     (update result :fx #(conj (vec (or % [])) [:vv/save-settings (pr-str settings)])))))
 
-(rf/reg-event-db :sidebar/tab   (fn [db [_ tab]] (assoc-in db [:ui :sidebar-tab] tab)))
+(rf/reg-event-fx
+ :sidebar/tab
+ (fn [{:keys [db]} [_ tab]]
+   (if (and (= tab :files) (not= :files (get-in db [:ui :sidebar-tab])))
+     (files-restore-result db)
+     {:db (-> db
+              (assoc-in [:ui :sidebar-tab] tab)
+              (cond-> (not= tab :files) (assoc-in [:ui :tree-restoring?] false)))})))
 (rf/reg-event-fx
  :sidebar/width
  (fn [{:keys [db]} [_ w]]
@@ -833,10 +978,13 @@
       :fx [[:vv/save-settings (pr-str settings)]]})))
 ;; show the Files tab (used by "Reveal in tree" + the directory context menu); the active file's ancestors
 ;; are auto-expanded by file-tree's reveal-active!
-(rf/reg-event-db :sidebar/reveal
-                 (fn [db _] (-> db (assoc-in [:ui :sidebar-visible?] true) (assoc-in [:ui :sidebar-tab] :files))))
-(rf/reg-event-db :sidebar/show
-                 (fn [db [_ tab]] (-> db (assoc-in [:ui :sidebar-visible?] true) (assoc-in [:ui :sidebar-tab] tab))))
+(rf/reg-event-fx :sidebar/reveal (fn [{:keys [db]} _] (files-restore-result db)))
+(rf/reg-event-fx
+ :sidebar/show
+ (fn [{:keys [db]} [_ tab]]
+   (if (= tab :files)
+     (files-restore-result db)
+     {:db (-> db (assoc-in [:ui :sidebar-visible?] true) (assoc-in [:ui :sidebar-tab] tab))})))
 
 ;; ---- menu bar (custom, theme-matched) ----
 (rf/reg-event-db :access-keys/set

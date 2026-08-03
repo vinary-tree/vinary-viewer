@@ -9,7 +9,7 @@
             [vinary.ui.preview-navigation :as preview-nav]
             [vinary.renderer.text-edit :as text-edit]))
 
-(defn- basename [p] (last (str/split (str p) #"/")))
+(defn- basename [p] (last (remove str/blank? (str/split (str p) #"[\\/]"))))
 
 (defn- source-label [source?]
   (if source? "View Preview" "View Source"))
@@ -29,7 +29,7 @@
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
 (defn items-for
-  [{:keys [kind path uri text source-location source-line math-tex] :as target} vs? previewable?]
+  [{:keys [kind root path uri text source-location source-line math-tex] :as target} vs? previewable?]
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
@@ -38,6 +38,7 @@
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
     :dir  [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
+           {:label "Refresh"              :event [:tree/refresh {:root root :path path}]}
            {:label "Open in file manager" :event [:shell/open-path path]}
            :sep
            {:label "Copy directory path"  :event [:clipboard/copy path]}
@@ -45,12 +46,14 @@
     ;; a Files-tab project header — a directory, plus the one action only a root has: leaving the sidebar
     :project [{:label "Open"                 :event [:doc/open path]}
               {:label "Open in new tab"      :event [:doc/open-new path]}
+              {:label "Refresh"              :event [:tree/refresh {:root (or root path) :path path}]}
               {:label "Open in file manager" :event [:shell/open-path path]}
               :sep
               {:label "Copy directory path"  :event [:clipboard/copy path]}
               {:label "Copy directory name"  :event [:clipboard/copy (basename path)]}
               :sep
               {:label "Remove from Files"    :event [:tree/remove-project path]}]
+    :files-tab [{:label "Refresh All" :event [:tree/refresh-all]}]
     :http [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
            {:label "Open in system browser" :event [:shell/open-external path]}

@@ -101,8 +101,9 @@ containment, opening a few files under one directory stacks up overlapping trees
 2. a synthetic root covered by a known **synthetic** root does not become a second tree; instead its
    freshly walked subtree is **merged into** that root, re-based onto it (`/notes/sub`'s `c.md` becomes
    `/notes`'s `sub/c.md`), replacing whatever that subtree previously held;
-3. a synthetic root covered by a **git** root is **dropped** outright — git re-lists the entire
-   repository on every open of its own, so its listing is never stale;
+3. a synthetic root covered by a **git** root is **dropped** outright — the git root is authoritative and
+   its incoming payload is already a complete repository listing (subsequent freshness follows
+   [ADR-0034](0034-expansion-scoped-file-tree-watchers.md));
 4. otherwise it is appended, and any **synthetic** root it now covers is **absorbed** (the broader view
    wins, so `/notes/sub` followed by `/notes` leaves one tree, not two).
 

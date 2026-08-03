@@ -99,7 +99,8 @@ contextBridge.exposeInMainWorld('vv', {
 
 | Capability class | Direction | Semantics |
 |------------------|-----------|-----------|
-| File content and watchers | renderer → main → renderer | Read retained local paths, watch retained files and embedded local media assets, and send `vv:content`, `vv:error`, and `vv:tree` payloads back. |
+| File content and document watchers | renderer → main → renderer | Read retained local paths, watch retained files and embedded local media assets, and send `vv:content` / `vv:error` payloads back. |
+| Files-tree listing and watchers | renderer → main → renderer | Re-list only a project root already offered to that window (or a descendant path beneath it), reconcile shallow watcher ownership to visible expanded scopes, and send full/scoped `vv:tree` payloads back. |
 | Configuration | both | Request/persist settings and keybindings; request user grammar and filetype registry data. |
 | Native views | renderer → main | Show, hide, and position main-owned PDF and HTTP views; relay HTTP heading metadata back to the renderer. |
 | Clipboard and shell helpers | renderer → main | Copy explicit text to the OS clipboard, open local paths through the OS, open external URLs, zoom, devtools, and quit. |
@@ -111,6 +112,12 @@ Each `on*` returns an **unsubscribe** function and passes only the message **pay
 
 The channel catalog is maintained in
 [reference/ipc-channels.md](../reference/ipc-channels.md).
+
+Tree refresh IPC is capability-narrowed in main: renderer root sync intersects with roots main has
+already offered to that window; explicit refresh requires the root to remain visible; and
+`path.relative` rejects absolute/`..` escapes. Window destruction drops its tree ownership and
+reconciles shared Chokidar watchers. These checks do not turn the renderer into a general filesystem
+API; they constrain the new navigation-refresh methods to its existing Files projects.
 
 ### What the seam does **NOT** expose
 

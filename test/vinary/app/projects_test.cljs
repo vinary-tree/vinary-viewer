@@ -24,7 +24,21 @@
   (testing "a parent is not under its own child, and nil never matches"
     (is (false? (projects/under? "/a"   "/a/b")))
     (is (false? (projects/under? nil    "/a")))
-    (is (false? (projects/under? "/a"   nil)))))
+    (is (false? (projects/under? "/a"   nil))))
+  (testing "Windows separators compare on the same boundaries as POSIX separators"
+    (is (true? (projects/under? "C:\\work\\repo\\sub" "C:\\work\\repo")))
+    (is (true? (projects/under? "C:\\work\\repo/sub" "C:\\work\\repo")))
+    (is (false? (projects/under? "C:\\work\\repository" "C:\\work\\repo")))
+    (is (projects/same-path? "C:\\work\\repo\\a.md" "C:\\work\\repo/a.md"))
+    (is (= "sub/deep" (projects/relative-path "C:\\work\\repo\\sub\\deep"
+                                                "C:\\work\\repo"))))
+  (testing "filesystem roots do not acquire a doubled separator"
+    (is (true? (projects/under? "/child" "/")))
+    (is (= "child" (projects/relative-path "/child" "/")))
+    (is (= "/child" (projects/join-path "/" "child")))
+    (is (true? (projects/under? "C:\\child" "C:\\")))
+    (is (= "child" (projects/relative-path "C:\\child" "C:\\")))
+    (is (= "C:\\child" (projects/join-path "C:\\" "child")))))
 
 (deftest merge-project-adds-the-first-root
   (testing "an empty list takes the entry as-is, normalized"
@@ -106,3 +120,23 @@
       (is (= ["/one"] (roots (projects/remove-project before "/nope"))))))
   (testing "an empty list stays empty"
     (is (= [] (projects/remove-project [] "/one")))))
+
+(deftest scoped-tree-updates-replace-only-the-selected-subtree
+  (let [before [(git "/repo" "top.md" "sub/a.md" "sub/deep/old.md" "sibling/keep.md")]
+        after  (projects/apply-tree-update
+                before {:root "/repo" :scope "sub/deep"
+                        :files ["sub/deep/new.md"] :synthetic? false})]
+    (is (= ["top.md" "sub/a.md" "sibling/keep.md" "sub/deep/new.md"]
+           (:files (first after))))))
+
+(deftest scoped-tree-updates-honor-segment-boundaries-and-empty-removal
+  (let [before [(git "/repo" "sub/a.md" "submarine/keep.md")]
+        after  (projects/apply-tree-update before {:root "/repo" :scope "sub" :files []})]
+    (is (= ["submarine/keep.md"] (:files (first after)))))
+  (testing "the empty relative scope is an exact-root replacement"
+    (is (= ["fresh.md"]
+           (:files (first (projects/apply-tree-update
+                           [(git "/repo" "stale.md")]
+                           {:root "/repo" :scope "" :files ["fresh.md"]}))))))
+  (testing "a late scoped reply cannot resurrect a removed project"
+    (is (= [] (projects/apply-tree-update [] {:root "/gone" :scope "sub" :files ["sub/a"]})))))

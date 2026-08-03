@@ -11,6 +11,9 @@
         :sidebar-width 280          ; px; the resizable sidebar splitter writes this
         :sidebar-tab :files         ; :files | :contents (the tabbed sidebar)
         :tree-selected nil
+        :tree-open #{}               ; #{[project-root absolute-directory]} — controlled Files disclosures
+        :tree-expanding #{}          ; scopes waiting for refresh-before-open
+        :tree-restoring? false       ; returning to Files waits for remembered root refreshes
         :dir-selected nil           ; highlighted entry path in the active directory view (Alt+Down opens it)
         ;; browser-tab model: tabs are views ({:id :uri :hist {:stack :idx}}); DataScript caches content.
         :tabs []
