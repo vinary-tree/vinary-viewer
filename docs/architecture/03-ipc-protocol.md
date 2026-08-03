@@ -48,14 +48,14 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 
 | Channel | `window.vv` API | Payload | Main owner | Purpose |
 |---------|-----------------|---------|------------|---------|
-| `vv:open` | `open(path)` | string path/URI | `vinary.main.service` | Read, classify, send content, send tree, ensure watcher/poller. Accepts local, `ssh://`/`sftp://`, and `vv-archive://` paths. |
+| `vv:open` | `open(path)` | string path/URI | `vinary.main.service` | Read, classify, send content/tree, and ensure local or target-daemon ownership (fallback poller when configured). Accepts local, `ssh://`/`sftp://`, and `vv-archive://` paths. |
 | `vv:close` | `close(path)` | string path | `vinary.main.service` | Close an individual watcher path. Kept for compatibility; retained sync is authoritative. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | path vector | `vinary.main.service` | Reconcile main watchers to the renderer's retained path set. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a document. |
-| `vv:tree-roots` | `syncTreeRoots(roots)` | visible root vector | `vinary.main.service` | Reconcile this window's visible project roots; only roots previously offered by main are accepted. |
-| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `vinary.main.service` | Reconcile shallow file-tree watchers to the mounted Files view's effective expanded directories. |
-| `vv:tree-refresh` *(invoke)* | `refreshTree(request)` | `{root, path}` → tree payload | `vinary.main.service` | Explicitly list one visible root/directory. The path must remain beneath its offered root. |
-| `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every project root visible in this window. |
+| `vv:tree-roots` | `syncTreeRoots(roots)` | visible root vector | `vinary.main.service` | Reconcile this window's visible project roots; only roots previously offered by main are accepted, and remote roots are forwarded to their authenticated target owner. |
+| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `vinary.main.service` | Reconcile shallow file-tree watchers to effective mounted directories, locally or on a compatible target daemon. |
+| `vv:tree-refresh` *(invoke)* | `refreshTree(request)` | `{root, path}` → tree payload | `vinary.main.service` | Explicitly list one visible local/remote root or directory. The path must remain beneath its offered root. |
+| `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every visible local and authenticated remote project root. |
 | `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
 | `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
 | `vv:load-pdf-bytes` *(invoke)* | `loadPdfBytes(path)` | string path | `content_service` | Load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch; no new tab). |
@@ -331,3 +331,22 @@ actually landed on the new build, and lets `vv` retire a stale **idle** daemon; 
 registry, never the warm pool) is what stops it retiring one mid-session. See
 [`usage/02-installation-and-build.md`](../usage/02-installation-and-build.md#the-resident-daemon-and-staleness).
 `test/daemon-smoke.js` covers the whole seam, including the legacy-inertness contract.
+
+---
+
+## 7. Authenticated target-daemon events (main ↔ main over SSH)
+
+Remote Files trees and push refresh use a third seam which never enters renderer IPC. Every running GUI/
+resident daemon publishes a loopback-only ephemeral TCP endpoint in the target user's private
+`~/.vinary-viewer/runtime/daemon-events.json`. A source reads that descriptor over its existing SFTP session,
+opens SSH `direct-tcpip` forwarding to target loopback, proves that the SFTP descriptor path identifies the
+exact file the target published, and completes the `vv-events/2` mutual nonce/session-bound HMAC-SHA-256
+handshake.
+
+Only after authentication does the newline-framed channel accept content subscribe/unsubscribe, tree open,
+visible-root/effective-expansion sync, scoped/root/all refresh, owner release, heartbeat, and pushed content/tree
+invalidations. File bytes stay on SFTP. Disconnect releases target watcher ownership; the source reconnects
+with bounded backoff and restores desired state. A missing/incompatible endpoint leaves ordinary SFTP reads and
+configured content polling operational, but supplies no remote Files tree. The complete transcript, bounds,
+path codecs, and security rationale are in
+[ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md).

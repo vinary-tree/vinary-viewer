@@ -6,21 +6,25 @@
 // fetch filter lists). Run: `electron --no-sandbox test/extensions-smoke.js` (npm run test:extensions).
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const assert = require('assert');
 const http = require('http');
 const path = require('path');
 const { app, BrowserWindow, WebContentsView, session, net } = require('electron');
+const { browserWindowOptions } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const EXT_DIR = path.join(ROOT, 'test', 'fixtures', 'ext-probe');
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
+if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(pred, label, ms = 12000) {
@@ -64,7 +68,8 @@ async function main() {
   // start the MV3 background SW so its startup chrome.* probe runs (it stores the result for the popup/smoke)
   try { await ses.serviceWorkers.startWorkerForScope(`chrome-extension://${ext.id}/`); } catch (e) {}
 
-  const win = new BrowserWindow({ width: 600, height: 500, show: true, paintWhenInitiallyHidden: true });
+  const win = new BrowserWindow(browserWindowOptions(
+    { width: 600, height: 500, show: true, paintWhenInitiallyHidden: true }));
   const view = new WebContentsView({ webPreferences: { partition: 'persist:vv-ext-smoke', contextIsolation: true, nodeIntegration: false } });
   win.contentView.addChildView(view);
   view.setBounds({ x: 0, y: 0, width: 600, height: 500 });

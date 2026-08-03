@@ -193,7 +193,11 @@ loop ([ADR-0018](../design-decisions/0018-document-streaming-pipeline.md),
 - **Remote (`ssh://` / `sftp://`).** The open flow of §1 is unchanged except that `service` routes the URI to
   `openRemoteUri`, a virtual backend (`main.ssh` / `ssh_transport.js`) that reads over SFTP and feeds the same
   `vv:content` pipeline; large remote logs stream as in §9. Auth prompts cross the seam over `vv:ssh-prompt`;
-  live-refresh is opt-in polling. See [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md).
+  a compatible target daemon supplies authenticated content invalidations and a git/synthetic Files tree over
+  SSH direct forwarding, reusing §3's expansion-scoped ownership. The source re-reads invalidated bytes over
+  SFTP; opt-in polling remains the no-channel content fallback. See
+  [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md) and
+  [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md).
 - **Terminal (`vv --cli` / `--tui`).** The same front-ends and IR run without a DOM: `ir.backend.ansi` lowers
   to a tty instead of `backend.html` to the DOM, and there is no re-frame/app-db loop — `cli.core` / `tui.*`
   drive the render directly over the shared IR + streaming spine. See

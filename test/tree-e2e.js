@@ -18,8 +18,8 @@
 // Assertions read BOTH the renderer's DEV inspect hook window.__vvdb() (app-db verbatim) and the real
 // sidebar DOM, and drive the project-header context menu with actual mouse events.
 //
-// Run: npm run test:tree-e2e          (wraps it in xvfb-run; needs a DISPLAY)
-//      xvfb-run -a electron --no-sandbox test/tree-e2e.js
+// Run: npm run test:tree-e2e          (uses the cross-platform headless runner)
+//      VV_HEADLESS_BACKEND=wayland npm run test:tree-e2e   (Linux Weston variant)
 //
 // Not part of `npm test`: like test:electron, it needs a display and boots a real window.
 
@@ -29,6 +29,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow } = require('electron');
+const { isLiveWindow } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -38,6 +39,7 @@ const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-')));
 const GIT_SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-git-e2e-')));
 const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-config-')));
+process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(CONFIG_HOME, 'daemon-events.json');
 const CLI_DOC = path.join(ROOT, 'src', 'vinary', 'ui', 'tree.cljs');
 
 // Keep persisted user settings (especially :sidebar-visible?) out of the harness: the CLI reveal assertion
@@ -70,7 +72,7 @@ function writeFixture() {
   });
 }
 
-// xvfb invokes `electron --no-sandbox <app>`, leaving the Chromium switch in argv[1]. Production is
+// The headless runner invokes `electron --no-sandbox <app>`, leaving the Chromium switch in argv[1]. Production is
 // `electron <app> <document>`, the shape startup/doc-uris intentionally parses (user args begin at index 2).
 // Chromium has already consumed its switch, so normalize only the argv presented to the required real main.
 process.argv.splice(1, process.argv.length - 1, __filename, CLI_DOC);
@@ -86,7 +88,7 @@ async function waitForWindow() {
   for (let i = 0; i < 300; i++) {
     // main refills its warm pool as soon as it opens the visible startup window. BrowserWindow's global list
     // contains that hidden, empty pool window too; the command-line document belongs to the visible claim.
-    const w = BrowserWindow.getAllWindows().find((candidate) => candidate.isVisible());
+    const w = BrowserWindow.getAllWindows().find(isLiveWindow);
     if (w && !w.webContents.isLoading()) return w;
     await sleep(100);
   }

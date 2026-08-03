@@ -25,13 +25,13 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 
 | Channel | Preload method | Payload | Main receiver | Purpose |
 |---------|----------------|---------|---------------|---------|
-| `vv:open` | `open(path)` | `path` string | `service/open!` | Read a local (or `ssh://`/`sftp://`) file, send content + git tree, start/reuse its watcher. |
+| `vv:open` | `open(path)` | `path` string | `service/open!` | Read a local or `ssh://`/`sftp://` file, send content and an available local/target tree, and start/reuse its watch ownership. |
 | `vv:close` | `close(path)` | `path` string | `service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
-| `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace the sending window's retained local-file set. Watchers/assets are released only after no live window retains the path. |
+| `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace the sending window's retained document-identity set (local paths and remote URIs). Watchers, authenticated remote subscriptions, and assets are released only after no live window retains the identity. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `service/watch-assets!` | Watch local media assets referenced by a retained Markdown/Org/LaTeX document. |
-| `vv:tree-roots` | `syncTreeRoots(roots)` | root string array | `service/sync-tree-roots!` | Reconcile the sending window's visible Files projects; unoffered roots are rejected. |
-| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `service/sync-tree-expanded!` | Reconcile shared depth-0 watchers to effective expanded directories; collapse/unmount releases ownership. |
-| `vv:tree-refresh` ⮐ | `refreshTree(request)` | `{root, path}` → `{root, files, synthetic?, scope?}` | `service/refresh-tree-request` | Re-list one directory beneath a visible, previously offered project root. |
+| `vv:tree-roots` | `syncTreeRoots(roots)` | root string array | `service/sync-tree-roots!` | Reconcile the sending window's Files projects; unoffered roots are rejected. Authenticated remote roots are forwarded to their target daemon owner. |
+| `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `service/sync-tree-expanded!` | Reconcile shared depth-0 watchers to effective expanded directories, locally or on an authenticated target daemon; collapse/unmount releases ownership. |
+| `vv:tree-refresh` ⮐ | `refreshTree(request)` | `{root, path}` → `{root, files, synthetic?, scope?}` | `service/refresh-tree-request` | Re-list one directory beneath a visible, previously offered local or remote project root. |
 | `vv:tree-refresh-all` ⮐ | `refreshAllTrees()` | none → tree payload array | `service/refresh-all-tree-requests` | Re-list every project root visible in the sending window. |
 | `vv:content-page` ⮐ | `contentPage(request)` | `{path, kind, stamp, page, meta?}` → page payload with `hasPrev`/`hasNext` | `content_service.contentPage` | Fetch one bounded page for a large log or delimited-table preview. |
 | `vv:stream-open` ⮐ | `streamOpen(req)` | `{path, mode:"lines"\|"bytes"}` → `{sessionId, size, mode}` | `content_service.streamOpen` | Open a bounded-memory pull-cursor stream session (local `fs` or SFTP read-stream). |
@@ -135,7 +135,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 |---------|----------------------|---------|-----------------------|---------|
 | `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, dataUrl?, sourceable?, paged?, pdfSibling?, sourceSibling?}` | `[:content/received …]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first `:page`; a doc collocated with an exported PDF carries `:pdfSibling` (and a PDF its `:sourceSibling`). |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error …]` | Deliver read/render errors. |
-| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received …]` | Deliver a full project listing or a scoped automatic update. `scope` is root-relative; its files remain root-relative. `synthetic? true` marks an inferred non-git root. |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received …]` | Deliver a full project listing or a scoped automatic update. `root` may be local or `ssh://`/`sftp://`; `scope` and files remain root-relative. `synthetic? true` marks an inferred non-git root. |
 | `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. |
 | `vv:grammars` | `onGrammars(cb)` | EDN **text** `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
 | `vv:settings` | `onSettings(cb)` | EDN **text** | `[:settings/received …]` | Deliver persisted settings. |

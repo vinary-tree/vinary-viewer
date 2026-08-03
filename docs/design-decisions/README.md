@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0035**.
+The next free number is **0036**.
 
 ---
 
@@ -92,6 +92,7 @@ The next free number is **0035**.
 | [0032](0032-scroll-ownership-and-derived-input-focus.md) | One scroll owner (confined `scrollTo`, a terminating cancellable animator), input focus **derived** from `document.activeElement` rather than cached, and cross-node find | Accepted |
 | [0033](0033-asynchronous-text-input.md) | Text fields own their own DOM value; one keyed scheduler (`debounce!`/`coalesce!`/`slice!`/`cancel!`) replaces four deferral idioms; find flattens incrementally; one configurable search model replaces five matchers | Accepted |
 | [0034](0034-expansion-scoped-file-tree-watchers.md) | Expansion-scoped shallow file-tree watchers, refresh-before-open controlled disclosures, and explicit subtree/root/all refresh | Accepted |
+| [0035](0035-authenticated-remote-daemon-events.md) | Authenticate SSH-forwarded daemon events for remote files and trees | Accepted |
 
 ---
 
@@ -124,7 +125,7 @@ twelve** (0001–0012) establish the reactive core:
   trail, and the native PDF/web overlays yield to DOM menus/dialogs. It reuses the **0009** mediator seam
   for the new `recent.edn` and adds no content IPC.
 
-The **later fifteen** (0013–0027) build capability on that core without disturbing it:
+The **later decisions** build capability on that core without disturbing it:
 
 - **0013** retires the main-owned native PDF view for **in-renderer pdf.js**, folding PDFs into the same
   renderer Strategy (**0002**) as every other document.
@@ -162,6 +163,11 @@ The **later fifteen** (0013–0027) build capability on that core without distur
   moves recur: one owner (a locally owned field value), one mechanism (`vinary.async.scheduler` absorbing
   four hand-rolled deferral idioms), one model (`vinary.search.*` absorbing five hand-rolled matchers,
   with the semantics as a parameter rather than a hard-coded choice per widget).
+- **0034** gives the Files tree explicit visible-root and effective-expansion ownership, so automatic
+  refresh uses shared depth-0 watchers and collapse/unmount deterministically releases them.
+- **0035** carries that same ownership model over a host-key-verified SSH tunnel: a compatible target
+  daemon authenticates with a private HMAC capability and owns the local content/tree watchers, while the
+  source preserves `ssh://`/`sftp://` identities and re-reads changed bytes through SFTP.
 
 Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
 core, which is why they compose without conflict.

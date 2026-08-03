@@ -38,6 +38,15 @@ await Parser.init({
 });
 
 let failures = 0;
+const runtimeSource = path.join(root, 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm');
+const runtimeStaged = path.join(publicRoot, 'js', 'tree-sitter.wasm');
+if (!fs.existsSync(runtimeStaged)
+    || !fs.readFileSync(runtimeSource).equals(fs.readFileSync(runtimeStaged))) {
+  console.error('✗ tree-sitter runtime: staged tree-sitter.wasm differs from web-tree-sitter');
+  failures++;
+} else {
+  console.log('✓ tree-sitter runtime: staged WASM matches web-tree-sitter');
+}
 for (const entry of entries) {
   const wasmPath = path.join(publicRoot, entry.wasmUrl);
   const scmPath = path.join(publicRoot, entry.scmUrl);

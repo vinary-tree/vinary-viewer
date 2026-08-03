@@ -19,7 +19,7 @@
 //
 // Needs a display for the window-count assertions (like the other Electron smokes), and a built
 // dist/main/main.js — it spawns real daemons.
-// Run: npm run test:daemon     (headless Linux: xvfb-run -a npm run test:daemon)
+// Run: npm run test:daemon     (the package script supplies the platform headless backend)
 
 const assert = require('assert');
 const fs = require('fs');
@@ -35,7 +35,8 @@ const APP = `/tmp/vv-smoke-app-${process.pid}`;
 const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const env = () => ({ ...process.env, XDG_RUNTIME_DIR: RUNTIME_DIR, XDG_CONFIG_HOME: path.join(APP, 'config'), VV_POOL: '0' });
+const env = () => ({ ...process.env, XDG_RUNTIME_DIR: RUNTIME_DIR, XDG_CONFIG_HOME: path.join(APP, 'config'),
+  VV_DAEMON_EVENTS_DESCRIPTOR: path.join(RUNTIME_DIR, 'daemon-events.json'), VV_POOL: '0' });
 
 // A mirror app dir: real package.json (renamed) + real copies of the scripts under test, with the heavy
 // directories symlinked. The scripts must be real files — node resolves import.meta.url through symlinks,

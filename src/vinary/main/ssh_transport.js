@@ -9,7 +9,8 @@
 //     a changed key), via the pure checkHostKey in ssh_config.js,
 //   • ProxyJump multi-hop chaining, ~/.ssh/config resolution (Host/Match/Include), and ~user home resolution,
 //   • the async SFTP API the content service consumes: remoteStat / remoteReaddir / remoteReadFile /
-//     remoteReadText / remoteReadPrefix / remoteCreateReadStream, plus lifecycle (open/close/count).
+//     remoteReadText / remoteReadPrefix / remoteCreateReadStream; plus canonical remote-path resolution and
+//     direct-tcpip streams for the authenticated daemon-event bridge; plus lifecycle (open/close/count).
 //
 // It is Electron-FREE: the two prompts and the error/status sinks are injected via configure(), and the home
 // directory / agent socket are overridable, so the module is fully node-testable against an in-process
@@ -566,6 +567,38 @@ async function remoteCreateReadStream(uri, o) {
   return stream;
 }
 
+// Resolve the SFTP-visible path behind a remote URI.  The daemon-event bridge needs the same canonical
+// namespace as ordinary reads so that a target daemon can map an opened ssh:// URI onto its local filesystem.
+// No connection internals or credentials escape; callers receive only the already-authorized remote path.
+async function remoteResolvePath(uri) {
+  const { path: p } = await resolvePath(uri);
+  return p;
+}
+
+// Open a direct-tcpip channel to a service bound on the TARGET host.  This is the cross-platform transport for
+// daemon events: unlike OpenSSH stream-local forwarding it works for Linux, macOS, and Windows targets.  The
+// target service itself binds loopback only, and daemon_events.js performs a separate authenticated handshake.
+// Register the channel as an open stream so the SSH idle reaper cannot close a connection carrying live watches.
+async function remoteForwardOut(uri, host, port) {
+  const conn = await getConn(uri);
+  return new Promise((resolve, reject) => {
+    try {
+      conn.client.forwardOut('127.0.0.1', 0, host, port, (err, stream) => {
+        if (err) return reject(err);
+        conn.lastUsed = Date.now();
+        conn.openStreams.add(stream);
+        const done = () => conn.openStreams.delete(stream);
+        stream.on('close', done); stream.on('end', done); stream.on('error', done);
+        resolve(stream);
+      });
+    } catch (e) { reject(e); }
+  });
+}
+
+function connectionKey(uri) {
+  return resolveForUri(uri).connKey;
+}
+
 // ───────────────────────────── lifecycle ─────────────────────────────
 
 function openConnection(uri) {
@@ -608,6 +641,7 @@ if (reaper.unref) reaper.unref();
 module.exports = {
   configure, isRemoteUri,
   remoteStat, remoteReaddir, remoteReadFile, remoteReadText, remoteReadPrefix, remoteCreateReadStream,
+  remoteResolvePath, remoteForwardOut, connectionKey,
   openConnection, closeConnection, closeAll, connectionCount, connectionHealth,
   // exposed for tests / diagnostics
   _resolveForUri: resolveForUri, _childUri: childUri, _execCapture: execCapture,

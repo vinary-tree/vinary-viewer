@@ -27,12 +27,13 @@ but they scaled linearly with rendered HTML size and repeated work the HAST tree
 
 Use the tab histories as the ownership boundary for content and watcher retention.
 
-- `vinary.app.nav/retained-file-paths` computes the retained local-file set from every open tab history.
+- `vinary.app.nav/retained-file-paths` computes the retained document-identity set from every open tab history
+  (the historical function name now includes remote URIs as well as local paths).
 - `vinary.app.events` syncs that set to main with `:vv/sync-retained-files` after navigation, tab close,
   history traversal, and HTTP navigation changes.
-- `vinary.main.service/sync-retained!` replaces the sending window's ownership set. Main closes a file
-  watcher and releases media ownership only when the path disappears from the union across all live
-  renderer windows; a change is sent to every window that retains the path.
+- `vinary.main.service/sync-retained!` replaces the sending window's ownership set. Main closes a local watcher
+  or releases an authenticated remote-daemon subscription and media ownership only when the identity disappears
+  from the union across all live renderer windows; a change is sent to every retaining window.
 - `vinary.app.ds/retract-unretained-tx` evicts DataScript content-cache entities whose `:doc/path` is no
   longer retained.
 

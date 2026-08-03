@@ -7,21 +7,26 @@
 // only to the last opener, then retained that destroyed destination forever.
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-process.env.XDG_SESSION_TYPE = 'x11';
-process.env.VV_OZONE = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  process.env.XDG_SESSION_TYPE = OZONE === 'wayland' ? 'wayland' : 'x11';
+  process.env.VV_OZONE = OZONE;
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
+const { isLiveWindow } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-watch-e2e-')));
 const DOC = path.join(SCRATCH, 'shared.md');
+process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(SCRATCH, 'daemon-events.json');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 fs.writeFileSync(DOC, '# Shared watch\n\nversion-one\n');
@@ -45,7 +50,7 @@ async function until(probe, predicate, label, timeoutMs = 12000) {
 }
 
 function visibleWindows() {
-  return BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed() && win.isVisible());
+  return BrowserWindow.getAllWindows().filter(isLiveWindow);
 }
 
 async function readyVisibleWindows(count) {

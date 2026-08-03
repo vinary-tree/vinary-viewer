@@ -85,7 +85,7 @@ Ten JavaScript harnesses (`test/*-smoke.js`) drive the wiring. Each is a plain
 Node or Electron script using the built-in `assert` module; there is no test
 framework. They fall into three groups by host.
 
-### 3.1 Electron smokes (need a display / Xvfb)
+### 3.1 Electron smokes (isolated display protocol)
 
 | Harness | Drives |
 |---------|--------|
@@ -111,27 +111,36 @@ framework. They fall into three groups by host.
 | [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The sidebar file-tree git seam: `repo-files` lists with `git ls-files --cached --others --exclude-standard` and subtracts `git ls-files --deleted`, so new non-ignored files appear while ignored clutter and deleted/unstaged-renamed tracked paths do not linger. It exercises both exact commands against a throwaway repo and asserts `send-tree!` still falls back to `dir-walk/dir-tree` when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)). |
 | [`ssh-config-smoke.js`](../../test/ssh-config-smoke.js) | Hermetic unit tests for `ssh_config.js` (pure, no fs/net): `parseSshUri` for `ssh://` / `sftp://` authority, port, user, and home-relative path handling ([ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)). |
 | [`ssh-transport-smoke.js`](../../test/ssh-transport-smoke.js) | `ssh_transport.js` end-to-end against the **hermetic in-process ssh2 SFTP fixture** (no network, no external host); also asserts ssh2 runs **pure-JS** (no native crypto addon) and that `AddKeysToAgent` adds a key to a throwaway ssh-agent. |
+| [`daemon-events-smoke.js`](../../test/daemon-events-smoke.js) | The authenticated target-daemon protocol: private descriptor lifecycle, both negative sides of mutual HMAC + SFTP-namespace proof, framed requests, SSH direct forwarding, invalidations, remote tree conversion, reconnect restoration, in-flight cancellation/owner release, and no-target SFTP fallback. |
 
 ### 3.4 What `npm test` actually runs
 
-The default `npm test` is **Node-only** — it runs the unit build plus the six
-Node smokes, and it deliberately excludes the two Electron smokes, which need a
-display:
+The default `npm test` is **Node-only** — it runs the unit build plus the listed
+Node smokes, and it deliberately excludes Electron smokes, which need a display:
 
 ```bash
-# npm test
+# npm test (terminal test compilers validate vendored assets; they do not sync/fetch)
 shadow-cljs compile test && node dist/test/test.js \
   && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js \
+  && node test/daemon-events-smoke.js \
   && node test/content-service-smoke.js && node test/git-tree-smoke.js \
+  && node test/headless-runner-smoke.mjs \
   && npm run test:cli && npm run test:tui
-# test:cli  → compile:cli + cli-smoke + graphics-smoke
-# test:tui  → compile:tui + tui-smoke
+# test:cli  → compile:cli:test (grammars:check + graphics:check) + cli-smoke + graphics-smoke
+# test:tui  → compile:tui:test (grammars:check + graphics:check) + tui-smoke
 ```
 
 The Electron smokes are separate scripts (`test:electron`, `test:electron:release`,
-`test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`, `test:watch-e2e`) because they require a running
-Electron with a display — a proposed CI matrix runs them under Xvfb (see
+`test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`, `test:watch-e2e`,
+`test:remote-daemon-events-e2e`) because they require a running Electron with a display protocol. The repository
+headless runner supplies that protocol without using the developer's desktop (see §3.6 and
 [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
+
+`remote-daemon-events-e2e` is the real-app SSH/SFTP counterpart to `tree-e2e`: it boots main + renderer,
+crosses the in-process SSH2 SFTP/direct-forward fixture, and proves target content/tree watcher delivery for
+both URI schemes, including URI-encoded tree clicks, project Refresh/Refresh All, collapsed-scope release, and
+re-expansion refresh. Its outer Node runner owns the isolated Electron profile and removes it only after the
+Electron child has fully exited.
 
 ### 3.5 The one harness that runs the REAL main process
 
@@ -160,7 +169,7 @@ directory/project/Files-tab refresh end to end. Its watched fixture and isolated
 separate throwaway directories removed by the harness.
 
 ```bash
-npm run test:tree-e2e     # shadow-cljs compile main renderer && xvfb-run -a electron … test/tree-e2e.js
+npm run test:tree-e2e     # compile main+renderer, then run the real app through the headless backend
 ```
 
 > **Poll, never single-read.** Every UI assertion in this harness goes through a polling helper.
@@ -171,6 +180,33 @@ npm run test:tree-e2e     # shadow-cljs compile main renderer && xvfb-run -a ele
 > **Note on `test/test-sidebar.js`.** This is the legacy v0.1.0 vmd-patch sidebar
 > harness. It is parse-checked by [`test/lint.js`](../../test/lint.js) but is not
 > part of `npm test`; the shipped 0.2/0.3 app does not load `src/sidebar.js`.
+
+### 3.6 Cross-platform headless Electron backends
+
+[`scripts/run-electron-headless.mjs`](../../scripts/run-electron-headless.mjs) is the single display owner for
+Electron tests, screenshots, and the input benchmark:
+
+| Platform | Backend | Isolation behavior |
+|----------|---------|--------------------|
+| Linux | `x11` (the `auto` default) | Starts a private `xvfb-run` display and removes inherited Wayland variables. |
+| Linux | `wayland` | Starts Weston with its `headless` backend, pixman renderer, fake input seat, private `XDG_RUNTIME_DIR`, and private socket; then terminates Weston and removes that directory after the child exits. |
+| macOS | `native` (`auto`) | Uses WindowServer, but `VV_HEADLESS=1` keeps BrowserWindows hidden and changes the app activation policy so it has no Dock presence. |
+| Windows | `native` (`auto`) | Uses the native compositor, but keeps BrowserWindows hidden with `skipTaskbar`. |
+
+The Linux virtual surfaces remain mapped *inside* their private compositor: realistic layout, animation-frame,
+focus, and paint behavior matters to these tests. Only the macOS/Windows native mode suppresses mapping.
+`test/headless-runner-smoke.mjs` validates backend selection, environment isolation, command construction, and
+the two native-hidden plans on every platform; the explicit Linux gates exercise the actual servers:
+
+```bash
+npm run test:electron:x11
+npm run test:electron:wayland
+VV_HEADLESS_BACKEND=wayland npm run test:tree-e2e   # select Weston for any migrated command
+npm run test:electron:display                      # deliberately use the current desktop
+```
+
+`VV_HEADLESS_WIDTH` / `VV_HEADLESS_HEIGHT` set the virtual output dimensions. A missing `xvfb-run` or `weston`
+is a hard failure for the selected backend rather than permission to fall back to the real desktop.
 
 ---
 
@@ -197,8 +233,8 @@ fixtures inspectable.
 `electron-smoke.js` runs against **both** build profiles, through two scripts:
 
 ```bash
-npm run test:electron          # electron --no-sandbox test/electron-smoke.js         (DEV build)
-npm run test:electron:release  # npm run release && VV_RELEASE=1 electron … electron-smoke.js  (RELEASE build)
+npm run test:electron          # headless runner → electron-smoke.js                   (DEV build)
+npm run test:electron:release  # release + headless runner with VV_RELEASE=1           (RELEASE build)
 ```
 
 The release variant exists because an entire class of bug is **release-only** —

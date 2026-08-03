@@ -65,8 +65,29 @@ function startSftpServer(config) {
     return { type: key.type, blob: key.getPublicSSH() };
   });
 
-  // Map a client-supplied remote path into the temp root, clamped so `..` cannot escape.
+  // Map a client-supplied remote path into the temp root, clamped so `..` cannot escape.  A small number of
+  // integration tests opt into an identity namespace rooted at `exposeAbsoluteRoot`: remote absolute paths below
+  // that root map to the same local absolute paths. This models a normal (non-chrooted) OpenSSH SFTP subsystem,
+  // while the containment check keeps the hermetic server from exposing anything outside its fixture directory.
+  const exposedRoot = config.exposeAbsoluteRoot ? fs.realpathSync(config.exposeAbsoluteRoot) : null;
+  const realHome = exposedRoot ? fs.realpathSync(config.realHome || exposedRoot) : '/';
+  const deniedPath = path.join(metaDir, 'sftp-path-outside-fixture');
+  const contained = (root, candidate) => {
+    const rel = path.relative(root, candidate);
+    return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
+  };
+  const remoteAbsolute = (p) => {
+    const value = String(p == null ? '' : p);
+    if (value === '' || value === '.') return realHome;
+    return path.posix.isAbsolute(value)
+      ? path.posix.normalize(value)
+      : path.posix.resolve(realHome.replace(/\\/g, '/'), value);
+  };
   const mapPath = (p) => {
+    if (exposedRoot) {
+      const candidate = path.resolve(remoteAbsolute(p));
+      return contained(exposedRoot, candidate) ? candidate : deniedPath;
+    }
     const norm = path.posix.normalize('/' + String(p == null ? '' : p));
     return path.join(dir, '.' + norm);
   };
@@ -134,7 +155,8 @@ function startSftpServer(config) {
           const drop = (h) => handles.delete(h.readUInt32BE(0));
 
           sftp.on('REALPATH', (reqid, p) => {
-            const abs = (p === '.' || p === '' || p == null) ? '/' : path.posix.resolve('/', p);
+            const abs = exposedRoot ? remoteAbsolute(p)
+              : ((p === '.' || p === '' || p == null) ? '/' : path.posix.resolve('/', p));
             sftp.name(reqid, [{ filename: abs, longname: abs, attrs: {} }]);
           });
           const onStat = (useLstat) => (reqid, p) => {

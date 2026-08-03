@@ -1,16 +1,20 @@
 'use strict';
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-process.env.XDG_SESSION_TYPE = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  process.env.XDG_SESSION_TYPE = OZONE === 'wayland' ? 'wayland' : 'x11';
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { browserWindowOptions, showForTest } = require('./headless-window.js');
 // the REAL main-process content service — the streaming smoke wires vv:stream-* to it (exactly as service.cljs
 // does) so the test drives genuine createReadStream/readline batching + the session registry, and can assert
 // streamCount() returns to 0 (no fd/session leak) after teardown.
@@ -25,7 +29,7 @@ const tempDirs = [];
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
+if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -621,7 +625,7 @@ async function main() {
 
   await app.whenReady();
 
-  const win = new BrowserWindow({
+  const win = new BrowserWindow(browserWindowOptions({
     width: 1000,
     height: 700,
     show: false,
@@ -631,7 +635,7 @@ async function main() {
       nodeIntegration: false,
       preload: PRELOAD
     }
-  });
+  }));
 
   win.webContents.on('render-process-gone', (_event, details) => {
     throw new Error(`Renderer process gone: ${details.reason}`);
@@ -652,6 +656,9 @@ async function main() {
   });
 
   await win.loadFile(INDEX);
+  // A Weston headless surface needs to be mapped before it receives ongoing frame callbacks. This is still
+  // invisible to the user under Xvfb/Weston, and showForTest suppresses mapping for native macOS/Windows mode.
+  showForTest(win);
 
   await waitFor(
     () => evalIn(win, `Boolean(window.__vvdb && document.querySelector('.vv-menubar') && document.querySelector('.vv-tab-new'))`),
@@ -1961,7 +1968,7 @@ async function main() {
     };
   })()`);
   assert.strictEqual(localSvgStart.imageCount, 3, 'local SVG fixture must render three images');
-  win.show();
+  showForTest(win);
   await delay(100);
   win.focus();
   win.webContents.focus();
@@ -2136,7 +2143,7 @@ async function main() {
   // responsively (width clamped to the column, height from the ratio) — this is what stops the jump
   assert.deepStrictEqual(rasterStart.dims.map((d) => d.ratio), [400, 33, 100],
     'reserved raster boxes must match their intrinsic aspect ratios');
-  win.show();
+  showForTest(win);
   await delay(100);
   win.focus();
   win.webContents.focus();

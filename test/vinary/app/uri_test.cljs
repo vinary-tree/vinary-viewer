@@ -43,7 +43,9 @@
     (is (= "b.md" (uri/basename "ssh://user@h:22/a/b.md")))
     (is (= "logs" (uri/basename "ssh://h/var/logs/")) "trailing slash ignored (a directory)")
     (is (= "/"    (uri/basename "ssh://h/"))          "remote root")
-    (is (= "/"    (uri/basename "ssh://h")))))
+    (is (= "/"    (uri/basename "ssh://h")))
+    (is (= "a b.md" (uri/basename "sftp://h/a%20b.md")))
+    (is (= "100%.md" (uri/basename "ssh://h/100%25.md")))))
 
 (deftest remote-dirname
   (testing "dirname keeps the authority on the parent; the remote root has no parent"

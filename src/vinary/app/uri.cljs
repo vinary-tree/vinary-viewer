@@ -16,6 +16,9 @@
 (defn sftp?   [uri] (boolean (and uri (re-find #"(?i)^sftp://" uri))))
 (defn remote? [uri] (or (ssh? uri) (sftp? uri)))
 
+(defn- decode-component [s]
+  (try (js/decodeURIComponent s) (catch :default _ s)))
+
 (defn remote-parts
   "Split a remote uri into [prefix path]: prefix = \"scheme://[user@]host[:port]\" (the authority, no
    trailing '/'), path = the remote path beginning with '/' (or \"/\" when absent). The authority is
@@ -80,7 +83,7 @@
     (archive? uri) (or (some-> (last (archive-chain uri)) (str/split #"/") last) "Archive")
     (remote? uri) (let [[_ p] (remote-parts uri)
                         segs  (remove str/blank? (str/split p #"/"))]
-                    (or (last segs) "/"))       ; remote file/dir name; "/" at the remote root
+                    (or (some-> (last segs) decode-component) "/")) ; decoded label; "/" at remote root
     :else       (last (str/split uri #"/"))))
 
 (defn- strip-trailing-slash
@@ -142,7 +145,7 @@
           named      (remove str/blank? (str/split (strip-trailing-slash p) #"/"))]
       (into [{:name prefix :path (str prefix "/")}]
             (map-indexed (fn [i name]
-                           {:name name
+                           {:name (decode-component name)
                             :path (str prefix "/" (str/join "/" (take (inc i) named)))})
                          named)))
     :else

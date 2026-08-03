@@ -86,9 +86,11 @@ text. Directory overrides `kind`.
 > threshold)`; a remote payload that omitted `meta.size` would make large remote logs/markdown **silently
 > never stream** — the same class of bug the local `:text` route's `:meta {:size}` fixed (ADR-0018).
 
-`open!` skips the git-tree sidebar and the chokidar watch for a remote URI (a remote path is not a local
-repo and cannot be inotify-watched); `complete` gains an async remote-directory branch for URI-bar
-completion; `vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (over SFTP).
+`open!` does not treat the URI as a local path or Chokidar-watch it on the source. As added by
+[ADR-0035](0035-authenticated-remote-daemon-events.md), a compatible target daemon can offer its local git
+or synthetic tree and own the corresponding expansion-scoped watchers; otherwise the remote document still
+opens without a Files tree. `complete` gains an async remote-directory branch for URI-bar completion;
+`vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (over SFTP).
 
 ### 4. Streaming, paging, and polling live-refresh
 
@@ -104,12 +106,13 @@ completion; `vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (o
   `:doc/streaming?` and would blank the streamed DOM).
 - **Paging** (`contentPage`): a remote arm reads only up to the requested window over SFTP; the LRU page
   cache keys on the `ssh://` URI verbatim.
-- **Live-refresh via polling** (SFTP has no inotify): a per-doc poller re-stats the URI and, on a
+- **Live-refresh fallback via polling** (SFTP itself has no inotify): a per-doc poller re-stats the URI and, on a
   size/mtime change, re-sends it (a fresh `Date.now` stamp → the renderer remounts/re-streams — the refresh
   contract is already mtime-agnostic). **Opt-in** via `settings.edn` `:remote {:poll-seconds …}`;
   exponential backoff (to 60 s) + ±25 % jitter avoid hammering a downed host; directory listings poll slower
   or not at all. Lifecycle is tied to `unwatch-file!`, so closing a tab stops the poll — the same guarantee
-  as watchers (ADR-0006).
+  as watchers (ADR-0006). ADR-0035 later made authenticated target-daemon invalidations the preferred path;
+  this opt-in poller remains the compatibility fallback.
 
 ### 5. Authentication, host-key trust, and `~/.ssh/config`
 

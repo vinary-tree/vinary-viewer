@@ -186,13 +186,15 @@ The `~26` scripts fall into build, asset-sync, launch, and test groups. Each app
 | Assets | `assets:sync` / `assets:check` | Vendor + verify self-hosted fonts and Font Awesome (`scripts/sync-assets.mjs`). |
 | | `pdfjs:sync` / `pdfjs:check` | Vendor + verify the pdf.js legacy build + cmaps/fonts/wasm. |
 | | `grammars:sync` / `grammars:check` | Vendor + verify bundled tree-sitter grammars. |
-| | `graphics:sync` | Vendor the terminal graphics WASM (resvg). |
+| | `graphics:sync` / `graphics:check` | Vendor / byte-verify the terminal graphics WASM (resvg). |
 | Launch | `start` → `electron .` | Launch Electron against `dist/main/main.js`. |
-| | `screenshots` / `screenshots:display` | Headless (xvfb) / on-display screenshot capture. |
-| Test | `test` | Compile+run the node unit tests, the SSH/content-service/git-tree smokes, then `test:cli` + `test:tui`. |
-| | `test:cli` / `test:tui` | Build the terminal targets and run their smokes (+ `graphics-smoke`). |
-| | `test:electron` / `test:electron:release` | Electron smoke against a dev / a **release** build (the release gate catches `:advanced`-only crashes). |
+| | `screenshots` / `screenshots:display` | Isolated-headless / explicitly on-display screenshot capture. |
+| Test | `test` | Compile+run the node unit tests, SSH/config/daemon-events/content/tree smokes, then `test:cli` + `test:tui`. |
+| | `test:cli` / `test:tui` | Read-only check vendored grammars/graphics, build the terminal targets, and run their smokes (+ `graphics-smoke`). |
+| | `test:electron` / `test:electron:release` | Headless Electron smoke against a dev / a **release** build (the release gate catches optimization-only crashes). |
+| | `test:electron:x11` / `test:electron:wayland` | Explicit Linux compositor gates: private Xvfb / private Weston headless. |
 | | `test:extensions` / `test:extensions:sandbox` | Extension-runtime smokes. |
+| | `test:remote-daemon-events-e2e` | Real Electron + SSH2 proof of authenticated remote content/tree watches through the cross-platform headless runner. |
 
 ### 4.2 Runtime dependencies (`dependencies`)
 

@@ -13,7 +13,8 @@ opens Markdown, Org, and LaTeX documents; unified/git **diffs**; images; PDFs
 (rendered in-renderer with pdf.js); office documents (docx/ODF) and
 spreadsheet/delimited tables; logs; archives; source and text files; HTTP/HTTPS
 links; and — new in 0.3.0 — files and directories on remote hosts over
-`ssh://`/`sftp://`. It live-refreshes local files (and polls remote ones) while
+`ssh://`/`sftp://`. It live-refreshes local files and, when a compatible target daemon is running,
+remote files and expansion-scoped remote trees (with opt-in content polling as a fallback), while
 preserving tabs, per-tab history, scroll positions, settings, and keybinding
 state, and it streams very large documents in bounded memory rather than loading
 them whole.
@@ -26,7 +27,7 @@ Key terms:
 | Renderer process | Chromium process that owns the re-frame/Reagent UI; Markdown/Org/LaTeX/diff rendering; in-renderer pdf.js; source preview; tabs; search; TOC; and keybindings. |
 | Preload mediator | `resources/preload.js`; exposes `window.vv` through `contextBridge`. |
 | DataScript content cache | In-memory document cache keyed by `:doc/path`. |
-| Retained file | A local file reachable from any open tab history entry. |
+| Retained document | A local path or remote URI reachable from any open tab history entry. |
 
 ---
 
@@ -45,7 +46,7 @@ Primary loops:
 |------|----------|
 | Open | Main reads/classifies a file and sends `vv:content`; renderer caches/renders and points a tab at it. |
 | Live refresh | Main watcher re-sends content; renderer updates cached content and rendered metadata without resetting UI state. |
-| Navigation | Renderer tab/history events change app-db, load retained local files when needed, and restore scroll. |
+| Navigation | Renderer tab/history events change app-db, load retained local paths/remote URIs when needed, and restore scroll. |
 | Configuration | Main watches settings/keybinding/grammar files and pushes plain EDN/data over IPC. |
 
 ---
@@ -80,7 +81,7 @@ renderer-to-main API is `window.vv`, exposed by the preload mediator.
 |-------|-------|----------|
 | UI and navigation | re-frame `app-db` | Tabs, active tab id, tab histories, saved scroll entries, sidebar state, find state, settings UI, keybinding UI. |
 | Loaded content | DataScript | `:doc/path`, `:doc/kind`, `:doc/text`, `:doc/html`, `:doc/toc`, `:doc/assets`, `:doc/entries`, `:doc/error`, `:doc/stamp`, plus representation-switch / reflow / streaming fields (`:doc/pdf-sibling`, `:doc/source-sibling`, `:doc/reflow-html`, `:doc/diff-split-html`, `:doc/streaming?`, …). |
-| OS/native resources | Main process | Chokidar watchers, asset watchers, the HTTP web view, the SSH/SFTP connection pool and remote pollers, config file watchers. (The native PDF `WebContentsView` is retired — PDFs render in-renderer via pdf.js; ADR-0013.) |
+| OS/native resources | Main process | Chokidar content/tree/asset watchers, the authenticated daemon-event endpoint and tunnels, the HTTP web view, the SSH/SFTP connection pool and fallback remote pollers, config file watchers. (The native PDF `WebContentsView` is retired — PDFs render in-renderer via pdf.js; ADR-0013.) |
 
 The `:ds/rev` bridge connects DataScript to re-frame subscriptions. Each
 DataScript transaction dispatches `[:ds/changed]`, increments `:ds/rev`, and
@@ -95,9 +96,10 @@ Main owns privileged operations:
 | Namespace | Responsibility |
 |-----------|----------------|
 | `vinary.main.core` / `vinary.main.startup` / `vinary.main.window` | App/window lifecycle and initial (multi-arg) file handling. |
-| `vinary.main.service` (+ `service_util`, `file_kind`) | File reading, kind classification, retained watcher reconciliation, git tree, embedded asset watchers, remote polling. |
+| `vinary.main.service` (+ `service_util`, `file_kind`) | File reading, kind classification, retained content/tree watcher reconciliation, git/synthetic trees, embedded asset watchers, target-daemon ownership, and fallback remote polling. |
 | `vinary.main.content_service` (JS) | The Electron-free file reader / bounded-preview pager / stream-session registry, shared with the CLI/TUI. |
-| `vinary.main.ssh` (+ `ssh_config`, `ssh_transport`, `ssh_agent` JS) | SSH/SFTP connection pool, auth chain, host-key trust, and the `vv:ssh-*` seam (ADR-0027). |
+| `vinary.main.ssh` (+ `ssh_config`, `ssh_transport`, `ssh_agent` JS) | SSH/SFTP connection pool, auth chain, host-key trust, direct-TCP forwarding, and the `vv:ssh-*` seam (ADR-0027/0035). |
+| `vinary.main.daemon_events` (JS) | Private target descriptor/listener, mutual HMAC handshake, framed content/tree events, heartbeat, reconnect, and desired-state restoration (ADR-0035). |
 | `vinary.main.connections` | `connections.edn` — non-secret SSH host metadata. |
 | `vinary.main.pdf` | **Retired** native PDF `WebContentsView` (kept commented; PDFs now render in-renderer via pdf.js — ADR-0013). |
 | `vinary.main.web` | In-app HTTP/HTTPS web view (browserized). |
@@ -141,13 +143,13 @@ Available now:
 | Diffs | `.diff` / `.patch` colored unified view plus on-demand side-by-side (split) and a multi-file Contents (ADR-0026). |
 | Office / tables | docx/ODF office documents and spreadsheet/delimited tables (`.xlsx`, `.ods`, `.csv`, …) as sanitized HTML / paged tables. |
 | Logs / archives | Bounded log/table paging and in-place archive browsing (virtual `vv-archive://` URIs, never extracted to disk). |
-| Live refresh | Retained-path watcher reconciliation, bounded DataScript cache eviction, and opt-in remote polling. |
+| Live refresh | Retained-path watcher reconciliation, bounded DataScript cache eviction, authenticated target-daemon invalidations/remote trees, and opt-in remote-content polling fallback. |
 | Tabs/history | Browser-like tabs, per-tab history, scroll restore, tab reorder, tab context menus, View Source. |
 | PDF | In-renderer **pdf.js** — windowed canvas + text/link layers inside `.vv-content`, with app find/selection/zoom/invert and an outline Contents (ADR-0013). |
 | Source preview | Read-only CodeMirror 6 with web-tree-sitter highlighting when a grammar or filetype mapping is available. |
 | Grammar registry | Bundled grammars plus user grammars under `~/.config/vinary-viewer/grammars/` and filename/pattern mappings from `filetypes.edn`. |
 | Mermaid rendering | Mermaid fences in Markdown and direct `.mmd` / `.mermaid` files render to SVG in the renderer. |
-| Remote files (SSH) | Open files and directories over `ssh://` / `sftp://` through the same pipeline as local paths (ADR-0027). |
+| Remote files (SSH) | Open files and directories over `ssh://` / `sftp://` through the same pipeline as local paths; a compatible target daemon supplies event-driven refresh and Files trees (ADR-0027/0035). |
 | Document streaming | Very large logs/Markdown/Org/PDF-reflow stream in bounded memory, default-on above a per-kind size threshold (ADR-0018). |
 | Terminal preview | `vv --cli` (pipe-friendly) and `vv --tui` (full-screen) render the same documents to ANSI, with kitty/sixel graphics where supported (ADR-0019). |
 | Keybindings | Standard/Vim/Emacs presets, command registry, resolver, visual editor, persisted `keybindings.edn`. |

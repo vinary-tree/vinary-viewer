@@ -16,22 +16,27 @@
 // This file requires the real compiled main (dist/main/main.js) from INSIDE an Electron process, exactly
 // as test/tree-e2e.js does, so the whole production chain runs against real files on disk.
 //
-// Run: npm run test:find-e2e       (wraps it in xvfb-run; needs a DISPLAY)
-//      xvfb-run -a electron --no-sandbox test/find-e2e.js
+// Run: npm run test:find-e2e       (uses the cross-platform headless runner)
+//      VV_HEADLESS_BACKEND=wayland npm run test:find-e2e   (Linux Weston variant)
 //
 // Not part of `npm test`: like test:electron and test:tree-e2e, it needs a display and boots a real window.
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-process.env.XDG_SESSION_TYPE = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  process.env.XDG_SESSION_TYPE = OZONE === 'wayland' ? 'wayland' : 'x11';
+  process.env.VV_OZONE = OZONE;
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
+const { showForTest } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e2e-')));
@@ -42,7 +47,7 @@ const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e
 const GPU = process.env.VV_FIND_E2E_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
+if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
 // ---- fixtures ---------------------------------------------------------------------------------------
 // Well over a viewport tall, far under the 256 KiB markdown streaming threshold (vinary.stream.flag), so
@@ -654,7 +659,7 @@ async function run() {
   const wc = win.webContents;
   await until(wc, 'typeof window.__vvdb === "function"', (v) => v === true, 'the __vvdb DEV hook');
 
-  win.show();
+  showForTest(win);
   await sleep(200);
   win.focus();
   wc.focus();

@@ -172,6 +172,22 @@ command execution); and remote streamed content rides the **same** per-block Git
 local content. A remote directory listing can only name child URIs **on the same host**, and connecting is
 always **user-initiated**.
 
+**Remote daemon events (ADR-0035).** A compatible target daemon may additionally provide event-driven file
+invalidations and expansion-scoped Files trees. Its TCP listener binds only target loopback and is reached
+through the existing host-key-verified SSH connection's `direct-tcpip` forwarding. SFTP discovery reads an
+atomically written, owner-readable descriptor (`0600` under `0700` on POSIX; inherited user-profile ACL on
+Windows) containing a process-lifetime 256-bit secret. Source and target then mutually authenticate a
+nonce/session-bound HMAC-SHA-256 transcript with constant-time proof comparison before any path request is
+accepted. The transcript includes the
+descriptor's canonical SFTP path, and the target first verifies that the codec-mapped path resolves to the
+descriptor file it actually published. A chrooted or virtual SFTP namespace therefore fails closed instead of
+letting an SFTP path be interpreted as an unrelated target-local path. The secret and raw channel remain
+main-process-only. Target refresh paths must stay beneath a tree root already offered to that authenticated
+session; disconnect releases content and shallow-tree watcher ownership. The event channel carries
+invalidations and bounded tree payloads, not file bytes—the source re-fetches content through SFTP. This does
+not defend against compromise of the target user account, which can already read that user's files, private
+descriptor, and daemon memory.
+
 **Where this would be a problem:** if the renderer were ever to load **remote or untrusted web content**
 that could script `window.vv.open("/etc/passwd")` (or any readable path) and exfiltrate the returned
 `vv:content` text. Today the renderer loads only the local, first-party bundle from `index.html`, so

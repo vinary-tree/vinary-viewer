@@ -6,7 +6,9 @@ live-refresh as a local path. A remote URI is a *virtual backend*, modeled exact
 scheme: the address is opened, never mirrored to a temp directory, so browsing a remote repo feels identical to
 browsing a local one. Everything runs in the **trusted main process** — the sandboxed renderer never touches a
 socket, a private key, or a passphrase. See
-[ADR-0027](../design-decisions/0027-remote-files-over-ssh.md) for the full design.
+[ADR-0027](../design-decisions/0027-remote-files-over-ssh.md) for the SFTP backend and
+[ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md) for authenticated target events
+and remote Files trees.
 
 ![The sandboxed renderer sends an ssh:// URI to main, whose content service opens it through the ssh2 transport (pool, auth, host-key, SFTP); only non-secret metadata crosses the window.vv seam](../diagrams/component-remote-backend.svg)
 
@@ -21,9 +23,10 @@ socket, a private key, or a passphrase. See
 | **Authentication** | ssh-agent, key files (with **passphrase prompts** + optional `AddKeysToAgent`), full `~/.ssh/config` (`Host` / `Match` / `Include` / `ProxyJump` / `%`-tokens), and **keyboard-interactive** (MFA) / password prompts. |
 | **Host-key trust** | Verified against `~/.ssh/known_hosts` with a **trust-on-first-use** prompt on an unknown key (a native dialog in the GUI, a `yes/no` in the terminal) and a **hard reject** of a *changed* key. |
 | **Large remote logs stream** | A big remote log / text file streams in **bounded memory** over SFTP; a mid-stream connection drop keeps the partial content (never a silent truncation). |
-| **Live refresh (polling)** | SFTP has no inotify, so a remote doc is kept fresh by an **opt-in poller** (`settings.edn` `:remote :poll-seconds`) with exponential backoff + jitter. |
+| **Event-driven live refresh** | When a compatible vinary-viewer daemon is running on the target, its local watcher sends authenticated invalidations; the source re-reads the changed URI over SFTP. Opt-in polling remains the no-channel content fallback. |
+| **Remote Files tree** | The target daemon offers the file's git repository or a synthetic containing-directory project. Expansion, add/delete/rename, `.gitignore`, manual Refresh, and Refresh All reuse the same expansion-scoped semantics as local trees. |
 | **Everything a local path does** | Relative image assets (inlined as `data:` URLs over SFTP), Document↔PDF siblings, side-by-side diff enrichment, remote archive browsing, and **live-rendered remote HTML** (via a privileged `vv-remote://` scheme). |
-| **Terminal parity** | `vv --cli ssh://…` and `vv --tui ssh://…` open remote URIs too, with TTY-gated auth prompts. |
+| **Terminal preview** | `vv --cli ssh://…` opens remote URIs too, with TTY-gated auth prompts. The interactive TUI remains local-only. |
 
 Both `ssh://` and `sftp://` are accepted as **equivalent aliases** — both drive the SFTP subsystem; the scheme
 is retained only for display. There is no IETF-standardized SSH-file URI scheme; these are the widely-supported
@@ -65,9 +68,11 @@ threaded from CLJS so a remote `.rs` renders as highlighted source, not sniffed 
 > payload that omitted `meta.size` would make large remote logs / markdown **silently never stream** — the
 > same class of bug the local `:text` route's `:meta {:size}` fixed ([ADR-0018](../design-decisions/0018-document-streaming-pipeline.md)).
 
-`open!` skips the git-tree sidebar and the chokidar watch for a remote URI (a remote path is not a local repo
-and cannot be inotify-watched); URI-bar completion gains an async remote-directory branch; and
-`vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches over SFTP.
+`open!` never tries to Chokidar-watch a URI locally. It asks a compatible target daemon for content/tree
+ownership and the target runs the ordinary local git/synthetic-tree and watcher logic there; when discovery or
+authentication is unavailable, the file still opens and optional content polling remains available, but no
+client-recursive Files tree is fabricated. URI-bar completion has an async remote-directory branch, and
+`vv:load-pdf-bytes` / `vv:load-diff-sources` have remote branches over SFTP.
 
 ### Authentication, host-key trust, and `~/.ssh/config`
 
@@ -94,7 +99,7 @@ ed25519 / RSA / ECDSA — ssh2 has no client-side agent-add).
   **hard reject**, `REMOTE HOST IDENTIFICATION … HAS CHANGED`), `revoked`, or `unknown` (→ the TOFU prompt,
   showing the OpenSSH **SHA256 fingerprint**; on accept, the key is appended to `~/.ssh/known_hosts`).
 
-### Streaming, paging, and polling live-refresh
+### Streaming, paging, and event-driven live-refresh
 
 - **Streaming** substitutes an SFTP read-stream for `fs.createReadStream` — a drop-in `Readable`, so the
   credit-1 pull cursor and the whole session are otherwise identical. Only the **transport engine** (log / text)
@@ -106,7 +111,13 @@ ed25519 / RSA / ECDSA — ssh2 has no client-side agent-add).
   `:doc/stream-note`; it **never** sets `:doc/error` (which would blank the streamed DOM).
 - **Paging** reads only up to the requested window over SFTP; the LRU page cache keys on the `ssh://` URI
   verbatim.
-- **Polling live-refresh.** A per-doc poller re-stats the URI and, on a size/mtime change, re-sends it (a fresh
+- **Target-daemon live-refresh.** Every GUI/resident daemon publishes a private descriptor and loopback-only
+  endpoint. The source discovers it over the already authenticated SFTP connection, reaches it through SSH
+  `direct-tcpip`, and completes a nonce/session-bound mutual HMAC-SHA-256 handshake before any operation. A
+  target Chokidar event sends only an invalidation; source content bytes still travel through SFTP and all
+  existing size/stream/parser bounds. Desired subscriptions reconnect with exponential backoff.
+- **Polling fallback.** When target discovery, forwarding, version negotiation, path-namespace proof, or the
+  channel is unavailable, a configured per-doc poller re-stats the URI and, on a size/mtime change, re-sends it (a fresh
   stamp → the renderer remounts / re-streams). It is **opt-in** via `settings.edn` `:remote {:poll-seconds …}`,
   with exponential backoff (to 60 s) and ±25 % jitter so a downed host is not hammered; directory listings poll
   slower or not at all. The schedule, seeded at the configured base `$`d_0`$`:
@@ -115,9 +126,22 @@ ed25519 / RSA / ECDSA — ssh2 has no client-side agent-add).
 d_{n+1} = \min\!\left(2\,d_n,\ 60\,\text{s}\right), \qquad \text{next fire} \sim d_{n+1}\,\bigl(1 \pm 0.25\bigr)
 ```
 
-  The poller's lifecycle is tied to `unwatch-file!`, so closing a tab stops the poll — the same guarantee
+  The fallback poller's lifecycle is tied to `unwatch-file!`, so closing a tab stops the poll — the same guarantee
   local watchers give ([feature 01](01-live-refresh.md)) — and it bails if the tab closes mid-stat so a stale
-  update cannot resurrect a zombie poller (and leak a connection).
+  update cannot resurrect a zombie poller (and leak a connection). An authenticated target subscription stops
+  the poller; a later disconnect restarts it when configured.
+
+### Remote Files trees reuse expansion-scoped ownership
+
+The authenticated target runs the same `repo-tree` / synthetic-directory fallback used for local opens and
+returns root-relative paths. The source maps only the root into the originating, segment-encoded remote URI
+namespace; tree labels decode for display while clicks retain the encoded identity. Distinct `ssh://` and
+`sftp://` spellings remain distinct projects even when they share one resolved SSH connection.
+
+Visible roots and effectively expanded directories cross the event channel as target-local paths. The target
+owns one shared depth-0 watcher per expanded scope, sends scoped replacements after add/delete/rename or
+`.gitignore` changes, and releases ownership on collapse, Files-view unmount, project/window removal, disconnect,
+or session death. Directory/project **Refresh** and Files-tab **Refresh All** use the same authenticated route.
 
 ### Remote assets, Document↔PDF, diffs, archives, and live HTML
 
@@ -133,8 +157,9 @@ Everything the local path does, a remote path now does:
 - **Document↔PDF** siblings over remote (a remote `paper.tex` ↔ `paper.pdf`, both directions), the side-by-side
   **diff** enrichment ([feature 28](28-diff-rendering.md), resolved over SFTP by walking ancestors), and
   **archive browsing** (a remote `.zip` / `.tar` read whole into a buffer, then the existing archive seam).
-- **Terminal parity**: `vv --cli` / `vv --tui` route remote URIs through `openRemoteUri`, with TTY-gated
-  terminal auth prompts (a non-interactive / piped run relies on the agent / keys and declines a prompt).
+- **Terminal preview**: `vv --cli` routes remote URIs through `openRemoteUri`, with TTY-gated terminal auth
+  prompts (a non-interactive / piped run relies on the agent / keys and declines a prompt). `vv --tui` remains
+  local-only.
 
 ### Secrets stay main-side
 
@@ -151,12 +176,13 @@ password-bridge doctrine.
 | File | Role |
 |---|---|
 | `vinary.main.ssh_config` (JS, **pure**) | URI parsing, `~/.ssh/config` (`Host` / `Match` / `Include` + `%`-tokens), `known_hosts` matching, SHA256 fingerprints. No `fs` / `net`. |
-| `vinary.main.ssh_transport` (JS) | ssh2 `Client` **pool**, the auth chain, `hostVerifier`, ProxyJump, `~user` resolution, the idle reaper, and the async SFTP API. Electron-free (injected callbacks). |
+| `vinary.main.ssh_transport` (JS) | ssh2 `Client` **pool**, the auth chain, `hostVerifier`, ProxyJump, `~user` resolution, the idle reaper, async SFTP API, canonical path resolution, and direct-TCP forwarding. Electron-free (injected callbacks). |
+| `vinary.main.daemon_events` (JS) | Private descriptor/listener, SFTP-namespace proof, mutual HMAC handshake, framed content/tree operations, heartbeat, reconnect, and desired-state restoration. |
 | `vinary.main.ssh_agent` (JS) | the SSH-agent `ADD_IDENTITY` wire protocol for `AddKeysToAgent` (ed25519 / RSA / ECDSA). |
 | `vinary.main.ssh` | wires the transport's prompts to a native host-key dialog + a renderer secret modal; owns the `vv:ssh-*` channels. |
 | `vinary.main.connections` | `connections.edn` — non-secret host metadata + a recent-remote MRU (a clone of `recent.cljs`). |
 | `vinary.main.content_service` (`openRemoteUri`) | the single async reader: `remoteStat` → list-vs-read → the shared payload contract. |
-| `vinary.main.service` (`send-remote-content!`, poller) | the async remote arm + the opt-in polling live-refresh. |
+| `vinary.main.service` | The async remote content arm, target/local watcher ownership, remote tree routing, and opt-in polling fallback. |
 | `vinary.main.web` (`vv-remote://`) | serves remote HTML's assets over SFTP for the web view. |
 | `vinary.app.uri` | `ssh?` / `sftp?` / `remote?` + authority-aware path helpers (renderer). |
 | `vinary.ui.ssh` | the renderer auth-prompt modal + a connection-error toast (secret stays component-local). |
@@ -166,11 +192,13 @@ password-bridge doctrine.
 `vv:ssh-prompt-reply` (renderer→main, the one secret channel), `vv:ssh-error`, `vv:ssh-status`,
 `vv:ssh-close-connection`, `vv:connections-request` / `vv:connections-save` / `vv:connections`, and
 `vv:load-remote-asset`; plus the reused `vv:content`, `vv:content-page`, `vv:stream-open` / `vv:stream-pull` /
-`vv:stream-close`, `vv:load-pdf-bytes`, and `vv:load-diff-sources`.
+`vv:stream-close`, `vv:tree` / `vv:tree-*`, `vv:load-pdf-bytes`, and `vv:load-diff-sources`. The raw
+daemon-event channel is main-process to main-process and is never exposed through preload.
 
 ## Configuration
 
-- **Live-refresh polling** — off by default. Enable in `settings.edn`:
+- **Fallback live-refresh polling** — off by default and unnecessary while a compatible target event channel is
+  active. Enable it in `settings.edn` for no-daemon/disconnected content refresh:
 
   ```clojure
   {:remote {:poll-seconds 10        ; re-stat every ~10 s (backoff to 60 s + jitter); absent / ≤ 0 → no polling
@@ -203,11 +231,16 @@ protections:
   itself runs a shell command *by design* — it is the user's own config file, the same file OpenSSH executes —
   bounded by a 5 s timeout.)
 - **`vv-remote://` serves only file bytes over SFTP** — no arbitrary command execution.
+- **Target daemon events use a second application handshake** — the target listens only on loopback; SSH
+  supplies confidentiality/host/user authentication; a private `0600` descriptor supplies a rotating 256-bit
+  capability; and mutual nonce-bound HMAC proofs plus exact SFTP-descriptor identity prevent stale-port and
+  mismatched/chrooted-namespace use. Tree refreshes are confined beneath roots already offered to the session.
 
 ## Edge cases & limitations
 
-- **No inotify.** Remote live-refresh is polling, not push — it is opt-in and rate-limited; a change is seen on
-  the next poll, not instantly.
+- **A compatible target daemon is required for push and Files trees.** If it is absent, incompatible, forwarding
+  is forbidden, or its SFTP namespace cannot be proven identical to the daemon's local namespace, ordinary SFTP
+  opens still work and configured content polling can refresh them. No source-side recursive tree is attempted.
 - **`ssh2` crypto is Node's built-in `crypto`.** The optional native accelerator (`sshcrypto.node`) is never
   built, so there is no mandatory native build; pure-JS crypto is used where no accelerator is present.
 - **Idle connections are reaped.** A pooled connection with no open streams is closed after ~5 minutes idle;
@@ -217,6 +250,8 @@ protections:
 ## References / see also
 
 - [ADR-0027 — Opening remote files & directories over SSH](../design-decisions/0027-remote-files-over-ssh.md)
+- [ADR-0035 — Authenticated remote daemon events](../design-decisions/0035-authenticated-remote-daemon-events.md) ·
+  [ADR-0034 — Expansion-scoped file-tree watchers](../design-decisions/0034-expansion-scoped-file-tree-watchers.md)
 - [ADR-0018 — Document-streaming pipeline](../design-decisions/0018-document-streaming-pipeline.md) ·
   [Theory 09 — Document streaming and the WPDA](../theory/09-document-streaming-and-the-wpda.md)
 - [feature 16 — Directory browser](16-directory-browser.md) ·

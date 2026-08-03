@@ -79,19 +79,21 @@ wired together. The table collects them so a pipeline author has the complete li
 
 ## 4. The CI matrix the project should run
 
-When CI is added, it should be a single Linux-x11 workflow (the only tested platform;
-[`CHANGELOG`](../../CHANGELOG.txt) notes "Linux + X11 tested (Electron 42)") with these jobs, ordered
-cheapest-first so a fast failure short-circuits the expensive ones:
+When CI is added, it should retain the stable Linux-X11 baseline and add a Wayland smoke job through the same
+repository-owned headless runner. macOS and Windows jobs use its native-hidden backend. Order jobs cheapest-first
+so a fast failure short-circuits the expensive ones:
 
 ```
-CI (ubuntu-latest, x11 via xvfb)
+CI
 ├── setup      : node + JDK (shadow-cljs needs a JVM) + graphviz + plantuml
 ├── lint       : node test/lint.js
 ├── provenance : npm run assets:check && npm run pdfjs:check && npm run grammars:check
 ├── unit       : npm test                      # compiles :test, runs it + the chained smokes
-├── smoke-dev  : xvfb-run npm run test:electron
-├── smoke-rel  : xvfb-run npm run test:electron:release     # the release build's :simple interop
-├── extensions : xvfb-run npm run test:extensions
+├── smoke-x11  : npm run test:electron:x11
+├── smoke-wl   : npm run test:electron:wayland
+├── smoke-rel  : npm run test:electron:release              # the release build's :simple interop
+├── native     : macOS + Windows → npm run test:electron     # hidden native windows, no Dock/taskbar entry
+├── extensions : npm run test:extensions
 └── docs       : plantuml -tsvg docs/diagrams/*.puml
                  ! grep -lF deprecated        docs/diagrams/*.svg    # must be empty
                  ! grep -lF "contains errors" docs/diagrams/*.svg    # must be empty

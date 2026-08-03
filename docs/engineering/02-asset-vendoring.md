@@ -212,7 +212,7 @@ where a hash check would have passed.
 ## 5. The fourth, lockfile-less asset — graphics WASM
 
 [`sync-graphics-wasm.mjs`](../../scripts/sync-graphics-wasm.mjs) is a deliberately
-simpler vendoring with **no lockfile and no check script**. It copies one binary —
+simpler vendoring with **no separate lockfile**. It copies one binary —
 `@resvg/resvg-wasm/index_bg.wasm` → `resources/public/js/resvg.wasm` — so the
 headless terminal graphics layer (`vinary.terminal.graphics`) can rasterize SVGs
 from disk at runtime, the same res-dir pattern `vinary.terminal.syntax` uses for
@@ -228,6 +228,9 @@ if (changed) fs.copyFileSync(src, dest);
 It has no integrity manifest because it is a single binary with a single upstream
 version already pinned in `package.json`; a full lockfile would add ceremony
 without adding provenance the `package.json` pin does not already provide.
+[`check-graphics-wasm.mjs`](../../scripts/check-graphics-wasm.mjs) performs the corresponding read-only byte
+comparison against that pinned dependency. `grammars:check` likewise verifies that the staged
+`tree-sitter.wasm` matches `web-tree-sitter` before loading every grammar/query pair.
 
 ---
 
@@ -238,16 +241,16 @@ without adding provenance the `package.json` pin does not already provide.
 | `assets:sync` / `assets:check` | `sync-assets.mjs` / `check-assets.mjs` | `resources/public/assets/` + `assets.lock.json` |
 | `pdfjs:sync` / `pdfjs:check` | `sync-pdfjs.mjs` / `check-pdfjs.mjs` | `resources/public/pdf/` + `pdfjs.lock.json` |
 | `grammars:sync` / `grammars:check` | `sync-grammars.mjs` / `check-grammars.mjs` | `resources/public/grammars/` + `catalog.edn` |
-| `graphics:sync` | `sync-graphics-wasm.mjs` | `resources/public/js/resvg.wasm` |
+| `graphics:sync` / `graphics:check` | `sync-graphics-wasm.mjs` / `check-graphics-wasm.mjs` | `resources/public/js/resvg.wasm` |
 
 The GUI build scripts (`compile`, `release`) prepend `assets:sync` + `pdfjs:sync`;
 the terminal build scripts (`compile:cli`, …) prepend `grammars:sync` +
 `graphics:sync`; and [`install.sh`](../../install.sh) runs `grammars:sync
 --skip-existing` + `graphics:sync` once up front for a whole install (see
 [01-build-system.md §6](01-build-system.md#6-which-asset-syncs-each-build-command-runs)).
-The `*:check` scripts are not wired into any build — they are integrity gates
-intended for CI, which is exactly the gap [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)
-recommends closing.
+The `compile:cli:test` / `compile:tui:test` scripts use the read-only grammar and graphics checks instead of
+the synchronizers. Consequently `npm test` is hermetic: it validates the vendored runtime inputs and never
+fetches grammar repositories or rewrites the worktree.
 
 ---
 
@@ -260,7 +263,8 @@ recommends closing.
 - [`scripts/sync-grammars.mjs`](../../scripts/sync-grammars.mjs) ·
   [`check-grammars.mjs`](../../scripts/check-grammars.mjs) — the grammar pair.
 - [`scripts/sync-graphics-wasm.mjs`](../../scripts/sync-graphics-wasm.mjs) — the
-  lockfile-less graphics binary sync.
+  lockfile-less graphics binary sync; [`check-graphics-wasm.mjs`](../../scripts/check-graphics-wasm.mjs) —
+  its pinned-dependency byte check.
 - [ADR-0011 — Font Awesome icons + self-hosted fonts, vendored at build time](../design-decisions/0011-font-awesome-icons-self-hosted-fonts.md).
 - [ADR-0013 — In-renderer pdf.js](../design-decisions/0013-in-renderer-pdfjs.md).
 - [01-build-system.md](01-build-system.md) — which build runs which sync.

@@ -41,6 +41,10 @@ cannot be undone by an older in-flight request.
 Main treats renderer paths as requests, not authority: a refresh root must already have been offered
 to that window and still be visible, and a requested directory must remain lexically beneath it.
 
+[ADR-0035](0035-authenticated-remote-daemon-events.md) reuses this ownership model for `ssh://` and
+`sftp://`: the target daemon becomes the shallow-watcher owner and the source transports the same scoped
+payloads into the existing renderer protocol.
+
 ## Consequences
 
 - Expanded directories track file/directory add, delete, and rename without recursively watching

@@ -3,12 +3,13 @@
 vinary-viewer opens files and browses directories on a **remote host over SSH**,
 using the `ssh://` and `sftp://` URI schemes. A remote URI flows through the
 *same* open pipeline as a local path — the same renderers, the same streaming, the
-same directory browser, the same live-refresh — so previewing a remote Markdown
+same directory browser, and, with a compatible target daemon, event-driven live refresh and Files trees — so previewing a remote Markdown
 file, PDF, log, or source tree works exactly like a local one. Nothing is copied
 to a temporary directory; the remote path is addressed in place over SFTP.
 
-> **Design background.** Remote SSH support is
-> [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md). The transport is
+> **Design background.** The SFTP backend is
+> [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md); authenticated target events and trees are
+> [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md). The transport is
 > the `ssh2` library, and it runs **entirely in the trusted main process** — the
 > sandboxed renderer never opens a socket, holds a key, or sees a passphrase. Only
 > non-secret metadata crosses the `window.vv` mediator.
@@ -158,6 +159,7 @@ The security boundary is strict:
 | Renderer | Sandboxed — `contextIsolation`, no `nodeIntegration`, `fs`/`path`/`url` stubbed, and a CSP that blocks remote I/O. It never opens a socket or reads a key. |
 | Secret transport | The only secret-bearing IPC channel is `vv:ssh-prompt-reply` (renderer → main): a one-shot reply carrying the value you typed into a prompt, resolved into a main-memory promise and **never** stored in `app-db` or on disk. |
 | Persistence | Accepted host keys append to `~/.ssh/known_hosts`; `connections.edn` holds non-secret metadata only. |
+| Target event channel | The target listens on loopback only. A private owner-readable descriptor, SSH forwarding, exact SFTP-namespace proof, and mutual nonce-bound HMAC authenticate the two daemon instances; the renderer sees neither the secret nor the raw channel. |
 
 A remote host is treated as a new **untrusted input source**: SFTP bytes and
 directory listings pass through the same GitHub-allowlist sanitizer as local
@@ -165,20 +167,35 @@ content.
 
 ---
 
-## 7. Live-refresh via polling
+## 7. Target-daemon live refresh and Files trees
 
-SFTP has no file-change notifications, so remote live-refresh is **opt-in
-polling**, off by default. Enable it in `~/.config/vinary-viewer/settings.edn`:
+When a compatible vinary-viewer GUI/resident daemon is running as the same target user, the source discovers
+its private descriptor over SFTP and reaches its loopback endpoint through the existing host-key-verified SSH
+connection. After the mutual handshake succeeds:
+
+- target-local Chokidar changes invalidate the open document; the source re-reads it through SFTP and refreshes
+  the rendition;
+- opening a remote file adds the target git repository—or a synthetic containing directory—to **Files**;
+- visible roots and expanded folders own the same shared depth-0 target watchers as local trees, so add/delete/
+  rename and `.gitignore` changes arrive automatically; and
+- folder/project **Refresh**, **Refresh All**, collapse/unmount release, heartbeat, reconnect, and desired-state
+  restoration work across both `ssh://` and `sftp://` identities.
+
+The event channel carries invalidations and tree payloads, never file bytes. If discovery, forwarding,
+compatibility, or the filesystem-namespace proof fails, ordinary SFTP opens continue but no remote Files tree is
+fabricated. Content polling remains an **opt-in fallback**, off by default. Enable it in
+`~/.config/vinary-viewer/settings.edn`:
 
 ```clojure
 {:remote {:poll-seconds 4      ; poll a remote doc every N seconds; 0 or absent = off (the default)
           :poll-dirs? false}}  ; also poll open directory listings (heavier); default false
 ```
 
-The poller re-stats the open remote URI and, on a size/mtime change, re-sends it
+The fallback poller re-stats the open remote URI and, on a size/mtime change, re-sends it
 (re-rendering or re-streaming the document). It backs off (to 60 s) and jitters by
 ±25 % on error, so a downed host is not hammered, and closing the tab stops the
-poll — the same lifecycle guarantee as local file watchers.
+poll. A successfully authenticated target subscription stops the poller; a later channel loss restarts it when
+configured.
 
 ---
 
@@ -189,6 +206,7 @@ work over SSH without special handling.
 
 | Capability | Remote behavior |
 |------------|-----------------|
+| Files tree | With a compatible target daemon, the target git/synthetic project appears in Files and supports expansion-scoped watching, encoded-path clicks, Refresh, and Refresh All. |
 | Relative image assets | A remote Markdown/office document's relative images are fetched over SFTP and inlined as `data:` URLs (the sandbox and `file://` cannot reach the host). |
 | Document↔PDF switch | A remote document collocated with a same-stem `.pdf` can switch to the faithful exported PDF, both directions. |
 | Side-by-side diff | A remote `.diff`/`.patch` enriches its context by reading the referenced files over SFTP. |
@@ -220,10 +238,10 @@ and any needed secret; a non-interactive run (piped, or under CI) relies on your
 
 | If you want to... | Read |
 |-------------------|------|
-| Configure remote polling and inspect `connections.edn` | [05-configuration.md](05-configuration.md) |
+| Configure fallback remote polling and inspect `connections.edn` | [05-configuration.md](05-configuration.md) |
 | Use the terminal renderers | [07-terminal-cli-tui.md](07-terminal-cli-tui.md) |
 | Understand file-kind classification and tabs | [03-opening-files-and-tabs.md](03-opening-files-and-tabs.md) |
-| Read the full remote-SSH design | [../design-decisions/0027-remote-files-over-ssh.md](../design-decisions/0027-remote-files-over-ssh.md) |
+| Read the full remote-SSH/event design | [ADR-0027](../design-decisions/0027-remote-files-over-ssh.md) and [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md) |
 
 ---
 

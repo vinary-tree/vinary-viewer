@@ -114,7 +114,7 @@ npm run dev
 | PDFs and images  | PDFs render **in the renderer** via pdf.js (canvas + text/link layers, outline-driven TOC, in-page find, zoom/fit/invert); images open in a focused image preview. (The old main-owned native PDF view was retired in ADR-0013.) |
 | Source files     | Source files open in a read-only CodeMirror 6 view, with tree-sitter highlighting from bundled/user grammars and filename/pattern filetype mappings such as `Cargo.lock` → TOML.    |
 | Web links        | HTTP and HTTPS links can open in an in-app web view whose heading outline feeds the same Contents panel model.                                                                     |
-| Remote files     | `ssh://` / `sftp://` open remote files and directories through the same renderers, streaming, paging, and refresh as local paths, using `~/.ssh/config`, agent/key/keyboard-interactive auth, and known-hosts trust-on-first-use; live-refresh is opt-in polling. Secrets stay in the main process. |
+| Remote files     | `ssh://` / `sftp://` open remote files and directories through the same renderers, streaming, and paging as local paths, using `~/.ssh/config`, agent/key/keyboard-interactive auth, and known-hosts trust-on-first-use. A compatible target daemon supplies authenticated live refresh and expansion-scoped Files trees; opt-in polling remains the no-daemon content fallback. Secrets stay in the main process. |
 | Terminal         | `vv --cli <file>` renders once to stdout (pipe-friendly ANSI + kitty/sixel graphics); `vv --tui <file>` is an interactive full-screen pager — a second renderer over the same common-IR / streaming spine as the GUI. |
 | Passwords        | Web-view login forms can be filled and saved through main-process provider CLIs for 1Password, LastPass, optional Bitwarden/Proton Pass, and restricted JSON adapters.             |
 | Sidebar          | Files and Contents panels provide a multi-project tree, filtering, tab mirroring, and Markdown/HTML scroll-spy outlines.                                                           |
@@ -176,6 +176,9 @@ The key invariant is separation of concerns:
 - Main owns retained-file/media watchers and the Files tree's shallow directory watchers. Document
   watchers follow retained tab histories; tree watchers follow only effectively expanded directories
   and are released on collapse, ancestor collapse, or Files-view unmount.
+- For `ssh://`/`sftp://`, a compatible target vinary-viewer daemon supplies the git/synthetic Files tree
+  and owns those same expansion-scoped watchers through a mutually authenticated SSH-forwarded event
+  channel. Remote document polling remains an opt-in fallback when that daemon channel is unavailable.
 
 This is why live refresh can repaint content without discarding scroll position,
 history, keybindings, or other UI state.
@@ -204,18 +207,25 @@ or personal launcher paths.
 | `npm run dev`            | Compile, then launch Electron against the workspace.                   |
 | `npm run start`          | Launch Electron against already compiled output.                       |
 | `npm run release`        | Produce release builds with the configured `:simple` optimizations.    |
-| `npm run compile:cli` / `release:cli` | Build the `vv --cli` terminal renderer → `dist/cli/vv-cli.js`. |
-| `npm run compile:tui` / `release:tui` | Build the `vv --tui` terminal renderer → `dist/tui/vv-tui.js`. |
-| `npm test`               | Compile + run the CLJS unit build, then the ssh-config / ssh-transport / content-service / git-tree / cli / tui smokes. |
+| `npm run compile:cli` / `release:cli` | Sync assets and build the `vv --cli` terminal renderer → `dist/cli/vv-cli.js`. |
+| `npm run compile:tui` / `release:tui` | Sync assets and build the `vv --tui` terminal renderer → `dist/tui/vv-tui.js`. |
+| `npm test`               | Compile + run the CLJS unit build, then the ssh-config / ssh-transport / daemon-events / content-service / git-tree / cli / tui smokes. |
 | `npm run test:cli` / `test:tui` | Run the terminal CLI / TUI smoke harnesses.                    |
-| `npm run test:electron` / `test:electron:release` | Run the Electron smoke against the dev / `:simple` release build. |
+| `npm run test:electron` / `test:electron:release` | Run the Electron smoke headlessly against the dev / `:simple` release build. |
+| `npm run test:electron:x11` / `test:electron:wayland` | Exercise Linux under isolated Xvfb / headless Weston. |
+| `npm run test:remote-daemon-events-e2e` | Run the real-app SSH/SFTP content + remote-tree watcher integration test headlessly. |
 | `npm run test:extensions` / `test:extensions:sandbox` | Run the scoped-extension smoke.             |
 | `node test/lint.js`      | Parse-check JavaScript, verify CSS braces, and verify `--vv-*` theme variables. |
 | `npm run assets:sync` / `assets:check` | Vendor / verify Font Awesome + self-hosted fonts against `assets.lock.json`. |
 | `npm run pdfjs:sync` / `pdfjs:check` | Vendor / verify the pdf.js worker + data against `pdfjs.lock.json`. |
 | `npm run grammars:sync` / `grammars:check` | Vendor / validate the tree-sitter grammars against `grammars.lock.json`. |
-| `npm run graphics:sync`  | Vendor the terminal-graphics (sixel / resvg) WASM.                     |
-| `npm run screenshots`    | Regenerate the 800×600 UI screenshots headlessly (xvfb + ImageMagick). |
+| `npm run graphics:sync` / `graphics:check` | Vendor / verify the terminal-graphics (sixel / resvg) WASM. |
+| `npm run screenshots`    | Regenerate the 800×600 UI screenshots with the isolated headless runner + ImageMagick. |
+
+Electron test commands do not use the current desktop. On Linux, `auto` defaults to Xvfb; set
+`VV_HEADLESS_BACKEND=wayland` to run any migrated command in a private Weston compositor, or use the explicit
+`test:electron:wayland` gate. macOS and Windows select `native`, which keeps BrowserWindows hidden and removes
+them from the Dock/taskbar while using the OS compositor. `test:electron:display` is the opt-in visual variant.
 
 For validation work, capture command output to a temporary log, inspect it, and
 remove the log after use.

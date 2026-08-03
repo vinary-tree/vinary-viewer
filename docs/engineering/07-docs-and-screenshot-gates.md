@@ -38,14 +38,14 @@ Two design choices make the output authentic and reproducible:
 Run it three ways:
 
 ```bash
-npm run screenshots            # assets:sync + pdfjs:sync + compile renderer, then xvfb-run … electron scripts/screenshots.cjs
+npm run screenshots            # assets:sync + pdfjs:sync + compile renderer, then platform headless runner
 npm run screenshots:display    # same, but on your real DISPLAY (no xvfb)
 electron --no-sandbox scripts/screenshots.cjs --only=native-pdf,web-preview   # a subset, for iteration
 ```
 
-`npm run screenshots` wraps the harness in `xvfb-run -a -s "-screen 0
-1280x1024x24"`, so it regenerates the whole gallery on a **headless** machine (CI,
-a server) with no physical display. The `--only=<scene,scene>` flag renders a
+`npm run screenshots` uses `run-electron-headless.mjs` at 1280×1024, so it regenerates the whole gallery on a
+**headless** machine (CI, a server) with no physical display. Linux defaults to Xvfb and can select private
+Weston with `VV_HEADLESS_BACKEND=wayland`; macOS/Windows use native-hidden mode. The `--only=<scene,scene>` flag renders a
 subset for fast iteration on one figure.
 
 ---

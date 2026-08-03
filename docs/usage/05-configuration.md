@@ -192,15 +192,17 @@ listing. See [../design-decisions/0027-remote-files-over-ssh.md](../design-decis
 - **Host keys** are verified against `~/.ssh/known_hosts`; an unknown host prompts once (trust-on-first-use)
   and, on accept, is appended there. A **changed** host key is rejected outright.
 - **`connections.edn`** stores only non-secret host metadata (aliases, recently-opened remotes).
-- **Live-refresh** for remote docs is **opt-in polling** (SFTP has no file-change events). Enable it in
-  `settings.edn`:
+- A compatible target vinary-viewer daemon provides event-driven remote content refresh without a setting.
+  `:remote` polling is the **opt-in fallback** when that daemon/channel is absent or incompatible. Enable it in
+  `settings.edn` if fallback refresh is desired:
 
 ```clojure
 {:remote {:poll-seconds 4      ; poll a remote doc every N seconds; 0 or absent = off (the default)
           :poll-dirs? false}}  ; also poll open directory listings (heavier); default false
 ```
 
-Polling backs off (to 60 s) and jitters on error so a downed host is not hammered; closing the tab stops it.
+Fallback polling backs off (to 60 s) and jitters on error so a downed host is not hammered; closing the tab
+stops it, and a successfully authenticated event subscription disables it.
 
 ---
 

@@ -23,7 +23,7 @@ output-facing layers are new, and the **GUI is untouched**. See
 | **Inline graphics** | On a kitty- or sixel-capable terminal, `vv --cli` draws images inline; elsewhere (piped, unsupported `TERM`, `--no-graphics`) it prints a labelled `🖼 name — reason` placeholder. |
 | **Bounded-memory streaming** | A huge log streams to stdout / into a bounded viewport ring, so `vv --cli huge.log | less` and a TUI on a growing log both keep memory flat. |
 | **Contents & find** | `--toc` prints the outline first in the CLI; the TUI has a selectable Contents overlay and reverse-video find — both reuse the shared TOC capability. |
-| **Remote** | `vv --cli ssh://…` / `vv --tui ssh://…` open remote URIs with TTY-gated auth prompts ([feature 29](29-remote-files-over-ssh.md)). |
+| **Remote** | `vv --cli ssh://…` opens remote URIs with TTY-gated auth prompts; the interactive TUI is local-only ([feature 29](29-remote-files-over-ssh.md)). |
 
 The two surfaces trade **display fidelity** (no rasterised PDF pages, no rendered Mermaid, no typeset math) for
 a **dependency-light, pure-core, fully-testable** layer that never touches Electron or a browser. Degradation

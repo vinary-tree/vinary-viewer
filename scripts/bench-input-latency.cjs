@@ -24,8 +24,8 @@
 //
 // Run (pinned, per the standing benchmarking rule):
 //   npm run compile
-//   taskset -c 2-9 xvfb-run -a -s "-screen 0 1400x1000x24" \
-//     electron --no-sandbox scripts/bench-input-latency.cjs | tee /tmp/vv-input-baseline.txt
+//   taskset -c 2-9 npm run bench:input
+// Set VV_HEADLESS_BACKEND=wayland to benchmark the private Weston path instead of the default Xvfb path.
 //
 // Environment:
 //   VV_BENCH_GPU=1        keep hardware acceleration on (default: off, like test/find-e2e.js)
@@ -34,10 +34,13 @@
 //   VV_BENCH_ONLY=<name>  run one scenario only (find-small, find-large, find-pdf, tree, palette, uri, prefs)
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-process.env.XDG_SESSION_TYPE = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  process.env.XDG_SESSION_TYPE = OZONE === 'wayland' ? 'wayland' : 'x11';
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const fs = require('fs');
 const os = require('os');
@@ -50,7 +53,7 @@ const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-
 const GPU = process.env.VV_BENCH_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
+if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
 const ONLY = process.env.VV_BENCH_ONLY || null;
 

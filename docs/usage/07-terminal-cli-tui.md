@@ -258,7 +258,7 @@ remote-file model (`~/.ssh/config`, host-key trust, `connections.edn`).
 |-------------------|------|
 | Open remote files over SSH (GUI + CLI) | [08-remote-files-ssh.md](08-remote-files-ssh.md) |
 | Build the CLI and TUI targets | [02-installation-and-build.md](02-installation-and-build.md) |
-| Configure themes, fonts, and remote polling | [05-configuration.md](05-configuration.md) |
+| Configure themes, fonts, and fallback remote polling | [05-configuration.md](05-configuration.md) |
 | Understand the terminal renderer's design | [../design-decisions/0019-terminal-preview-layer.md](../design-decisions/0019-terminal-preview-layer.md) |
 
 ---

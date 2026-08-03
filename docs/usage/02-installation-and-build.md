@@ -196,7 +196,7 @@ the `:sync` variants automatically; run them directly for CI or to refresh asset
 | `npm run assets:sync` / `assets:check` | Stage / verify the self-hosted fonts and Font Awesome icons. |
 | `npm run pdfjs:sync` / `pdfjs:check` | Stage / verify the pdf.js distribution + worker. |
 | `npm run grammars:sync` / `grammars:check` | Build / verify the bundled tree-sitter grammar WASM. Strict by default (a failed grammar exits non-zero); pass `--skip-existing` to skip already-built grammars and `--allow-failures` to skip (rather than abort on) grammars that can't be downloaded/built — the installer uses both (see [§1.1](#11-optional-grammars-rholang-and-metta)). |
-| `npm run graphics:sync` | Stage the resvg image WASM used by terminal graphics. |
+| `npm run graphics:sync` / `graphics:check` | Stage / byte-verify the resvg image WASM used by terminal graphics. |
 
 Grammar sources are cached for fetching but copied or attached as isolated
 worktrees under `.cache/tree-sitter-build/sources/` for generation and
@@ -207,23 +207,25 @@ caches and makes repeated full synchronization deterministic.
 
 | Command | Expands to | Use |
 |---------|------------|-----|
-| `npm test` | `shadow-cljs compile test && node dist/test/test.js && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && npm run test:cli && npm run test:tui` | The full non-Electron suite: it compiles the `test` build and runs the DOM-free unit tests, then the SSH-config, SSH-transport, content-service, and git-tree smokes, and finally the CLI and TUI smokes. |
-| `npm run test:cli` | `compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js` | Build `vv --cli` and run the CLI + terminal-graphics smokes. |
-| `npm run test:tui` | `compile:tui && node test/tui-smoke.js` | Build `vv --tui` and run the TUI smoke (headless `--drive` replay). |
-| `npm run test:electron` | `electron --no-sandbox test/electron-smoke.js` | Electron GUI smoke test (debug artifacts). |
-| `npm run test:watch-e2e` | Compile GUI builds and run `test/watch-e2e.js` under Xvfb. | Real-main-process, two-window live-refresh and watcher-ownership regression. |
-| `npm run test:find-e2e` | Compile GUI builds and run `test/find-e2e.js` under Xvfb. | In-page-find behavior and large-document input-latency regression. |
-| `npm run test:daemon` | `compile && node test/daemon-smoke.js` | The resident-daemon control seam ([§1.2](#12-the-resident-daemon-and-staleness)): `vv1 ping`/`stop`, the legacy-inertness contract, and the stale-but-idle self-heal. Spawns real daemons on an isolated socket, so it never touches yours. Headless Linux: `xvfb-run -a npm run test:daemon`. |
-| `npm run test:electron:release` | `release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js` | The GUI smoke against a fresh optimized release build. |
-| `npm run test:extensions` | `electron --no-sandbox test/extensions-smoke.js` | Browser-extension runtime smoke (no sandbox). |
-| `npm run test:extensions:sandbox` | `electron test/extensions-smoke.js` | The extension smoke with the Chromium sandbox enabled. |
+| `npm test` | Unit build + SSH/config/daemon-events/content/tree smokes + CLI/TUI smokes | The full non-Electron suite. Terminal test builds verify vendored grammars/graphics locally and perform no network fetch or asset rewrite. |
+| `npm run test:cli` | `compile:cli:test && node test/cli-smoke.js && node test/graphics-smoke.js` | Verify vendored terminal assets, build `vv --cli`, and run the CLI + graphics smokes. |
+| `npm run test:tui` | `compile:tui:test && node test/tui-smoke.js` | Verify vendored terminal assets, build `vv --tui`, and run the TUI smoke (headless `--drive` replay). |
+| `npm run test:electron` | `run-electron-headless … electron-smoke.js` | Electron GUI smoke through the platform headless backend. |
+| `npm run test:electron:x11` / `test:electron:wayland` | Select Xvfb / Weston headless explicitly. | Linux compositor-specific smoke gates. |
+| `npm run test:watch-e2e` | Compile GUI builds and run `test/watch-e2e.js` through the headless runner. | Real-main-process, two-window live-refresh and watcher-ownership regression. |
+| `npm run test:remote-daemon-events-e2e` | Compile GUI builds; its Node runner launches `test/remote-daemon-events-e2e.js` through the headless runner and owns/cleans the isolated profile. | Real-app authenticated SSH/SFTP content, manual refresh, and expansion-scoped remote-tree watcher regression. |
+| `npm run test:find-e2e` | Compile GUI builds and run `test/find-e2e.js` through the headless runner. | In-page-find behavior and large-document input-latency regression. |
+| `npm run test:daemon` | `compile && run-electron-headless … daemon-smoke.js` | The resident-daemon control seam ([§1.2](#12-the-resident-daemon-and-staleness)): `vv1 ping`/`stop`, the legacy-inertness contract, and the stale-but-idle self-heal. Spawns real daemons on an isolated socket, so it never touches yours. |
+| `npm run test:electron:release` | `release && run-electron-headless --env=VV_RELEASE=1 …` | The GUI smoke against a fresh optimized release build. |
+| `npm run test:extensions` | Run `extensions-smoke.js` headlessly without Chromium's sandbox. | Browser-extension runtime smoke. |
+| `npm run test:extensions:sandbox` | Run `extensions-smoke.js` headlessly with Chromium's sandbox. | The sandboxed extension smoke. |
 | `node test/lint.js` | JavaScript/CSS checks | Parse checks and theme variable checks across both CSS surfaces. |
 
 ### 3.5 Screenshots
 
 | Command | Does |
 |---------|------|
-| `npm run screenshots` | Compile the renderer and capture UI screenshots headlessly under `xvfb-run`. |
+| `npm run screenshots` | Compile the renderer and capture UI screenshots through the platform headless runner. |
 | `npm run screenshots:display` | The same capture, but on your real display (no `xvfb`). |
 
 Pass an initial file to the start script with npm's `--` separator:

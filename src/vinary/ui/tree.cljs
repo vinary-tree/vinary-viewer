@@ -30,9 +30,17 @@
     (.stopPropagation e)
     (rf/dispatch [(if open? :tree/collapse :tree/expand) root directory])))
 
+(defn- display-name [root name]
+  ;; Target-daemon tree paths are URI-encoded by segment so clicking always yields a valid ssh:// URI. Keep
+  ;; that encoded identity in :file/:data-path, but show the actual filesystem name in the tree.
+  (if (re-find #"(?i)^s(?:sh|ftp)://" (str root))
+    (try (js/decodeURIComponent name) (catch :default _ name))
+    name))
+
 (defn- nodes->hiccup [children root active expanded expanding dir-prefix]
   (into [:<>]
-        (for [[k v] (sort-by (fn [[k v]] [(if (:children v) 0 1) (str/lower-case k)]) children)]
+        (for [[k v] (sort-by (fn [[k v]] [(if (:children v) 0 1)
+                                           (str/lower-case (display-name root k))]) children)]
           ^{:key k}
           (if (:children v)
             (let [dpath    (projects/join-path dir-prefix k)
@@ -47,7 +55,7 @@
                  :aria-busy       (boolean pending?)
                  :on-click        (summary-click! root dpath open?)
                  :on-context-menu (ctx! :dir root dpath)}
-                (icons/folder-icon) k]
+                (icons/folder-icon) (display-name root k)]
                (nodes->hiccup (:children v) root active expanded expanding dpath)])
             (let [full (projects/join-path root (:file v))]
               ;; open (single click on Linux, double on Windows/macOS); Ctrl+click → new tab; right-click → menu
@@ -61,7 +69,7 @@
                                                (when-not (platform/single-click-open?)
                                                  (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
                            :on-context-menu  (ctx! :file root full)}
-               (icons/file-icon k) k])))))
+               (icons/file-icon k) (display-name root k)])))))
 
 ;; `nodes` and `filtered?` arrive already computed from the :tree/filtered subscription — folding paths
 ;; into a tree is a model question, and doing it here meant redoing it on every keystroke (ADR-0033).
@@ -76,7 +84,9 @@
        :aria-busy       (boolean pending?)
        :on-click        (summary-click! root root open?)
        :on-context-menu (ctx! :project root root)}
-      (icons/folder-icon) (last (remove str/blank? (str/split (projects/normalized-path root) #"/")))]
+      (icons/folder-icon) (display-name root
+                                       (last (remove str/blank?
+                                                     (str/split (projects/normalized-path root) #"/"))))]
      (nodes->hiccup nodes root active expanded expanding root)]))
 
 (defn- file-tree-view [_shown _active _projects _filter _open _expanding _expanded]

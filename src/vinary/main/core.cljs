@@ -48,6 +48,13 @@
 (def ^:private daemon?
   (boolean (some #{"--daemon"} (js->clj js/process.argv))))
 
+;; Test/automation-only native-window suppression. Linux's Xvfb/Weston windows must remain visible *inside that
+;; private compositor* for realistic focus/layout semantics. macOS and Windows have no separate display server,
+;; so their `native` backend keeps windows hidden and out of the Dock/taskbar. Ordinary launches never take it.
+(def ^:private headless?
+  (and (= "1" (.. js/process -env -VV_HEADLESS))
+       (= "native" (.. js/process -env -VV_HEADLESS_BACKEND))))
+
 ;; ── warm window pool ────────────────────────────────────────────────────────────────────────────────────────
 ;; Pre-booted, fully-wired HIDDEN windows. A real open CLAIMS one and shows it instantly — the per-window bundle
 ;; eval (~700 ms even in the warm process) was already paid at boot — then the pool refills in the background.
@@ -73,7 +80,7 @@
   "macOS only: show/hide the Dock icon. The resident --daemon hides it (invisible background service, like the
    Linux systemd unit / launchd LaunchAgent that keeps it warm) and shows it whenever a window is on screen."
   [visible?]
-  (when (= "darwin" js/process.platform)
+  (when (and (not headless?) (= "darwin" js/process.platform))
     (when-let [dock (.-dock app)]
       (if visible? (.show dock) (.hide dock)))))
 
@@ -101,7 +108,7 @@
    the init!s — it opens the requested files (visible) or hands the window to the pool (hidden). Returns the win."
   [show? on-ready]
   (let [win (BrowserWindow.
-              (clj->js (merge {:show show?
+              (clj->js (merge (cond-> {:show (and show? (not headless?))
                                :icon (app-icon)
                                :backgroundColor "#292b2e"
                                :autoHideMenuBar true
@@ -111,9 +118,13 @@
                                                 ;; canvases don't hold a stale/blank GPU surface
                                                 :backgroundThrottling false
                                                 :preload (preload-path)}}
+                                      headless? (assoc :paintWhenInitiallyHidden true :skipTaskbar true))
                               ;; restore last position/size (clamped on-screen); defaults to 1280×860
                               (window/options))))
         wc  (.-webContents win)]
+    ;; Lets real-main E2E harnesses distinguish a deliberately hidden live window from a hidden warm-pool slot.
+    ;; It is inert outside VV_HEADLESS and is not exposed through IPC or the renderer bridge.
+    (set! (.-vvHeadlessActive win) (boolean show?))
     ;; profiling: propagate VV_PROFILE into the renderer via a ?profile=1 search param (it has no process.env),
     ;; and forward the renderer's `[vv-profile]` console marks to main's stdout (a renderer console.log does not
     ;; otherwise reach it) so scripts/profile-cold-start.mjs sees main + renderer marks on one stream
@@ -193,13 +204,13 @@
    launch's instance-id to it)."
   [args]
   (set-dock-visible! true)   ; a window is about to appear — restore the Dock icon (no-op off macOS / if already shown)
-  (if-let [win (peek @pool)]
+  (if-let [^js win (peek @pool)]
     (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
+        (set! (.-vvHeadlessActive win) true)
         (windows/add! win)                          ; it is now a real, tracked, on-screen window
         (profile/mark! "claim")
         (open-files! win args)
-        (.show win)
-        (.focus win)
+        (when-not headless? (.show win) (.focus win))
         (refill-pool!)
         win)
     (let [win (create-window! args)]
@@ -240,7 +251,8 @@
     :daemon-bootstrap  nil                                                 ; a --daemon sibling that lost the lock
     ;; authoritative user launch/open (:initial | :socket | :second-instance)
     (if-let [^js win (and id (get @served id))]
-      (when-not (.isDestroyed win) (.show win) (.focus win))               ; a duplicate signal → surface it
+      (when-not (.isDestroyed win)
+        (when-not headless? (.show win) (.focus win)))                     ; a duplicate signal → surface it
       (let [^js win (claim-window! (seq args))]
         (when (and id win)
           (set! (.-vvInstance win) id)      ; the window holds its own instance-id
@@ -284,22 +296,23 @@
               ^js dialog    (.-dialog electron)
               ^js shell     (.-shell electron)]
           (try (.writeText clipboard text) (catch :default _ nil))   ; pre-copy (best-effort) before the dialog
-          (try
-            (let [detail (cond-> text logfile (str "\n\nFull trace saved to:\n  " logfile))
-                  choice (.showMessageBoxSync dialog
-                           (clj->js {:type      "error"
-                                     :title     "vinary-viewer — unexpected error"
-                                     :message   "An unexpected error occurred in the main process."
-                                     :detail    detail
-                                     :buttons   ["Copy details" "Open crash log" "Dismiss"]
-                                     :defaultId 0
-                                     :cancelId  2
-                                     :noLink    true}))]
-              (case choice
-                0 (try (.writeText clipboard text) (catch :default _ nil))
-                1 (when logfile (try (.openPath shell logfile) (catch :default _ nil)))
-                nil))
-            (catch :default _ nil)))))))   ; pre-ready / headless → the console + crash log still have the trace
+          (when-not headless?
+            (try
+              (let [detail (cond-> text logfile (str "\n\nFull trace saved to:\n  " logfile))
+                    choice (.showMessageBoxSync dialog
+                             (clj->js {:type      "error"
+                                       :title     "vinary-viewer — unexpected error"
+                                       :message   "An unexpected error occurred in the main process."
+                                       :detail    detail
+                                       :buttons   ["Copy details" "Open crash log" "Dismiss"]
+                                       :defaultId 0
+                                       :cancelId  2
+                                       :noLink    true}))]
+                (case choice
+                  0 (try (.writeText clipboard text) (catch :default _ nil))
+                  1 (when logfile (try (.openPath shell logfile) (catch :default _ nil)))
+                  nil))
+              (catch :default _ nil))))))))   ; pre-ready / headless → console + crash log still carry the trace
 
 (defn- install-crash-reporting! []
   (.on js/process "uncaughtException"  (fn [err]      (report-crash! err)))
@@ -341,6 +354,10 @@
     nil)
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
+  ;; macOS' native-hidden headless analogue must not activate the Dock even though AppKit remains the display
+  ;; service. Windows uses BrowserWindow.skipTaskbar; Linux is isolated by Xvfb/Weston in the test runner.
+  (when (and headless? (= "darwin" js/process.platform))
+    (.setActivationPolicy app "accessory"))
   ;; SINGLE-INSTANCE: the first process becomes the resident app; a subsequent `vv <file>` fails the lock and
   ;; hands its argv to the primary via `second-instance` (below), which opens the file in a NEW window of the
   ;; already-warm process — no second cold start. A non-primary exits immediately without booting anything.
@@ -411,6 +428,16 @@
                                                             (startup/doc-uris (into ["_" "_"] args) identity)))
                                    :on-stop (fn [] (.quit app))
                                    :status  daemon-status})
+                                ;; Authenticated SSH/SFTP live events: advertise a loopback-only endpoint in the
+                                ;; target user's private runtime descriptor. A source reaches it through SSH
+                                ;; direct-tcpip and proves possession of the descriptor's rotating secret.
+                                (let [{:keys [version bundle-mtime-ms]} (daemon-status)]
+                                  (-> (service/start-daemon-events!
+                                       #js {:version version :bundleMtimeMs bundle-mtime-ms})
+                                      (.catch (fn [e]
+                                                (js/console.warn
+                                                 "[vinary] daemon event endpoint unavailable:"
+                                                 (.-message e))))))
                                 ;; a daemon opens no window (it stays resident and pre-warms the pool); a normal
                                 ;; launch claims a window for its command-line files (cold the very first time,
                                 ;; then refills the pool so every subsequent open is instant). The initial open
@@ -430,7 +457,9 @@
                                 ;; reactivation, not a `vv` invocation), so open-window! only honors it when no window
                                 ;; is open at all — a daemon that has served a socket open already has one.
                                 (.on app "activate" (fn [] (open-window! :activate nil nil))))))
-  (.on app "before-quit" (fn [] (ssh/shutdown!)))   ; tear down pooled SSH connections on quit
+  (.on app "before-quit" (fn []
+                           (service/shutdown!)
+                           (ssh/shutdown!)))   ; stop event tunnels/server, then tear down pooled SSH connections
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
        (fn [] (cond

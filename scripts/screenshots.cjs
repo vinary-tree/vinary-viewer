@@ -13,21 +13,25 @@
 // which is a native WebContentsView overlay: for that one scene we create the overlay ourselves, capture
 // its own webContents, and composite it onto the chrome with ImageMagick.
 //
-// Run: electron --no-sandbox scripts/screenshots.cjs            (needs a DISPLAY / xvfb)
-//      npm run screenshots                                      (wraps it in xvfb-run + the asset syncs)
+// Run: electron --no-sandbox scripts/screenshots.cjs            (explicit current display)
+//      npm run screenshots                                      (platform headless runner + asset syncs)
 //      electron --no-sandbox scripts/screenshots.cjs --only=native-pdf,web-preview   (subset, for iteration)
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
-process.env.ELECTRON_OZONE_PLATFORM_HINT = 'x11';
-process.env.GDK_BACKEND = 'x11';
-process.env.XDG_SESSION_TYPE = 'x11';
-delete process.env.WAYLAND_DISPLAY;
+const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
+if (OZONE) {
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = OZONE;
+  process.env.GDK_BACKEND = OZONE;
+  process.env.XDG_SESSION_TYPE = OZONE === 'wayland' ? 'wayland' : 'x11';
+  if (OZONE === 'x11') delete process.env.WAYLAND_DISPLAY;
+}
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow, ipcMain, WebContentsView } = require('electron');
+const { browserWindowOptions, showForTest } = require('../test/headless-window.js');
 const contentService = require('../src/vinary/main/content_service.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -44,7 +48,7 @@ const GITHUB_URL = 'https://github.com/vinary-tree/vinary-viewer';
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
+if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 app.commandLine.appendSwitch('force-device-scale-factor', '1'); // 1 CSS px == 1 device px -> exact 800x600
 
 // sample files
@@ -628,17 +632,17 @@ async function main() {
   installIpc(state);
 
   await app.whenReady();
-  const win = new BrowserWindow({
+  const win = new BrowserWindow(browserWindowOptions({
     useContentSize: true, width: W, height: H, show: false, paintWhenInitiallyHidden: true,
     backgroundColor: '#292b2e',
     webPreferences: { contextIsolation: true, nodeIntegration: false, preload: PRELOAD }
-  });
+  }));
   state.win = win;
   win.webContents.on('render-process-gone', (_e, d) => { throw new Error('renderer gone: ' + d.reason); });
 
   await win.loadFile(INDEX);
   await waitFor(() => evalIn(win, `Boolean(window.__vvdb && document.querySelector('.vv-menubar') && document.querySelector('.vv-tab-new'))`), 'initial boot', 20000);
-  win.show(); // invisible under xvfb; guarantees the compositor paints so captures aren't blank
+  showForTest(win); // visible only on an explicitly selected real display; hidden headless windows still paint
 
   const results = [];
   for (const name of names) {

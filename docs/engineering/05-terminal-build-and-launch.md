@@ -110,14 +110,19 @@ release builds, `release:cli` / `release:tui` use `:optimizations :simple` — t
 ANSI path shares the unified/rehype/content-service interop that `:advanced`
 property-renaming would break ([ADR-0016](../design-decisions/0016-main-process-simple-optimization.md)).
 
-The terminal builds are exercised by the `test:cli` and `test:tui` scripts, which
-compile the artifact and then run its Node smoke (see
+The terminal builds are exercised by the `test:cli` and `test:tui` scripts. Their test-only compilers first
+run the read-only grammar and graphics integrity checks, then compile the artifact and run its Node smoke (see
 [03-test-strategy.md §3.2](03-test-strategy.md#32-terminal-smokes-node-no-display)):
 
 ```jsonc
-"test:cli": "npm run compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js",
-"test:tui": "npm run compile:tui && node test/tui-smoke.js",
+"compile:cli:test": "npm run grammars:check && npm run graphics:check && shadow-cljs compile cli",
+"compile:tui:test": "npm run grammars:check && npm run graphics:check && shadow-cljs compile tui",
+"test:cli": "npm run compile:cli:test && node test/cli-smoke.js && node test/graphics-smoke.js",
+"test:tui": "npm run compile:tui:test && node test/tui-smoke.js",
 ```
+
+Production compilers still synchronize assets; test compilers deliberately validate the vendored inputs
+without network access or worktree mutation.
 
 ---
 

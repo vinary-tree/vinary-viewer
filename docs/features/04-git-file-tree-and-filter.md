@@ -31,6 +31,11 @@ matches what you type (folders containing a match are force-expanded so the matc
 The tree is a convenience for navigating a docs/source repository — or a directory of notes — without
 leaving the previewer: open one file, then jump around from the sidebar.
 
+For an `ssh://` or `sftp://` open, a **compatible vinary-viewer daemon on the target** performs the same
+git/synthetic-root query locally and returns the encoded remote project over an authenticated SSH-forwarded
+event channel. Without that target channel the document still opens over SFTP, but no client-recursive tree is
+invented. See [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-events.md).
+
 ---
 
 ## 2 · How to use it
@@ -158,6 +163,11 @@ refresh. When a tree watcher fires, main returns a root-relative payload with `:
 replaces only that subtree. Every new watcher also performs one ready-time reconciliation so a file
 created between the expansion listing and Chokidar becoming ready cannot be missed. See
 [ADR-0034](../design-decisions/0034-expansion-scoped-file-tree-watchers.md).
+
+Remote projects send the identical visible-root/effective-expansion state to their authenticated target owner.
+The target shares the same depth-0 Chokidar watchers, then maps scoped payloads back into the originating
+`ssh://` or `sftp://` namespace; collapse, unmount, project/window removal, disconnect, and session death all
+release ownership. Manual **Refresh** and **Refresh All** follow that same route.
 
 ### RENDERER: store the tree
 

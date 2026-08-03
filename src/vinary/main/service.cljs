@@ -1,15 +1,17 @@
 (ns vinary.main.service
   "Main-process IO service: read files, push their content to the renderer over the Mediator IPC seam,
-   and watch every retained local file path so edits stream back live. Rendering happens in the renderer
-   (the ESM remark pipeline is browser-friendly), so main stays a thin, side-effect-at-the-edge
-   service."
+   and own live content/tree subscriptions locally or through an authenticated target daemon. Rendering
+   happens in the renderer (the ESM remark pipeline is browser-friendly), so main stays a thin,
+   side-effect-at-the-edge service."
   (:require ["electron" :refer [ipcMain]]
             ["fs" :as fs]
             ["path" :as path]
             ["os" :as os]
+            ["crypto" :as crypto]
             ["child_process" :as cp]
             ["chokidar" :refer [watch]]
             ["./content_service.js" :as content-service]
+            ["./daemon_events.js" :as daemon-events]
             ["./ssh_transport.js" :as ssh-transport]
             [cljs.reader :as reader]
             [clojure.set :as set]
@@ -25,8 +27,12 @@
 (defonce ^:private window-owners (atom {}))  ; webContents.id -> {:wc wc :paths #{retained doc paths}}
 (defonce ^:private doc-assets (atom {}))      ; markdown doc path -> #{local media paths}
 (defonce ^:private asset-watchers (atom {}))  ; local media path -> {:watcher chokidar :owners #{doc paths}}
-(defonce ^:private tree-windows (atom {}))    ; wc.id -> {:wc :offered {root entry} :visible #{root} :expanded #{[root dir]}}
-(defonce ^:private tree-watchers (atom {}))   ; [root dir] -> {:watcher :owners #{wc.id} :timer timeout? :synthetic?}
+(defonce ^:private tree-windows (atom {}))    ; owner -> {:wc|:send :offered {root metadata} :visible :expanded}
+(defonce ^:private tree-watchers (atom {}))   ; [root dir] -> {:watcher :owners #{owner} :timer timeout? :synthetic?}
+(defonce ^:private remote-content-owners (atom {})) ; local path -> {[session sub-id] invalidate-callback}
+(defonce ^:private remote-event-subs (atom #{}))    ; source-side ssh/sftp URIs subscribed to a target daemon
+(defonce ^:private remote-owner-windows (atom {}))  ; source-side target owner-id -> renderer webContents
+(defonce ^:private remote-tree-pending (atom {}))   ; [webContents.id opened-uri] -> target owner-id
 
 (def ^:private watch-options
   (clj->js {:ignoreInitial true
@@ -81,20 +87,33 @@
 (defn- directory? [path]
   (try (and (not (archive-uri? path)) (.isDirectory (.statSync fs path))) (catch :default _ false)))
 
-(defn- offer-tree! [^js wc entry]
-  (let [id (.-id wc)]
-    (swap! tree-windows
-           (fn [windows]
-             (let [window (get windows id {:wc wc :offered {} :visible #{} :expanded #{}})]
-               (assoc windows id (-> window
-                                     (assoc :wc wc)
-                                     (assoc-in [:offered (:root entry)]
-                                               (select-keys entry [:root :synthetic?])))))))))
+(defn- empty-tree-owner [] {:offered {} :visible #{} :expanded #{}})
+
+(defn- offer-tree-owner! [id entry source]
+  (swap! tree-windows update id
+         (fn [owner]
+           (assoc-in (or owner (empty-tree-owner)) [:offered (:root entry)]
+                     (merge (select-keys entry [:root :synthetic?]) source)))))
+
+(defn- send-tree-owner-entry! [id entry source]
+  (when entry
+    (offer-tree-owner! id entry source)
+    (let [{:keys [wc send]} (get @tree-windows id)]
+      (cond
+        (and wc (try (not (.isDestroyed ^js wc)) (catch :default _ false)))
+        (.send ^js wc "vv:tree" (clj->js entry))
+
+        send
+        (send entry)))))
 
 (defn- send-tree-entry! [^js wc entry]
-  (when (and entry wc (try (not (.isDestroyed wc)) (catch :default _ false)))
-    (offer-tree! wc entry)
-    (.send wc "vv:tree" (clj->js entry))))
+  (when wc
+    (send-tree-owner-entry! (.-id wc) entry {:backend :local})))
+
+(defn- send-remote-tree-entry! [^js wc uri remote-owner-id entry]
+  (when (and wc entry)
+    (send-tree-owner-entry! (.-id wc) (js->clj entry :keywordize-keys true)
+                            {:backend :remote :connection-uri uri :remote-owner-id remote-owner-id})))
 
 (defn- send-tree!
   "Send the sidebar tree for a path: its git repository when it has one, else its containing directory as a
@@ -104,15 +123,32 @@
   (when-let [t (or (repo-tree file-path) (dir-walk/dir-tree file-path (directory? file-path)))]
     (send-tree-entry! wc t)))
 
+(defn- remote-relative-scope [root directory]
+  (try
+    (let [^js r (js/URL. root)
+          ^js d (js/URL. directory)
+          same? (and (= (.-protocol r) (.-protocol d))
+                     (= (.-username r) (.-username d))
+                     (= (.-hostname r) (.-hostname d))
+                     (= (.-port r) (.-port d)))
+          rp (js/decodeURIComponent (.-pathname r))
+          dp (js/decodeURIComponent (.-pathname d))
+          prefix (if (str/ends-with? rp "/") rp (str rp "/"))]
+      (when (and same? (or (= rp dp) (str/starts-with? dp prefix)))
+        (if (= rp dp) "" (subs dp (count prefix)))))
+    (catch :default _ nil)))
+
 (defn- relative-scope
   "A root-relative `/` path for directory, or nil when directory escapes root."
   [root directory]
-  (let [rel (try (.relative path root directory) (catch :default _ nil))]
-    (when (and (string? rel)
-               (not (.isAbsolute path rel))
-               (not= rel "..")
-               (not (str/starts-with? rel (str ".." (.-sep path)))))
-      (str/replace rel #"\\" "/"))))
+  (if (file-kind/remote-uri? root)
+    (remote-relative-scope root directory)
+    (let [rel (try (.relative path root directory) (catch :default _ nil))]
+      (when (and (string? rel)
+                 (not (.isAbsolute path rel))
+                 (not= rel "..")
+                 (not (str/starts-with? rel (str ".." (.-sep path)))))
+        (str/replace rel #"\\" "/")))))
 
 (defn- prefix-files [scope files]
   (if (str/blank? scope)
@@ -341,8 +377,14 @@
 
 (defn- desired-tree-watcher-owners []
   (reduce-kv
-   (fn [acc id {:keys [expanded]}]
-     (reduce (fn [m scope] (update m scope (fnil conj #{}) id)) acc expanded))
+   (fn [acc id {:keys [expanded offered]}]
+     (reduce (fn [m [root _ :as scope]]
+               ;; A source daemon never watches the URI spelling locally.  The corresponding target-daemon
+               ;; owner has a :local offer and therefore participates here like an ordinary renderer window.
+               (if (= :remote (get-in offered [root :backend]))
+                 m
+                 (update m scope (fnil conj #{}) id)))
+             acc expanded))
    {}
    @tree-windows))
 
@@ -363,10 +405,6 @@
                 (start-tree-watcher! scope owners synthetic?)))
           (start-tree-watcher! scope owners synthetic?))))))
 
-(defn- live-tree-window [id]
-  (let [^js wc (get-in @tree-windows [id :wc])]
-    (when (and wc (try (not (.isDestroyed wc)) (catch :default _ false))) wc)))
-
 (defn- refresh-watched-tree! [[root directory :as scope]]
   (when-let [{:keys [owners synthetic?]} (get @tree-watchers scope)]
     (swap! tree-watchers assoc-in [scope :timer] nil)
@@ -377,29 +415,27 @@
                     (= root directory) (assoc :scope ""))]
         (doseq [id owners]
           (when (contains? (get-in @tree-windows [id :expanded] #{}) scope)
-            (when-let [wc (live-tree-window id)]
-              (send-tree-entry! wc entry))))))))
+            (let [source (select-keys (get-in @tree-windows [id :offered root])
+                                      [:backend :connection-uri])]
+              (send-tree-owner-entry! id entry source))))))))
 
-(defn- offered-visible-root [^js wc root]
-  (let [id (.-id wc)]
-    (when (contains? (get-in @tree-windows [id :visible] #{}) root)
-      (get-in @tree-windows [id :offered root]))))
+(defn- offered-visible-root [id root]
+  (when (contains? (get-in @tree-windows [id :visible] #{}) root)
+    (get-in @tree-windows [id :offered root])))
 
-(defn- sync-tree-roots! [^js wc roots]
-  (let [id      (ensure-window! wc)
+(defn- sync-tree-owner-roots! [id roots]
+  (let [owner   (get @tree-windows id (empty-tree-owner))
         offered (set (keys (get-in @tree-windows [id :offered] {})))
         visible (set/intersection offered (->> roots (filter string?) set))]
     (swap! tree-windows update id
            (fn [window]
-             (let [window (or window {:wc wc :offered {} :expanded #{}})]
-               (-> window
-                   (assoc :wc wc :visible visible)
-                   (update :expanded #(into #{} (filter (fn [[root _]] (contains? visible root))) %))))))
+             (-> (or window owner)
+                 (assoc :visible visible)
+                 (update :expanded #(into #{} (filter (fn [[root _]] (contains? visible root))) %)))))
     (reconcile-tree-watchers!)))
 
-(defn- sync-tree-expanded! [^js wc scopes]
-  (let [id      (ensure-window! wc)
-        visible (get-in @tree-windows [id :visible] #{})
+(defn- sync-tree-owner-expanded! [id scopes]
+  (let [visible (get-in @tree-windows [id :visible] #{})
         valid   (into #{}
                       (keep (fn [{:keys [root path]}]
                               (when (and (string? root) (string? path)
@@ -410,41 +446,200 @@
     (swap! tree-windows assoc-in [id :expanded] valid)
     (reconcile-tree-watchers!)))
 
+(defn- remote-uri-prefix [uri]
+  (or (second (re-find #"(?i)^(s(?:sh|ftp)://[^/]*)" (str uri))) (str uri)))
+
+(defn- renderer-tree-owner-id [^js wc uri]
+  ;; One renderer can retain both ssh:// and sftp:// spellings (or multiple ssh_config aliases) for the same
+  ;; resolved connection. Keep target ownership separate by source authority so pushed roots preserve the exact
+  ;; URI namespace which created them. The digest avoids sending URI userinfo to the target as an owner label.
+  (let [digest (-> (.createHash crypto "sha256")
+                   (.update (remote-uri-prefix uri))
+                   (.digest "base64url"))]
+    (str "window-" (.-id wc) "-" digest)))
+
+(defn- remote-offers-by-owner [id]
+  (reduce-kv (fn [m root offer]
+               (if (= :remote (:backend offer))
+                 (let [uri (:connection-uri offer)
+                       key (:remote-owner-id offer)]
+                   (-> m
+                       (assoc-in [key :uri] uri)
+                       (assoc-in [key :offers root] offer)))
+                 m))
+             {} (get-in @tree-windows [id :offered] {})))
+
+(defn- ignore-remote-error! [p]
+  (when p (.catch p (fn [_] nil))))
+
+(defn- remote-owner-needed? [id remote-owner-id]
+  (or (contains? (remote-offers-by-owner id) remote-owner-id)
+      (some (fn [[[_id _uri] owner-id]]
+              (and (= id _id) (= remote-owner-id owner-id)))
+            @remote-tree-pending)))
+
+(defn- discard-pending-remote-tree-open! [id uri remote-owner-id]
+  (let [key [id uri]]
+    (when (= remote-owner-id (get @remote-tree-pending key))
+      (swap! remote-tree-pending dissoc key)
+      (ignore-remote-error! (.cancelTreeOpen daemon-events uri remote-owner-id uri))
+      (when-not (remote-owner-needed? id remote-owner-id)
+        (swap! remote-owner-windows dissoc remote-owner-id)))))
+
+(defn- cancel-pending-remote-tree-opens! [uri]
+  (doseq [[[_id opened-uri :as key] remote-owner-id] @remote-tree-pending
+          :when (= uri opened-uri)]
+    (discard-pending-remote-tree-open! (first key) opened-uri remote-owner-id)))
+
+(defn- deliver-pending-remote-tree-open! [^js wc uri remote-owner-id entry]
+  (let [id  (.-id wc)
+        key [id uri]]
+    (when (= remote-owner-id (get @remote-tree-pending key))
+      (swap! remote-tree-pending dissoc key)
+      (send-remote-tree-entry! wc uri remote-owner-id entry))))
+
+(defn- sync-tree-roots! [^js wc roots]
+  (let [id (ensure-window! wc)]
+    (sync-tree-owner-roots! id roots)
+    (doseq [[remote-owner-id {:keys [uri offers]}] (remote-offers-by-owner id)]
+      (ignore-remote-error!
+       (.treeRoots daemon-events uri remote-owner-id
+                   (clj->js (filterv #(contains? offers %) (get-in @tree-windows [id :visible] #{}))))))))
+
+(defn- sync-tree-expanded! [^js wc scopes]
+  (let [id (ensure-window! wc)]
+    (sync-tree-owner-expanded! id scopes)
+    (doseq [[remote-owner-id {:keys [uri offers]}] (remote-offers-by-owner id)]
+      (let [remote-scopes (into []
+                                (comp (filter (fn [[root _]] (contains? offers root)))
+                                      (map (fn [[root p]] {:root root :path p})))
+                                (get-in @tree-windows [id :expanded] #{}))]
+        (ignore-remote-error!
+         (.treeExpanded daemon-events uri remote-owner-id (clj->js remote-scopes)))))))
+
 (defn- refresh-tree-request [^js wc {:keys [root path]}]
   (when-not (and (string? root) (string? path))
     (throw (js/Error. "invalid tree refresh request")))
-  (let [offer (offered-visible-root wc root)]
+  (let [id (.-id wc)
+        offer (offered-visible-root id root)]
     (when-not offer (throw (js/Error. "tree root is not visible in this window")))
     (when-not (some? (relative-scope root path))
       (throw (js/Error. "tree refresh path escapes its project root")))
-    (or (tree-entry-for root (:synthetic? offer) path)
-        (throw (js/Error. "tree listing failed")))))
+    (if (= :remote (:backend offer))
+      (.treeRefresh daemon-events (:connection-uri offer) (:remote-owner-id offer) root path)
+      (clj->js (or (tree-entry-for root (:synthetic? offer) path)
+                   (throw (js/Error. "tree listing failed")))))))
 
 (defn- refresh-all-tree-requests [^js wc]
-  (let [id (.-id wc)]
-    (into []
-          (keep (fn [root]
-                  (let [offer (get-in @tree-windows [id :offered root])]
-                    (tree-entry-for root (:synthetic? offer) root))))
-          (get-in @tree-windows [id :visible] #{}))))
+  (let [id      (.-id wc)
+        visible (get-in @tree-windows [id :visible] #{})
+        local   (into []
+                      (keep (fn [root]
+                              (let [offer (get-in @tree-windows [id :offered root])]
+                                (when (not= :remote (:backend offer))
+                                  (tree-entry-for root (:synthetic? offer) root)))))
+                      visible)
+        calls   (mapv (fn [[remote-owner-id {:keys [uri]}]]
+                        (.treeRefreshAll daemon-events uri remote-owner-id))
+                      (remote-offers-by-owner id))]
+    (if (seq calls)
+      (-> (js/Promise.all (clj->js calls))
+          (.then (fn [groups]
+                   (clj->js (into local (mapcat #(js->clj % :keywordize-keys true))
+                                  (array-seq groups))))))
+      (js/Promise.resolve (clj->js local)))))
+
+(defn- release-tree-owner! [id]
+  (swap! tree-windows dissoc id)
+  (reconcile-tree-watchers!))
 
 (defn- release-window! [id]
-  (let [paths (retention/paths-for @window-owners id)]
+  (let [paths (retention/paths-for @window-owners id)
+        pending-owners (into {}
+                             (keep (fn [[[_id uri] remote-owner-id]]
+                                     (when (= id _id) [remote-owner-id {:uri uri}])))
+                             @remote-tree-pending)
+        remote-owners (merge pending-owners (remote-offers-by-owner id))]
     (swap! window-owners retention/drop-owner id)
-    (swap! tree-windows dissoc id)
-    (reconcile-tree-watchers!)
+    (release-tree-owner! id)
+    (swap! remote-tree-pending
+           (fn [pending] (into {} (remove (fn [[[owner-id _] _]] (= id owner-id))) pending)))
+    (doseq [[remote-owner-id {:keys [uri]}] remote-owners]
+      (swap! remote-owner-windows dissoc remote-owner-id)
+      (ignore-remote-error! (.releaseOwner daemon-events uri remote-owner-id)))
     (doseq [path paths]
       (when-not (retained? path) (unwatch-file! path)))))
 
 (defn- ensure-window! [^js wc]
   (let [id (owner-id wc)]
-    (swap! tree-windows update id #(or % {:wc wc :offered {} :visible #{} :expanded #{}}))
+    (swap! tree-windows update id #(assoc (or % (empty-tree-owner)) :wc wc))
     (when-not (contains? @window-owners id)
       (swap! window-owners retention/sync-owner id wc #{})
       ;; Process-lifetime watchers must not retain a dead window. One listener per owner
       ;; releases only that window's paths and preserves paths shared with other windows.
       (.once wc "destroyed" (fn [] (release-window! id))))
     id))
+
+(defn- target-tree-owner-id [session-id owner-id]
+  [:remote-session (str session-id) (str owner-id)])
+
+(defn- target-tree-open! [session-id owner-id file-path send]
+  (let [id (target-tree-owner-id session-id owner-id)]
+    (swap! tree-windows update id
+           #(assoc (or % (empty-tree-owner)) :send (fn [entry] (send (clj->js entry)))))
+    (when-let [entry (or (repo-tree file-path)
+                         (dir-walk/dir-tree file-path (directory? file-path)))]
+      ;; The request response carries the initial tree; only subsequent watcher refreshes use :send.
+      (offer-tree-owner! id entry {:backend :local})
+      (clj->js entry))))
+
+(defn- target-tree-roots! [session-id owner-id roots]
+  (sync-tree-owner-roots! (target-tree-owner-id session-id owner-id) roots))
+
+(defn- target-tree-expanded! [session-id owner-id scopes]
+  (sync-tree-owner-expanded! (target-tree-owner-id session-id owner-id) scopes))
+
+(defn- target-tree-refresh! [session-id owner-id {:keys [root path]}]
+  (let [id    (target-tree-owner-id session-id owner-id)
+        offer (offered-visible-root id root)]
+    (when-not offer (throw (js/Error. "tree root is not visible for this authenticated session")))
+    (when-not (some? (relative-scope root path))
+      (throw (js/Error. "tree refresh path escapes its project root")))
+    (clj->js (or (tree-entry-for root (:synthetic? offer) path)
+                 (throw (js/Error. "tree listing failed"))))))
+
+(defn- target-tree-refresh-all! [session-id owner-id]
+  (let [id (target-tree-owner-id session-id owner-id)]
+    (clj->js
+     (into []
+           (keep (fn [root]
+                   (let [offer (get-in @tree-windows [id :offered root])]
+                     (tree-entry-for root (:synthetic? offer) root))))
+           (get-in @tree-windows [id :visible] #{})))))
+
+(defn- target-release-tree-owner! [session-id owner-id]
+  (release-tree-owner! (target-tree-owner-id session-id owner-id)))
+
+(defn- handle-remote-tree-update! [^js update]
+  (let [owner-id (.-ownerId update)
+        opened   (.-openedPath update)
+        ^js wc   (get @remote-owner-windows owner-id)]
+    (when (live-webcontents? wc)
+      (if (string? opened)
+        (deliver-pending-remote-tree-open! wc opened owner-id (.-entry update))
+        (send-remote-tree-entry! wc (.-uri update) owner-id (.-entry update))))))
+
+(defn- open-remote-tree! [^js wc uri]
+  (let [id       (.-id wc)
+        owner-id (renderer-tree-owner-id wc uri)]
+    (swap! remote-owner-windows assoc owner-id wc)
+    (swap! remote-tree-pending assoc [id uri] owner-id)
+    (-> (.treeOpen daemon-events uri owner-id uri)
+        (.then (fn [entry]
+                 (if entry
+                   (deliver-pending-remote-tree-open! wc uri owner-id entry)
+                   (discard-pending-remote-tree-open! id uri owner-id))))
+        (.catch (fn [_] nil)))))
 
 (defn- retained-by? [^js wc path]
   (contains? (retention/paths-for @window-owners (owner-id wc)) path))
@@ -454,14 +649,74 @@
   ;; poll). The doc's window may have CLOSED since it was retained — under the resident daemon the watcher
   ;; outlives it — so skip a destroyed webContents (else `.send` throws "Object has been destroyed").
   (doseq [wc (webcontents-for path)]
-    (send-content! wc path)))
+    (send-content! wc path))
+  ;; Authenticated source daemons receive only an invalidation.  They re-read through their own SFTP
+  ;; connection, so target file bytes never travel over the event protocol and existing content limits apply.
+  (doseq [invalidate (vals (get @remote-content-owners path {}))]
+    (invalidate "change")))
 
-;; ---- remote (SSH) live-refresh via polling ----
-;; SFTP has no inotify, so a remote doc cannot be chokidar-watched. Instead a per-doc poller re-stats the URI
-;; and, on a size/mtime change, re-sends it (send-open-content! → a fresh Date.now stamp → the renderer remounts
-;; / re-streams). Opt-in via settings.edn `:remote {:poll-seconds …}`; exponential backoff (to 60s) + ±25%
-;; jitter avoid hammering a downed host; directory listings poll slower (or not at all). Lifecycle is tied to
-;; unwatch-file!, so closing a tab / navigating away stops the poll for free (the same guarantee as watchers).
+(defn- content-owned? [path]
+  (or (retained? path) (seq (get @remote-content-owners path))))
+
+(defn- ensure-content-watcher! [path]
+  (when-not (or (archive-uri? path) (file-kind/remote-uri? path) (get @watchers path))
+    (let [dir? (directory? path)
+          w    (watch path (if dir? dir-watch-options watch-options))]
+      (if dir?
+        (doseq [ev ["add" "unlink" "addDir" "unlinkDir" "change"]]
+          (.on w ev (fn [_] (send-open-content! path))))
+        (doseq [ev ["change" "add" "unlink"]]
+          (.on w ev (fn [_] (send-open-content! path)))))
+      (swap! watchers assoc path w))))
+
+(defn- release-content-watcher-if-unowned! [path]
+  (when-not (content-owned? path)
+    (when-let [^js w (get @watchers path)]
+      (.close w)
+      (swap! watchers dissoc path))))
+
+(declare target-content-unsubscribe!)
+
+(defn- target-content-subscribe! [session-id sub-id file-path invalidate]
+  ;; A subscription id is unique inside one authenticated session. Replace its previous path atomically from
+  ;; the ownership model so a repeated subscribe cannot accumulate stale target watchers.
+  (target-content-unsubscribe! session-id sub-id)
+  (swap! remote-content-owners assoc-in [file-path [(str session-id) (str sub-id)]] invalidate)
+  (ensure-content-watcher! file-path))
+
+(defn- remove-target-content-owners! [pred]
+  (let [affected (into #{}
+                       (keep (fn [[file-path owners]]
+                               (when (some (fn [[owner _]] (pred owner)) owners) file-path)))
+                       @remote-content-owners)]
+    (swap! remote-content-owners
+           (fn [by-path]
+             (into {}
+                   (keep (fn [[file-path owners]]
+                           (let [owners' (into {} (remove (fn [[owner _]] (pred owner))) owners)]
+                             (when (seq owners') [file-path owners']))))
+                   by-path)))
+    (doseq [file-path affected]
+      (release-content-watcher-if-unowned! file-path))))
+
+(defn- target-content-unsubscribe! [session-id sub-id]
+  (let [wanted [(str session-id) (str sub-id)]]
+    (remove-target-content-owners! #(= wanted %))))
+
+(defn- target-release-session! [session-id]
+  (let [session-id (str session-id)
+        tree-ids   (filter (fn [id]
+                             (and (vector? id) (= :remote-session (first id))
+                                  (= session-id (second id))))
+                           (keys @tree-windows))]
+    (remove-target-content-owners! #(= session-id (first %)))
+    (doseq [id tree-ids] (release-tree-owner! id))))
+
+;; ---- remote (SSH) live-refresh polling fallback ----
+;; SFTP has no inotify, so when no compatible target daemon event subscription is active an opt-in per-doc
+;; poller can re-stat the URI and re-send it on size/mtime change. Configure settings.edn
+;; `:remote {:poll-seconds …}`; exponential backoff (to 60s) + ±25% jitter avoid hammering a downed host.
+;; Directory listings poll slower (or not at all). Lifecycle remains tied to unwatch-file!.
 (defonce ^:private remote-pollers (atom {}))   ; ssh-uri -> {:sig {…} :base ms :backoff ms :poll-dirs? bool :timer t}
 
 (defn- stop-remote-poller! [path]
@@ -511,6 +766,22 @@
         (swap! remote-pollers assoc path {:sig nil :base base :backoff base
                                           :poll-dirs? (boolean (:poll-dirs? prefs))})
         (reschedule-remote-poll! path base)))))
+
+(defn- handle-remote-content-state! [^js state]
+  (let [uri (.-subId state)]
+    (when (string? uri)
+      (if (.-active state)
+        (stop-remote-poller! uri)
+        (when (retained? uri) (start-remote-poller! uri))))))
+
+(defn- start-remote-live! [uri]
+  ;; Polling remains an opt-in compatibility fallback.  It starts while discovery/handshake runs and is
+  ;; stopped as soon as the authenticated target subscription becomes active.
+  (start-remote-poller! uri)
+  (when-not (contains? @remote-event-subs uri)
+    (swap! remote-event-subs conj uri)
+    (-> (.subscribeContent daemon-events uri uri (fn [_] (send-open-content! uri)))
+        (.catch (fn [_] (when (retained? uri) (start-remote-poller! uri)))))))
 
 (defn- refresh-asset-owners! [asset-path]
   (doseq [doc-path (:owners (get @asset-watchers asset-path))]
@@ -564,15 +835,17 @@
        set))
 
 (defn- unwatch-file! [path]
-  (when-let [^js w (get @watchers path)]
-    (.close w)
-    (swap! watchers dissoc path))
+  (release-content-watcher-if-unowned! path)
+  (cancel-pending-remote-tree-opens! path)
+  (when (contains? @remote-event-subs path)
+    (swap! remote-event-subs disj path)
+    (ignore-remote-error! (.unsubscribeContent daemon-events path path)))
   (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
   (release-doc-assets! path))
 
 (defn sync-retained!
-  "Replace one renderer window's retained-file set. Watchers, remote pollers, and media
-   ownership are released only when no live window can still reach a path."
+  "Replace one renderer window's retained document-identity set. Local watchers, authenticated remote
+   subscriptions, fallback pollers, and media ownership are released only when no live window retains it."
   [^js wc paths]
   (let [id  (ensure-window! wc)
         old (retention/paths-for @window-owners id)
@@ -587,24 +860,15 @@
   [^js wc path]
   (ensure-window! wc)
   (send-content! wc path)
-  (when-not (or (archive-uri? path) (file-kind/remote-uri? path))
-    (send-tree! wc path))                    ; the git tree sidebar is a LOCAL-repo concern
+  (if (file-kind/remote-uri? path)
+    (open-remote-tree! wc path)
+    (when-not (archive-uri? path) (send-tree! wc path)))
   (cond
-    ;; remote (ssh://sftp://): no inotify over SSH, so poll for changes instead of chokidar-watching (which
-    ;; would statSync/watch a non-path). Opt-in via settings.edn :remote :poll-seconds.
+    ;; remote (ssh://sftp://): prefer the authenticated target daemon event channel; polling stays opt-in fallback.
     (file-kind/remote-uri? path)
-    (start-remote-poller! path)
-    (not (or (archive-uri? path) (get @watchers path)))
-    (let [dir? (directory? path)
-          w    (watch path (if dir? dir-watch-options watch-options))]
-      (if dir?
-        ;; a directory tab: re-list as immediate children appear / vanish / change
-        (doseq [ev ["add" "unlink" "addDir" "unlinkDir" "change"]]
-          (.on w ev (fn [_] (send-open-content! path))))
-        (do
-          (.on w "change" (fn [_] (send-open-content! path)))
-          (.on w "add"    (fn [_] (send-open-content! path)))))
-      (swap! watchers assoc path w))))
+    (start-remote-live! path)
+    :else
+    (ensure-content-watcher! path)))
 
 (defn close! [^js wc path]
   (let [id (ensure-window! wc)]
@@ -654,7 +918,36 @@
                                           entries)})))
         (.catch (fn [_] (clj->js {:input s :dir dir-part :target s :entries [] :exists? false :dir? false}))))))
 
+(defn start-daemon-events!
+  "Publish this daemon's authenticated loopback event endpoint.  The descriptor is owner-readable and clients
+   can reach the endpoint only through an SSH direct-tcpip forward to the target host's loopback interface."
+  [meta]
+  (.startServer daemon-events meta))
+
+(defn shutdown! []
+  (.shutdown daemon-events))
+
 (defn init! []
+  (.configure daemon-events
+              #js {:onTreeUpdate handle-remote-tree-update!
+                   :onContentState handle-remote-content-state!
+                   :handlers
+                   #js {:contentSubscribe target-content-subscribe!
+                        :contentUnsubscribe target-content-unsubscribe!
+                        :treeOpen target-tree-open!
+                        :treeRoots (fn [session-id owner-id roots]
+                                     (target-tree-roots! session-id owner-id (js->clj roots)))
+                        :treeExpanded (fn [session-id owner-id scopes]
+                                        (target-tree-expanded!
+                                         session-id owner-id
+                                         (js->clj scopes :keywordize-keys true)))
+                        :treeRefresh (fn [session-id owner-id req]
+                                       (target-tree-refresh!
+                                        session-id owner-id
+                                        (js->clj req :keywordize-keys true)))
+                        :treeRefreshAll target-tree-refresh-all!
+                        :releaseTreeOwner target-release-tree-owner!
+                        :releaseSession target-release-session!}})
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [^js e path] (close! (.-sender e) path)))
   (.handle ipcMain "vv:content-page" (fn [_e req] (.contentPage content-service req)))
@@ -673,9 +966,9 @@
          (sync-tree-expanded! (.-sender e) (js->clj scopes :keywordize-keys true))))
   (.handle ipcMain "vv:tree-refresh"
            (fn [^js e req]
-             (clj->js (refresh-tree-request (.-sender e) (js->clj req :keywordize-keys true)))))
+             (refresh-tree-request (.-sender e) (js->clj req :keywordize-keys true))))
   (.handle ipcMain "vv:tree-refresh-all"
-           (fn [^js e] (clj->js (refresh-all-tree-requests (.-sender e)))))
+           (fn [^js e] (refresh-all-tree-requests (.-sender e))))
   ;; resolve a diff's referenced files (relative to the diff, walking up ancestors) → {rel → content}, for the
   ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"
