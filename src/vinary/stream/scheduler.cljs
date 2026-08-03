@@ -148,7 +148,10 @@
       (if (:blocks-fn opts)
         (start-progressive)
         (-> (transport/open! path kind)
-            (.then (fn [session] (when (alive?) (swap! ctrl assoc :session session) (ric tick))))
+            ;; The heavy surface is mounted only after the tab chrome has painted. Pull the
+            ;; first transport batch immediately after IPC open; later batches retain the
+            ;; visible/idle pacing in `tick`.
+            (.then (fn [session] (when (alive?) (swap! ctrl assoc :session session) (tick nil))))
             (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "stream error: " (.-message e))}])))))
       ctrl)))
 

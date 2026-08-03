@@ -307,6 +307,23 @@ async function scenario(win, { file, kind, ready, check, keymap }) {
       'the find input unmounted while focused; Chromium fires no blur, so a cached flag leaks');
   });
 
+  // Reopening keeps the previous term, but it must arrive fully selected so one real
+  // printable key replaces it instead of appending to it.
+  await sendChord(win, keys.open[0], keys.open[1]);
+  await openFindOrForce(win, `${kind} find reopens with its remembered query`);
+  const rememberedSelection = await until(wc, `(() => { const i=document.querySelector('.vv-find-input');
+    return i && { value:i.value, start:i.selectionStart, end:i.selectionEnd,
+                  active:document.activeElement===i }; })()`,
+    (v) => v && v.active && v.start === 0 && v.end === v.value.length,
+    `${kind} remembered find query is selected`);
+  check(`${kind}: reopening find selects the remembered query`, () => {
+    assert.strictEqual(rememberedSelection.value, 'the');
+    assert.strictEqual(rememberedSelection.start, 0);
+    assert.strictEqual(rememberedSelection.end, rememberedSelection.value.length);
+  });
+  await evalIn(wc, ESCAPE_ON_INPUT);
+  await until(wc, FIND_OPEN, (v) => v === false, `${kind} reopened find closes`);
+
   // ---- drive the animator's worst case, then require it to STOP -------------------------------------
   await evalIn(wc, `window.__vvscrollanimlog && window.__vvscrollanimlog().clear()`);
   await evalIn(wc, `window.__vvscrolltrace && window.__vvscrolltrace().clear()`);

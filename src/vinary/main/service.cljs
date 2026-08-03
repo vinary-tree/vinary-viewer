@@ -16,13 +16,13 @@
             [clojure.string :as str]
             [vinary.main.dir-walk :as dir-walk]
             [vinary.main.file-kind :as file-kind]
+            [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.grammars :as grammars]))
 
 (defonce ^:private watchers (atom {}))   ; path -> chokidar watcher
-(defonce ^:private retained-paths (atom #{})) ; local file paths reachable from open renderer tabs/history
-(defonce ^:private doc-webcontents (atom {})) ; open doc path -> current sender webContents
+(defonce ^:private window-owners (atom {}))  ; webContents.id -> {:wc wc :paths #{retained doc paths}}
 (defonce ^:private doc-assets (atom {}))      ; markdown doc path -> #{local media paths}
 (defonce ^:private asset-watchers (atom {}))  ; local media path -> {:watcher chokidar :owners #{doc paths}}
 
@@ -219,13 +219,51 @@
                                                grp  (assoc :siblings grp)))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
 
+(declare unwatch-file!)
+
+(defn- owner-id [^js wc] (.-id wc))
+
+(defn- live-webcontents? [^js wc]
+  (boolean (and wc (try (not (.isDestroyed wc)) (catch :default _ false)))))
+
+(defn- retained? [path]
+  (retention/retained? @window-owners path))
+
+(defn- webcontents-for
+  "Every live renderer retaining `path`. Destroyed entries are ignored; the Electron
+   `destroyed` listener normally removes them eagerly, and this guard makes watcher delivery
+   safe during shutdown races."
+  [path]
+  (into []
+        (keep (fn [id]
+                (let [wc (get-in @window-owners [id :wc])]
+                  (when (live-webcontents? wc) wc))))
+        (retention/owner-ids-for @window-owners path)))
+
+(defn- release-window! [id]
+  (let [paths (retention/paths-for @window-owners id)]
+    (swap! window-owners retention/drop-owner id)
+    (doseq [path paths]
+      (when-not (retained? path) (unwatch-file! path)))))
+
+(defn- ensure-window! [^js wc]
+  (let [id (owner-id wc)]
+    (when-not (contains? @window-owners id)
+      (swap! window-owners retention/sync-owner id wc #{})
+      ;; Process-lifetime watchers must not retain a dead window. One listener per owner
+      ;; releases only that window's paths and preserves paths shared with other windows.
+      (.once wc "destroyed" (fn [] (release-window! id))))
+    id))
+
+(defn- retained-by? [^js wc path]
+  (contains? (retention/paths-for @window-owners (owner-id wc)) path))
+
 (defn- send-open-content! [path]
   ;; the single choke point for every watcher/poller-driven re-send (local file watch, asset watch, remote
   ;; poll). The doc's window may have CLOSED since it was retained — under the resident daemon the watcher
   ;; outlives it — so skip a destroyed webContents (else `.send` throws "Object has been destroyed").
-  (when-let [wc (and (contains? @retained-paths path) (get @doc-webcontents path))]
-    (when-not (.isDestroyed ^js wc)
-      (send-content! wc path))))
+  (doseq [wc (webcontents-for path)]
+    (send-content! wc path)))
 
 ;; ---- remote (SSH) live-refresh via polling ----
 ;; SFTP has no inotify, so a remote doc cannot be chokidar-watched. Instead a per-doc poller re-stats the URI
@@ -251,7 +289,7 @@
 
 (defn- poll-remote! [path]
   (when-let [entry (get @remote-pollers path)]
-    (if-not (and (contains? @retained-paths path) (get @doc-webcontents path))
+    (if-not (retained? path)
       (stop-remote-poller! path)                       ; tab gone → stop polling
       (let [base (:base entry)]
         (-> (.remoteStat ssh-transport path)
@@ -316,8 +354,8 @@
        (remove str/blank?)
        set))
 
-(defn- watch-assets! [doc-path paths]
-  (when (and (string? doc-path) (contains? @retained-paths doc-path) (get @doc-webcontents doc-path))
+(defn- watch-assets! [^js wc doc-path paths]
+  (when (and (string? doc-path) (retained-by? wc doc-path))
     (let [old (get @doc-assets doc-path #{})
           new (asset-paths paths)]
       (doseq [asset-path (set/difference old new)]
@@ -339,27 +377,24 @@
     (.close w)
     (swap! watchers dissoc path))
   (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
-  (release-doc-assets! path)
-  (swap! doc-webcontents dissoc path))
+  (release-doc-assets! path))
 
 (defn sync-retained!
-  "Replace the retained local-file set. Watchers and media ownership are released for paths no open tab
-   history can still reach."
+  "Replace one renderer window's retained-file set. Watchers, remote pollers, and media
+   ownership are released only when no live window can still reach a path."
   [^js wc paths]
-  (let [old @retained-paths
+  (let [id  (ensure-window! wc)
+        old (retention/paths-for @window-owners id)
         new (retained-path-set paths)]
-    (reset! retained-paths new)
-    (swap! doc-webcontents
-           (fn [m]
-             (reduce (fn [acc p] (assoc acc p wc)) m new)))
+    (swap! window-owners retention/sync-owner id wc new)
     (doseq [path (set/difference old new)]
-      (unwatch-file! path))))
+      (when-not (retained? path) (unwatch-file! path)))))
 
 (defn open!
   "Send the file's content now, and watch it (once) so changes re-send live (and on re-create — many
    editors land an atomic save that way)."
   [^js wc path]
-  (swap! doc-webcontents assoc path wc)
+  (ensure-window! wc)
   (send-content! wc path)
   (when-not (or (archive-uri? path) (file-kind/remote-uri? path))
     (send-tree! wc path))                    ; the git tree sidebar is a LOCAL-repo concern
@@ -380,9 +415,10 @@
           (.on w "add"    (fn [_] (send-open-content! path)))))
       (swap! watchers assoc path w))))
 
-(defn close! [path]
-  (swap! retained-paths disj path)
-  (unwatch-file! path))
+(defn close! [^js wc path]
+  (let [id (ensure-window! wc)]
+    (swap! window-owners retention/drop-path id path)
+    (when-not (retained? path) (unwatch-file! path))))
 
 ;; ---- URI-bar path auto-completion ----
 (defn- expand-home [p]
@@ -429,7 +465,7 @@
 
 (defn init! []
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
-  (.on ipcMain "vv:close" (fn [_e path] (close! path)))
+  (.on ipcMain "vv:close" (fn [^js e path] (close! (.-sender e) path)))
   (.handle ipcMain "vv:content-page" (fn [_e req] (.contentPage content-service req)))
   ;; bounded-memory document streaming (session pull-cursor) — open/pull/close a paused file read
   (.handle ipcMain "vv:stream-open"  (fn [_e req] (.streamOpen  content-service req)))
@@ -455,6 +491,4 @@
   (.on ipcMain "vv:watch-assets"
        (fn [^js e payload]
          (let [{:keys [docPath paths]} (js->clj payload :keywordize-keys true)]
-           (when (get @doc-webcontents docPath)
-             (swap! doc-webcontents assoc docPath (.-sender e))
-             (watch-assets! docPath paths))))))
+           (watch-assets! (.-sender e) docPath paths)))))

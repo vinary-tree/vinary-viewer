@@ -93,11 +93,13 @@ The concrete sub-decisions:
    through a per-controller promise queue so async post-passes still land in document order, and each append is
    cancel-aware (skipped if the stream was torn down mid-pass).
 
-5. **The render is never snapshotted.** On completion the app deliberately does **not** copy the DOM back into
-   `:doc/html`. Snapshotting would hold the whole rendered document in memory — exactly what streaming exists to
-   avoid — so a re-mount (tab-switch back, live-refresh) simply **re-streams** from the top, which stays
-   bounded for arbitrarily large files. *(This supersedes the initial plan's "snapshot on done for instant
-   rehydration": bounded memory is the load-bearing goal and wins the trade.)*
+5. **The DOM is never snapshotted; prepared artifacts may be reused within a strict bound.** On completion the
+   app deliberately does **not** copy the DOM back into `:doc/html`, and only the active tab owns a document DOM.
+   Markdown/Org/LaTeX may retain their DOM-free prepared blocks, source may retain spans + outline, and PDF may
+   retain its loaded document/page sizes. The shared cache keeps at most the two most-recent inactive artifacts,
+   rejects entries above 32 MiB, deduplicates in-flight preparation, and keys every entry by content stamp. A
+   live refresh invalidates the old stamp immediately. Logs/text remain bounded transport streams and re-read
+   from the top because retaining their input would defeat the streaming guarantee.
 
 6. **The sanitizer is per-block, and that is sound.** Each block is lowered through the same single
    GitHub-allowlist sanitizer the batch path uses (see [ADR-0017](0017-common-document-ir.md)). The allowlist
@@ -162,9 +164,9 @@ parser. (PDF-reflow streaming is gated by the reflow toggle + the flag in `conte
   trade for the render win already captured. "Bounded memory" precisely means the *parse/transport* working
   set for logs, the non-held HTML string for the progressive kinds, and the *bounded render* (not node count)
   for the windowed DOM.
-- **Re-mount re-streams from the top** (the render is never snapshotted). A tab-switch away/back or a
-  live-refresh loses the precise scroll position *transiently*; Phase 4's re-anchor saves the scrollTop and
-  restores it once the re-stream settles (`scheduler/when-settled`).
+- **Re-mount reconstructs one DOM.** A recent prepared artifact can recommit immediately without reparsing;
+  otherwise the document re-streams from the top. Scroll restoration retries progressively as the body grows,
+  rather than waiting for the entire stream to settle. Live refresh always uses the new content stamp.
 - **A second render path exists** (streaming + batch). Byte-parity gates (the electron smoke's byte-identical
   streamed-vs-batch comparison for Markdown and PDF-reflow; the exact-count log assertions) keep them from
   diverging.

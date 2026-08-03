@@ -18,7 +18,7 @@ const jsFiles = [
   'src/vinary/main/content_service.js',
   'resources/public/js/pdf-loader.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
-  'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js',
+  'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js', 'test/watch-e2e.js',
   'test/git-tree-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
   'test/tui-smoke.js', 'test/daemon-smoke.js',
   // the in-page-find / typist-latency gate, and the benchmark that produced its threshold (ADR-0033)

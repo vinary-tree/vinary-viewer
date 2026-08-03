@@ -96,8 +96,9 @@ history semantics.
 ## 5. Retained files and watchers
 
 A **retained file** is any local file still reachable from any open tab history
-entry. After tab/history changes, the renderer sends that retained set to the
-main process with `window.vv.syncRetainedFiles(paths)`.
+entry. After tab/history changes, each renderer window sends its own retained set
+to the main process with `window.vv.syncRetainedFiles(paths)`. Main watches the
+union across live windows and fans a change out to every window retaining that path.
 
 The retained set controls:
 
@@ -106,8 +107,14 @@ The retained set controls:
 3. Which DataScript content entities remain cached.
 
 Closing a tab does not necessarily close its current file if that file still
-appears in another tab's history. Once a file is unreachable from every tab
-history, its watcher is closed and its cached content is evicted.
+appears in another tab's history—or in another app window. Once a file is
+unreachable from every history in every live window, its watcher is closed.
+Renderer content is evicted according to that window's own retained set.
+
+Only the active tab owns a rendered document DOM. To keep tab activation fast without
+retaining hidden documents, the renderer may keep DOM-free prepared artifacts for the
+two most-recent inactive documents, provided each is at most 32 MiB. Content stamps
+invalidate these artifacts on live refresh.
 
 See [../design-decisions/0010-bounded-content-retention-and-render-metadata.md](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)
 for the design rationale.

@@ -89,6 +89,7 @@
      :on-commit        (fn [s]) — Enter
      :on-cancel        (fn [])  — Escape
      :commit-on-blur?  call :on-commit with the current draft when focus leaves
+     :select-on-mount? focus and select the complete value once, after the input mounts
      :on-key-down      (fn [event]) — runs FIRST; if it calls .preventDefault, Enter/Escape handling here
                        is skipped, so a widget can keep its own meaning for those keys
      :attrs            merged onto the <input> (:class, :placeholder, :auto-focus, :type, :ref, …)
@@ -96,8 +97,22 @@
    Form-2: the state must survive re-renders, and the props are read fresh on every one."
   [_opts]
   (let [draft (r/atom nil)                                    ; reactive: drives the re-render
-        bk    (atom {:seen ::init :pending [] :external? false})]
-    (fn [{:keys [value on-change on-commit on-cancel commit-on-blur? on-key-down attrs]}]
+        bk    (atom {:seen ::init :pending [] :external? false})
+        opts* (atom nil)
+        selected? (atom false)
+        ;; Stable ref: React calls it only for mount/unmount, not on every render. Compose the
+        ;; caller's ref and perform the one-shot selection after autoFocus has landed.
+        ref-fn (fn [^js el]
+                 (when-let [f (get-in @opts* [:attrs :ref])] (f el))
+                 (when (and el (:select-on-mount? @opts*) (not @selected?))
+                   (reset! selected? true)
+                   (r/next-tick (fn []
+                                  (when (.-isConnected el)
+                                    (.focus el #js {:preventScroll true})
+                                    (.select el))))))]
+    (fn [{:keys [value on-change on-commit on-cancel commit-on-blur? on-key-down attrs]
+          :as opts}]
+      (reset! opts* opts)
       (let [model (or value "")
             {:keys [external?]} (swap! bk reconcile model)]
         ;; Abandoning the draft is a reactive write, so it cannot happen during render — next-tick it.
@@ -108,6 +123,7 @@
           [:input
            (merge
             {:value shown
+             :ref ref-fn
              :on-change (fn [^js e]
                           (let [v (.. e -target -value)]
                             (reset! draft v)
@@ -130,4 +146,4 @@
                                 nil)))}
             ;; :on-blur is composed above rather than overwritten, so a caller keeping its own blur
             ;; behaviour does not silently disable commit-on-blur
-            (dissoc attrs :on-blur))])))))
+            (dissoc attrs :on-blur :ref))])))))

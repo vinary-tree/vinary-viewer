@@ -132,7 +132,7 @@
   "Mount a read-only CodeMirror view of text in parent. If grammar (a {:wasm-url :scm-url}) is given,
    asynchronously load the tree-sitter grammar (via renderer.syntax) and reconfigure with highlighting. Returns
    the view."
-  [^js parent text grammar]
+  [^js parent text grammar prepared-spans]
   (let [hl   (Compartment.)
         exts #js [(.of (.-readOnly EditorState) true)
                   (.of (.-editable EditorView) false)
@@ -148,10 +148,12 @@
     (when grammar
       ;; parse stays in renderer.syntax (@codemirror-free): it resolves highlight SPANS, which we turn into a
       ;; CodeMirror decoration set here — byte-for-byte the same decorations the old in-syntax path produced.
-      (-> (syntax/highlight-spans text grammar)
-          (.then (fn [spans]
-                   (.dispatch view #js {:effects (.reconfigure hl (highlight-field (decoration-set (spans->decorations spans))))})))
-          (.catch (fn [e] (js/console.warn "[vv] grammar load failed:" e)))))
+      (if (some? prepared-spans)
+        (.dispatch view #js {:effects (.reconfigure hl (highlight-field (decoration-set (spans->decorations prepared-spans))))})
+        (-> (syntax/highlight-spans text grammar)
+            (.then (fn [spans]
+                     (.dispatch view #js {:effects (.reconfigure hl (highlight-field (decoration-set (spans->decorations spans))))})))
+            (.catch (fn [e] (js/console.warn "[vv] grammar load failed:" e))))))
     view))
 
 ;; The renderer.cm facade loads this module lazily and passes calls through these exported fns (string keys so

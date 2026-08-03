@@ -178,8 +178,10 @@ feeds 500+ batches and asserts the frontier stays a single config and only the l
 
 The bound extends across the whole pipeline (see the diagram): the **transport** holds $`\le 2`$ batches (the current
 one plus one double-buffered prefetch); **main** reads $`\le 1`$ batch ahead (it pauses `readline` at the batch cap —
-the credit-1 backpressure); and the render is **never snapshotted** back to `:doc/html`, so a re-mount re-streams
-rather than materialising the whole HTML. The *parse/transport* working set is thus $`O(1)`$ in $`N`$. (The rendered
+the credit-1 backpressure); and the render is **never snapshotted** back to `:doc/html`, so a log/text re-mount
+re-streams rather than materialising the whole input or HTML. The bounded warm cache described in ADR-0018
+applies only to already-materialized progressive prose/source/PDF artifacts, not this transport path. The
+*parse/transport* working set is thus $`O(1)`$ in $`N`$. (The rendered
 **DOM** node count still tracks the streamed prefix until Phase 4 windows it — see the trade-offs in ADR-0018.)
 
 ---

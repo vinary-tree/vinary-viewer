@@ -27,7 +27,7 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 |---------|----------------|---------|---------------|---------|
 | `vv:open` | `open(path)` | `path` string | `service/open!` | Read a local (or `ssh://`/`sftp://`) file, send content + git tree, start/reuse its watcher. |
 | `vv:close` | `close(path)` | `path` string | `service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
-| `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace main's retained local-file set and release unretained watchers/assets. |
+| `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace the sending window's retained local-file set. Watchers/assets are released only after no live window retains the path. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `service/watch-assets!` | Watch local media assets referenced by a retained Markdown/Org/LaTeX document. |
 | `vv:content-page` ⮐ | `contentPage(request)` | `{path, kind, stamp, page, meta?}` → page payload with `hasPrev`/`hasNext` | `content_service.contentPage` | Fetch one bounded page for a large log or delimited-table preview. |
 | `vv:stream-open` ⮐ | `streamOpen(req)` | `{path, mode:"lines"\|"bytes"}` → `{sessionId, size, mode}` | `content_service.streamOpen` | Open a bounded-memory pull-cursor stream session (local `fs` or SFTP read-stream). |

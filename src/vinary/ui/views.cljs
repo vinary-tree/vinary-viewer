@@ -14,7 +14,9 @@
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
+            [vinary.renderer.warm-cache :as warm-cache]
             [vinary.ui.tabs :as tabs]
+            [vinary.ui.content-route :as content-route]
             [vinary.ui.text-input :as text-input]
             [vinary.async.scheduler :as sched]
             [vinary.ui.icons :as icons]
@@ -351,6 +353,7 @@
         last-link   (atom nil)
         detach*     (atom nil)
         ctrl*       (atom nil)
+        lease*      (atom nil)                                 ; prepared prose blocks retained across tab revisits
         ensurer*    (atom nil)                                 ; find-materialize hook (drains the stream before search)
         restore-to* (atom nil)                                 ; scrollTop to re-anchor after a live-refresh remount
         last-toc-n  (atom 0)
@@ -370,6 +373,15 @@
                                  estimated (virtual-layout/extrapolate-total rendered progress rendered)]
                              (set! (.. sp -style -height)
                                    (str (js/Math.round (virtual-layout/spacer-height estimated rendered)) "px"))))))
+        apply-restore! (fn []
+                         (when-let [target @restore-to*]
+                           (when-let [^js content (some-> @node (.closest ".vv-content"))]
+                             ;; Browser clamping is useful here: retry as the body/spacer grows, then
+                             ;; stop as soon as the requested position becomes reachable so subsequent
+                             ;; user scrolling is never fought by the restore loop.
+                             (set! (.-scrollTop content) target)
+                             (when (>= (.-scrollTop content) (max 0 (dec target)))
+                               (reset! restore-to* nil)))))
         ;; As blocks append they already carry final figure/math/mermaid geometry (pre-sized in apply-posts), so a
         ;; burst only needs the scroll-spy re-measured (block commits move heading offsets) + the spacer resized.
         ;; rAF-coalesce bursts of appends into one refresh.
@@ -381,6 +393,7 @@
                              (reset! refresh-raf false)
                              (when @node
                                (size-spacer!)
+                               (apply-restore!)
                                (when-let [^js content (some-> @node (.closest ".vv-content"))]
                                  (toc/refresh! content (mapv :id @(rf/subscribe [:doc/toc]))))))))) ]
     (r/create-class
@@ -389,13 +402,23 @@
                               (let [[_ path kind text stamp] (r/argv this)
                                     ;; progressive kinds inject a block-provider (full-document render → parity);
                                     ;; log/text leave it nil and take the bounded transport engine instead.
-                                    blocks-fn (case kind
-                                                "markdown"   (fn [] (md/stream-blocks text (md/dir-of path) stamp))
-                                                "org"        (fn [] (md/org-stream-blocks text (md/dir-of path) stamp))
-                                                "latex"      (fn [] (md/latex-stream-blocks text (md/dir-of path) stamp))
-                                                "pdf-reflow" (fn [] (pdf/reflow-blocks! path))
-                                                nil)]
+                                    provider (case kind
+                                               "markdown"   (fn [] (md/stream-blocks text (md/dir-of path) stamp))
+                                               "org"        (fn [] (md/org-stream-blocks text (md/dir-of path) stamp))
+                                               "latex"      (fn [] (md/latex-stream-blocks text (md/dir-of path) stamp))
+                                               "pdf-reflow" (fn [] (pdf/reflow-blocks! path))
+                                               nil)
+                                    lease (when (and provider (not= kind "pdf-reflow"))
+                                            (warm-cache/acquire!
+                                             {:key [:stream path stamp kind]
+                                              :path path :stamp stamp
+                                              :weight (* 2 (count (or text "")))
+                                              :build provider}))
+                                    blocks-fn (cond lease (fn [] (:promise lease))
+                                                    provider provider
+                                                    :else nil)]
                                 (reset! path* path)
+                                (reset! lease* lease)
                                 (reset! detach* (attach-content-interactions! @node source* path* last-link))
                                 ;; keep the pre-estimated spacer honest as the body height settles (late web
                                 ;; fonts, mermaid/syntax post-passes, pre-sized figures) — the robust,
@@ -423,23 +446,14 @@
                                 ;; exists; the browser clamps if the doc came back shorter
                                 (reset! restore-to* (get @stream-scroll path))
                                 (swap! stream-scroll dissoc path)
+                                (when @restore-to* (js/requestAnimationFrame (fn [_] (refresh-view!))))
                                 (if-let [jump-line (source-nav/take-preview-line!)]
                                   ;; a source→preview jump into a streamed doc: scroll to the target line once the
                                   ;; whole doc has drained (its block may be among the last committed); the jump
                                   ;; wins over any saved scroll restore
                                   (-> (stream-scheduler/when-settled @ctrl*)
                                       (.then (fn [_] (source-nav/scroll-preview-to-line! jump-line))))
-                                  (when @restore-to*
-                                    (let [set-scroll! (fn [] (when-let [^js content (and @node (some-> @node (.closest ".vv-content")))]
-                                                               (set! (.-scrollTop content) @restore-to*)))]
-                                      (-> (stream-scheduler/when-settled @ctrl*)
-                                          ;; re-apply across a few frames: post-passes (syntax highlight) can grow the
-                                          ;; layout height AFTER the appends settle, so one early set would clamp short
-                                          (.then (fn [_]
-                                                   (set-scroll!)
-                                                   (js/requestAnimationFrame
-                                                    (fn [_] (set-scroll!)
-                                                      (js/requestAnimationFrame (fn [_] (set-scroll!))))))))))) ))
+                                  nil)))
       :component-did-update (fn [this]
                               ;; re-measure on every batch that reports progress (ALL streaming kinds) OR when the
                               ;; outline grew (logs' incremental Contents), so the scroll-spy AND the pre-estimated
@@ -457,6 +471,9 @@
                                 (when @stream-ro (.disconnect ^js @stream-ro) (reset! stream-ro nil))
                                 (when @ensurer* (pdf-cache/clear-ensurer! @ensurer*) (reset! ensurer* nil))
                                 (when @ctrl* (stream-scheduler/stop! @ctrl*) (reset! ctrl* nil))
+                                (when-let [release! (:release! @lease*)]
+                                  (release!)
+                                  (reset! lease* nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))
       :reagent-render (fn [_path _kind _text _stamp]
                         ;; deref the streamed outline + progress so the component re-renders as the stream
@@ -479,6 +496,29 @@
                            ;; innerHTML capture is untouched): height set imperatively to pad the rendered body up
                            ;; to the estimated whole-document height, so the scrollbar matches the whole doc
                            [:div.vv-stream-spacer {:ref (fn [el] (reset! spacer el))}]]))})))
+
+(defn post-paint-surface
+  "Let tab/URI chrome paint before mounting an imperative heavy renderer. Two animation
+   frames guarantee one browser paint with the lightweight shell; the child remains the
+   only mounted document surface."
+  [_child]
+  (let [ready? (r/atom false)
+        raf1   (atom nil)
+        raf2   (atom nil)]
+    (r/create-class
+     {:display-name "vv-post-paint-surface"
+      :component-did-mount
+      (fn [_]
+        (reset! raf1
+                (js/requestAnimationFrame
+                 (fn [_]
+                   (reset! raf2 (js/requestAnimationFrame (fn [_] (reset! ready? true))))))))
+      :component-will-unmount
+      (fn [_]
+        (when @raf1 (js/cancelAnimationFrame @raf1))
+        (when @raf2 (js/cancelAnimationFrame @raf2)))
+      :reagent-render (fn [child]
+                        (if @ready? child [:div.vv-empty "Loading…"]))})))
 
 (defn- pdf-rect [^js node]
   (let [r (.getBoundingClientRect node)]
@@ -615,8 +655,10 @@
    editor scrolls, the source-toc section at the viewport top is marked :ui/active-heading — the same highlight
    the preview uses, but measured in editor LINES instead of DOM pixel offsets (the source Contents ids are
    `L<line>`, not host-DOM element ids, and the CodeMirror `.cm-scroller` scrolls internally, not `.vv-content`)."
-  [_text _path]
+  [_text _path _stamp]
   (let [node (atom nil) view (atom nil) path* (atom nil)
+        cur*    (atom nil)        ; [path stamp], prevents unrelated app renders rebuilding CodeMirror
+        lease*  (atom nil)        ; prepared highlight spans + outline
         toc*    (atom nil)        ; the current source Contents outline (L<line> ids), read by the scroll-spy
         last*   (atom ::none)     ; last-dispatched active id — skip redundant dispatches on every scroll frame
         build*  (atom 0)          ; build generation: the @codemirror source-view chunk loads async (cm/ensure!),
@@ -643,40 +685,50 @@
             ;; mount the EditorView + wire its scroll-spy + derive the Contents outline. Factored out of build! so
             ;; the (warm) chunk-ready path stays SYNCHRONOUS (identical to the pre-split behavior) while the cold
             ;; path runs it from cm/ensure!'s .then. `token` fences a stale build (see build*).
-            (mount-editor! [text path token]
+            (mount-editor! [text path prepared token]
               (when (and (= token @build*) @node)
-                (reset! view (cm/create-source-view @node text (syntax/grammar-for path)))
+                (reset! view (cm/create-source-view @node text (syntax/grammar-for path) (:spans prepared)))
                 ;; follow the editor's own scroller so the Contents highlight tracks scrolling (rAF-throttled)
                 (let [scroller (.-scrollDOM ^js @view)
                       handler  (fn [_] (spy!))]
                   (.addEventListener scroller "scroll" handler #js {:passive true})
                   (reset! detach* (fn [] (.removeEventListener scroller "scroll" handler))))
-                ;; derive a code Contents outline from the tree-sitter parse (common IR) -> sidebar :doc/toc, then
-                ;; set the initial highlight once it is ready
-                (-> (syntax/parse-outline text path)
-                    (.then (fn [toc]
-                             (when (= token @build*)          ; not superseded while the parse was in flight
-                               (rf/dispatch [:toc/set path toc])
-                               (reset! toc* toc)
-                               (spy!))))
-                    (.catch (fn [_] nil)))))
+                (let [outline (:toc prepared)]
+                  (rf/dispatch [:toc/set path outline])
+                  (reset! toc* outline)
+                  (spy!))))
             (build! [this]
-              (let [[_ text path] (r/argv this)
-                    token (swap! build* inc)]   ; supersede any in-flight (cold-path) build
+              (let [[_ text path stamp] (r/argv this)
+                    token   (swap! build* inc)
+                    grammar (syntax/grammar-for path)
+                    lease   (warm-cache/acquire!
+                             {:key [:source path stamp grammar]
+                              :path path :stamp stamp
+                              :weight (* 2 (count (or text "")))
+                              :build (fn []
+                                       (let [spans-p (if grammar
+                                                       (syntax/highlight-spans text grammar)
+                                                       (js/Promise.resolve #js []))
+                                             toc-p   (syntax/parse-outline text path)]
+                                         (-> (js/Promise.all #js [spans-p toc-p])
+                                             (.then (fn [values]
+                                                      {:spans (aget values 0)
+                                                       :toc   (aget values 1)})))))})
+                    ready-p (if (cm/ready?) (js/Promise.resolve nil) (cm/ensure!))]
                 (reset! path* path)
-                ;; the @codemirror editor lives in a lazily-loaded chunk (renderer.cm). Once it's warm (the pool
-                ;; preload, or a prior source open) create it synchronously — same timing as before the split; the
-                ;; first cold open waits on ensure!, leaving the .vv-source placeholder empty until the chunk lands.
-                (if (cm/ready?)
-                  (mount-editor! text path token)
-                  (-> (cm/ensure!)
-                      (.then (fn [_] (mount-editor! text path token)))
-                      (.catch (fn [e] (js/console.warn "[vv] source-view chunk load failed:" e)))))))
+                (reset! cur* [path stamp])
+                (reset! lease* lease)
+                (-> (js/Promise.all #js [ready-p (:promise lease)])
+                    (.then (fn [values] (mount-editor! text path (aget values 1) token)))
+                    (.catch (fn [e] (js/console.warn "[vv] source-view preparation failed:" e))))))
             (destroy! []
               (swap! build* inc)   ; cancel any in-flight build so its .then can't mount a stale/orphan view
               (when @detach* (@detach*) (reset! detach* nil))
               (reset! toc* nil) (reset! last* ::none)
-              (when @view (.destroy ^js @view) (reset! view nil)))
+              (when @view (.destroy ^js @view) (reset! view nil))
+              (when-let [release! (:release! @lease*)]
+                (release!)
+                (reset! lease* nil)))
             (on-ctx [^js e]
               (.preventDefault e)
               (.stopPropagation e)
@@ -698,9 +750,12 @@
       (r/create-class
        {:display-name           "vv-source-view"
         :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))
-        :component-did-update    (fn [this] (destroy!) (build! this) (scroll/apply! @node))
-        :component-will-unmount  (fn [_] (destroy!))
-        :reagent-render          (fn [_text _path] [:div.vv-source {:ref (fn [el] (reset! node el))
+        :component-did-update    (fn [this]
+                                   (let [[_ _text path stamp] (r/argv this)]
+                                     (when (not= [path stamp] @cur*)
+                                       (destroy!) (build! this) (scroll/apply! @node))))
+        :component-will-unmount  (fn [_] (destroy!) (reset! cur* nil))
+        :reagent-render          (fn [_text _path _stamp] [:div.vv-source {:ref (fn [el] (reset! node el))
                                                                      :on-context-menu on-ctx}])}))))
 
 (defn mermaid-view
@@ -749,7 +804,9 @@
    pdf/update!. Right-click reuses the markdown :preview-body context menu (Copy)."
   [_path _stamp]
   (let [node   (atom nil)
-        ctrl   (atom nil)            ; the pdf engine controller (pdf/mount! return)
+        ctrl   (atom nil)            ; the per-DOM pdf engine controller
+        lease* (atom nil)            ; shared PDFDocumentProxy + page-size artifact
+        gen*   (atom 0)              ; fences a preparation finishing after navigation
         cur    (atom nil)            ; [path stamp] currently mounted
         vstate (atom nil)            ; latest :pdf/view-state (captured reactively in render)
         on-ctx (fn [^js e]
@@ -758,12 +815,27 @@
                    (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
                                                      :target {:kind :preview-body :text (or text "")}}])))
         remount! (fn [path stamp]
-                   (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
-                   (when @node (set! (.-innerHTML @node) ""))
-                   (when-let [bytes (pdf-cache/get-bytes path)]
-                     (reset! ctrl (pdf/mount! @node bytes path @vstate))
-                     (reset! cur [path stamp])
-                     (scroll/apply! @node)))]
+                   (let [gen (swap! gen* inc)]
+                     (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
+                     (when-let [release! (:release! @lease*)]
+                       (release!)
+                       (reset! lease* nil))
+                     (when @node (set! (.-innerHTML @node) ""))
+                     (when-let [bytes (pdf-cache/get-bytes path)]
+                       (let [lease (warm-cache/acquire!
+                                    {:key [:pdf path stamp]
+                                     :path path :stamp stamp
+                                     :weight (or (.-byteLength ^js bytes) 0)
+                                     :build #(pdf/prepare! bytes)
+                                     :dispose pdf/dispose-prepared!})]
+                         (reset! lease* lease)
+                         (-> (:promise lease)
+                             (.then (fn [prepared]
+                                      (when (and (= gen @gen*) @node)
+                                        (reset! ctrl (pdf/mount-prepared! @node prepared path @vstate))
+                                        (scroll/apply! @node))))
+                             (.catch (fn [e] (js/console.error "[pdf] prepare failed" e)))))
+                       (reset! cur [path stamp]))))]
     (r/create-class
      {:display-name "vv-pdf-view"
       :component-did-mount    (fn [this]
@@ -776,8 +848,12 @@
                                     (remount! path stamp)             ; new doc / live-refresh → reload
                                     (when @ctrl (pdf/update! @ctrl @vstate)))))  ; zoom/fit/invert
       :component-will-unmount (fn [_]
+                                (swap! gen* inc)
                                 (when @node (.removeEventListener @node "contextmenu" on-ctx))
-                                (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil)))
+                                (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
+                                (when-let [release! (:release! @lease*)]
+                                  (release!)
+                                  (reset! lease* nil)))
       :reagent-render         (fn [_path _stamp]
                                 (reset! vstate @(rf/subscribe [:pdf/view-state]))  ; reactive → did-update
                                 [:div.vv-pdf-doc {:ref (fn [el] (reset! node el))}])})))
@@ -997,6 +1073,8 @@
         dv      @(rf/subscribe [:ui/active-diff-view])         ; :unified | :split (diff docs only)
         reflow? @(rf/subscribe [:pdf/reflow?])
         stream? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))   ; streaming on → reflow streams too
+        route   (content-route/route {:doc doc :tabs tabs :uri uri :source? vs? :diff-view dv
+                                      :reflow? reflow? :stream-setting? stream?})
         ;; is a source (code) view showing? (the `source` kind, or a previewable doc toggled to view-source).
         ;; The prose reading gutter frames a code editor — its gutter/background never reach the edges, reading
         ;; as "not filling" — so drop the gutter edge-to-edge like the web/PDF views. Mirrors the source-view
@@ -1025,84 +1103,72 @@
       ;; (this is never focused by tabbing, only by an explicit hand-off). ADR-0032.
       :tab-index -1
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
-     (cond
-       (empty? tabs)               [watermark]
-       (nil? uri)                  [:div.vv-empty "New Tab"]
+     (case route
+       :watermark                  [watermark]
+       :empty                      [:div.vv-empty "New Tab"]
        ;; a PDF opened from a web-view link (main downloaded its bytes into the cache under the URL) → the app's
        ;; pdf.js, NOT the web view — the web view would re-trigger Chromium's inline pdfium plugin (the bug fixed).
-       (and (uri/http? uri) (= "pdf" (:doc/kind doc)))
+       :http-pdf
        ^{:key (str "http-pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
-       [pdf-view (:doc/path doc) (:doc/stamp doc)]
-       (uri/http? uri)             [web-host uri]
+       [post-paint-surface [pdf-view (:doc/path doc) (:doc/stamp doc)]]
+       :http                       [web-host uri]
        ;; .html → render live in the web view (keyed by stamp so a live-refresh remounts the host and reloads),
        ;; not shown as escaped source. A LOCAL file loads by its file:// URL; a REMOTE file loads by its
        ;; vv-remote:// URL, which main serves over SFTP (so the page's relative CSS/JS/images resolve too).
-       (= "html" (:doc/kind doc))  ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
+       :html                       ^{:key (str "html:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [web-host (if (uri/remote? (:doc/path doc))
                                                (media/remote->vv-remote-url (:doc/path doc))
                                                (media/path->file-url (:doc/path doc)))]
        ;; an in-place FACET whose file is still being fetched (its vv:open is in flight, so no doc entity is cached
        ;; yet) — the resolved content path exists but the doc doesn't. Placed above the kind branches (they read
        ;; (:doc/kind doc), nil for an absent doc).
-       (and (nil? doc) uri)        [:div.vv-empty "Loading…"]
-       (:doc/error doc)            [:div.vv-error "Error: " (:doc/error doc)]
+       :loading                    [:div.vv-empty "Loading…"]
+       :error                      [:div.vv-error "Error: " (:doc/error doc)]
+       ;; Explicit Source precedes the streaming Preview policy (content-route). This is
+       ;; what makes Source reachable for Markdown/Org/LaTeX above the streaming threshold.
+       :source                     ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [post-paint-surface [source-view (:doc/text doc) (:doc/path doc) (:doc/stamp doc)]]
        ;; a large streamable doc renders as a bounded-memory INCREMENTAL stream (ir-stream-body drives it from
        ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
        ;; :doc/streaming? (stream-flag/enabled?), so they fall through to the byte-identical batch renderers.
-       (:doc/streaming? doc)       ^{:key (str "stream:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [ir-stream-body (:doc/path doc) (:doc/kind doc) (:doc/text doc) (:doc/stamp doc)]
+       :stream                     ^{:key (str "stream:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [post-paint-surface
+                                    [ir-stream-body (:doc/path doc) (:doc/kind doc) (:doc/text doc) (:doc/stamp doc)]]
        ;; PDF: the fixed-layout canvas by default; when "Reflow Text" is on and the extracted-text HTML is
        ;; ready, show that reflowable prose instead (an additive facet — the canvas render is untouched).
-       (= "pdf" (:doc/kind doc))
-       (cond
-         ;; reflow + streaming on → progressively commit the extracted-text blocks (pdf/reflow-blocks!, stored
-         ;; by the :pdf/reflow fx while the doc was mounted); byte-identical to the batch reflow HTML
-         (and reflow? (:doc/reflow-html doc) stream?)
-         ^{:key (str "pdf-reflow-stream:" (:doc/path doc) ":" (:doc/stamp doc))}
-         [ir-stream-body (:doc/path doc) "pdf-reflow" nil (:doc/stamp doc)]
-         (and reflow? (:doc/reflow-html doc))
-         ^{:key (str "pdf-reflow:" (:doc/path doc))}
-         [markdown-body (:doc/reflow-html doc) nil (:doc/path doc)]
-         :else
-         ^{:key (str "pdf:" (:doc/path doc))}
-         [pdf-view (:doc/path doc) (:doc/stamp doc)])
-       (= "image" (:doc/kind doc)) ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
+       :pdf-reflow-stream          ^{:key (str "pdf-reflow-stream:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [ir-stream-body (:doc/path doc) "pdf-reflow" nil (:doc/stamp doc)]
+       :pdf-reflow                 ^{:key (str "pdf-reflow:" (:doc/path doc))}
+                                   [markdown-body (:doc/reflow-html doc) nil (:doc/path doc)]
+       :pdf                        ^{:key (str "pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [post-paint-surface [pdf-view (:doc/path doc) (:doc/stamp doc)]]
+       :image                      ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
-       (and vs?
-            (:doc/text doc)
-            (or (:doc/sourceable? doc) (#{"markdown" "mermaid" "source" "org" "latex" "diff"} (:doc/kind doc))))
-       ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
-       [source-view (:doc/text doc) (:doc/path doc)]
        ;; diff (.diff/.patch): the colored UNIFIED HTML by default; the side-by-side SPLIT HTML when chosen and
        ;; built (falls back to unified while the split is still building). Both render through markdown-body, so
        ;; find / scroll-spy / the themed context menu / the Contents outline all work. "Source" (above) shows raw.
-       (= "diff" (:doc/kind doc))
-       (cond
-         (and (= :split dv) (:doc/diff-split-html doc))
-         ^{:key (str "diff-split:" (:doc/path doc) ":" (:doc/stamp doc))}
-         [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)]
-         (:doc/html doc)
-         ^{:key (str "diff:" (:doc/path doc) ":" (:doc/stamp doc))}
-         [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
-         :else [:div.vv-empty "Rendering…"])
-       (= "diagram" (:doc/kind doc)) [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
-       (= "mermaid" (:doc/kind doc)) ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
+       :diff-split                 ^{:key (str "diff-split:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)]
+       :diff                       ^{:key (str "diff:" (:doc/path doc) ":" (:doc/stamp doc))}
+                                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       :diff-rendering             [:div.vv-empty "Rendering…"]
+       :diagram                    [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
+       :mermaid                    ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
                                      [mermaid-view (:doc/text doc) (:doc/path doc)]
-       (= "source" (:doc/kind doc)) ^{:key (:doc/path doc)} [source-view (:doc/text doc) (:doc/path doc)]
-       (= "office" (:doc/kind doc)) [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
-       (= "table" (:doc/kind doc)) ^{:key (str "table:" (:doc/path doc) ":" (:doc/stamp doc))}
+       :office                     [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       :table                      ^{:key (str "table:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [table-view doc]
-       (= "log" (:doc/kind doc))   ^{:key (str "log:" (:doc/path doc) ":" (:doc/stamp doc))}
+       :log                        ^{:key (str "log:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [log-view doc]
-       (#{"directory" "archive"} (:doc/kind doc)) ^{:key (str "dir:" (:doc/path doc))}
+       :directory                  ^{:key (str "dir:" (:doc/path doc))}
                                                    [dir-view (:doc/path doc) (:doc/entries doc)]
        ;; The render FINISHED but produced nothing (`""` — truthy in CLJS, so this must precede the
        ;; `(:doc/html doc)` catch-all or an empty .markdown-body mounts and the pane is silently blank).
        ;; While the render is still in flight :doc/html is nil, so the "Rendering…" branch below still wins.
-       (and (some? (:doc/html doc)) (ir-html/blank? (:doc/html doc)))
+       :blank
        [:div.vv-empty "Nothing to preview — this document has no renderable content. Use View Source to see the file."]
-       (:doc/html doc)             [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
-       :else                       [:div.vv-empty "Rendering…"])]))
+       :html-doc                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       :rendering                  [:div.vv-empty "Rendering…"])]))
 
 (defn- breadcrumb
   "The active local path rendered as clickable folder segments (root → leaf). Clicking a segment
@@ -1202,17 +1268,40 @@
    error (never a dialog); Esc closes the dropdown, then reverts. Holding Ctrl while hovering turns a
    local path into a clickable breadcrumb. (Per-tab history: back/forward act on the active tab.)"
   []
-  (let [draft  (r/atom nil)
-        hover? (r/atom false)]
+  (let [draft    (r/atom nil)
+        hover?   (r/atom false)
+        baseline (atom ::init)            ; active URI at the start of this edit
+        input*   (atom nil)]
     (fn []
       (let [active-uri  @(rf/subscribe [:ui/active-uri])
+            active-display (uri/display active-uri)
             active-path @(rf/subscribe [:ui/active-path])
             ctrl?       @(rf/subscribe [:ui/ctrl-held?])
             back?       @(rf/subscribe [:history/can-back?])
             fwd?        @(rf/subscribe [:history/can-forward?])
             uc          @(rf/subscribe [:ui/uri-complete])
             web-history @(rf/subscribe [:ui/web-history])
-            shown       (if (nil? @draft) (uri/display active-uri) @draft)
+            editing-now? (some? @draft)
+            external?   (and editing-now? (not= @baseline ::init) (not= active-display @baseline))
+            selected-all? (let [^js el @input*]
+                            (boolean (and external? el
+                                          (identical? el (.-activeElement js/document))
+                                          (= 0 (.-selectionStart el))
+                                          (= (count (.-value el)) (.-selectionEnd el)))))
+            _sync-baseline (when (or (= @baseline ::init) (not editing-now?))
+                             (reset! baseline active-display))
+            ;; A tab/history change is authoritative even while this controlled field is focused.
+            ;; Render the model now; clear the reactive draft after this commit to avoid a write-in-render loop.
+            _sync-external (when external?
+                             (reset! baseline active-display)
+                             (r/next-tick
+                              (fn []
+                                (reset! draft nil)
+                                (rf/dispatch [:uri-complete/clear])
+                                (when selected-all?
+                                  (when-let [^js el @input*]
+                                    (when (.-isConnected el) (.select el)))))))
+            shown       (if (or external? (nil? @draft)) active-display @draft)
             crumbs?     (and ctrl? @hover? active-path)
             editing?    (some? @draft)
             ;; editing an http(s) URL completes from browser history; a path completes from the filesystem
@@ -1258,15 +1347,18 @@
              (when (and ghost (seq ghost)) [:span.vv-uri-ghost-suffix ghost])]
             [:input.vv-uri-input
              {:value       shown
+              :ref         (fn [el] (reset! input* el))
               :placeholder "Enter a file path or http(s):// URL"
               :spellCheck  false
               ;; :in-input? is derived from document.activeElement by the keymap resolver (ADR-0032)
               :on-focus    (fn [^js e]
-                             (let [v (uri/display active-uri)]
+                             (let [v active-display]
+                               (reset! baseline v)
                                (reset! draft v)
                                (.select (.-target e))
                                (rf/dispatch [:uri-complete/typed v])))
               :on-blur     (fn [_]
+                             (reset! baseline active-display)
                              (reset! draft nil)
                              (rf/dispatch [:uri-complete/clear]))
               :on-change   (fn [^js e]
@@ -1406,6 +1498,7 @@
                [text-input/async-input
                 {:value       query
                  :on-change   #(rf/dispatch [:find/set-query %])
+                 :select-on-mount? true
                  :attrs       {:class "vv-find-input" :placeholder "Find" :auto-focus true}
                  :on-key-down (fn [^js e]
                                 (case (.-key e)

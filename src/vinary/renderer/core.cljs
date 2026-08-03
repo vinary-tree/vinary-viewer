@@ -15,6 +15,7 @@
             [vinary.async.scheduler :as sched]
             [vinary.renderer.scroll-trace :as scroll-trace]
             [vinary.renderer.input-trace :as input-trace]
+            [vinary.renderer.warm-cache :as warm-cache]
             [vinary.renderer.find :as finder]
             [vinary.renderer.history-input :as history-input]
             [vinary.renderer.profile :as profile]
@@ -443,6 +444,7 @@
   (when ^boolean js/goog.DEBUG
     (scroll-trace/expose!)
     (input-trace/expose!)
+    (set! (.-__vvwarmcache js/window) (fn [] (clj->js (warm-cache/stats))))
     (set! (.-__vvscrollanim js/window) (fn [] (input-fx/anim-snapshot)))
     (set! (.-__vvscrollanimlog js/window)
           (fn [] #js {:entries (input-fx/anim-log-entries)

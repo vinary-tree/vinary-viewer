@@ -46,7 +46,8 @@
     (cond-> []
       (seq tx) (conj [:ds/transact tx])
       true     (conj [:vv/sync-retained-files retained])
-      true     (conj [:pdf/evict retained]))))   ; evict cached PDF bytes for retired docs
+      true     (conj [:pdf/evict retained])       ; evict cached PDF bytes for retired docs
+      true     (conj [:render-cache/retain-only retained]))))
 
 (defn- with-retention [result db]
   (update result :fx #(into (vec (or % [])) (retention-fx db))))
@@ -134,7 +135,8 @@
          db'     (cond-> db' fresh-facet (nav/set-facet (:path fresh-facet) (:type fresh-facet)))]
      (with-retention
        {:db db'
-        :fx (cond-> [[:ds/transact tx]]
+        :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
+                     [:ds/transact tx]]
               ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx
               (and (= kind "markdown") (not stream?))
               (conj [:markdown/render {:text text :path path :stamp stamp
@@ -362,15 +364,18 @@
        (nav-result db' uri 0)))))
 
 ;; switch tabs — save the leaving tab's view position, restore the target tab's (facet-aware)
+(defn- activate-tab-result [db view-pos id]
+  (let [db'    (nav/activate (nav/save-scroll db view-pos) id)
+        target (nav/active-uri db')]
+    (with-retention
+      {:db db' :fx (cond-> [] (uri/file-path target) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+      db')))
+
 (rf/reg-event-fx
  :tab/activate
  [(rf/inject-cofx :view-pos)]
  (fn [{:keys [db view-pos]} [_ id]]
-   (let [db'    (nav/activate (nav/save-scroll db view-pos) id)
-         target (nav/active-uri db')]
-     (with-retention
-       {:db db' :fx (cond-> [] (uri/file-path target) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
-       db'))))
+   (activate-tab-result db view-pos id)))
 
 (rf/reg-event-fx
  :tab/duplicate
@@ -798,8 +803,17 @@
 ;; ---- command-target events (the keybinding command registry dispatches these) ----
 (def ^:private theme-cycle ["spacemacs-dark" "spacemacs-light"])
 
-(rf/reg-event-db :tab/next (fn [db _] (if-let [id (nav/nth-id db 1)]  (nav/activate db id) db)))
-(rf/reg-event-db :tab/prev (fn [db _] (if-let [id (nav/nth-id db -1)] (nav/activate db id) db)))
+(rf/reg-event-fx
+ :tab/next
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
+   (when-let [id (nav/nth-id db 1)] (activate-tab-result db view-pos id))))
+
+(rf/reg-event-fx
+ :tab/prev
+ [(rf/inject-cofx :view-pos)]
+ (fn [{:keys [db view-pos]} _]
+   (when-let [id (nav/nth-id db -1)] (activate-tab-result db view-pos id))))
 
 (rf/reg-event-fx
  :sidebar/toggle

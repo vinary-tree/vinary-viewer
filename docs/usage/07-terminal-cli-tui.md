@@ -75,8 +75,8 @@ vv --cli docs/usage/01-getting-started.md docs/usage/02-installation-and-build.m
 |--------|--------|
 | `-t`, `--toc` | Print the document outline (Contents) before the body. |
 | `--width N` | Wrap column (default: the terminal width, else 80). |
-| `--no-color` | Disable ANSI colour (also auto-off when piped or under `NO_COLOR`). |
-| `--color` | Force colour even when stdout is not a TTY (e.g. through a pipe). |
+| `--no-color` | Disable ANSI colour; this explicit opt-out takes precedence over every other setting. |
+| `--color` | Force colour even when stdout is not a TTY or `NO_COLOR` is set (e.g. through a pipe). |
 | `--no-graphics` | Disable inline image graphics (sixel/kitty). |
 | `--graphics P` | Force the image protocol `P` (`kitty` or `sixel`), bypassing terminal detection. |
 | `-p`, `--plain` | Plain output: no colour, no graphics, no hyperlinks. |
@@ -197,8 +197,9 @@ Both terminal modes reuse every format front-end the GUI has:
 Terminal capabilities are detected from `process.stdout` plus the environment
 (`vinary.terminal.caps`):
 
-- **Colour** is on when stdout is a TTY and `NO_COLOR` is unset; `--no-color`
-  forces it off, `--color` forces it on through a pipe. Truecolor is used when
+- **Colour** is on when stdout is a TTY and `NO_COLOR` is unset; explicit
+  `--color` overrides both automatic checks, while `--no-color` has final
+  precedence and forces it off. Truecolor is used when
   `COLORTERM` advertises `truecolor`/`24bit`.
 - **Inline images** use the **kitty** graphics protocol (detected via
   `KITTY_WINDOW_ID` or a `kitty` `TERM`) or **sixel** (foot, WezTerm, mlterm,

@@ -198,6 +198,11 @@ the `:sync` variants automatically; run them directly for CI or to refresh asset
 | `npm run grammars:sync` / `grammars:check` | Build / verify the bundled tree-sitter grammar WASM. Strict by default (a failed grammar exits non-zero); pass `--skip-existing` to skip already-built grammars and `--allow-failures` to skip (rather than abort on) grammars that can't be downloaded/built — the installer uses both (see [§1.1](#11-optional-grammars-rholang-and-metta)). |
 | `npm run graphics:sync` | Stage the resvg image WASM used by terminal graphics. |
 
+Grammar sources are cached for fetching but copied or attached as isolated
+worktrees under `.cache/tree-sitter-build/sources/` for generation and
+compilation. This keeps generated parser manifests out of the upstream source
+caches and makes repeated full synchronization deterministic.
+
 ### 3.4 Tests and lint
 
 | Command | Expands to | Use |
@@ -206,6 +211,8 @@ the `:sync` variants automatically; run them directly for CI or to refresh asset
 | `npm run test:cli` | `compile:cli && node test/cli-smoke.js && node test/graphics-smoke.js` | Build `vv --cli` and run the CLI + terminal-graphics smokes. |
 | `npm run test:tui` | `compile:tui && node test/tui-smoke.js` | Build `vv --tui` and run the TUI smoke (headless `--drive` replay). |
 | `npm run test:electron` | `electron --no-sandbox test/electron-smoke.js` | Electron GUI smoke test (debug artifacts). |
+| `npm run test:watch-e2e` | Compile GUI builds and run `test/watch-e2e.js` under Xvfb. | Real-main-process, two-window live-refresh and watcher-ownership regression. |
+| `npm run test:find-e2e` | Compile GUI builds and run `test/find-e2e.js` under Xvfb. | In-page-find behavior and large-document input-latency regression. |
 | `npm run test:daemon` | `compile && node test/daemon-smoke.js` | The resident-daemon control seam ([§1.2](#12-the-resident-daemon-and-staleness)): `vv1 ping`/`stop`, the legacy-inertness contract, and the stale-but-idle self-heal. Spawns real daemons on an isolated socket, so it never touches yours. Headless Linux: `xvfb-run -a npm run test:daemon`. |
 | `npm run test:electron:release` | `release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js` | The GUI smoke against a fresh optimized release build. |
 | `npm run test:extensions` | `electron --no-sandbox test/extensions-smoke.js` | Browser-extension runtime smoke (no sandbox). |

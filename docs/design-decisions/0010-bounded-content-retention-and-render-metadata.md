@@ -30,8 +30,9 @@ Use the tab histories as the ownership boundary for content and watcher retentio
 - `vinary.app.nav/retained-file-paths` computes the retained local-file set from every open tab history.
 - `vinary.app.events` syncs that set to main with `:vv/sync-retained-files` after navigation, tab close,
   history traversal, and HTTP navigation changes.
-- `vinary.main.service/sync-retained!` closes file watchers and releases media watcher ownership for
-  paths removed from the retained set.
+- `vinary.main.service/sync-retained!` replaces the sending window's ownership set. Main closes a file
+  watcher and releases media ownership only when the path disappears from the union across all live
+  renderer windows; a change is sent to every window that retains the path.
 - `vinary.app.ds/retract-unretained-tx` evicts DataScript content-cache entities whose `:doc/path` is no
   longer retained.
 
@@ -55,6 +56,8 @@ after an `O(h)` measurement pass on render/resize.
 ## Consequences
 
 - Watcher lifetime is now tied to actual reachability from open tab histories, not just the visible URI.
+- Retention is isolated per window, so closing or navigating one window cannot suppress live refresh in
+  another; destroying a `WebContents` releases that owner's paths.
 - Closing a tab that visited many local files releases every unshared watcher and media owner associated
   with that tab history.
 - DataScript remains a bounded content cache; it is not an unbounded archive of every file visited.
@@ -72,6 +75,6 @@ after an `O(h)` measurement pass on render/resize.
 
 ## Trade-offs
 
-The renderer sends one extra retained-set message after navigation changes. In return, main has a single
-authoritative ownership set, cleanup is deterministic, and memory use is bounded by open tab histories
-instead of by all files ever visited during the session.
+The renderer sends one extra retained-set message after navigation changes. In return, main has one
+authoritative ownership set per live window; cleanup is deterministic, and memory use is bounded by open
+tab histories instead of by all files ever visited during the session.

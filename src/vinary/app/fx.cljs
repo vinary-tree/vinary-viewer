@@ -15,6 +15,7 @@
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
             [vinary.renderer.pdf-cache :as pdf-cache]
+            [vinary.renderer.warm-cache :as warm-cache]
             [vinary.renderer.input-trace :as input-trace]
             [vinary.renderer.tree-reveal :as tree-reveal]
             [vinary.async.scheduler :as sched]
@@ -163,6 +164,9 @@
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
 (rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
+(rf/reg-fx :render-cache/invalidate
+           (fn [{:keys [path stamp]}] (warm-cache/invalidate-path! path stamp)))
+(rf/reg-fx :render-cache/retain-only (fn [paths] (warm-cache/retain-only! paths)))
 
 ;; Load a collocated FACET's content into the cache WITHOUT opening a tab: main reads + routes the file over the
 ;; vv:open seam and replies vv:content → :content/received transacts its doc entity (and, for a pdf, caches its

@@ -523,6 +523,39 @@
        (.catch (fn [_] nil)))))
 
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------
+(defn prepare!
+  "Load a PDF once and compute its intrinsic page sizes. The returned DOM-free artifact may
+   be leased across view mounts; `dispose-prepared!` owns the eventual pdf.js destruction."
+  [bytes]
+  (-> (get-document bytes)
+      (.then (fn [^js doc]
+               (-> (page-sizes doc)
+                   (.then (fn [sizes] {:doc doc :sizes sizes})))))))
+
+(defn dispose-prepared! [{:keys [doc]}]
+  (when doc (try (.destroy ^js doc) (catch :default _ nil))))
+
+(defn mount-prepared!
+  "Mount a leased `{doc sizes}` artifact into a fresh DOM surface. Per-mount canvases,
+   observers, tasks, and text/link layers are still recreated and torn down normally."
+  [container {:keys [doc sizes]} path view-state]
+  (let [state (atom {:container container :path path :doc doc :owns-doc? false
+                     :sizes sizes :rects [] :page-divs [] :toc-ids []
+                     :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
+                     :fit (:fit view-state) :invert? (boolean (:invert? view-state))
+                     :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
+        ensure-fn (fn [] (ensure-all-text! state))]
+    (swap! state assoc :ensure-fn ensure-fn)
+    (cache/set-ensurer! ensure-fn)
+    (toggle-class! container "vv-pdf-invert" (:invert? view-state))
+    (reset! current-doc {:doc doc :path path})
+    (when (:fit view-state) (apply-fit! state (:fit view-state)))
+    (build-placeholders! state)
+    (observe! state)
+    (observe-resize! state)
+    (extract-outline! state doc path)
+    state))
+
 (defn mount!
   "Render `bytes` (a PDF) into `container` (a .vv-pdf-doc div inside .vv-content). Returns a controller
    atom — pass it to update!/unmount!/ensure-all-text!. `view-state` = {:scale n :fit kw :invert? b}.
@@ -585,4 +618,5 @@
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
   (when-let [^js obs (:observer @state)] (.disconnect obs))
   (when-let [^js ro (:resize-observer @state)] (.disconnect ro))
-  (when-let [^js doc (:doc @state)] (try (.destroy doc) (catch :default _ nil))))
+  (when (not= false (:owns-doc? @state))
+    (when-let [^js doc (:doc @state)] (try (.destroy doc) (catch :default _ nil)))))

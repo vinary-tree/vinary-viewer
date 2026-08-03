@@ -7,6 +7,17 @@
 (defn- env [k] (some-> (aget js/process.env k) str))
 (defn- stdout-tty? [] (boolean (and js/process.stdout (.-isTTY js/process.stdout))))
 
+(defn color-enabled?
+  "Resolve colour precedence without reading process state. Explicit disabling wins;
+   explicit CLI colour/graphics wins over NO_COLOR and non-TTY detection; otherwise
+   NO_COLOR disables the normal TTY-derived capability."
+  [opts {:keys [no-color-env? tty? forced-graphics?]}]
+  (boolean
+   (and (not (:no-color opts))
+        (or (:force-color opts)
+            forced-graphics?
+            (and (not no-color-env?) tty?)))))
+
 (defn detect
   "Resolve the effective render capabilities from CLI `opts` + the terminal environment. Returns
    {:width :color? :truecolor? :hyperlinks? :graphics}. `:graphics` is :kitty | :sixel | nil.
@@ -17,10 +28,9 @@
   (let [term       (or (env "TERM") "")
         colorterm  (or (env "COLORTERM") "")
         forced-gfx (:force-graphics opts)                       ; :kitty | :sixel | nil
-        color?     (and (not (:no-color opts))
-                        (or forced-gfx
-                            (and (not (some? (env "NO_COLOR")))
-                                 (or (:force-color opts) (stdout-tty?)))))
+        color?     (color-enabled? opts {:no-color-env? (some? (env "NO_COLOR"))
+                                         :tty? (stdout-tty?)
+                                         :forced-graphics? (some? forced-gfx)})
         truecolor? (and color? (or (str/includes? colorterm "truecolor") (str/includes? colorterm "24bit")))
         graphics   (cond
                      (:no-graphics opts) nil

@@ -43,7 +43,8 @@
 
 ;; ---- pass-throughs to the loaded chunk ----
 ;; View-bound: only ever called on an existing EditorView (⇒ the chunk is loaded), so deref @sv-module directly.
-(defn create-source-view [^js parent text grammar] ((gobj/get @sv-module "create-source-view") parent text grammar))
+(defn create-source-view [^js parent text grammar prepared-spans]
+  ((gobj/get @sv-module "create-source-view") parent text grammar prepared-spans))
 (defn line-info-at      [^js view pos] ((gobj/get @sv-module "line-info-at") view pos))
 (defn pos-at-coords     [^js view x y] ((gobj/get @sv-module "pos-at-coords") view x y))
 (defn selected-text     [^js view]     ((gobj/get @sv-module "selected-text") view))

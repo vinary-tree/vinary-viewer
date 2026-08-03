@@ -48,6 +48,7 @@
     "test:electron": "electron --no-sandbox test/electron-smoke.js",
     "test:daemon": "npm run compile && node test/daemon-smoke.js",
     "test:tree-e2e": "shadow-cljs compile main renderer && xvfb-run -a electron --no-sandbox test/tree-e2e.js",
+    "test:watch-e2e": "shadow-cljs compile main renderer && xvfb-run -a electron --no-sandbox test/watch-e2e.js",
     "test:find-e2e": "shadow-cljs compile main renderer && xvfb-run -a -s \"-screen 0 1400x1000x24\" electron --no-sandbox test/find-e2e.js",
     "test:electron:release": "npm run release && VV_RELEASE=1 electron --no-sandbox test/electron-smoke.js",
     "test:extensions": "electron --no-sandbox test/extensions-smoke.js",
@@ -106,5 +107,8 @@
     "patch-package": "^8.0.1",
     "shadow-cljs": "3.2.0",
     "tree-sitter-cli": "^0.25.0"
+  },
+  "allowScripts": {
+    "tree-sitter-cli@0.25.10": true
   }
 }

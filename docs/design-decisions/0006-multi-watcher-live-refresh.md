@@ -22,28 +22,31 @@ than changed, and the write may land in several syscalls.
 ## Decision
 
 Run **one `chokidar` watcher per retained path**, tracked in a `path → watcher` atom, and listen for
-both `change` **and** `add`, with write-coalescing:
+both `change` **and** `add`, with write-coalescing. Retention itself is owned per renderer window;
+the watcher set is the union of all live windows' retained paths:
 
 ```clojure
 ;; vinary.main.service (essence)
-(defonce ^:private watchers (atom {}))   ; path -> chokidar watcher
+(defonce ^:private watchers (atom {}))       ; path -> chokidar watcher
+(defonce ^:private window-owners (atom {})) ; webContents.id -> {:wc wc :paths #{...}}
 
 (defn open! [wc path]
+  (ensure-window! wc)
   (send-content! wc path)
   (send-tree! wc path)
   (when-not (get @watchers path)                                  ; watch once per path
     (let [w (watch path (clj->js {:ignoreInitial true
                                   :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-      (.on w "change" (fn [_] (send-content! wc path)))
-      (.on w "add"    (fn [_] (send-content! wc path)))           ; atomic-save re-create
+      (.on w "change" (fn [_] (send-open-content! path)))
+      (.on w "add"    (fn [_] (send-open-content! path)))         ; atomic-save re-create
       (swap! watchers assoc path w))))
 
 (defn sync-retained! [wc paths]
-  (let [old @retained-paths
-        new (retained-path-set paths)]
-    (reset! retained-paths new)
-    (doseq [path (set/difference old new)]
-      (unwatch-file! path))))
+  (let [old-union (retained-path-union @window-owners)]
+    (swap! window-owners sync-owner wc paths)                       ; replace this sender only
+    (let [new-union (retained-path-union @window-owners)]
+      (doseq [path (set/difference old-union new-union)]
+        (unwatch-file! path)))))
 ```
 
 - `:ignoreInitial true` — do not fire on the initial `add` when the watch starts (we already sent the
@@ -53,8 +56,10 @@ both `change` **and** `add`, with write-coalescing:
   re-send.
 - Listening to **both** `change` and `add` catches in-place writes *and* atomic-save re-creates.
 
-The watcher lifecycle is tied to the retained-file set: `open!` starts a path watcher once, and
-`sync-retained!` closes watchers for paths no open tab history can still reach.
+The watcher lifecycle is tied to the aggregate retained-file set: `open!` starts a path watcher once,
+and `sync-retained!` replaces only the sending window's ownership. A watcher closes only after no live
+window retains its path. Each change is fanned out to every retaining `WebContents`, and a window's
+`destroyed` event releases its ownership even when renderer cleanup IPC can no longer run.
 
 ## Consequences
 
@@ -67,6 +72,10 @@ The watcher lifecycle is tied to the retained-file set: `open!` starts a path wa
   from an open history is released without directory-wide bookkeeping.
 - **No duplicate watchers.** The `(when-not (get @watchers path) …)` guard means opening an
   already-open file re-sends content but does not stack a second watcher.
+- **Multi-window safe.** A retention update or close in one window cannot steal another window's
+  watcher or refresh destination; every retaining window receives the changed content.
+- `npm run test:watch-e2e` boots the real main process, opens one file in two windows, proves one
+  edit reaches both, destroys the most-recent opener, and proves the surviving window still refreshes.
 
 ## Alternatives considered
 

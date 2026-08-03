@@ -13,6 +13,7 @@ const publicRoot = path.join(root, 'resources', 'public');
 const grammarOutRoot = path.join(publicRoot, 'grammars');
 const cacheRoot = path.join(root, '.cache', 'tree-sitter-grammars');
 const buildCacheRoot = path.join(root, '.cache', 'tree-sitter-build');
+const sourceStageRoot = path.join(buildCacheRoot, 'sources');
 const buildTimeoutMs = Number(process.env.TREE_SITTER_BUILD_TIMEOUT_MS || 180000);
 const only = new Set((process.argv.find(arg => arg.startsWith('--only=')) || '')
   .replace(/^--only=/, '')
@@ -73,25 +74,105 @@ function safeId(value) {
   return value.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
-function sourceDir(entry) {
+function sourceRev(srcDir) {
+  // A meaningful rev exists only when srcDir belongs to a DIFFERENT git repo than this one: an upstream
+  // grammar cloned into .cache/…, or a grammar sourced from a sibling project (e.g. metta ←
+  // ../MeTTa-Compiler/tree-sitter-metta), where HEAD is that repo's real, stable rev. When srcDir is a plain
+  // subdirectory of THIS (vinary-viewer) repo (tree-sitter-bnfc / tree-sitter-d2), `git rev-parse HEAD` just
+  // echoes vinary-viewer's own HEAD — a self-referential value that re-pins on every commit (a churn
+  // treadmill). Those grammars' versions are already tracked by this repo's history, so record null (as for
+  // `existing` grammars), keeping source.json stable.
+  try {
+    const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: srcDir, capture: true }).trim();
+    if (fs.realpathSync(top) === fs.realpathSync(root)) return null;
+    return run('git', ['rev-parse', 'HEAD'], { cwd: srcDir, capture: true }).trim();
+  } catch (_) {
+    return null;
+  }
+}
+
+function removeSourceStage(stage) {
+  const rel = path.relative(sourceStageRoot, stage);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`refusing to remove grammar source stage outside ${sourceStageRoot}: ${stage}`);
+  }
+  fs.rmSync(stage, { recursive: true, force: true });
+}
+
+function localSourceStage(entry, original) {
+  ensureDir(sourceStageRoot);
+  const stage = fs.mkdtempSync(path.join(sourceStageRoot, `${safeId(entry.id)}-`));
+  try {
+    const excluded = new Set(['.git', 'node_modules', 'target', 'build', 'dist']);
+    fs.cpSync(original, stage, {
+      recursive: true,
+      filter(candidate) {
+        const rel = path.relative(original, candidate);
+        return !rel.split(path.sep).some(part => excluded.has(part));
+      }
+    });
+    return stage;
+  } catch (error) {
+    removeSourceStage(stage);
+    throw error;
+  }
+}
+
+function sourceLease(entry) {
   const source = entry.source;
-  if (source.type === 'local') return repoPath(source.path);
-  if (source.type === 'existing') return root;
+  if (source.type === 'existing') return { dir: root, revision: null, cleanup() {} };
+
+  if (source.type === 'local') {
+    const original = repoPath(source.path);
+    const revision = sourceRev(original);
+    const stage = localSourceStage(entry, original);
+    return { dir: stage, revision, cleanup: () => removeSourceStage(stage) };
+  }
+
   if (source.type !== 'git') throw new Error(`unsupported source type for ${entry.id}: ${source.type}`);
 
+  // The persistent checkout is an object cache only. Building in it used to leave generated
+  // tree-sitter.json/parser metadata behind; the next `git checkout FETCH_HEAD` then failed on its own
+  // residue. Fetch into the cache, attach the exact fetched commit as an isolated worktree, and perform
+  // every generating/building operation there. A worktree is intentional here: a shared clone cannot
+  // reliably check out a freshly fetched commit from a shallow cache because that commit is dangling
+  // rather than advertised by one of the cache's local refs.
   ensureDir(cacheRoot);
-  const dir = path.join(cacheRoot, safeId(entry.id));
-  if (fs.existsSync(path.join(dir, '.git'))) {
-    run('git', ['remote', 'set-url', 'origin', source.url], { cwd: dir });
-    run('git', ['fetch', '--depth', '1', 'origin', source.ref || 'HEAD'], { cwd: dir });
-    run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: dir });
+  const mirror = path.join(cacheRoot, safeId(entry.id));
+  if (fs.existsSync(path.join(mirror, '.git'))) {
+    run('git', ['remote', 'set-url', 'origin', source.url], { cwd: mirror });
   } else {
-    const args = ['clone', '--depth', '1'];
-    if (source.ref) args.push('--branch', source.ref);
-    args.push(source.url, dir);
-    run('git', args);
+    run('git', ['clone', '--no-checkout', '--depth', '1', source.url, mirror]);
   }
-  return dir;
+  run('git', ['fetch', '--depth', '1', 'origin', source.ref || 'HEAD'], { cwd: mirror });
+  const revision = run('git', ['rev-parse', 'FETCH_HEAD'], { cwd: mirror, capture: true }).trim();
+
+  ensureDir(sourceStageRoot);
+  const stage = fs.mkdtempSync(path.join(sourceStageRoot, `${safeId(entry.id)}-`));
+  let registered = false;
+  try {
+    run('git', ['-c', 'core.fsmonitor=false', 'worktree', 'add', '--detach', stage, revision], { cwd: mirror });
+    registered = true;
+    return {
+      dir: stage,
+      revision,
+      cleanup() {
+        run('git', ['-c', 'core.fsmonitor=false', 'worktree', 'remove', '--force', stage], { cwd: mirror });
+      }
+    };
+  } catch (error) {
+    if (registered) {
+      try {
+        run('git', ['-c', 'core.fsmonitor=false', 'worktree', 'remove', '--force', stage], { cwd: mirror });
+      } catch (_) {
+        removeSourceStage(stage);
+        run('git', ['-c', 'core.fsmonitor=false', 'worktree', 'prune'], { cwd: mirror });
+      }
+    } else {
+      removeSourceStage(stage);
+    }
+    throw error;
+  }
 }
 
 function findGrammarDirs(dir) {
@@ -149,24 +230,7 @@ function copyIfDifferent(from, to) {
   if (path.resolve(from) !== path.resolve(to)) fs.copyFileSync(from, to);
 }
 
-function sourceRev(srcDir) {
-  // A meaningful rev exists only when srcDir belongs to a DIFFERENT git repo than this one: an upstream
-  // grammar cloned into .cache/…, or a grammar sourced from a sibling project (e.g. metta ←
-  // ../MeTTa-Compiler/tree-sitter-metta), where HEAD is that repo's real, stable rev. When srcDir is a plain
-  // subdirectory of THIS (vinary-viewer) repo (tree-sitter-bnfc / tree-sitter-d2), `git rev-parse HEAD` just
-  // echoes vinary-viewer's own HEAD — a self-referential value that re-pins on every commit (a churn
-  // treadmill). Those grammars' versions are already tracked by this repo's history, so record null (as for
-  // `existing` grammars), keeping source.json stable.
-  try {
-    const top = run('git', ['rev-parse', '--show-toplevel'], { cwd: srcDir, capture: true }).trim();
-    if (fs.realpathSync(top) === fs.realpathSync(root)) return null;
-    return run('git', ['rev-parse', 'HEAD'], { cwd: srcDir, capture: true }).trim();
-  } catch (_) {
-    return null;
-  }
-}
-
-function copyLicense(entry, srcDir, outDir) {
+function copyLicense(entry, srcDir, outDir, revision = sourceRev(srcDir)) {
   const names = ['LICENSE', 'LICENSE.md', 'LICENSE-MIT', 'COPYING'];
   const found = entry.source.type === 'existing'
     ? null
@@ -179,7 +243,7 @@ function copyLicense(entry, srcDir, outDir) {
       language: entry.language,
       extensions: entry.extensions,
       source: entry.source,
-      sourceRev: entry.source.type === 'existing' ? null : sourceRev(srcDir)
+      sourceRev: entry.source.type === 'existing' ? null : revision
     }, null, 2)}\n`
   );
 }
@@ -318,6 +382,7 @@ for (const entry of entries) {
 
   if (VERBOSE) console.log(`\n== ${entry.id} ==`);
   else console.log(`  building ${entry.id}…`);
+  let lease = null;
   try {
     ensureDir(outDir);
 
@@ -326,12 +391,13 @@ for (const entry of entries) {
       copyIfDifferent(repoPath(entry.source.query), scmOut);
       copyLicense(entry, root, outDir);
     } else {
-      const srcDir = sourceDir(entry);
+      lease = sourceLease(entry);
+      const srcDir = lease.dir;
       const gramDir = grammarDir(entry, srcDir);
       const scm = queryPath(entry, srcDir, gramDir);
       buildWasm(entry, srcDir, gramDir, wasmOut);
       writeQuery(scm, scmOut);
-      copyLicense(entry, srcDir, outDir);
+      copyLicense(entry, srcDir, outDir, lease.revision);
     }
 
     catalog.push(catalogEntry(entry));
@@ -339,6 +405,8 @@ for (const entry of entries) {
   } catch (error) {
     failures.push({ id: entry.id, error });
     console.error(`!! ${entry.id} failed: ${error.message || error}`);
+  } finally {
+    if (lease) lease.cleanup();
   }
 }
 

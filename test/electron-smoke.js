@@ -1340,6 +1340,16 @@ async function main() {
     () => evalIn(win, `document.querySelector('.vv-empty')?.textContent.trim() === 'New Tab'`),
     'blank tab view'
   );
+  const uriAfterFocusedNavigation = await evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return { value:i?.value ?? null, active:document.activeElement===i,
+             start:i?.selectionStart ?? -1, end:i?.selectionEnd ?? -1 }; })()`);
+  assert.strictEqual(uriAfterFocusedNavigation.active, true,
+    'the URI field stays focused across a command-driven tab change');
+  assert.strictEqual(uriAfterFocusedNavigation.value, '',
+    'a focused URI field immediately follows the new blank tab instead of retaining its old draft until blur');
+  assert.strictEqual(uriAfterFocusedNavigation.start, 0, 'the replacement URI remains selected from its start');
+  assert.strictEqual(uriAfterFocusedNavigation.end, 0, 'the empty replacement URI has an empty full selection');
+  console.log('[ok] focused/selected URI input follows an external tab URI change without blur');
   console.log('[ok] Ctrl+T opens a blank tab');
 
   const badgeSvg = encodeURIComponent(
@@ -3083,6 +3093,100 @@ async function main() {
   }
   assert.strictEqual(streamHtml, batchHtml, 'streamed markdown innerHTML must be byte-identical to the batch render');
   console.log('[ok] streamed markdown is BYTE-IDENTICAL to the batch render (slug dedup, forward refs, lists, code, tables, positions)');
+
+  // Regression: Source is explicit user intent, so the streaming Preview policy must not
+  // intercept it for a document over the 256 KiB threshold (the reported 396 KiB Markdown case).
+  const warmBeforeSource = await evalIn(win, `window.__vvwarmcache ? window.__vvwarmcache() : null`);
+  await evalIn(win, `(() => { const b=[...document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')]
+    .find(x => x.textContent.trim() === 'Source'); if (b) b.click(); return Boolean(b); })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-source .cm-line'))
+    && !document.querySelector('.vv-content .vv-stream-progress')`),
+    'large streamed Markdown switches to its source editor', 20000);
+  assert.strictEqual(await evalIn(win, `document.querySelector('.vv-content .cm-line')?.textContent || ''`), '# Big Markdown Document',
+    'Source displays the Markdown text rather than leaving the streamed Preview mounted');
+  await evalIn(win, `(() => { const b=[...document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')]
+    .find(x => x.textContent.trim() === 'Preview'); if (b) b.click(); return Boolean(b); })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-stream-progress'))`),
+    'large Markdown returns to streamed Preview', 12000);
+  const warmAfterPreview = await evalIn(win, `window.__vvwarmcache ? window.__vvwarmcache() : null`);
+  assert.ok(warmBeforeSource && warmAfterPreview && warmAfterPreview.hits > warmBeforeSource.hits,
+    `returning to Preview reuses its prepared artifact (${JSON.stringify(warmBeforeSource)} → ${JSON.stringify(warmAfterPreview)})`);
+  console.log('[ok] large Markdown Source overrides streaming; returning to Preview hits the bounded warm cache');
+
+  // Regression: activating a tab used to synchronously rebuild its large document before Chromium could paint
+  // the newly active chrome, making Ctrl+PageUp/PageDown appear frozen for ~2 seconds. Add a tiny tab to guarantee
+  // another target exists, select the large tab's actual right-hand neighbor, then measure the REAL key path in
+  // both directions. The tab state, URI bar, and target surface must all settle within a human-immediate budget;
+  // the large return must
+  // also hit the prepared-artifact cache, or this could pass only because the fixture happened to parse quickly.
+  const tabLatencyPath = path.join(md.dir, 'tab-latency.md');
+  const tabLatencyText = '# Tab latency neighbor\n\nSmall adjacent document.\n';
+  fs.writeFileSync(tabLatencyPath, tabLatencyText);
+  state.contentByPath.set(tabLatencyPath, {
+    path: tabLatencyPath, kind: 'markdown', text: tabLatencyText,
+    stamp: Date.now(), sourceable: true, meta: { size: Buffer.byteLength(tabLatencyText) }
+  });
+  // One selected file intentionally navigates the current tab. Supplying the current large path followed by
+  // the new file exercises the multi-file contract instead: reactivate the existing first path, then open the
+  // second in a NEW tab. Its presence guarantees a distinct neighbor even if the large tab was previously last.
+  win.webContents.send('vv:open-files', { paths: [md.streamPath, tabLatencyPath] });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-content')?.dataset.docKey === ${JSON.stringify(tabLatencyPath)}
+    && Boolean(document.querySelector('.vv-content .markdown-body h1'))`),
+    'small latency-fixture tab becomes active before the measurement', 10000);
+  const tabPair = await evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    const byUri = (uri) => ui.tabs.find((t) => t.uri === uri);
+    const large = byUri(${JSON.stringify(md.streamPath)});
+    const largeIndex = ui.tabs.findIndex((t) => t.id === large?.id);
+    const rightIndex = (largeIndex + 1) % ui.tabs.length;
+    const right = ui.tabs[rightIndex];
+    const rightDisplay = document.querySelectorAll('.vv-tab')[rightIndex]?.title;
+    return { active: ui['active-tab'],
+             large: large?.id, small: byUri(${JSON.stringify(tabLatencyPath)})?.id,
+             right: right?.id, rightIndex, rightDisplay };
+  })()`);
+  assert.strictEqual(tabPair.active, tabPair.small, 'latency precondition: the small neighbor is active');
+  assert.ok(tabPair.large != null && tabPair.right != null && tabPair.right !== tabPair.large,
+    `latency precondition: the large tab has a distinct right neighbor (${JSON.stringify(tabPair)})`);
+  await evalIn(win, `(() => {
+    const tab = document.querySelectorAll('.vv-tab')[${tabPair.rightIndex}];
+    if (tab) tab.click();
+    return Boolean(tab);
+  })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${tabPair.right}
+    && document.querySelector('.vv-uri-input')?.value === ${JSON.stringify(tabPair.rightDisplay)}`),
+    'the large tab actual right neighbor becomes active before timing', 10000);
+  const maxTabSwitchMs = 1000;
+  const cacheBeforeTabReturn = await evalIn(win, `window.__vvwarmcache()`);
+  const largeSwitchStarted = Date.now();
+  await dispatchWindowKey(win, 'PageUp', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${tabPair.large}
+    && document.querySelector('.vv-uri-input')?.value === ${JSON.stringify(`file://${md.streamPath}`)}
+    && document.querySelector('.vv-content')?.dataset.docKey === ${JSON.stringify(md.streamPath)}
+    && Boolean(document.querySelector('.vv-content .markdown-body h1'))`),
+    'Ctrl+PageUp paints the warmed large streamed tab', maxTabSwitchMs);
+  const largeSwitchMs = Date.now() - largeSwitchStarted;
+  const cacheAfterTabReturn = await evalIn(win, `window.__vvwarmcache()`);
+  assert.ok(cacheAfterTabReturn.hits > cacheBeforeTabReturn.hits,
+    `large tab return must hit the warm cache (${JSON.stringify(cacheBeforeTabReturn)} → ${JSON.stringify(cacheAfterTabReturn)})`);
+  assert.ok(largeSwitchMs < maxTabSwitchMs,
+    `Ctrl+PageUp took ${largeSwitchMs} ms to paint the warmed large tab (budget ${maxTabSwitchMs} ms)`);
+
+  const neighborSwitchStarted = Date.now();
+  await dispatchWindowKey(win, 'PageDown', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${tabPair.right}
+    && document.querySelector('.vv-uri-input')?.value === ${JSON.stringify(tabPair.rightDisplay)}`),
+    'Ctrl+PageDown paints the actual right-hand tab', maxTabSwitchMs);
+  const neighborSwitchMs = Date.now() - neighborSwitchStarted;
+  assert.ok(neighborSwitchMs < maxTabSwitchMs,
+    `Ctrl+PageDown took ${neighborSwitchMs} ms to paint the right-hand tab (budget ${maxTabSwitchMs} ms)`);
+  console.log(`[ok] Ctrl+Page tab switching paints within ${maxTabSwitchMs} ms (large ${largeSwitchMs} ms, neighbor ${neighborSwitchMs} ms; warm-cache hit)`);
+
+  // Return to the large fixture for its remaining Contents/windowing/live-refresh assertions.
+  await dispatchWindowKey(win, 'PageUp', { ctrlKey: true });
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-content')?.dataset.docKey === ${JSON.stringify(md.streamPath)}
+    && Boolean(document.querySelector('.vv-content .markdown-body h1'))`),
+    'large streamed tab is restored after the latency measurement', maxTabSwitchMs);
 
   // Contents populated from the streamed markdown headings (set upfront from the one base-pipeline pass)
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= ${md.sections}`, 'streamed markdown Contents lists its headings', 10000);
