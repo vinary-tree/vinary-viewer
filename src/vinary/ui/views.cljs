@@ -1293,20 +1293,31 @@
    option) or a combo (several); a type with no options is omitted. Driven entirely by the :view/switch VM
    (vinary.app.facet/view-model). MAIN region → activate the type's main target; a menu pick → show that file.
 
-   For a shown DIFF preview (ADR-0037) the Preview button additionally carries the diff's LAYOUT rows —
-   Unified / Split — in its caret menu, replacing the retired [Unified | Split] seg control: a lone diff's
-   menu is exactly those two rows (its single redundant file row is suppressed, combo mode forced so the
-   caret exists); a diff in a collocated group lists its file rows, a divider, then the layout rows. This
-   is a UI-layer injection — the facet VM (vinary.app.facet) stays content-agnostic."
+   When the shown FILE is a diff (ADR-0037) — its rendered preview OR its raw source view — the Preview
+   button additionally carries the diff's LAYOUT rows — Unified / Split — in its caret menu, replacing
+   the retired [Unified | Split] seg control: a lone diff's menu is exactly those two rows (its single
+   redundant file row is suppressed, combo mode forced so the caret exists); a diff in a collocated group
+   lists its file rows, a divider, then the layout rows. Picking a layout while viewing the SOURCE also
+   activates the preview facet — choosing \"Split\" from the source view means \"show me the split
+   preview\", exactly as picking a file row there shows that file's preview. This is a UI-layer
+   injection — the facet VM (vinary.app.facet) stays content-agnostic."
   []
   (let [{:keys [active-type preview source]} @(rf/subscribe [:view/switch])
         id    @(rf/subscribe [:ui/active-tab-id])
-        diff? @(rf/subscribe [:view/diff-active?])
+        ;; the shown file's kind, facet-agnostic (:doc/kind follows the active content path, which is the
+        ;; diff itself in both its preview and its source view) — deliberately NOT :view/diff-active?,
+        ;; whose ¬source condition gates the collapse surfaces, not this menu
+        diff? (= "diff" @(rf/subscribe [:doc/kind]))
+        vs?   @(rf/subscribe [:ui/active-view-source?])
         dv    @(rf/subscribe [:ui/active-diff-view])
+        pick-layout (fn [layout]
+                      (rf/dispatch [:tab/set-diff-view id layout])
+                      ;; from the source view, a layout pick switches to the preview showing it
+                      (when vs? (rf/dispatch [:tab/activate-facet-type id :preview])))
         layout-rows [{:key "diff-unified" :label "Unified" :active? (= dv :unified)
-                      :on-pick #(rf/dispatch [:tab/set-diff-view id :unified])}
+                      :on-pick #(pick-layout :unified)}
                      {:key "diff-split" :label "Split" :active? (= dv :split)
-                      :on-pick #(rf/dispatch [:tab/set-diff-view id :split])}]
+                      :on-pick #(pick-layout :split)}]
         btn (fn [type {:keys [mode main-path options]} label]
               (let [diff-preview? (and diff? (= type :preview))
                     files         (vec options)

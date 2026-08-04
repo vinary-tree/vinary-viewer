@@ -161,9 +161,11 @@ Changed
     - The diff layout choice (Unified / Split) moved INTO the Preview combo's caret
       menu (ADR-0037): a lone diff's Preview menu is exactly [Unified, Split]
       (check-marked by the effective layout); a diff in a collocated group lists its
-      file rows, a separator, then the layout rows. The standalone [Unified | Split]
-      segmented toolbar control was removed in the combo's favor (user-requested
-      consolidation; Ctrl+Shift+B and the palette toggle are unchanged).
+      file rows, a separator, then the layout rows. The combo keeps its caret in the
+      diff's SOURCE view too, and a layout pick from there switches back to the
+      preview showing it. The standalone [Unified | Split] segmented toolbar control
+      was removed in the combo's favor (user-requested consolidation; Ctrl+Shift+B
+      and the palette toggle are unchanged).
     - BREAKING (vv --cli): `-t` no longer means `--toc` -- it is the short form of
       `--type` uniformly across vv, --cli, and --tui (ADR-0036). `--toc` is long-only now.
     - Deferral and matching each got one implementation instead of five. Four hand-rolled

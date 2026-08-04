@@ -72,11 +72,14 @@ before scrolling (a jump is intent to see the file; the offset must measure expa
 
 **Toolbar consolidation.** The diff layout choice moved INTO the `Preview ▾` combo's caret menu:
 `combo-button` learned divider rows and self-dispatching rows (`:on-pick`), and `view-switch` injects
-`Unified`/`Split` rows for a shown diff preview at the UI layer — the facet model stays
-content-agnostic. A lone diff's menu is exactly those two rows (its redundant single file row is
-suppressed; combo mode is forced so the caret exists); a grouped diff lists files, a divider, then the
-layouts. The `[Unified | Split]` segmented control (`seg-button` + `.vv-seg*` CSS) was **removed** —
-an explicit user-requested replacement, not a disable (zero other consumers, verified).
+`Unified`/`Split` rows whenever the shown FILE is a diff — its preview *or* its source view (the gate
+is the facet-agnostic `:doc/kind`, deliberately not the collapse surfaces' preview-only gate) — at the
+UI layer, so the facet model stays content-agnostic. A layout pick from the source view also activates
+the preview facet (choosing "Split" there means "show me the split preview", symmetric with a file-row
+pick). A lone diff's menu is exactly the two layout rows (its redundant single file row is suppressed;
+combo mode is forced so the caret exists); a grouped diff lists files, a divider, then the layouts.
+The `[Unified | Split]` segmented control (`seg-button` + `.vv-seg*` CSS) was **removed** — an
+explicit user-requested replacement, not a disable (zero other consumers, verified).
 
 ## Alternatives considered
 

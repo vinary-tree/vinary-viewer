@@ -163,10 +163,13 @@ triggers a disk fetch) mirrors LaTeX's per-tab `:representation` ([ADR-0025](../
 It surfaces the same three ways every view switch does:
 
 - the **`Preview ▾` combo's caret menu** ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
-  for a shown diff preview the caret menu carries **Unified** and **Split** rows (the effective layout is
-  check-marked). A lone diff's menu is exactly those two rows; a diff inside a collocated group lists its
-  file rows, a separator, then the layout rows. This replaced the earlier standalone `[Unified | Split]`
-  segmented control — one toolbar affordance instead of two,
+  whenever the shown file is a diff — its rendered preview **or** its raw source view — the caret menu
+  carries **Unified** and **Split** rows (the effective layout is check-marked). A lone diff's menu is
+  exactly those two rows; a diff inside a collocated group lists its file rows, a separator, then the
+  layout rows. Picking a layout while viewing the *source* also switches back to the preview showing it
+  (choosing "Split" there means "show me the split preview", exactly as picking a file row does). This
+  replaced the earlier standalone `[Unified | Split]` segmented control — one toolbar affordance instead
+  of two,
 - a command palette entry — **View ▸ Toggle unified / split diff** (`:view/toggle-diff-split`), and
 - a default keybinding, **`Ctrl+Shift+B`**, which self-gates (a no-op on a non-diff document).
 

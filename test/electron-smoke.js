@@ -1084,6 +1084,35 @@ async function main() {
   await waitFor(async () => (await detailsState()).every(d => d.open), 'file 0 re-expanded', 8000);
   console.log('[ok] the Preview combo caret switches diff layouts (seg control retired) and collapse state survives');
 
+  // ── the Preview combo KEEPS its caret in the diff's SOURCE view (ADR-0037): the layout rows stay
+  //    offered there, and picking one switches back to the preview in that layout ──
+  await evalIn(win, `window.__vvsource()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-source'))`),
+    'the diff source view mounts', 12000);
+  assert.ok(await evalIn(win, `Boolean(document.querySelector('.vv-combo-caret'))`),
+    'the Preview combo keeps its caret while viewing the diff source');
+  {
+    const rows = await openComboMenu();
+    assert.ok(rows.includes('Unified') && rows.includes('Split'),
+      `the source-view Preview menu still offers the layout rows (got ${JSON.stringify(rows)})`);
+    assert.strictEqual(await pickCombo('Split'), true, 'Split is pickable from the source view');
+  }
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-diff-splitview .vv-diff-row'))`),
+    'picking Split from the source view switches to the split PREVIEW', 8000
+  );
+  // back to the unified preview for the drives below
+  {
+    const rows = await openComboMenu();
+    assert.ok(rows.includes('Unified'));
+    assert.strictEqual(await pickCombo('Unified'), true);
+  }
+  await waitFor(
+    () => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-line')) && !document.querySelector('.vv-diff-splitview')`),
+    'back to the unified preview after the source-view drive', 8000
+  );
+  console.log('[ok] the Preview combo keeps Unified/Split in the diff SOURCE view; a pick returns to that preview');
+
   // ── Vim f-hints treat the banners as :toggle targets: typing a banner's label clicks it (ADR-0037) ──
   win.webContents.send('vv:keymap', '{:active "vim" :order [] :sets {}}');
   await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'vim'`), 'vim keymap active for the diff hint drive');
