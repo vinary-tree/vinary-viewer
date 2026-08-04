@@ -240,3 +240,47 @@
     (is (not (math/tex-error? (engine/render-tex "\\llbracket x \\rrbracket" false))) "the configured macros")
     (is (not (math/tex-error? (engine/render-tex "\\boldsymbol{x}" false))) "boldsymbol")
     (is (not (math/tex-error? (engine/render-tex "\\begin{CD} A @>>> B \\end{CD}" true))) "amscd")))
+
+;; ── GitHub parity: amscd's global `@`, and the deliberately-undefined \textsc ───────────────────────────────
+;;
+;; Both behaviors below LOOK like renderer bugs and are not — they are the publishing target's behavior,
+;; reproduced. GitHub's MathJax loads amscd, whose `@` handler is registered globally (unlike real LaTeX,
+;; where amscd's `@` is active only inside \begin{CD}), and no MathJax release defines \textsc in any
+;; package or font (there is no small-caps variant to map it to). "Fixing" either here — dropping or
+;; scoping amscd, shimming \textsc in the macros map — would make documents preview clean and publish
+;; broken: the disagreement-with-the-target failure mode the textmacros tests above exist to prevent.
+;; Author-side spellings that render correctly BOTH here and on GitHub: `t_1{@}A` (the brace hides the
+;; arrow lookahead) and `\text{R{\small ECORD}-A{\small CTIVE}}` (fake small caps).
+
+(deftest amscd-at-is-github-parity
+  (testing "@ before an arrow char (> < V A . | =) errors 'Misplaced @' outside \\begin{CD}, as on GitHub"
+    (let [bad (engine/render-tex "t_1@A" false)]
+      (is (string? bad) "render-tex returns normally — noerrors/noundefined suppress the throw")
+      (is (math/tex-error? bad) "@A is a CD up-arrow prefix; outside a CD array it is an error node")
+      (is (str/includes? bad "Misplaced @") "…carrying amscd's 'Misplaced @' message")))
+  (testing "a braced {@} hides the arrow lookahead — same glyphs, no error, safe here and on GitHub"
+    (let [ok (engine/render-tex "t_1{@}A" false)]
+      (is (not (math/tex-error? ok)) "no error node")
+      (is (str/includes? (glyphs ok) "@") "draws a literal U+0040 glyph")))
+  (testing "@ before any NON-arrow character is an ordinary glyph — t_2@B works where t_1@A errors"
+    (doseq [tex ["t@n" "t_2@B" "@"]]
+      (let [out (engine/render-tex tex false)]
+        (is (not (math/tex-error? out)) (str tex ": no error"))
+        (is (str/includes? (glyphs out) "@") (str tex ": draws @")))))
+  (testing "\\begin{CD} itself still typesets — the reason amscd stays in safe-packages"
+    (let [cd (engine/render-tex "\\begin{CD} A @>>> B \\end{CD}" true)]
+      (is (not (math/tex-error? cd)) "the CD environment renders")
+      (is (str/includes? (glyphs cd) "→") "@>>> becomes a stretchy right arrow"))))
+
+(deftest textsc-is-deliberately-undefined
+  (testing "\\textsc renders as red noundefined text — NOT an error node, and NOT shimmed to \\text"
+    (doseq [tex ["\\textsc{Idle}" "\\text{\\textsc{Idle}}"]]
+      (let [out (engine/render-tex tex false)]
+        (is (not (math/tex-error? out)) (str tex ": noundefined marks it red rather than erroring"))
+        (is (str/includes? out "fill=\"red\"")
+            (str tex ": the red undefined-macro marker must be present — a shim would preview clean here and publish red on GitHub")))))
+  (testing "the author-side replacement — fake small caps — renders clean with uppercase glyphs"
+    (let [out (engine/render-tex "\\text{R{\\small ECORD}-A{\\small CTIVE}}" false)]
+      (is (not (math/tex-error? out)) "no error node")
+      (is (not (str/includes? out "fill=\"red\"")) "no undefined-macro text")
+      (is (= "RECORD-ACTIVE" (glyphs out)) "caps at two sizes — the \\small groups carry the small-caps look"))))

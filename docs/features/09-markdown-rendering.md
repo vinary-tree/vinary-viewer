@@ -86,6 +86,27 @@ are worth knowing, because both bit us:
 `<mjx-break>`, and relational widths such as `width(\implies) > width(\Longrightarrow)`); the electron smoke adds
 the browser-only half (`getComputedStyle(svg).overflow === 'visible'`, and `getBBox()` inside the `viewBox`).
 
+Two TeX inputs that *look* valid are rejected on purpose, because GitHub rejects them identically and the
+previewer must agree with the publishing target in both directions — accepting what GitHub renders red
+would hide real errors until publish:
+
+- **`\textsc` is undefined — and deliberately not shimmed.** No MathJax release has ever defined it
+  (no MathJax font has a small-caps variant), and GitHub's served MathJax 3.2 bundle contains no
+  `textsc` either, so both render red `\textsc` followed by the argument (`noundefined`). Binding it in
+  the engine's macros map would make such documents preview clean here and publish broken. Authors who
+  want small-caps labels (e.g. inference-rule names) should write fake small caps, which render
+  everywhere: `\text{R{\small ECORD}-A{\small CTIVE}}` → (Rᴇᴄᴏʀᴅ-Aᴄᴛɪᴠᴇ).
+- **amscd makes `@` an arrow prefix *everywhere*.** Loading `amscd` (for `\begin{CD}` commutative
+  diagrams) registers `@` as a global character handler rather than one scoped to the CD environment:
+  `@` followed by one of `> < V A . | =` starts a CD arrow and errors **"Misplaced @"** outside
+  `\begin{CD}` — so `t_1@A` fails while `t_2@B` renders, one capital letter apart. GitHub loads amscd
+  and errors identically (real LaTeX does not: amscd's `@` is active only inside `CD` there). For a
+  literal `@` before an arrow character, brace it — `t_1{@}A` draws the same glyphs and is safe both
+  here and on GitHub.
+
+`amscd-at-is-github-parity` and `textsc-is-deliberately-undefined` in
+`test/vinary/renderer/math_test.cljs` pin both behaviors.
+
 Mermaid diagrams render from Markdown fences:
 
 ````markdown
