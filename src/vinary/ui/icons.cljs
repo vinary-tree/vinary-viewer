@@ -33,6 +33,7 @@
    :redo             "fa-solid fa-rotate-right"
    :folder           "fa-solid fa-folder"
    :folder-open      "fa-solid fa-folder-open"
+   :folder-up        "fa-solid fa-turn-up"
    :globe            "fa-solid fa-globe"
    :file             "fa-solid fa-file"})
 

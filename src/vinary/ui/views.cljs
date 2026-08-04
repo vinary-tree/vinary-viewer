@@ -1025,12 +1025,41 @@
    [:span.vv-fb-size (when-not dir? (human-size (:size entry)))]
    [:span.vv-fb-mtime (human-mtime (:mtime entry))]])
 
+(defn- parent-row
+  "The pinned \"..\" row at the top of a directory listing — the file-manager affordance for navigating up
+   one directory. Shown only when `parent` (uri/dirname of the current directory) is non-nil, so it hides
+   at every filesystem/remote/archive root. It is NOT one of the directory's entries, so it stays out of
+   the sort and the keyboard-selection math (Alt+Up is its keyboard equivalent). Primary activation reuses
+   :nav/parent, which also pre-highlights the directory you came from so Alt+Down/Enter returns to it;
+   Ctrl+click opens the parent in a new tab."
+  [parent]
+  [:div.vv-fb-row.vv-fb-up
+   {:title            (str "Up to " (uri/display parent))
+    :data-path        parent
+    :data-dir         "true"
+    :on-click         (fn [^js e]
+                        (cond
+                          (.-ctrlKey e)                 (rf/dispatch [:doc/open-new parent])
+                          (platform/single-click-open?) (rf/dispatch [:nav/parent])))
+    :on-double-click  (fn [^js e]
+                        (when-not (platform/single-click-open?)
+                          (rf/dispatch (if (.-ctrlKey e) [:doc/open-new parent] [:nav/parent]))))
+    :on-context-menu  (fn [^js e]
+                        (.preventDefault e) (.stopPropagation e)
+                        (rf/dispatch [:context-menu/show
+                                      {:x (.-clientX e) :y (.-clientY e)
+                                       :target {:kind :dir :path parent}}]))}
+   (icons/icon :folder-up)
+   [:span.vv-fb-name ".."]
+   [:span.vv-fb-size]
+   [:span.vv-fb-mtime]])
+
 (defn dir-view
   "A directory rendered in the preview pane as a detailed list (name · size · modified). Entries arrive
    from main as :doc/entries; the explicit selection + the persisted dir→child trail pick the highlighted
    target (double-click / Enter / Alt+Down opens it, Ctrl+click opens it in a new tab); arrow keys scroll
-   the listing. Pure Reagent (interactive rows), restoring per-history scroll on mount/update like
-   image-view."
+   the listing. A pinned \"..\" row (parent-row) leads the body whenever the directory has a parent. Pure
+   Reagent (interactive rows), restoring per-history scroll on mount/update like image-view."
   [_path _entries]
   (let [node (atom nil)]
     (r/create-class
@@ -1043,6 +1072,7 @@
               trail    (:trail @(rf/subscribe [:ui/recent]))
               sorted   (nav/sort-entries entries)
               selected (nav/effective-selected path entries dsel trail)
+              parent   (uri/dirname path)
               label    (let [n (uri/basename path)] (if (str/blank? n) path n))]
           [:div.vv-fb
            {:tab-index   0
@@ -1054,12 +1084,14 @@
            [:div.vv-fb-head
             [:span.vv-fb-path {:title (uri/display path)}
              (str label "  ·  " (count sorted) (if (= 1 (count sorted)) " item" " items"))]]
-           (when (seq sorted)
+           (when (or parent (seq sorted))
              [:div.vv-fb-head-row [:span.vv-fb-col-icon] [:span "Name"] [:span "Size"] [:span "Modified"]])
-           (if (seq sorted)
+           (if (or parent (seq sorted))
              (into [:div.vv-fb-body]
-                   (for [entry sorted]
-                     ^{:key (:path entry)} [dir-entry entry (= (:path entry) selected)]))
+                   (concat
+                    (when parent [^{:key "vv-parent"} [parent-row parent]])
+                    (for [entry sorted]
+                      ^{:key (:path entry)} [dir-entry entry (= (:path entry) selected)])))
              [:div.vv-fb-empty "Empty directory"])]))})))
 
 (defn content-view

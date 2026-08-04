@@ -992,6 +992,22 @@ async function main() {
       'a remote ssh:// directory lists its entries in-pane', 12000);
     console.log('[ok] a remote ssh:// directory browses in the in-pane file list');
 
+    // The pinned ".." parent row: present for a subdirectory (with the parent authority-path kept), navigates up
+    // one directory when activated, and is absent at the remote root (uri/dirname → nil, so nothing to go up to).
+    const upAtSub = await evalIn(win, `(() => {
+      const up = document.querySelector('.vv-fb-up');
+      return up ? { present: true, name: (up.querySelector('.vv-fb-name') || {}).textContent, dataPath: up.getAttribute('data-path') } : { present: false };
+    })()`);
+    assert.ok(upAtSub.present && upAtSub.name === '..', 'a subdirectory listing shows a pinned ".." parent row');
+    assert.strictEqual(upAtSub.dataPath, sshSrv.url('/'), 'the ".." row targets the parent directory (remote root, authority kept)');
+    // activate the ".." row with the platform's open gesture (single-click on Linux, double-click elsewhere)
+    const upGesture = (process.platform === 'linux') ? 'click' : 'dblclick';
+    await evalIn(win, `(() => { const up = document.querySelector('.vv-fb-up'); up.dispatchEvent(new MouseEvent(${JSON.stringify(upGesture)}, { bubbles: true, cancelable: true })); })()`);
+    await waitFor(() => evalIn(win, `(() => { const t = document.querySelector('.vv-content').textContent;
+      return /notes\\.md/.test(t) && /sub/.test(t) && document.querySelector('.vv-fb-up') === null; })()`),
+      'activating ".." navigates up to the parent listing, where no ".." remains (the remote root has no parent)', 12000);
+    console.log('[ok] the ".." parent row lists, navigates up one directory, and hides at the root');
+
     // SSH auth-prompt modal: main pushes a (non-secret) prompt request → the modal appears → OK sends the secret
     state.sshReply = null;
     win.webContents.send('vv:ssh-prompt', { promptId: 'smoke1', kind: 'password', host: 'demo.example', user: 'alice', attempt: 1 });

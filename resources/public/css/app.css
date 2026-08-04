@@ -1018,6 +1018,10 @@ details[open] > .vv-project-name > .vv-folder-open { display: inline-block; }
 .vv-fb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vv-fb-size, .vv-fb-mtime { color: var(--vv-fg-dim); font-size: 12px;
   font-family: var(--vv-font-fixed); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The pinned ".." parent-directory row: reads as a navigation control, set off from the entries. */
+.vv-fb-row.vv-fb-up { margin-bottom: 2px; border-bottom: 1px solid var(--vv-border); border-radius: 0; }
+.vv-fb-row.vv-fb-up .vv-fb-name { font-weight: 600; color: var(--vv-head1); }
+.vv-fb-row.vv-fb-up i { color: var(--vv-head1); }
 
 /* ===== Breadcrumb URI bar (Ctrl-hover) ===== */
 .vv-breadcrumb { flex: 1 1 auto; display: flex; align-items: center; gap: 1px; min-width: 0;
