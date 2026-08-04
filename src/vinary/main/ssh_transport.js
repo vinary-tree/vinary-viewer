@@ -43,6 +43,15 @@ const opts = {
 };
 
 function configure(o) { Object.assign(opts, o || {}); }
+
+// This module is Electron-FREE and its error/status sinks are INJECTED via configure(). A sink must never be able
+// to turn a transport event into an uncaught main-process exception — especially one fired from a keepalive/idle
+// TIMER (client 'error'/'close' emitted by ssh2's sendKA), where a throw has no catch above it and crashes main.
+// Every sink invocation goes through these guards; a broken sink is swallowed (there is no safe channel to report
+// it on without risking the same crash).
+function safeError(info) { try { opts.onError(info); } catch (_e) { /* a broken sink must not crash the transport */ } }
+function safeStatus(info) { try { opts.onStatus(info); } catch (_e) { /* a broken sink must not crash the transport */ } }
+
 function homeDir() { return opts.homeDir || os.homedir(); }
 function osUser() { try { return os.userInfo().username; } catch (_e) { return process.env.USER || process.env.USERNAME || null; } }
 function agentSock() { return opts.agentSock !== undefined ? opts.agentSock : process.env.SSH_AUTH_SOCK; }
@@ -158,7 +167,7 @@ function appendKnownHost(host, port, keyType, keyB64) {
     fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
     fs.appendFileSync(p, sshcfg.knownHostsLine(host, port, keyType, keyB64) + '\n', { mode: 0o600 });
   } catch (e) {
-    opts.onError({ connKey: sshcfg.connKeyOf(null, host, port), host, port, kind: 'sftp-error', message: 'could not write known_hosts: ' + e.message });
+    safeError({ connKey: sshcfg.connKeyOf(null, host, port), host, port, kind: 'sftp-error', message: 'could not write known_hosts: ' + e.message });
   }
 }
 
@@ -174,23 +183,23 @@ function makeHostVerifier(resolved) {
       keyB64 = keyBuffer.toString('base64');
       fp = sshcfg.fingerprintSha256(keyBuffer);
     } catch (_e) {
-      opts.onError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: 'could not parse host key' });
+      safeError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: 'could not parse host key' });
       return callback(false);
     }
     const status = sshcfg.checkHostKey(loadKnownHosts(), host, port, keyType, keyB64);
     if (status === 'ok') return callback(true);
     if (status === 'changed') {
-      opts.onError({ connKey: resolved.connKey, host, port, kind: 'hostkey-changed', message: `REMOTE HOST IDENTIFICATION FOR ${host} HAS CHANGED (${fp}) — refusing to connect` });
+      safeError({ connKey: resolved.connKey, host, port, kind: 'hostkey-changed', message: `REMOTE HOST IDENTIFICATION FOR ${host} HAS CHANGED (${fp}) — refusing to connect` });
       return callback(false);
     }
     if (status === 'revoked') {
-      opts.onError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: `host key for ${host} is revoked` });
+      safeError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: `host key for ${host} is revoked` });
       return callback(false);
     }
     Promise.resolve(opts.promptHostKey({ host, port, keyType, fingerprint: fp, changed: false }))
       .then((accepted) => {
         if (accepted) { appendKnownHost(host, port, keyType, keyB64); callback(true); }
-        else { opts.onError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: 'host key not trusted' }); callback(false); }
+        else { safeError({ connKey: resolved.connKey, host, port, kind: 'hostkey-rejected', message: 'host key not trusted' }); callback(false); }
       })
       .catch(() => callback(false));
   };
@@ -212,7 +221,7 @@ function maybeAddKeyToAgent(resolved, parsedKey, keyPath) {
     lifetime = parseInt(timeMatch[1], 10) * mult;
   }
   sshAgent.addKey(sock, parsedKey, path.basename(keyPath), { lifetime, confirm })
-    .catch((e) => opts.onError({ connKey: resolved.connKey, host: resolved.host, port: resolved.port, kind: 'sftp-error', message: 'AddKeysToAgent failed: ' + e.message }));
+    .catch((e) => safeError({ connKey: resolved.connKey, host: resolved.host, port: resolved.port, kind: 'sftp-error', message: 'AddKeysToAgent failed: ' + e.message }));
 }
 
 async function produceKeyMethod(conn, resolved, keyPath) {
@@ -370,24 +379,24 @@ async function connect(conn, resolved, inboundSock, depth) {
 
   const client = new Client();
   conn.client = client;
-  opts.onStatus({ connKey: conn.connKey, host: resolved.host, state: 'connecting' });
+  safeStatus({ connKey: conn.connKey, host: resolved.host, state: 'connecting' });
 
   return new Promise((resolve, reject) => {
     let settled = false;
     const fail = (err) => { if (!settled) { settled = true; reject(err); } };
     client.on('ready', () => {
       conn.state = 'ready'; conn.lastUsed = Date.now();
-      opts.onStatus({ connKey: conn.connKey, host: resolved.host, state: 'ready' });
+      safeStatus({ connKey: conn.connKey, host: resolved.host, state: 'ready' });
       settled = true; resolve(conn);
     });
     client.on('error', (err) => {
       conn.state = 'error'; conn.lastError = err; pool.delete(conn.connKey); destroyStreams(conn);
-      opts.onError(errInfo(err, resolved)); fail(err);
+      safeError(errInfo(err, resolved)); fail(err);
     });
     client.on('close', () => {
       const wasReady = conn.state === 'ready';
       conn.state = 'closed'; pool.delete(conn.connKey); destroyStreams(conn); conn.sftpP = null;
-      if (wasReady) opts.onStatus({ connKey: conn.connKey, host: resolved.host, state: 'closed' });
+      if (wasReady) safeStatus({ connKey: conn.connKey, host: resolved.host, state: 'closed' });
       fail(new Error('connection closed'));
     });
 

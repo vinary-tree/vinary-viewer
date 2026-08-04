@@ -109,6 +109,9 @@ async function main() {
   // 9d. agent auth — a key added to a throwaway ssh-agent authenticates via SSH_AUTH_SOCK (no key files present).
   await testAgentConnect();
 
+  // 9e. a throwing status/error sink must not wedge connect/read (guarded sink) — see testThrowingSink.
+  await testThrowingSink();
+
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);
 
@@ -165,6 +168,34 @@ async function testAgentConnect() {
     }
   } finally {
     try { process.kill(parseInt(pid, 10)); } catch (_e) {}
+  }
+}
+
+// A THROWING status/error sink must NOT break connect or reads. In the app these sinks are backed by an Electron
+// webContents; after the window they were captured against closes, a connect-status or keepalive-error callback can
+// throw "Object has been destroyed". `connect()` calls onStatus('connecting') SYNCHRONOUSLY before the connect
+// promise, so an unguarded throw there rejected the read directly — which is exactly why, after a suspend dropped
+// the SSH connection and the window went away, EVERY subsequent remote open surfaced "Object has been destroyed" as
+// its preview. The transport now funnels every sink call through a guard (safeStatus/safeError), so a broken sink is
+// swallowed and the read still completes. (Regression; own server so it cannot perturb the main sequence.)
+async function testThrowingSink() {
+  const srv = await startSftpServer({ password: 'sink-pw', files: { 'notes.md': 'content here' } });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sinkhome-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true,
+    promptSecret: async () => 'sink-pw',
+    onStatus: () => { throw new Error('Object has been destroyed'); },
+    onError:  () => { throw new Error('Object has been destroyed'); },
+  });
+  try {
+    eq(await transport.remoteReadText(srv.url('/notes.md')), 'content here',
+       'a throwing onStatus/onError sink does not break connect or read (guarded sink)');
+    transport.closeAll();
+  } finally {
+    await srv.close();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 }
 
