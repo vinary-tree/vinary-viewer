@@ -344,20 +344,25 @@
                     (into (into out gap) (split-rows (assoc file :hunks [h])))))))
        true])))
 
-(defn- file-split-html [file sources]
+(defn- file-split-html
+  "One file's side-by-side section — a collapsible `<details class=\"vv-diff-file\" open>` whose
+   `<summary>` is the file banner (ADR-0037; mirrors the unified view's per-file wrapper, same
+   `vv-diff-file-N` id space, so the per-tab collapsed set applies to whichever view is mounted).
+   The unchanged-run `vv-diff-gap` details nested inside stay native/uncontrolled."
+  [file sources]
   (let [status (file-status file)
         src    (get sources (:new-path file))
         [rows collapse?] (if src (enrich-rows file (str/split src #"\n" -1)) [(split-rows file) false])]
-    (str "<section class=\"vv-diff-file vv-diff-split\" data-status=\"" status "\">"
-         "<header class=\"vv-diff-file-head\" id=\"vv-diff-file-" (:idx file) "\">"
+    (str "<details class=\"vv-diff-file vv-diff-split\" data-status=\"" status "\" open>"
+         "<summary class=\"vv-diff-file-head\" id=\"vv-diff-file-" (:idx file) "\">"
          "<span class=\"vv-diff-file-status vv-diff-status-" status "\">" status "</span>"
-         "<span class=\"vv-diff-file-name\">" (esc (file-label file)) "</span></header>"
+         "<span class=\"vv-diff-file-name\">" (esc (file-label file)) "</span></summary>"
          (cond
            (:binary? file) "<div class=\"vv-diff-row vv-diff-row-note\">Binary file — no textual diff</div>"
            (and (empty? (:hunks file)) (:rename? file)) "<div class=\"vv-diff-row vv-diff-row-note\">Renamed with no content change</div>"
            (empty? (:hunks file)) "<div class=\"vv-diff-row vv-diff-row-note\">No changes</div>"
            :else (str "<div class=\"vv-diff-grid\">" (rows->html rows collapse?) "</div>"))
-         "</section>")))
+         "</details>")))
 
 (defn split-html
   "Render a parsed diff `model` as the multi-file side-by-side view (an HTML string for `markdown-body`).

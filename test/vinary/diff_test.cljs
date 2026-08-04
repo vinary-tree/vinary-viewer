@@ -8,7 +8,8 @@
             [vinary.diff :as diff]
             [vinary.ir.frontend.diff :as ir-diff]
             [vinary.ir.backend.html :as ir-html]
-            [vinary.ir.backend.ansi :as ansi]))
+            [vinary.ir.backend.ansi :as ansi]
+            [vinary.ir.node :as node]))
 
 (def ^:private git-modify
   (str "diff --git a/src/foo.txt b/src/foo.txt\n"
@@ -182,7 +183,11 @@
     (is (str/includes? html "vv-diff-side-old"))
     ;; the enriched view pulls unchanged tail lines (four, five) from the on-disk file
     (is (str/includes? html "line four"))
-    (is (str/includes? html "line five"))))
+    (is (str/includes? html "line five"))
+    ;; per-file collapsible wrapper (ADR-0037): details/summary, banner id, default-open
+    (is (str/includes? html "<details class=\"vv-diff-file vv-diff-split\" data-status=\"modified\" open>"))
+    (is (str/includes? html "<summary class=\"vv-diff-file-head\" id=\"vv-diff-file-0\">"))
+    (is (not (str/includes? html "<header")) "the banner is a <summary> now, not a <header>")))
 
 (deftest unified-ir->html
   (let [ir   (ir-diff/diff->ir git-modify)
@@ -195,7 +200,35 @@
     ;; the gutter line numbers must serialize as real data-* attributes (camelCase property → data-old/data-new)
     (is (str/includes? html "data-new=\"2\""))
     (is (str/includes? html "data-old=\"2\""))
+    ;; per-file collapsible wrapper (ADR-0037): a details element, open by default, summary banner, no h2
+    (is (str/includes? html "<details class=\"vv-diff-file\" data-status=\"modified\" open>"))
+    (is (str/includes? html "<summary"))
+    (is (not (str/includes? html "<h2")) "the banner is a <summary> now, not an <h2>")
     (is (not (ir-html/blank? html)))))
+
+(deftest unified-wrapper-structure
+  ;; The two-backend invariants of the per-file wrapper (ADR-0037), asserted on the IR itself:
+  ;; one :details wrapper per file, the banner as its FIRST child (the ANSI inline-container guard +
+  ;; anchor line), the file id as wrapper META only (the DOM id lives solely on the summary — no
+  ;; duplicate getElementById targets), and the default-open attribute.
+  (let [ir       (ir-diff/diff->ir (str git-modify git-new))
+        wrappers (filterv #(= :details (node/kind %)) (node/children ir))]
+    (is (= 2 (count wrappers)) "one :details wrapper per file, as direct document children")
+    (doseq [[idx w] (map-indexed vector wrappers)]
+      (let [m      (node/node-meta w)
+            banner (first (node/children w))
+            bm     (node/node-meta banner)]
+        (is (= "details" (:tag m)))
+        (is (= (str "vv-diff-file-" idx) (:id m)) "the wrapper carries the file id as meta (the TUI anchor)")
+        (is (nil? (get (:attrs m) "id")) "…but NEVER as a DOM attribute (the summary owns getElementById)")
+        (is (true? (get (:attrs m) "open")) "files render expanded by default")
+        (is (= :heading (node/kind banner)) "the banner is the wrapper's FIRST child")
+        (is (= "summary" (:tag bm)))
+        (is (= (str "vv-diff-file-" idx) (get (:attrs bm) "id")) "the summary carries the canonical DOM id"))))
+  ;; every body shape keeps the banner-first invariant (binary / rename / empty files included)
+  (let [ir (ir-diff/diff->ir (str git-binary git-rename))]
+    (doseq [w (filter #(= :details (node/kind %)) (node/children ir))]
+      (is (= :heading (node/kind (first (node/children w))))))))
 
 (deftest unified-ir->ansi
   (let [out (ansi/render (ir-diff/diff->ir git-modify) {:width 80 :color? true})]
@@ -207,9 +240,31 @@
     (is (str/includes? out "+line 2"))
     (is (str/includes? out "-line two"))))
 
+;; (unified-ir->ansi above runs at the DEFAULT "\n\n" block-sep — its SGR/marker assertions are
+;;  separator-independent; the byte-level contract at diff's PRODUCTION separator "\n" is pinned below)
+
+(deftest unified-ansi-golden
+  ;; BYTE-parity with the pre-ADR-0037 flat structure at diff's production block separator "\n"
+  ;; (cli/render + the TUI render diffs that way): the per-file wrapper recurses in the ANSI backend, and
+  ;; within-block joins equal the former between-block separators. Captured from the pre-change build.
+  (let [opts {:block-sep "\n" :color? false :width 80}]
+    (is (= "modified src/foo.txt\n@@ -1 +1 @@\nline one\n-line two\n+line 2\nline three"
+           (ansi/render (ir-diff/diff->ir git-modify) opts)))
+    (is (= (str "modified src/foo.txt\n@@ -1 +1 @@\nline one\n-line two\n+line 2\nline three\n"
+                "added new.txt\n@@ -0 +1 @@\n+hello\n+world")
+           (ansi/render (ir-diff/diff->ir (str git-modify git-new)) opts)))))
+
+(deftest unified-ansi-anchors
+  ;; The TUI Contents-jump contract: render-lines anchors each file id (the wrapper's META :id — top-level
+  ;; blocks are the wrappers now) to the banner's 0-based line index. Captured from the pre-change build.
+  (let [{:keys [anchors]} (ansi/render-lines (ir-diff/diff->ir (str git-modify git-new))
+                                             {:block-sep "\n" :color? false :width 80})]
+    (is (= {"vv-diff-file-0" 0 "vv-diff-file-1" 6} anchors))))
+
 (deftest unified-outline
   (let [ir (ir-diff/diff->ir (str git-modify git-new))
         toc (ir-diff/outline ir)]
+    ;; exercises the PREORDER scan — the banners live inside the per-file wrappers now (ADR-0037)
     (is (= 2 (count toc)))
     (is (= ["src/foo.txt" "new.txt"] (map :text toc)))
     (is (= ["vv-diff-file-0" "vv-diff-file-1"] (map :id toc)))))

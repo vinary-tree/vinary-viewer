@@ -131,9 +131,11 @@
         (if (= uri (:uri (get stack idx)))
           (assoc t :uri uri)
           (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0 :facet nil})]
-            ;; a new destination is a new document → clear the in-place facet so it gets a fresh default
+            ;; a new destination is a new document → clear the in-place facet so it gets a fresh default,
+            ;; and the diff collapsed set (its vv-diff-file-N ids are POSITIONAL — a set from diff A must
+            ;; not collapse arbitrary files of diff B; ADR-0037)
             (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
-                (dissoc :facet :facet-mru))))))))
+                (dissoc :facet :facet-mru :diff-collapsed))))))))
 
 (defn nav-tab
   "Point the tab with `id` at uri, pushing a history entry (a repeat just refreshes the uri) — like
@@ -151,7 +153,7 @@
                                (assoc t :uri uri)
                                (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0 :facet nil})]
                                  (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
-                                     (dissoc :facet :facet-mru)))))
+                                     (dissoc :facet :facet-mru :diff-collapsed)))))   ; positional ids — see nav-active
                            t))
                        ts)))
     db))
@@ -172,7 +174,10 @@
                                             (assoc-in [:hist :idx] idx')
                                             (assoc :facet f))          ; mirror the entry's facet onto the tab
                                   (nil? f)  (dissoc :facet-mru)         ; default view → forget the per-doc mru
-                                  (some? f) (assoc-in [:facet-mru (:type f)] (:path f)))))
+                                  (some? f) (assoc-in [:facet-mru (:type f)] (:path f))
+                                  ;; Back/Forward onto a DIFFERENT uri drops the diff collapsed set (positional
+                                  ;; ids — see nav-active); same-uri steps (facet flips, anchors) keep it
+                                  (not= (:uri entry) (:uri t)) (dissoc :diff-collapsed))))
          (:uri entry) entry]))))
 
 (defn reorder
@@ -262,6 +267,27 @@
   "The diff view to show: the tab's explicit choice, else :unified. Pure so the sub + tests share it."
   [tab-view]
   (or tab-view :unified))
+
+;; ---- Diff per-file collapse (per-tab; only meaningful for a .diff/.patch doc — ADR-0037) ----
+;; A tab's :diff-collapsed is the set of collapsed `vv-diff-file-N` ids (absent/#{} = all expanded). Same
+;; tier as :diff-view — survives tab switches, live refresh, and the unified⇄split flip (both views share
+;; the id space); never in history entries; CLEARED when the tab navigates to a different uri (the ids are
+;; positional — see nav-active). The GUI re-applies the set to fresh DOM after every innerHTML rebuild.
+(defn diff-collapsed [db] (get (active-tab db) :diff-collapsed #{}))
+(defn set-diff-collapsed
+  ([db ids]    (set-diff-collapsed db (active-id db) ids))
+  ([db id ids] (update-in db [:ui :tabs]
+                          (fn [ts] (mapv #(if (= (:id %) id) (assoc % :diff-collapsed (set ids)) %) ts)))))
+(defn toggle-diff-collapsed
+  "Flip one file id in/out of tab `id`'s collapsed set."
+  [db id file-id]
+  (update-in db [:ui :tabs]
+             (fn [ts] (mapv #(if (= (:id %) id)
+                               (update % :diff-collapsed
+                                       (fn [s] (let [s (or s #{})]
+                                                 (if (contains? s file-id) (disj s file-id) (conj s file-id)))))
+                               %)
+                            ts))))
 
 (defn nth-id
   "The id of the tab `dir` steps from the active one (wrapping), or nil if no tabs."

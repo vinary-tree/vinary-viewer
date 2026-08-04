@@ -1,14 +1,26 @@
 (ns vinary.ir.frontend.diff
   "Diff front-end: parse `.diff`/`.patch` text (vinary.diff) into the common document IR for the UNIFIED
    (single-column, colored) view — lowered identically by the HTML back-end (GUI) and the ANSI back-end
-   (terminal `vv-cli`/`vv-tui`). Each file becomes an `<h2>` banner (which also feeds a multi-file Contents
-   outline), each hunk a `@@` header line, and each body line a class-tagged `<div>` carrying its old/new
-   gutter numbers as `data-*` attributes (drawn by CSS in the GUI, invisible to the terminal's text-only
-   ANSI backend). The side-by-side (split) view is GUI-only and lives in vinary.diff. Pure — no DOM, no fs.
+   (terminal `vv-cli`/`vv-tui`). Each file becomes a collapsible `<details class=\"vv-diff-file\" open>`
+   wrapper (ADR-0037) whose FIRST child is the file's `<summary>` banner (kind :heading — it also feeds the
+   multi-file Contents outline), followed by each hunk's `@@` header line and each body line as a
+   class-tagged `<div>` carrying its old/new gutter numbers as `data-*` attributes (drawn by CSS in the
+   GUI, invisible to the terminal's text-only ANSI backend). The side-by-side (split) view is GUI-only and
+   lives in vinary.diff. Pure — no DOM, no fs.
 
    Attribute maps use STRING keys (\"className\"/\"id\"/…) — the pure-front-end convention the ANSI backend's
    `attr`/`classes` reader expects — and camelCase `dataOld`/`dataNew` property names, which the HTML back-end's
-   hast serializer emits as `data-old`/`data-new`."
+   hast serializer emits as `data-old`/`data-new`.
+
+   Two-backend invariants of the per-file wrapper (ADR-0037; guarded by diff-test's structure + golden tests):
+     - the banner is the wrapper's FIRST child — a :heading child is what keeps the wrapper out of the ANSI
+       backend's inline-container merge, and its line index is where the file's TUI anchor lands;
+     - the wrapper carries the file id ONLY as IR meta :id (never serialized — the DOM id lives solely on
+       the summary, so getElementById stays unambiguous) — ANSI render-lines reads top-level blocks' meta
+       :id for the TUI Contents-jump anchors;
+     - ANSI output is byte-identical to the pre-wrapper flat form at the diff block separator \"\\n\"
+       (cli/render + the TUI both render diffs that way): the wrapper recurses, and within-block joins
+       equal the former between-block separators."
   (:require [clojure.string :as str]
             [vinary.diff :as diff]
             [vinary.ir.node :as node]))
@@ -42,7 +54,12 @@
              [(code-span (str "@@ -" old-start " +" new-start " @@" (when (seq heading) (str " " heading))))]
              {:tag "div" :attrs {"className" ["vv-diff-line" "vv-diff-hunk"]}}))
 
-(defn- file-heading [file idx]
+(defn- file-heading
+  "The file's banner — a `<summary>` (the wrapper's native toggle target; Settings/none of the GUI relies on
+   h2 semantics, and the ANSI backend + both Contents outlines dispatch on the :heading KIND, not the tag).
+   Carries the canonical DOM id `vv-diff-file-<idx>` + the `.vv-diff-file-head` class the GUI click
+   delegation and the link-hints collector key off."
+  [file idx]
   (let [status (diff/file-status file)
         label  (diff/file-label file)
         id     (str "vv-diff-file-" idx)]
@@ -52,16 +69,27 @@
                 (text-leaf " ")
                 (node/node :span [(text-leaf label)]
                            {:tag "span" :attrs {"className" ["vv-diff-file-name"]}})]
-               {:tag "h2" :level 2 :id id :toc-text label
+               {:tag "summary" :level 2 :id id :toc-text label
                 :attrs {"id" id "className" ["vv-diff-file-head"] "dataStatus" status}})))
 
-(defn- file-nodes [file idx]
-  (into [(file-heading file idx)]
-        (cond
-          (:binary? file)                             [(note-line "Binary file — no textual diff")]
-          (and (empty? (:hunks file)) (:rename? file)) [(note-line "Renamed with no content change")]
-          (empty? (:hunks file))                      [(note-line "No changes")]
-          :else (mapcat (fn [h] (cons (hunk-node h) (map line-node (:lines h)))) (:hunks file)))))
+(defn- file-nodes
+  "One collapsible `<details class=\"vv-diff-file\" open>` wrapper per file: the banner FIRST (the
+   inline-container guard + the ANSI anchor line), then the hunk/body lines. The wrapper's file id is IR
+   meta ONLY (`:id` — read by ANSI render-lines for TUI anchors, never serialized); `open` serializes as
+   the bare attribute so the default paint matches the all-expanded state (the GUI re-applies the per-tab
+   collapsed set right after every innerHTML rebuild)."
+  [file idx]
+  (let [status (diff/file-status file)]
+    [(node/node :details
+                (into [(file-heading file idx)]
+                      (cond
+                        (:binary? file)                              [(note-line "Binary file — no textual diff")]
+                        (and (empty? (:hunks file)) (:rename? file)) [(note-line "Renamed with no content change")]
+                        (empty? (:hunks file))                       [(note-line "No changes")]
+                        :else (mapcat (fn [h] (cons (hunk-node h) (map line-node (:lines h)))) (:hunks file))))
+                {:tag "details"
+                 :id (str "vv-diff-file-" idx)
+                 :attrs {"className" ["vv-diff-file"] "dataStatus" status "open" true}})]))
 
 (defn diff->ir
   "Parse `text` and lower it to the unified diff IR — a :document of file `<h2>` banners + `@@`/±/context
@@ -77,11 +105,13 @@
                {})))
 
 (defn outline
-  "A Contents outline for a diff IR: one entry per file banner (its :toc-text label, anchored by :id)."
+  "A Contents outline for a diff IR: one entry per file banner (its :toc-text label, anchored by :id).
+   Scans PREORDER — the banners live inside the per-file `<details>` wrappers (ADR-0037), no longer as
+   direct document children."
   [ir]
   (into []
         (comp (filter #(= :heading (node/kind %)))
               (keep (fn [h] (let [m (node/node-meta h)]
                               (when-let [id (:id m)]
                                 {:level 1 :text (or (:toc-text m) "") :id id})))))
-        (node/children ir)))
+        (node/preorder ir)))

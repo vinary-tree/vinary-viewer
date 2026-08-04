@@ -487,6 +487,41 @@
                        {:fx [[:dispatch [:tab/set-diff-view nil nxt]]]})
                      {})))
 
+;; ── per-file diff collapse (ADR-0037). State = the active tab's :diff-collapsed id set; every write is
+;; followed by :diff/apply-collapsed, which projects the set onto the mounted <details> wrappers (both
+;; views share the vv-diff-file-N id space, so the set applies to whichever layout is up). All four events
+;; self-gate on the shown facet being a diff PREVIEW — the :tab/toggle-diff-view pattern, since palette
+;; commands and the vim z M / z R chords carry no doc-kind :when predicate. ──
+
+;; header click / hint activation: flip ONE file (the id is the summary's — "vv-diff-file-N")
+(rf/reg-event-fx :diff/toggle-file
+                 (fn [{:keys [db]} [_ file-id]]
+                   (if (and (string? file-id) (facet/diff-preview-active? db))
+                     (let [db' (nav/toggle-diff-collapsed db (nav/active-id db) file-id)]
+                       {:db db' :fx [[:diff/apply-collapsed (nav/diff-collapsed db')]]})
+                     {})))
+
+;; collapse every file — the id list comes from the diff's Contents outline (:doc/toc), never the DOM
+(rf/reg-event-fx :diff/collapse-all
+                 (fn [{:keys [db]} _]
+                   (if (facet/diff-preview-active? db)
+                     (let [db' (nav/set-diff-collapsed db (set (facet/diff-file-ids db)))]
+                       {:db db' :fx [[:diff/apply-collapsed (nav/diff-collapsed db')]]})
+                     {})))
+
+(rf/reg-event-fx :diff/expand-all
+                 (fn [{:keys [db]} _]
+                   (if (facet/diff-preview-active? db)
+                     (let [db' (nav/set-diff-collapsed db #{})]
+                       {:db db' :fx [[:diff/apply-collapsed #{}]]})
+                     {})))
+
+;; the View-menu item's single static event: expand when everything is collapsed, else collapse — the
+;; menu's dynamic label ("Collapse All Files" ↔ "Expand All Files") flips off the same predicate
+(rf/reg-event-fx :diff/toggle-collapse-all
+                 (fn [{:keys [db]} _]
+                   {:fx [[:dispatch (if (facet/diff-all-collapsed? db) [:diff/expand-all] [:diff/collapse-all])]]}))
+
 ;; the side-by-side (split) HTML for a diff finished building (baseline or on-disk-enriched) → store it on the doc
 (rf/reg-event-fx :diff/split-ready
                  (fn [_ [_ path html]]
@@ -926,7 +961,13 @@
  (fn [{:keys [db]} [_ id]]
    (if (uri/http? (nav/active-uri db))
      {:fx [[:vv/http-toc-goto id]]}
-     {:fx [[:toc/scroll id]]})))
+     ;; a Contents click on a COLLAPSED diff file is explicit intent to SEE it: auto-expand the target
+     ;; (state first, DOM applied before the scroll so the offset measures the expanded layout — ADR-0037)
+     (if (and (facet/diff-preview-active? db) (contains? (nav/diff-collapsed db) id))
+       (let [db' (nav/toggle-diff-collapsed db (nav/active-id db) id)]
+         {:db db' :fx [[:diff/apply-collapsed (nav/diff-collapsed db')]
+                       [:toc/scroll id]]})
+       {:fx [[:toc/scroll id]]}))))
 
 (rf/reg-event-db
  :toc/active-heading

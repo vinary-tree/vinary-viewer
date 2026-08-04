@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0036**.
+The next free number is **0038**.
 
 ---
 
@@ -94,6 +94,7 @@ The next free number is **0036**.
 | [0034](0034-expansion-scoped-file-tree-watchers.md) | Expansion-scoped shallow file-tree watchers, refresh-before-open controlled disclosures, and explicit subtree/root/all refresh | Accepted |
 | [0035](0035-authenticated-remote-daemon-events.md) | Authenticate SSH-forwarded daemon events for remote files and trees | Accepted |
 | [0036](0036-stdin-documents-and-explicit-file-types.md) | Piped-stdin documents (spilled temp file) + explicit `-t/--type` file types (one shared resolver, a main-side override registry, Settings ▸ File Type); plain text is never delimiter-sniffed | Accepted |
+| [0037](0037-collapsible-diff-file-previews.md) | Collapsible per-file diff previews: a controlled `<details>` wrapper in the shared IR (byte-neutral ANSI, meta-id TUI anchors), per-tab `:diff-collapsed` state re-projected after every innerHTML rebuild, hintable banners, View ▸ Collapse All Files, vim `z M`/`z R`; the `[Unified \| Split]` seg control folded into the Preview combo | Accepted |
 
 ---
 

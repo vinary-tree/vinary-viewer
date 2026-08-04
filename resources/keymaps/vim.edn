@@ -17,6 +17,9 @@
    "C-b" :nav/page-up
    "g"   {"g" :nav/scroll-top "t" :tab/next "T" :tab/prev}
    "G"   :nav/scroll-bottom
+   ;; vim fold idiom over a diff's per-file previews (ADR-0037; self-gate: no-op outside a diff).
+   ;; No "z a" — there is no cursor-over-file concept; `f` link-hints are the per-file toggle.
+   "z"   {"M" :view/diff-collapse-all "R" :view/diff-expand-all}
    "C-w" {"h" :focus/sidebar "l" :focus/content "w" :focus/toggle "q" :tab/close}
    "C-o" :file/open-dialog
    "C-i" :history/forward

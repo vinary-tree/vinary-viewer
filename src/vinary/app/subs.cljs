@@ -21,6 +21,8 @@
 (rf/reg-sub :pdf/view-state    (fn [db _] (get-in db [:ui :pdf])))
 (rf/reg-sub :view/zoom-percent (fn [db _] (zoom/percent db)))   ; live zoom % for the active surface (zoom bar)
 (rf/reg-sub :view/pdf-active?  (fn [db _] (= :pdf (zoom/context db))))  ; gates the PDF-only View-menu items
+(rf/reg-sub :view/diff-active? (fn [db _] (facet/diff-preview-active? db)))  ; gates the diff-only View-menu item + the Preview-combo layout rows (ADR-0037)
+(rf/reg-sub :diff/all-collapsed? (fn [db _] (facet/diff-all-collapsed? db))) ; flips the "Collapse All Files" ↔ "Expand All Files" menu label
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
@@ -232,6 +234,10 @@
 
 ;; the EFFECTIVE diff view of the active doc (:unified | :split); split is opt-in, so the default is :unified
 (rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] (fn [tab _] (nav/effective-diff-view (:diff-view tab))))
+
+;; the active tab's collapsed diff-file ids (#{} = all expanded) — re-applied to the DOM by markdown-body
+;; after every innerHTML rebuild and by the :diff/apply-collapsed fx on every state change (ADR-0037)
+(rf/reg-sub :ui/active-diff-collapsed :<- [:ui/active-tab] (fn [tab _] (get tab :diff-collapsed #{})))
 
 ;; the complete render model for the [Preview ▾ | Source ▾] toolbar combo (both buttons' modes/options/active).
 ;; Layered on ::facet-inputs + :doc/group — see the note there for why it must not be a plain db sub.

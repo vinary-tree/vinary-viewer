@@ -244,10 +244,12 @@ The `vim` keymap now mirrors Vimium for Chrome:
 
 - **`h` / `l`** scroll the content pane horizontally (`:nav/scroll-left`/`-right` → the `:dom/scroll` fx,
   which gained a `:dx` axis); `H`/`L` remain history back/forward.
-- **`f`** overlays short **alphabetic hint labels** on every link visible in the content viewport
-  (`hints/collect` finds + classifies each `a[href]`, `hints/labels` assigns uniform-length, unique labels);
-  typing a label activates that link (file → open in pane, http → web view, dir → file manager, `#anchor` →
-  scroll), `Backspace` pops a char, `Esc` cancels. A capture-phase key listener owns the keyboard only
+- **`f`** overlays short **alphabetic hint labels** on every hintable element visible in the content
+  viewport (`hints/collect` finds + classifies each `a[href]`, each `[data-path]` file/dir row, and each
+  diff file banner `.vv-diff-file-head` — the pure `classify-target` core; `hints/labels` assigns
+  uniform-length, unique labels); typing a label activates that target (file → open in pane, http → web
+  view, dir → file manager, `#anchor` → scroll, a diff banner → toggle that file's collapse via its own
+  click, ADR-0037), `Backspace` pops a char, `Esc` cancels. A capture-phase key listener owns the keyboard only
   while hints are active, so `f` itself still reaches the resolver to *start* hinting. **HTTP pages** get
   their own self-contained `f`-hint mode injected by `web-preload.js` (the web view is a separate page).
 - **`/`** opens the in-page find bar (already bound).

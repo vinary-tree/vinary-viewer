@@ -9,6 +9,7 @@
             [vinary.ir.backend.html :as ir-html]
             [vinary.renderer.markdown :as md]
             [vinary.renderer.scroll :as scroll]
+            [vinary.renderer.diff-view :as diff-view]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.cm :as cm]
             [vinary.renderer.figures :as figures]
@@ -74,6 +75,12 @@
              (let [^js el (some-> (.elementFromPoint js/document (inc x) (inc y)) (.closest "a[href]"))]
                (cond
                  el                         (.click el)
+                 ;; a diff file banner (ADR-0037): re-find by its stable vv-diff-file-N id — more robust
+                 ;; than the stamped position (survives a wheel-scroll between collect and follow) — and
+                 ;; fire its OWN click, so the hint rides the same delegated toggle branch as a mouse
+                 ;; click (one behavior source; the Bug-B2 fidelity argument above). `el` is always nil
+                 ;; here — a banner has no a[href] ancestor.
+                 (= kind :toggle)           (some-> (.getElementById js/document path) (.click))
                  ;; file/dir rows ([data-path], no href): keep :doc/open — their on-click is platform single/
                  ;; double-click gated, so a synthetic .click() would only open on single-click platforms.
                  (#{:http :file :dir} kind) (rf/dispatch [:doc/open path])
@@ -154,6 +161,12 @@
                         (when (seq sources)
                           (rf/dispatch [:diff/split-ready path (diff/split-html model sources)])))))
              (.catch (fn [_] nil))))))))
+
+;; project the per-tab collapsed diff-file set onto the mounted DOM (ADR-0037) — the state-change half;
+;; markdown-body calls the same applier synchronously after every innerHTML rebuild (the re-render half).
+(rf/reg-fx
+ :diff/apply-collapsed
+ (fn [collapsed] (diff-view/apply-collapsed! collapsed)))
 
 ;; swap the active theme stylesheet (themes are CSS-var palettes; the structural app.css references them)
 (rf/reg-fx

@@ -71,6 +71,10 @@
    ;; self-gates: a no-op when there is no other facet to switch to, e.g. a lone PDF).
    :view/toggle-source         {:id :view/toggle-source :title "Toggle preview / source" :category "View" :dispatch [:tab/toggle-source]}
    :view/toggle-diff-split     {:id :view/toggle-diff-split :title "Toggle unified / split diff" :category "View" :dispatch [:tab/toggle-diff-view]}
+   ;; diff per-file collapse (ADR-0037) — self-gate on the shown diff preview, like the toggles above;
+   ;; bound to the vim fold idiom `z M` / `z R` (vim.edn) and always reachable from the palette
+   :view/diff-collapse-all     {:id :view/diff-collapse-all :title "Collapse all diff files" :category "View" :dispatch [:diff/collapse-all]}
+   :view/diff-expand-all       {:id :view/diff-expand-all :title "Expand all diff files" :category "View" :dispatch [:diff/expand-all]}
    :theme/cycle    {:id :theme/cycle :title "Cycle theme" :category "View" :dispatch [:theme/cycle]}
    :theme/pick     {:id :theme/pick :title "Choose theme…" :category "View" :prompt :theme}
    :view/zoom-in    {:id :view/zoom-in :title "Zoom in" :category "View" :dispatch [:view/zoom 1]}

@@ -245,6 +245,9 @@
     (registry/install-for! empty-keymaps "vim")
     (is (= :normal (keymap/initial-mode)) "vim is modal → initial mode :normal")
     (is (= :hint/start (get-in (keymap/modes) [:normal "f"])) "vim's normal-mode bindings are live after install-for!")
+    ;; the vim fold idiom over a diff's per-file previews (ADR-0037): z M / z R chords
+    (is (= :view/diff-collapse-all (get-in (keymap/modes) [:normal "z" "M"])) "z M → collapse all diff files")
+    (is (= :view/diff-expand-all   (get-in (keymap/modes) [:normal "z" "R"])) "z R → expand all diff files")
     (registry/install-for! empty-keymaps "default")
     (is (= :insert (keymap/initial-mode)) "default is non-modal → initial mode :insert")))
 
@@ -566,6 +569,18 @@
           idx       (first (keep-indexed (fn [i label] (when (= "Developer Tools" label) i)) labels))]
       (is (number? idx))
       (is (= "re-frame-10x" (get labels (inc idx))))))
+  (testing "View carries the diff-only Collapse All Files toggle (ADR-0037): static default label + event,
+            dynamic label realized at the filter seam, and — with no diff active (this fake db / empty
+            DataScript) — the item is unreachable by its access key, exactly like the pdf-only items"
+    (let [view-menu (first (filter #(= "View" (:label %)) menubar/menus))
+          item      (first (filter #(= :diff-collapse-toggle (:dyn-label %)) (filter map? (:items view-menu))))]
+      (is (some? item))
+      (is (= "Collapse All Files" (:label item)) "the static default label")
+      (is (= [:diff/toggle-collapse-all] (:event item)) "one static event — the handler picks the direction")
+      (is (true? (:diff-only item)))
+      (is (= "a" (:access-key item)))
+      (is (nil? (menubar/access-action {:ui {:menu "View"}} "a"))
+          "hidden without an active diff preview → not reachable by access key")))
   (testing "Settings exposes File Type, Theme and Key Bindings as the first three submenus (ADR-0036)"
     (let [settings-menu (first (filter #(= "Settings" (:label %)) menubar/menus))]
       (is (= ["File Type" "Theme" "Key Bindings"]
@@ -674,6 +689,27 @@
     (is (= 30 (count (hints/labels 30))))
     (is (apply distinct? (hints/labels 40)) "labels unique")
     (is (= [] (hints/labels 0)))))
+
+(deftest hint-classify-target
+  ;; the pure classification core behind target-for-el (DOM-free; ADR-0037 added the diff-banner arm)
+  (testing "a diff file banner → a :toggle target keyed by its stable vv-diff-file-N id"
+    (is (= {:kind :toggle :path "vv-diff-file-2" :text "modified src/foo.txt"}
+           (hints/classify-target {:diff-head? true :id "vv-diff-file-2" :text "modified src/foo.txt"})))
+    (is (nil? (hints/classify-target {:diff-head? true :id "" :text "x"})) "a blank id is not hintable")
+    (is (nil? (hints/classify-target {:diff-head? true :id nil :text "x"}))))
+  (testing "the diff-head arm wins over a (hypothetical) co-present data-path — :toggle must never
+            reopen the document the way the :file/:dir kinds do"
+    (is (= :toggle (:kind (hints/classify-target {:diff-head? true :id "vv-diff-file-0"
+                                                  :data-path "/x" :text "t"})))))
+  (testing "file/dir rows are unchanged"
+    (is (= {:kind :file :path "/a/b.md" :text "b.md"}
+           (hints/classify-target {:data-path "/a/b.md" :dir? false :text "b.md"})))
+    (is (= {:kind :dir :path "/a" :text "a"}
+           (hints/classify-target {:data-path "/a" :dir? true :text "a"})))
+    (is (nil? (hints/classify-target {:data-path "" :dir? false :text "x"}))))
+  (testing "anchors still delegate to link/classify"
+    (is (= :http (:kind (hints/classify-target {:href "https://example.com" :text "x"}))))
+    (is (nil? (hints/classify-target {:href "" :text "x"})))))
 
 (deftest link-classify
   (is (= :http   (:kind (link/classify "https://example.com" "x"))))

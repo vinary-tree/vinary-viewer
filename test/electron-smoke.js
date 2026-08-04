@@ -759,9 +759,11 @@ async function main() {
   // runs this smoke against a release build with VV_RELEASE=1 to assert it is then absent.
   const releaseBuild = process.env.VV_RELEASE === '1';
   const viewNoPdf = await evalIn(win, `(() => { const t = document.querySelector('.vv-menu-dropdown')?.textContent || '';
-    return { fit: t.includes('Fit'), invert: t.includes('Invert PDF'), tenx: t.includes('re-frame-10x') }; })()`);
+    return { fit: t.includes('Fit'), invert: t.includes('Invert PDF'), tenx: t.includes('re-frame-10x'),
+             allFiles: t.includes('All Files') }; })()`);
   assert.strictEqual(viewNoPdf.fit, false, 'View ▸ Fit must be hidden when no PDF is active');
   assert.strictEqual(viewNoPdf.invert, false, 'View ▸ Invert PDF must be hidden when no PDF is active');
+  assert.strictEqual(viewNoPdf.allFiles, false, 'View ▸ Collapse All Files must be hidden when no diff is active (ADR-0037)');
   assert.strictEqual(viewNoPdf.tenx, !releaseBuild,
     releaseBuild ? 'View ▸ re-frame-10x must be absent in a release build' : 'View ▸ re-frame-10x present in a dev build');
   await dispatchWindowKey(win, 'Escape');
@@ -900,6 +902,8 @@ async function main() {
   await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu open (pdf active)');
   await waitFor(() => evalIn(win, `document.querySelector('.vv-menu-dropdown')?.textContent.includes('Fit')`), 'View ▸ Fit present with a PDF active');
   assert.strictEqual(await evalIn(win, `(document.querySelector('.vv-menu-dropdown')?.textContent || '').includes('Invert PDF')`), true, 'View ▸ Invert PDF present with a PDF active');
+  assert.strictEqual(await evalIn(win, `(document.querySelector('.vv-menu-dropdown')?.textContent || '').includes('All Files')`), false,
+    'View ▸ Collapse All Files stays hidden with a PDF active (the diff gate is not the pdf gate; ADR-0037)');
   assert.strictEqual(await hoverMenuItem(win, 'Fit'), true, 'View menu must have a Fit submenu with a PDF active');
   await waitFor(() => evalIn(win, `(() => { const d = document.querySelector('.vv-menu-subdropdown');
     return Boolean(d) && d.textContent.includes('Fit Width') && d.textContent.includes('Fit Page'); })()`),
@@ -947,20 +951,101 @@ async function main() {
       dataNew: insert ? (insert.getAttribute('data-new') || '') : ''
     };
   })()`);
-  assert.strictEqual(diffUnified.banners, 2, 'a multi-file diff renders one <h2> banner per file (also the Contents anchors)');
+  assert.strictEqual(diffUnified.banners, 2, 'a multi-file diff renders one banner per file (also the Contents anchors)');
   assert.ok(diffUnified.hasHunk, 'the unified view renders the @@ hunk header');
   assert.ok(/hello/.test(diffUnified.insertText) && diffUnified.insertText.startsWith('+'), 'the inserted line renders with its + marker');
   assert.ok(/hi /.test(diffUnified.deleteText) && diffUnified.deleteText.startsWith('-'), 'the deleted line renders with its - marker');
   assert.ok(diffUnified.dataNew && Number(diffUnified.dataNew) > 0, 'the insert line carries a data-new gutter number');
   console.log('[ok] diff renders a colored, multi-file unified view with gutter line numbers');
 
-  // toggle to the side-by-side split view via the toolbar's [Unified | Split] control
-  const clickedSplit = await evalIn(win, `(() => {
-    const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Split');
-    if (b) b.click();
-    return Boolean(b);
+  // ── collapsible per-file previews (ADR-0037): each file is <details class="vv-diff-file" open> whose
+  //    <summary> banner toggles it; state is per-tab and re-applied after every innerHTML rebuild ──
+  const detailsState = () => evalIn(win, `(() =>
+    Array.from(document.querySelectorAll('.vv-content details.vv-diff-file')).map(d => ({
+      id: (d.querySelector('summary.vv-diff-file-head') || {}).id, open: d.open })))()`);
+  {
+    const ds0 = await detailsState();
+    assert.strictEqual(ds0.length, 2, 'each diff file renders as a details.vv-diff-file wrapper');
+    assert.ok(ds0.every(d => d.open), 'files render expanded by default');
+    assert.deepStrictEqual(ds0.map(d => d.id), ['vv-diff-file-0', 'vv-diff-file-1'],
+      'the summaries carry the canonical vv-diff-file-N ids');
+  }
+  // clicking the banner collapses that ONE file (the delegated branch preventDefaults the native toggle)
+  await evalIn(win, `document.getElementById('vv-diff-file-0').click()`);
+  await waitFor(async () => {
+    const ds = await detailsState();
+    return ds.length === 2 && ds[0].open === false && ds[1].open === true;
+  }, 'a banner click collapses its own file only', 8000);
+  await evalIn(win, `document.getElementById('vv-diff-file-0').click()`);
+  await waitFor(async () => (await detailsState()).every(d => d.open), 'clicking again expands it', 8000);
+  console.log('[ok] a diff file banner click toggles that file preview (ADR-0037)');
+
+  // Platform-regime pin (ADR-0037 — the find-over-collapsed doc wording rests on it): this Chromium hides
+  // a closed <details>' body via content-visibility on an internal slot, so the CHILDREN's computed style
+  // stays display:block/visible — the find walker (which prunes only display:none/visibility:hidden
+  // subtrees) therefore still MATCHES text inside a collapsed file, with the highlight invisible until it
+  // expands (docs/features/28-diff-rendering.md states exactly that). If a Chromium upgrade flips back to
+  // the legacy UA `display:none` rule, this assertion fails on purpose: update the doc wording with it.
+  const closedRegime = await evalIn(win, `(() => {
+    const d = document.getElementById('vv-diff-file-0').closest('details');
+    const wasOpen = d.open; d.open = false;
+    const line = d.querySelector('.vv-diff-line');
+    const cs = getComputedStyle(line);
+    const out = { display: cs.display, visibility: cs.visibility };
+    d.open = wasOpen;
+    return out;
   })()`);
-  assert.strictEqual(clickedSplit, true, 'the [Unified | Split] toolbar control is present for a diff');
+  assert.notStrictEqual(closedRegime.display, 'none',
+    'closed-details children are hidden via content-visibility (NOT display:none) — the find-over-collapsed doc wording depends on this');
+  assert.strictEqual(closedRegime.visibility, 'visible',
+    'closed-details children keep visibility:visible — same reason');
+  console.log('[ok] closed-details child regime pinned (content-visibility hiding — find still matches inside collapsed files)');
+
+  // View ▸ Collapse All Files — the diff-only single toggling item: label flips to "Expand All Files"
+  // once every file is collapsed, and back
+  const clickViewItem = (label) => evalIn(win, `(() => {
+    const it = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item'))
+      .find(el => el.textContent.includes(${JSON.stringify(label)}));
+    if (it) it.click();
+    return Boolean(it);
+  })()`);
+  await dispatchWindowKey(win, 'v', { altKey: true });
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.menu === 'View'`), 'View menu opens with a diff active');
+  await waitFor(() => evalIn(win, `(document.querySelector('.vv-menu-dropdown')?.textContent || '').includes('Collapse All Files')`),
+    'the diff-only Collapse All Files item is present with a diff active');
+  assert.strictEqual(await clickViewItem('Collapse All Files'), true, 'Collapse All Files is clickable');
+  await waitFor(async () => (await detailsState()).every(d => d.open === false), 'Collapse All collapses every file', 8000);
+  await dispatchWindowKey(win, 'v', { altKey: true });
+  await waitFor(() => evalIn(win, `(document.querySelector('.vv-menu-dropdown')?.textContent || '').includes('Expand All Files')`),
+    'the item label flips to Expand All Files once everything is collapsed');
+  assert.strictEqual(await clickViewItem('Expand All Files'), true, 'Expand All Files is clickable');
+  await waitFor(async () => (await detailsState()).every(d => d.open === true), 'Expand All expands every file', 8000);
+  console.log('[ok] View ▸ Collapse/Expand All Files toggles every diff file (dynamic label, diff-only)');
+
+  // ── the diff layout choice lives in the Preview combo's caret menu now (ADR-0037; the [Unified | Split]
+  //    seg control is retired). A lone diff's menu is exactly [Unified, Split]; picks fire on MOUSE-DOWN. ──
+  // collapse file 0 first, so the collapsed state can be shown to survive the layout switch
+  await evalIn(win, `document.getElementById('vv-diff-file-0').click()`);
+  await waitFor(async () => (await detailsState())[0].open === false, 'file 0 collapsed before the layout switch', 8000);
+  const openComboMenu = async () => {
+    await evalIn(win, `document.querySelector('.vv-combo-caret').click()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-combo-menu'))`), 'the Preview caret menu opens');
+    return evalIn(win, `Array.from(document.querySelectorAll('.vv-combo-menu .vv-combo-opt')).map(li => li.textContent.trim())`);
+  };
+  const pickCombo = (label) => evalIn(win, `(() => {
+    const li = Array.from(document.querySelectorAll('.vv-combo-menu .vv-combo-opt'))
+      .find(el => el.textContent.trim() === ${JSON.stringify(label)});
+    if (li) li.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    return Boolean(li);
+  })()`);
+  {
+    const rows = await openComboMenu();
+    assert.deepStrictEqual(rows, ['Unified', 'Split'],
+      'a lone diff\'s Preview caret menu is exactly the two layout rows (no redundant file row, no divider)');
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-combo-menu .vv-combo-sep').length`), 0,
+      'no divider for a lone diff');
+    assert.strictEqual(await pickCombo('Split'), true, 'the Split row picks on mouse-down');
+  }
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-diff-splitview .vv-diff-row'))`),
     'the split (side-by-side) view renders two-column rows', 8000
@@ -971,18 +1056,70 @@ async function main() {
     text: document.querySelector('.vv-diff-splitview').textContent
   }))()`);
   assert.ok(split.hasOld && split.hasNew, 'the split view has old and new side columns');
-  // enrichment: the staged on-disk file contributes context lines BEYOND the hunk window
+  // enrichment: the staged on-disk file contributes context lines BEYOND the hunk window (textContent
+  // includes a collapsed details' hidden children, so file 0's enrichment is still assertable)
   assert.ok(/VERSION/.test(split.text) && /module\.exports/.test(split.text),
     'the split view is enriched with full-file context from the on-disk source (beyond the diff hunk)');
-  console.log('[ok] diff split view renders side-by-side and enriches from the on-disk source file');
+  // the per-tab collapsed set survives the unified→split remount (both views share the id space)
+  {
+    const ds = await detailsState();
+    assert.strictEqual(ds.length, 2, 'the split view renders the same details.vv-diff-file wrappers');
+    assert.strictEqual(ds[0].open, false, 'file 0 stays collapsed across the layout switch');
+    assert.strictEqual(ds[1].open, true, 'file 1 stays expanded across the layout switch');
+  }
+  console.log('[ok] Preview▾ Split renders side-by-side, enriches from disk, and keeps the collapsed set');
 
-  // toggle back to unified
-  await evalIn(win, `(() => { const b = Array.from(document.querySelectorAll('.vv-seg-btn')).find(x => x.textContent.trim() === 'Unified'); if (b) b.click(); })()`);
+  // back to unified via the combo; the collapsed set survives again, then expand file 0 for the tests below
+  {
+    const rows = await openComboMenu();
+    assert.ok(rows.includes('Unified'), 'the caret menu offers Unified in the split view too');
+    assert.strictEqual(await pickCombo('Unified'), true);
+  }
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-line')) && !document.querySelector('.vv-diff-splitview')`),
-    'toggling back shows the unified view', 8000
+    'picking Unified shows the unified view', 8000
   );
-  console.log('[ok] the [Unified | Split] toggle switches diff layouts');
+  await waitFor(async () => (await detailsState())[0].open === false, 'file 0 still collapsed back in unified', 8000);
+  await evalIn(win, `document.getElementById('vv-diff-file-0').click()`);
+  await waitFor(async () => (await detailsState()).every(d => d.open), 'file 0 re-expanded', 8000);
+  console.log('[ok] the Preview combo caret switches diff layouts (seg control retired) and collapse state survives');
+
+  // ── Vim f-hints treat the banners as :toggle targets: typing a banner's label clicks it (ADR-0037) ──
+  win.webContents.send('vv:keymap', '{:active "vim" :order [] :sets {}}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'vim'`), 'vim keymap active for the diff hint drive');
+  await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); if (c) c.focus(); })()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.input['in-input?']`), ':in-input? cleared before the diff f');
+  await dispatchWindowKey(win, 'f');
+  await waitFor(() => evalIn(win, `Boolean(window.__vvdb().ui.hints && window.__vvdb().ui.hints['active?'])`),
+    'f activates hint mode over a diff (the banners are targets)');
+  const diffHint = await evalIn(win, `(() => {
+    const ts = (window.__vvdb().ui.hints && window.__vvdb().ui.hints.targets) || [];
+    const t = ts.find(t => t.kind === 'toggle' && (t.text || '').indexOf('greet.js') >= 0);
+    return t ? { label: t.label, path: t.path } : null;
+  })()`);
+  assert.ok(diffHint && diffHint.path === 'vv-diff-file-0', 'the greet.js banner is a :toggle hint target keyed by its id');
+  for (const ch of diffHint.label) { await dispatchWindowKey(win, ch); await delay(20); }
+  await waitFor(async () => (await detailsState())[0].open === false,
+    'typing the banner hint label toggles its file (rides the same click branch)', 8000);
+  await evalIn(win, `document.getElementById('vv-diff-file-0').click()`);   // restore expanded
+  win.webContents.send('vv:keymap', null);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'default'`), 'default keymap restored after the diff hint drive');
+  await delay(60);
+  console.log('[ok] Vim f-hints toggle diff file previews via their banners (ADR-0037)');
+
+  // ── vim z M / z R fold chords collapse/expand every file (self-gated on the diff preview) ──
+  win.webContents.send('vv:keymap', '{:active "vim" :order [] :sets {}}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'vim'`), 'vim keymap active for the fold chords');
+  await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); if (c) c.focus(); })()`);
+  await waitFor(() => evalIn(win, `!window.__vvdb().ui.input['in-input?']`), ':in-input? cleared before z M');
+  await dispatchWindowKey(win, 'z'); await delay(30); await dispatchWindowKey(win, 'M');
+  await waitFor(async () => (await detailsState()).every(d => d.open === false), 'z M collapses every file', 8000);
+  await dispatchWindowKey(win, 'z'); await delay(30); await dispatchWindowKey(win, 'R');
+  await waitFor(async () => (await detailsState()).every(d => d.open === true), 'z R expands every file', 8000);
+  win.webContents.send('vv:keymap', null);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'default'`), 'default keymap restored after the fold chords');
+  await delay(60);
+  console.log('[ok] vim z M / z R collapse and expand all diff files');
 
   // ── Settings ▸ File Type (ADR-0036): the menu re-types the SHOWN document in place ──
   // Drives the REAL menu DOM (Settings → File Type flyout → row click) so the whole renderer half is

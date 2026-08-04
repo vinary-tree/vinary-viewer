@@ -154,3 +154,30 @@
   "The active tab's current view type — `:preview` or `:source`."
   [db]
   (:type (resolve-facet db)))
+
+;; ── diff-view gates (ADR-0037) ───────────────────────────────────────────────────────────────────────────
+;; The single definition of "a diff PREVIEW is what the pane shows" — shared by the View-menu :diff-only
+;; gate (render + keyboard paths), the Preview-combo layout rows, and the collapse events' self-gating,
+;; exactly as zoom/context is the one definition behind the :pdf-only items. All fns are nil-safe on an
+;; empty/fake db (the node tests drive the menubar with one).
+
+(defn diff-preview-active?
+  "Is the active tab showing a diff's rendered preview (kind \"diff\" AND not its raw-source facet)? The
+   same condition the `[Preview ▾]` layout rows use."
+  [db]
+  (boolean
+   (and (= "diff" (some->> (active-content-path db) (#(ds/doc-attr (ds/snapshot) % :doc/kind))))
+        (not= :source (active-type db)))))
+
+(defn diff-file-ids
+  "The shown diff's `vv-diff-file-N` ids, in order — read from its Contents outline (`:doc/toc`), never
+   the DOM. [] when no diff (or its toc has not arrived yet)."
+  [db]
+  (into [] (keep :id) (some->> (active-content-path db) (#(ds/doc-attr (ds/snapshot) % :doc/toc)))))
+
+(defn diff-all-collapsed?
+  "Are ALL of the shown diff's files collapsed? Drives the View-menu label flip (\"Collapse All Files\" ↔
+   \"Expand All Files\"). false while the file list is empty/unknown."
+  [db]
+  (let [ids (diff-file-ids db)]
+    (boolean (and (seq ids) (every? (nav/diff-collapsed db) ids)))))

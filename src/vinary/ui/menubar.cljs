@@ -41,6 +41,10 @@
             {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-only true}
             {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle] :pdf-only true}
             {:label "Reflow Text"       :access-key "r" :event [:pdf/reflow-toggle] :pdf-only true}
+            ;; diff-only (ADR-0037): ONE toggling item — realize-item flips its label to "Expand All
+            ;; Files" once every file is collapsed; the static :event picks the right direction itself.
+            {:label "Collapse All Files" :dyn-label :diff-collapse-toggle :access-key "a"
+             :event [:diff/toggle-collapse-all] :diff-only true}
             :sep
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
             {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x] :dev-only true}]}
@@ -120,19 +124,35 @@
   [src]
   (radio-rows-from-db @rfdb/app-db src))
 
-;; ---- PDF-only / dev-only View-menu items -------------------------------------------------------
-;; The Fit submenu + Invert PDF apply only to a PDF; re-frame-10x exists only in dev builds (its runtime
-;; is stripped from :release, so the item was a silent no-op there). Both are filtered from the View menu
-;; — for rendering AND keyboard nav/access-keys — so the two paths stay consistent. The render passes the
-;; :view/pdf-active? sub value; the event/keyboard path reads app-db directly (no reactivity needed there).
-(defn- pdf-active-now? [] (= :pdf (zoom/context @rfdb/app-db)))
+;; ---- conditional (PDF-only / diff-only / dev-only) View-menu items + dynamic labels ------------
+;; The Fit submenu + Invert PDF apply only to a PDF; Collapse/Expand All Files only to a diff preview
+;; (ADR-0037); re-frame-10x exists only in dev builds (its runtime is stripped from :release, so the item
+;; was a silent no-op there). All are filtered — and dynamic labels realized — from the View menu at the
+;; ONE seam (filter-items) both the render path (effective-menus, ctx from subs) and the event/keyboard
+;; path (open-menu-spec → access-action / arrow-nav, ctx read from app-db) flow through, so the two paths
+;; can never disagree about what an item is called or whether it exists.
+;; (pdf-active-now? was the single-gate predecessor of menu-ctx-now — folded in, not duplicated.)
+(defn- menu-ctx-now []
+  (let [db @rfdb/app-db]
+    {:pdf?  (= :pdf (zoom/context db))
+     :diff? (facet/diff-preview-active? db)
+     :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
-(defn- item-visible? [pdf? item]
+(defn- item-visible? [ctx item]
   (cond
     (not (map? item)) true                     ; :sep — kept here, tidied by clean-seps
-    (:pdf-only item)  pdf?
+    (:pdf-only item)  (:pdf? ctx)
+    (:diff-only item) (:diff? ctx)
     (:dev-only item)  ^boolean js/goog.DEBUG    ; false in :release → re-frame-10x hidden there
     :else             true))
+
+(defn- realize-item
+  "Realize a dynamic item label from the menu ctx. The item keeps a STATIC default :label (raw-`menus`
+   readers and tests stay sane) and a static :event — only its displayed name flips."
+  [ctx item]
+  (if (and (map? item) (= :diff-collapse-toggle (:dyn-label item)))
+    (assoc item :label (if (:diff-all-collapsed? ctx) "Expand All Files" "Collapse All Files"))
+    item))
 
 (defn- clean-seps
   "Drop separators left leading, trailing, or consecutive by item filtering."
@@ -142,10 +162,13 @@
                      [] items)]
     (if (= :sep (peek kept)) (pop kept) kept)))
 
-(defn- filter-items [pdf? menu]
-  (update menu :items (fn [items] (clean-seps (filterv #(item-visible? pdf? %) items)))))
+(defn- filter-items [ctx menu]
+  (update menu :items
+          (fn [items]
+            (clean-seps (mapv (partial realize-item ctx)
+                              (filterv (partial item-visible? ctx) items))))))
 
-(defn- effective-menus [pdf?] (mapv #(filter-items pdf? %) menus))
+(defn- effective-menus [ctx] (mapv #(filter-items ctx %) menus))
 
 (defn- menu-index [label]
   (first (keep-indexed (fn [idx m] (when (= (:label m) label) idx)) menus)))
@@ -158,7 +181,7 @@
   (some (fn [m] (when (access/match? (:access-key m) k) m)) menus))
 
 (defn- open-menu-spec [label]
-  (some (fn [m] (when (= (:label m) label) (filter-items (pdf-active-now?) m))) menus))
+  (some (fn [m] (when (= (:label m) label) (filter-items (menu-ctx-now) m))) menus))
 
 (defn- submenu-spec [menu submenu]
   (some (fn [item] (when (and (map? item) (= (:submenu item) submenu)) item)) (:items menu)))
@@ -415,9 +438,12 @@
         focus @(rf/subscribe [:ui/menu-focus])
         sub-focus @(rf/subscribe [:ui/menu-submenu-focus])
         access-active? @(rf/subscribe [:ui/access-keys-active?])
-        pdf? @(rf/subscribe [:view/pdf-active?])
+        ;; the reactive render-side twin of menu-ctx-now (the keyboard path reads app-db directly)
+        ctx {:pdf?  @(rf/subscribe [:view/pdf-active?])
+             :diff? @(rf/subscribe [:view/diff-active?])
+             :diff-all-collapsed? @(rf/subscribe [:diff/all-collapsed?])}
         root (cond-> [:div.vv-menubar {:role "menubar"}]
                open (conj [:div.vv-menu-overlay {:on-click #(rf/dispatch [:menu/close])}]))]
     (into root
           (map (fn [menu] (top-menu open sub-open focus sub-focus access-active? menu)))
-          (effective-menus pdf?))))
+          (effective-menus ctx))))

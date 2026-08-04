@@ -1,6 +1,8 @@
 # 0026 — Diff (`.diff`/`.patch`) rendering + side-by-side, standard repo filetypes, and the reverse PDF↔source switch
 
-- **Status:** Accepted
+- **Status:** Accepted — amended by [0037](0037-collapsible-diff-file-previews.md) (the unified view's
+  per-file structure gained a collapsible `<details>` wrapper, and the `[Unified | Split]` seg control
+  moved into the Preview combo's caret menu)
 - **Date:** 2026-07-10
 - **Deciders:** Vinary Tree (maintainer)
 

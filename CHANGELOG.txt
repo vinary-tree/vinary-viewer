@@ -14,6 +14,23 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Collapsible per-file diff previews (ADR-0037), in BOTH layouts: click a file's
+      banner to toggle that file (the banner is a <summary> now; each file is a
+      controlled <details class="vv-diff-file"> wrapper emitted by the shared IR --
+      byte-identical ANSI for --cli/--tui at the diff separator, TUI Contents-jump
+      anchors preserved via IR-meta ids, both pinned by golden tests). The per-tab
+      collapsed set survives tab switches, live refreshes, the unified<->split flip,
+      and the split view's async enrichment (state is re-projected onto the rebuilt
+      innerHTML before paint); it clears when the tab navigates to a different
+      document (the vv-diff-file-N ids are positional). View > Collapse All Files --
+      one diff-only menu item whose label flips to "Expand All Files" once everything
+      is collapsed -- plus palette commands Collapse/Expand all diff files, the vim
+      fold chords `z M` / `z R`, and vim `f` link-hints now treat the banners as
+      targets (typing a banner's label toggles it via its own click). A Contents
+      click on a collapsed file auto-expands it before scrolling; in-page find still
+      matches inside collapsed files (highlights show once expanded). See
+      docs/features/28-diff-rendering.md "Collapsible file previews" and
+      docs/design-decisions/0037-collapsible-diff-file-previews.md.
     - Piped-stdin documents and explicit file types (ADR-0036), uniformly across all
       three interfaces (GUI, --cli, --tui -- one shared core, presentation aside).
       `git diff | vv -t diff` is the primary use case: piped input becomes the FIRST
@@ -141,6 +158,12 @@ Added
       Markdown and Org too.
 
 Changed
+    - The diff layout choice (Unified / Split) moved INTO the Preview combo's caret
+      menu (ADR-0037): a lone diff's Preview menu is exactly [Unified, Split]
+      (check-marked by the effective layout); a diff in a collocated group lists its
+      file rows, a separator, then the layout rows. The standalone [Unified | Split]
+      segmented toolbar control was removed in the combo's favor (user-requested
+      consolidation; Ctrl+Shift+B and the palette toggle are unchanged).
     - BREAKING (vv --cli): `-t` no longer means `--toc` -- it is the short form of
       `--type` uniformly across vv, --cli, and --tui (ADR-0036). `--toc` is long-only now.
     - Deferral and matching each got one implementation instead of five. Four hand-rolled

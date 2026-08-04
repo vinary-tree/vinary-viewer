@@ -66,7 +66,8 @@ stable actions available across the current UI include:
 | Scroll the pane | **Bare arrow keys** (`↑`/`↓`/`←`/`→`), plus keymap commands backed by `:nav/scroll` (Vim `j`/`k`, page/half). All are smooth — see below. |
 | Toggle sidebar | Command backed by `:sidebar/toggle`. |
 | Open command palette | Command backed by palette state and command registry. |
-| Link hints | `f` in Vim normal mode. |
+| Link hints | `f` in Vim normal mode. Targets are links, file/dir rows, and — in a diff — the file banners: typing a banner's label toggles that file's collapse (ADR-0037). |
+| Collapse/expand all diff files | Vim `z M` / `z R` (the fold idiom; no-ops outside a diff). Also View ▸ Collapse All Files (label flips to Expand All Files) and the palette commands **Collapse/Expand all diff files**. |
 
 Use the visual editor for the authoritative active binding list; it reads the
 same registry the resolver uses.

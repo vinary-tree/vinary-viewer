@@ -11,6 +11,7 @@
             [vinary.renderer.math :as math]
             [vinary.renderer.markdown :as md]
             [vinary.ir.backend.html :as ir-html]
+            [vinary.renderer.diff-view :as diff-view]
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
@@ -200,7 +201,16 @@
             (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
               (when-let [event (preview-nav/open-event target new-tab?)]
                 (rf/dispatch event))))]
-    (let [on-click (fn [^js e] (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e)))
+    (let [on-click (fn [^js e]
+                     ;; a diff file banner toggles its file's collapse (ADR-0037). preventDefault cancels the
+                     ;; NATIVE <details> toggle so per-tab STATE owns openness (re-applied after every rebuild);
+                     ;; real clicks, keyboard summary activation, and the link-hints' synthetic .click() all
+                     ;; land here — one behavior source. Banners are never <a> descendants, so the branches
+                     ;; are disjoint (and gap summaries carry a different class — they stay native).
+                     (if-let [^js h (.closest (.-target e) ".vv-diff-file-head")]
+                       (do (.preventDefault e)
+                           (rf/dispatch [:diff/toggle-file (.-id h)]))
+                       (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e))))
           on-aux   (fn [^js e] (when (= 1 (.-button e))
                                  (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
           on-over  (fn [^js e]
@@ -281,6 +291,12 @@
                        (let [token (swap! render-token inc)]
                          (reset! html* html)
                          (set-inner! @node html)
+                         ;; project the per-tab collapsed diff-file set onto the fresh DOM (ADR-0037) —
+                         ;; SYNCHRONOUSLY, before paint (no expanded-flash) and before the rAF'd scroll
+                         ;; restore measures the layout. Covers the live-refresh remount, tab-switch-back
+                         ;; mount, unified⇄split remount, and the split-enrichment in-place swap. A cheap
+                         ;; no-op for non-diff bodies; sub-deref in a callback = the refresh-toc! idiom.
+                         (diff-view/apply-collapsed! @node @(rf/subscribe [:ui/active-diff-collapsed]))
                          ;; a remote doc's ssh:// media URLs can't be reached by the renderer or file:// — fetch
                          ;; their bytes over the vv bridge and inline them as data: URLs (best-effort, async)
                          (when (media/remote-url? @path*)
@@ -1235,49 +1251,81 @@
                       [^{:key (str "sep" path)} [:span.vv-crumb-sep "›"] crumb])))
                 (uri/segments active-uri)))))
 
-(defn- seg-button [active? label title on-click]
-  [:button.vv-seg-btn {:class (when active? "vv-seg-active") :title title :on-click on-click} label])
-
 (defn combo-button
   "A split/combo toolbar button (modeled on the zoom caret): a MAIN region that runs `on-main`, plus — for ≥2
-   `options` — a vertical divider + down-caret that opens a menu of the type's files. A single option renders as a
-   plain button (no divider/caret/menu). Local open-state closes on mouse-leave or on a pick (`:on-mouse-down` +
-   preventDefault so the click lands before blur). `active?` highlights the button when its type is the shown one;
-   the currently-shown file's menu row is checked."
+   `options` — a vertical divider + down-caret that opens a menu. A single option renders as a plain button
+   (no divider/caret/menu) unless `:mode :combo` forces the caret (the diff Preview button: its menu holds
+   LAYOUT rows even for a lone file — ADR-0037). Local open-state closes on mouse-leave or on a pick
+   (`:on-mouse-down` + preventDefault so the click lands before blur). `active?` highlights the button when
+   its type is the shown one; the currently-shown row is checked.
+
+   Option rows:
+     {:path p :label l :active? b}              — a file row; a pick calls (on-select p)
+     {:key k :label l :active? b :on-pick f}    — a self-dispatching row (the diff Unified/Split layouts)
+     {:divider? true :key k}                    — a separator between row groups
+   `:caret-title` overrides the caret tooltip (default: choosing a file)."
   [_props]
   (let [open? (r/atom false)]
-    (fn [{:keys [label active? title mode on-main options on-select]}]
+    (fn [{:keys [label active? title mode on-main options on-select caret-title]}]
       (if (= mode :plain)
         [:button.vv-combo-plain {:class (when active? "vv-combo-active") :title title :on-click on-main} label]
         [:div.vv-combo {:on-mouse-leave #(reset! open? false)}
          [:button.vv-combo-main {:class (when active? "vv-combo-active") :title title :on-click on-main} label]
-         [:button.vv-combo-caret {:class (when active? "vv-combo-active") :title "Choose the file to show"
+         [:button.vv-combo-caret {:class (when active? "vv-combo-active")
+                                  :title (or caret-title "Choose the file to show")
                                   :aria-haspopup "menu" :on-click #(swap! open? not)} "▾"]
          (when @open?
-           [:ul.vv-combo-menu {:role "menu"}
-            (for [{:keys [path] opt-label :label opt-active? :active?} options]
-              ^{:key path}
-              [:li.vv-combo-opt {:role "menuitem"
-                                 :class (when opt-active? "vv-combo-opt-sel")
-                                 :on-mouse-down (fn [^js e] (.preventDefault e) (reset! open? false) (on-select path))}
-               opt-label])])]))))
+           (into [:ul.vv-combo-menu {:role "menu"}]
+                 (for [{:keys [path key divider? on-pick] opt-label :label opt-active? :active?} options]
+                   (if divider?
+                     ^{:key key} [:li.vv-combo-sep {:role "separator"}]
+                     ^{:key (or key path)}
+                     [:li.vv-combo-opt {:role "menuitem"
+                                        :class (when opt-active? "vv-combo-opt-sel")
+                                        :on-mouse-down (fn [^js e]
+                                                         (.preventDefault e)
+                                                         (reset! open? false)
+                                                         (if on-pick (on-pick) (on-select path)))}
+                      opt-label]))))]))))
 
 (defn view-switch
   "The [Preview ▾ | Source ▾] combo pair for a document with collocated representations. Each button is plain (one
    option) or a combo (several); a type with no options is omitted. Driven entirely by the :view/switch VM
-   (vinary.app.facet/view-model). MAIN region → activate the type's main target; a menu pick → show that file."
+   (vinary.app.facet/view-model). MAIN region → activate the type's main target; a menu pick → show that file.
+
+   For a shown DIFF preview (ADR-0037) the Preview button additionally carries the diff's LAYOUT rows —
+   Unified / Split — in its caret menu, replacing the retired [Unified | Split] seg control: a lone diff's
+   menu is exactly those two rows (its single redundant file row is suppressed, combo mode forced so the
+   caret exists); a diff in a collocated group lists its file rows, a divider, then the layout rows. This
+   is a UI-layer injection — the facet VM (vinary.app.facet) stays content-agnostic."
   []
   (let [{:keys [active-type preview source]} @(rf/subscribe [:view/switch])
-        id  @(rf/subscribe [:ui/active-tab-id])
+        id    @(rf/subscribe [:ui/active-tab-id])
+        diff? @(rf/subscribe [:view/diff-active?])
+        dv    @(rf/subscribe [:ui/active-diff-view])
+        layout-rows [{:key "diff-unified" :label "Unified" :active? (= dv :unified)
+                      :on-pick #(rf/dispatch [:tab/set-diff-view id :unified])}
+                     {:key "diff-split" :label "Split" :active? (= dv :split)
+                      :on-pick #(rf/dispatch [:tab/set-diff-view id :split])}]
         btn (fn [type {:keys [mode main-path options]} label]
-              (when (not= mode :hidden)
-                [combo-button {:label     label
-                               :active?   (= type active-type)
-                               :title     (str "Show the " label)
-                               :mode      mode
-                               :on-main   #(when main-path (rf/dispatch [:tab/activate-facet-type id type]))
-                               :options   options
-                               :on-select (fn [path] (rf/dispatch [:tab/set-facet id path type]))}]))]
+              (let [diff-preview? (and diff? (= type :preview))
+                    files         (vec options)
+                    multi?        (> (count files) 1)
+                    options'      (if diff-preview?
+                                    (cond-> (if multi? files [])
+                                      multi? (conj {:divider? true :key "diff-sep"})
+                                      true   (into layout-rows))
+                                    files)
+                    mode'         (if diff-preview? :combo mode)]
+                (when (not= mode :hidden)
+                  [combo-button {:label     label
+                                 :active?   (= type active-type)
+                                 :title     (str "Show the " label)
+                                 :mode      mode'
+                                 :caret-title (when diff-preview? "Choose the file or diff layout")
+                                 :on-main   #(when main-path (rf/dispatch [:tab/activate-facet-type id type]))
+                                 :options   options'
+                                 :on-select (fn [path] (rf/dispatch [:tab/set-facet id path type]))}])))]
     [:div.vv-combo-group {:role "group" :aria-label "View"}
      (btn :preview preview "Preview")
      (btn :source source "Source")]))
@@ -1285,22 +1333,11 @@
 (defn view-switch-toolbar
   "The toolbar's view controls: the [Preview ▾ | Source ▾] combo — shown only when the active document has
    something to toggle (facet/show-view-switch?: a source to view, or ≥2 previews; a lone PDF or office file shows
-   nothing) — plus the orthogonal [Unified | Split] control for a diff's layout. Renders nothing otherwise."
+   nothing). A diff's Unified/Split layout choice lives INSIDE the Preview combo's caret menu (ADR-0037 —
+   the former [Unified | Split] seg control is retired). Renders nothing otherwise."
   []
-  (let [show? (:show? @(rf/subscribe [:view/switch]))
-        kind  @(rf/subscribe [:doc/kind])
-        vs?   @(rf/subscribe [:ui/active-view-source?])
-        dv    @(rf/subscribe [:ui/active-diff-view])
-        id    @(rf/subscribe [:ui/active-tab-id])]
-    [:<>
-     (when show? [view-switch])
-     ;; [Unified | Split] — a diff's layout (hidden while viewing the raw source text)
-     (when (and (= "diff" kind) (not vs?))
-       [:div.vv-seg {:role "group" :aria-label "Diff layout"}
-        [seg-button (= dv :unified) "Unified" "Show the unified (single-column) diff"
-         #(when (not= dv :unified) (rf/dispatch [:tab/set-diff-view id :unified]))]
-        [seg-button (= dv :split) "Split" "Show the side-by-side diff"
-         #(when (not= dv :split) (rf/dispatch [:tab/set-diff-view id :split]))]])]))
+  (let [show? (:show? @(rf/subscribe [:view/switch]))]
+    (when show? [view-switch])))
 
 (defn uri-bar
   "Browser-style nav row: back / forward / reload + the address bar. The input shows the active tab's

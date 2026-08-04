@@ -100,7 +100,7 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:toc/goto` | fx | `id` | — | — | `[:toc/scroll id]` |
+| `:toc/goto` | fx | `id` | active tab (diff collapsed set) | tab `:diff-collapsed` (auto-expand) | `[:toc/scroll id]`; a Contents click on a COLLAPSED diff file first auto-expands it — `[:diff/apply-collapsed …]` is ordered before the scroll so the offset measures the expanded layout (ADR-0037) |
 | `:toc/active-heading` | db | `id` | — | `:ui :active-heading` ← id | — |
 
 ### 1.9 Sidebar & focus / scroll commands **[input]**
@@ -203,7 +203,10 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | `:tab/toggle-representation` | — | Flip `:document` ↔ `:pdf` (toolbar segmented control / command palette). |
 | `:tab/open-representation-source` | — | From a PDF, navigate to its collocated **source** document, forcing `:representation :document`. |
 | `:tab/toggle-source` | — | Flip the tab's `:view-source?` — Preview ↔ Source (`Ctrl+Shift+D` / `Ctrl+Shift+S`). |
-| `:tab/set-diff-view` | `:unified` \| `:split` | Set a diff tab's `:diff-view`. |
+| `:tab/set-diff-view` | `:unified` \| `:split` | Set a diff tab's `:diff-view` (picked from the Preview combo's caret layout rows — ADR-0037). |
+| `:diff/toggle-file` | `file-id` | Flip one diff file's collapsed state (its `vv-diff-file-N` summary id) in the tab's `:diff-collapsed` set — the banner-click / hint-activation event; self-gated on the shown diff preview; fires `[:diff/apply-collapsed …]` (ADR-0037). |
+| `:diff/collapse-all` / `:diff/expand-all` | — | Collapse (ids from the diff's `:doc/toc` outline — never the DOM) / expand every file; self-gated; palette **Collapse/Expand all diff files**, vim `z M` / `z R`. |
+| `:diff/toggle-collapse-all` | — | The View-menu item's single static event: dispatches expand-all iff everything is collapsed (the same predicate flips the item's dynamic label). |
 | `:tab/toggle-diff-view` | — | Flip Unified ↔ Split; entering Split requests the on-disk pre/post sources over the `vv:load-diff-sources` IPC **invoke** (there is no `reg-fx` for it), whose result returns as `[:diff/split-ready …]`. |
 | `:diff/split-ready` | `{:path :html}` | The enriched side-by-side HTML arrived → stored as `:doc/diff-split-html`. |
 | `:pdf/sibling-ready` | `{:path :bytes}` | The sibling PDF's bytes arrived (over `vv:load-pdf-bytes`) → cached for the pdf view. |
@@ -336,8 +339,9 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/ext-check-updates` | — | trigger a Web-Store update check | `[:ext/update-result …]` |
 | `:vv/ext-action-clicked` / `:vv/ext-popup-close` | `{:id :popup :bounds}` / — | open / close a browser-action popup | — |
 | `:vv/adblock-set-enabled` / `:vv/adblock-set-lists` / `:vv/adblock-refresh` | bool / keyword / — | toggle / configure / refresh the ad-blocker | — (status returns on `vv:adblock-status`) |
-| `:hints/collect` | — | scan the visible surface for link targets and assign Vimium-style hint labels | — |
-| `:hints/follow` | target | activate the hinted link | — |
+| `:hints/collect` | — | scan the visible surface for hint targets (`a[href]`, `[data-path]` rows, and diff file banners `.vv-diff-file-head` — ADR-0037) and assign Vimium-style labels | — |
+| `:hints/follow` | target | activate the hinted target: an anchor's real `.click()`; `:file`/`:dir` → `[:doc/open]`; a diff banner's `:toggle` → `getElementById` + `.click()` (rides the same delegated collapse branch as a mouse click) | — |
+| `:diff/apply-collapsed` | collapsed-id set | project the per-tab `:diff-collapsed` set onto the mounted `details.vv-diff-file` wrappers (the state-change half; `markdown-body` re-applies the same helper synchronously after every innerHTML rebuild — ADR-0037) | — |
 | `:vv/zoom` / `:vv/zoom-set` | direction / factor | app-window zoom (DOM views) → `vv:zoom` / `vv:zoom-set` | — (main reports `vv:zoom-changed`) |
 | `:vv/http-zoom` / `:vv/http-zoom-set` | direction / factor | zoom the **web page** inside the native web view (not the app chrome) | — |
 | `:vv/open-dialog` | candidate paths (vector) | open the native multi-file Open dialog, seeded to the folder of the active file/dir then the recent-files MRU (`nav/dialog-seed-path` + fallback) | — |
@@ -406,6 +410,9 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/active-uri` | `app-db` | the active tab's current URI — a local path **or** a virtual `ssh://` / `sftp://` / `vv-archive://` URI |
 | `:ui/active-view-source?` | `app-db` | bool — the active tab shows **Source** rather than **Preview** |
 | `:ui/active-diff-view` | `app-db` | `:unified` \| `:split` for the active diff tab |
+| `:ui/active-diff-collapsed` | `app-db` | the active tab's collapsed diff-file id set (`#{}` = all expanded) — re-projected onto the DOM after every rebuild (ADR-0037) |
+| `:view/diff-active?` | `app-db` + DataScript | is the shown facet a diff PREVIEW (kind `"diff"` ∧ not source)? Gates the diff-only View-menu item + the Preview combo's layout rows |
+| `:diff/all-collapsed?` | `app-db` + DataScript | are ALL of the shown diff's files collapsed? Flips the "Collapse All Files" ↔ "Expand All Files" menu label |
 | `:ui/collocated-default` | `app-db` | the `collocated-default` preference (`:pdf` \| `:document`) — which face a doc with a sibling PDF opens as |
 | `:ui/settings` | `app-db` | the persisted settings map (`settings.edn`) |
 | `:ui/projects` | `app-db` | the git-rooted file trees |

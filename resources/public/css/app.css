@@ -122,10 +122,24 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body .vv-diff { font-family: var(--vv-font-fixed); font-size: var(--vv-code-font-size); line-height: 1.5; }
 .markdown-body .vv-diff-preamble { background: var(--vv-bg2); border: 1px solid var(--vv-border);
   border-radius: 6px; padding: 8px 12px; color: var(--vv-fg-dim); white-space: pre-wrap; margin: 0 0 14px; }
-/* file banner (an <h2> in the unified view, a <header> in the split view; both anchor the Contents outline) */
-.markdown-body .vv-diff-file-head { display: flex; align-items: center; gap: 8px; margin: 20px 0 0; padding: 7px 12px;
+/* per-file collapsible wrapper (ADR-0037): each file is a controlled <details class="vv-diff-file" open>
+   in BOTH views whose <summary> is the banner below. The wrapper owns the inter-file top margin (a
+   collapsed file must not keep a phantom banner margin), openness is driven by the per-tab collapsed set
+   (re-applied after every innerHTML rebuild), and the banner is the click/hint toggle target. */
+.markdown-body details.vv-diff-file { margin: 20px 0 0; }
+/* file banner (a <summary> in both views; anchors the Contents outline and toggles its file's preview) */
+.markdown-body .vv-diff-file-head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 7px 12px;
   background: var(--vv-bg2); border: 1px solid var(--vv-border); border-bottom: none; border-radius: 6px 6px 0 0;
-  font-family: var(--vv-font-fixed); font-size: 0.92em; font-weight: 500; color: var(--vv-fg); }
+  font-family: var(--vv-font-fixed); font-size: 0.92em; font-weight: 500; color: var(--vv-fg);
+  cursor: pointer; list-style: none; user-select: none; -webkit-user-select: none; }
+.markdown-body .vv-diff-file-head::-webkit-details-marker { display: none; }
+/* disclosure affordance: a chevron ahead of the status chip, rotated by the wrapper's open state */
+.markdown-body .vv-diff-file-head::before { content: "\25B8"; flex: 0 0 auto; color: var(--vv-fg-dim);
+  font-size: 0.8em; transition: transform 120ms ease; }
+.markdown-body details.vv-diff-file[open] > .vv-diff-file-head::before { transform: rotate(90deg); }
+/* a collapsed file's banner closes its own box (the body that carried the bottom edge is hidden) */
+.markdown-body details.vv-diff-file:not([open]) > .vv-diff-file-head { border-bottom: 1px solid var(--vv-border);
+  border-radius: 6px; }
 .markdown-body .vv-diff-file-status { flex: 0 0 auto; text-transform: uppercase; font-size: 0.68em;
   letter-spacing: 0.05em; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
 .vv-diff-status-added    { background: rgba(64, 160, 43, 0.20);  color: #2ea043; }
@@ -426,17 +440,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   border-radius: 3px; padding: 1px 9px; margin-right: 4px; cursor: pointer; font-size: 14px; line-height: 1.4; }
 .vv-nav-btn:hover:not(:disabled) { color: var(--vv-head1); background: var(--vv-bg-code); }
 .vv-nav-btn:disabled { opacity: 0.4; cursor: default; }
-/* segmented switch: [Unified | Split] diff layout (view-switch-toolbar) */
-.vv-seg { display: inline-flex; margin-left: 6px; border: 1px solid var(--vv-border); border-radius: 3px;
-  overflow: hidden; flex: 0 0 auto; }
-.vv-seg-btn { background: var(--vv-bg2); color: var(--vv-fg); border: none; border-left: 1px solid var(--vv-border);
-  padding: 1px 8px; cursor: pointer; font-size: 12px; line-height: 1.5; font-family: inherit; }
-.vv-seg-btn:first-child { border-left: none; }
-.vv-seg-btn:hover:not(.vv-seg-active) { background: var(--vv-bg-code); color: var(--vv-head1); }
-.vv-seg-btn.vv-seg-active { background: var(--vv-accent, var(--vv-head1)); color: var(--vv-bg1); cursor: default; }
-
-/* [Preview ▾ | Source ▾] combo (split) buttons over a collocated document group (view-switch / combo-button).
-   Like .vv-seg but overflow-visible so the caret menu can escape; each combo is a MAIN region + a divider + caret. */
+/* [Preview ▾ | Source ▾] combo (split) buttons over a collocated document group (view-switch / combo-button);
+   a diff's Unified/Split layout rows live in the Preview caret menu (ADR-0037 — the former [Unified | Split]
+   .vv-seg control was REMOVED in the combo's favor). Overflow-visible so the caret menu can escape; each
+   combo is a MAIN region + a divider + caret. */
 .vv-combo-group { display: inline-flex; margin-left: 6px; border: 1px solid var(--vv-border); border-radius: 3px;
   overflow: visible; flex: 0 0 auto; }
 .vv-combo { display: inline-flex; position: relative; }               /* anchor for the caret menu */
@@ -461,6 +468,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-combo-opt-sel::before { content: "\2713"; }                       /* ✓ on the currently-shown file */
 .vv-combo-opt:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
 .vv-combo-opt-sel { color: var(--vv-head1); }
+/* group separator inside a combo menu (files above, diff layout rows below — ADR-0037); mirrors .vv-menu-sep */
+.vv-combo-sep { margin: 4px 0; border-top: 1px solid var(--vv-border); }
 .vv-theme-select { background: var(--vv-bg2); color: var(--vv-fg); border: 1px solid var(--vv-border);
   border-radius: 3px; padding: 2px 6px; font-size: 12px; font-family: inherit; outline: none; }
 

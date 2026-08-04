@@ -86,9 +86,14 @@ spent (it annotates the hunk's last line), so it is handled by a dedicated arm a
 
 ### One model → two back-ends (the unified view)
 
-`diff->ir` builds a `:document` whose children are, per file, an `<h2>` banner node followed by the hunk and
-body-line nodes. Each body line carries the `±`/space marker *inside* its text so the terminal reads it
-naturally, and its old / new line numbers as **`data-*` attributes**:
+`diff->ir` builds a `:document` whose children are, per file, one collapsible
+**`<details class="vv-diff-file" open>`** wrapper ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md))
+holding the file's `<summary class="vv-diff-file-head">` banner FIRST, then the hunk and body-line nodes.
+The wrapper carries the file's `vv-diff-file-N` id as **IR meta only** (never serialized — it feeds the
+terminal's `render-lines` anchors), while the canonical DOM id lives solely on the summary; the
+banner-first ordering is what keeps the wrapper out of the ANSI back-end's inline merge and puts the
+file's TUI anchor on the banner's line. Each body line carries the `±`/space marker *inside* its text so
+the terminal reads it naturally, and its old / new line numbers as **`data-*` attributes**:
 
 ```clojure
 ;; a class-tagged div; the marker is in the (span-wrapped) text, the numbers are data-* gutters
@@ -100,12 +105,16 @@ naturally, and its old / new line numbers as **`data-*` attributes**:
 ```
 
 - The **HTML back-end** is unchanged: it already serializes each node's `:tag` / `:attrs` verbatim, so the
-  frontend's own classes (`vv-diff-insert`, `vv-diff-delete`, `vv-diff-hunk`, `vv-diff-note`) and the
-  camelCase `dataOld` / `dataNew` (emitted by the hast serializer as `data-old` / `data-new`) fall straight
-  out as fixed-structure HTML with escaped text nodes.
+  frontend's own classes (`vv-diff-insert`, `vv-diff-delete`, `vv-diff-hunk`, `vv-diff-note`), the
+  camelCase `dataOld` / `dataNew` (emitted by the hast serializer as `data-old` / `data-new`), and the
+  per-file `<details … open>` wrapper fall straight out as fixed-structure HTML with escaped text nodes.
 - The **ANSI back-end** gained one small function, `diff-line-style`, which reads a node's existing classes and
   maps `vv-diff-insert → green`, `vv-diff-delete → red`, `vv-diff-hunk → bold cyan`, `vv-diff-note → dim` —
   the terminal analog of the GUI's CSS line colouring. That is the whole cost of a **colored terminal diff**.
+  The per-file wrapper costs it *nothing*: an unknown element recurses, and at the diff's production block
+  separator `"\n"` the output is **byte-identical** to the pre-wrapper flat form (pinned by
+  `unified-ansi-golden` / `unified-ansi-anchors` in `diff_test`), with each file's Contents-jump anchor
+  read from the wrapper's meta id at the banner's line.
 
 **Why a hand-written parser rather than a tree-sitter-diff grammar?** The unified format is small and fully
 specified, and the split view needs the structured model anyway (hunks, per-side numbers, delete/insert
@@ -147,18 +156,55 @@ The split HTML lands on the document as `:doc/diff-split-html` (built by the `:d
 `vinary.app.fx`, committed by the `:diff/split-ready` event); `content-view` shows it when the tab's diff view
 is `:split` and the enriched HTML is ready, otherwise it falls back to the unified HTML while the split builds.
 
-### The `[Unified | Split]` toggle
+### The Unified ⇄ Split choice — the Preview combo's caret menu
 
 A per-tab `:diff-view` (`:unified` | `:split`, default `:unified` — split is opt-in so opening a diff never
 triggers a disk fetch) mirrors LaTeX's per-tab `:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)).
 It surfaces the same three ways every view switch does:
 
-- a segmented `[Unified | Split]` control in the toolbar's `view-switch-toolbar` (beside `[Preview | Source]`),
+- the **`Preview ▾` combo's caret menu** ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
+  for a shown diff preview the caret menu carries **Unified** and **Split** rows (the effective layout is
+  check-marked). A lone diff's menu is exactly those two rows; a diff inside a collocated group lists its
+  file rows, a separator, then the layout rows. This replaced the earlier standalone `[Unified | Split]`
+  segmented control — one toolbar affordance instead of two,
 - a command palette entry — **View ▸ Toggle unified / split diff** (`:view/toggle-diff-split`), and
 - a default keybinding, **`Ctrl+Shift+B`**, which self-gates (a no-op on a non-diff document).
 
 Because a diff is `:sourceable?`, it *also* offers **View Source** — the raw `.diff`, syntax-highlighted — so a
 diff tab has up to three surfaces: **Unified** (default), **Split**, and **Source**.
+
+### Collapsible file previews
+
+Every file's preview is collapsible, in both layouts ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
+
+- **Click the file's banner** (its `<summary>`) to toggle that one file. The native `<details>` toggle is
+  deliberately cancelled and re-dispatched (`[:diff/toggle-file id]`) so *state* owns openness: the
+  per-tab **`:diff-collapsed`** set survives tab switches, live refreshes (the watcher re-send rebuilds
+  the innerHTML; `markdown-body` re-applies the set synchronously, before paint), the unified⇄split flip
+  (both views share the `vv-diff-file-N` id space), and the split view's async enrichment swap. It is
+  cleared when the tab navigates to a *different* document — the ids are positional, so diff A's set must
+  never collapse arbitrary files of diff B — and it dies with the tab.
+- **View ▸ Collapse All Files** — a diff-only menu item (the `Fit ▸`/`Invert PDF` gating pattern) whose
+  label flips to **Expand All Files** once every file is collapsed. One item, one access key; the file
+  list comes from the diff's Contents outline, never the DOM. Palette commands **Collapse all diff
+  files** / **Expand all diff files** reach the same events from any keymap.
+- **Vim**: the fold idiom — **`z M`** collapses all, **`z R`** expands all (self-gated: no-ops outside a
+  diff) — and **`f` link-hints treat the banners as targets**: each visible banner gets a hint label, and
+  typing it toggles that file exactly as a click would (the hint re-finds the banner by its stable id and
+  fires its real click, so mouse and hint share one behavior source). There is deliberately no `z a` —
+  the preview has no cursor-over-file concept; the hints *are* the per-file affordance.
+- **Contents interplay**: a Contents click on a collapsed file **auto-expands it** before scrolling (a
+  jump is explicit intent to *see* the file, and the scroll offset must measure the expanded layout).
+  The scroll-spy self-heals after any toggle via the existing resize observation. In-page find still
+  **matches** text inside a collapsed file — Chromium hides a closed `<details>`' body via
+  content-visibility on an internal slot, so the children's computed style stays `display:block` and
+  the find walker (which prunes only `display:none`/`visibility:hidden` subtrees) keeps searching them
+  (verified empirically; the electron smoke pins this regime) — but the match highlight is not visible
+  until the file is expanded, exactly as inside the split view's collapsed unchanged-run gaps. Use
+  **Expand All Files** first when you want every match on screen.
+
+The split view's *unchanged-run* `<details class="vv-diff-gap">` collapses are unrelated to this state:
+they remain native and uncontrolled (and still reset when the enriched HTML swaps in).
 
 ### Standard repository filetypes
 
