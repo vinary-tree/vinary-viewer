@@ -14,6 +14,36 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Piped-stdin documents and explicit file types (ADR-0036), uniformly across all
+      three interfaces (GUI, --cli, --tui -- one shared core, presentation aside).
+      `git diff | vv -t diff` is the primary use case: piped input becomes the FIRST
+      document (a lone `-` repositions it; empty pipe opens nothing), drained to EOF
+      binary-safe (piped PDFs work) and, for the GUI, spilled to a private
+      $XDG_RUNTIME_DIR file the resident daemon owns (unlinked when the tab closes;
+      age-gated boot sweep for crashed invocations). The tab is named `stdin`, is
+      excluded from Open Recent, and a piped diff's side-by-side view enriches from
+      the INVOKING directory (as do piped markdown's relative images).
+      `-t/--type TYPE` (alias --file-type; repeatable) pairs positionally -- the Nth
+      type applies to the Nth file, stdin is file 0; untyped files deduce by extension,
+      else plain text. TYPE is a standard MIME type (text/x-diff, application/pdf), a
+      short alias (diff, md, csv, log, table, ...), or a grammar language (python, rs,
+      ... -> highlighted source with that grammar); kind tokens win over grammar names.
+      One shared resolver/pairing core (vinary.file-type) serves every interface; an
+      explicit type is authoritative in the content service (no re-classification, no
+      content sniffing, delimited-by-declaration for tables) and lives in a main-side
+      per-path registry so watcher live-refreshes, Reload, facet switches, and history
+      navigation can never silently revert it. Types work on remote (ssh://, sftp://)
+      and archive-entry URIs too. Unknown tokens are strict usage errors everywhere --
+      the daemon socket gained an additive v2 open message with a reject-only reply, so
+      even the GUI prints the error on the invoking terminal. The --tui reads the
+      document from the pipe and reopens /dev/tty for keys (view-only fallback when no
+      controlling terminal exists). See docs/usage/03-opening-files-and-tabs.md 2a,
+      docs/usage/07-terminal-cli-tui.md, and
+      docs/design-decisions/0036-stdin-documents-and-explicit-file-types.md.
+    - Settings > File Type: re-interpret the SHOWN document under any text-representable
+      kind (Plain Text, Markdown, Org, LaTeX, Diff/Patch, Log, Delimited Table, Mermaid,
+      HTML, Source (auto)) or any bundled grammar language -- re-read and re-rendered in
+      place, sticky across reloads and live-refreshes, forgotten when the tab closes.
     - A file that belongs to no git repository now gets a Files-tab tree: its containing
       directory is adopted as a project root of its own (a directory opened directly is
       its own root; a filesystem root is never adopted). Previously the sidebar read
@@ -111,6 +141,8 @@ Added
       Markdown and Org too.
 
 Changed
+    - BREAKING (vv --cli): `-t` no longer means `--toc` -- it is the short form of
+      `--type` uniformly across vv, --cli, and --tui (ADR-0036). `--toc` is long-only now.
     - Deferral and matching each got one implementation instead of five. Four hand-rolled
       deferral idioms (a dispatch-later plus a generation counter, a requestAnimationFrame-or-
       idle tick, a boolean latch plus one rAF in three copies, and clear-timer/set-timer in
@@ -230,6 +262,14 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Plain text is never delimiter-sniffed into a column-aligned table any more: prose
+      whose lines share a stable comma/tab/pipe count (notes, pasted CSV fragments in a
+      .txt, ASCII layouts) used to open as a delimited TABLE in the GUI (the CLI/TUI
+      already bypassed the sniff deliberately). Plain text now renders literally in all
+      three interfaces; explicitly NAMED delimited files (.csv/.tsv/...) are unaffected,
+      the log sniff (extensionless syslogs) is deliberately kept, and `-t csv` /
+      Settings > File Type > Delimited Table are the sanctioned escape hatches for
+      headerless delimited data in a .txt. (ADR-0036)
     - Typing into a text field no longer lags, and no longer loses characters. Two separate
       defects wore one symptom, and they were in different widgets.
 

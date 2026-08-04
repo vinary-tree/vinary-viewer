@@ -25,7 +25,8 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 
 | Channel | Preload method | Payload | Main receiver | Purpose |
 |---------|----------------|---------|---------------|---------|
-| `vv:open` | `open(path)` | `path` string | `service/open!` | Read a local or `ssh://`/`sftp://` file, send content and an available local/target tree, and start/reuse its watch ownership. |
+| `vv:open` | `open(path)` | `path` string | `service/open!` | Read a local or `ssh://`/`sftp://` file, send content and an available local/target tree, and start/reuse its watch ownership. The path alone is sent — an explicit type (ADR-0036) is looked up in main's doc-overrides registry, so Reload/facet/history re-opens keep it. A piped-stdin document (registry `:stdin?`) skips the tree and the watcher. |
+| `vv:set-file-type` | `setFileType(req)` | `{path, kind, language?}` | `service` (registers via `doc-overrides/set-type!`) | Settings ▸ File Type (ADR-0036): register an explicit type for `path` (kind/language/delimiter replace as a unit; a piped document's stdin facts survive) and re-send it through the full open pipeline to every retaining window. |
 | `vv:close` | `close(path)` | `path` string | `service/close!` | Compatibility close path; retained-file sync is the normal ownership path. |
 | `vv:retained-files` | `syncRetainedFiles(paths)` | string array | `service/sync-retained!` | Replace the sending window's retained document-identity set (local paths and remote URIs). Watchers, authenticated remote subscriptions, and assets are released only after no live window retains the identity. |
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `service/watch-assets!` | Watch local media assets referenced by a retained Markdown/Org/LaTeX document. |
@@ -133,7 +134,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 
 | Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
 |---------|----------------------|---------|-----------------------|---------|
-| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, dataUrl?, sourceable?, paged?, pdfSibling?, sourceSibling?}` | `[:content/received …]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first `:page`; a doc collocated with an exported PDF carries `:pdfSibling` (and a PDF its `:sourceSibling`). |
+| `vv:content` | `onContent(cb)` | `{path, kind, stamp, text?, html?, bytes?, entries?, sheets?, page?, meta?, dataUrl?, sourceable?, paged?, pdfSibling?, sourceSibling?, language?, stdin?, baseDir?}` | `[:content/received …]` | Deliver initial and live-refreshed document content. PDFs carry `:bytes`; directories/archives carry `:entries`; large logs/tables carry the first `:page`; a doc collocated with an exported PDF carries `:pdfSibling` (and a PDF its `:sourceSibling`). ADR-0036 adds three optional keys: `language` (an explicit source grammar → `:doc/language`, the renderer's grammar pick), `stdin` (a piped document — excluded from the Recent MRU), and `baseDir` (the invoking cwd a piped document's relative assets and diff sources resolve against → `:doc/base-dir`). |
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?}` | `[:content/error …]` | Deliver read/render errors. |
 | `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received …]` | Deliver a full project listing or a scoped automatic update. `root` may be local or `ssh://`/`sftp://`; `scope` and files remain root-relative. `synthetic? true` marks an inferred non-git root. |
 | `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. |
@@ -229,10 +230,15 @@ for directories, which `vinary.main.service/send-content!` detects first (via
 | `.zip`, `.jar`, `.war`, `.ear`, `.epub`, `.tar`, `.tgz`, `.tar.gz` and `vv-archive://…` | `"archive"` | listed in-pane as directory-browser-compatible entries; nested archive entries are addressed by virtual archive URI chains and are not extracted to disk. |
 | `.mmd`, `.mermaid` | `"mermaid"` | text is read and rendered to SVG by the renderer-side Mermaid strategy. |
 | bundled/user source extensions, configured filetype mappings, well-known repo files, and non-Mermaid diagram-source extensions | `"source"` | text is read into the read-only CodeMirror source view. |
-| everything else | `"text"` | plain text routes through the content service first so extensionless logs/delimited files can be sniffed; otherwise text is escaped into plain HTML. |
+| everything else | `"text"` | plain text routes through the content service first so extensionless syslogs can be LOG-sniffed; otherwise text is escaped into plain HTML **literally** — the delimiter sniff that used to flip prose into a column-aligned table is disabled (ADR-0036; an explicit `-t csv` / Settings ▸ File Type ▸ Delimited Table is the sanctioned path). |
 
 `ssh://` and `sftp://` URIs classify off the same basename extension (served by
 the async SFTP reader instead of the local filesystem).
+
+An **explicit type** (ADR-0036 — CLI `-t/--type`, Settings ▸ File Type) overrides this classifier
+entirely: main's doc-overrides registry supplies the kind on every send (so watcher live-refreshes
+cannot revert it), and the content service treats it as authoritative — no `classifyName`, no content
+sniffing, delimited-by-declaration for an explicit `table` (`meta.delimiter` carries `-t tsv`'s tab).
 
 ---
 

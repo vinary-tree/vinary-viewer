@@ -22,12 +22,25 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tui-smoke-'));
 let passed = 0;
 function ok(cond, msg) { assert.ok(cond, msg); console.log('  ✓ ' + msg); passed++; }
 
-// drive vv-tui with a byte sequence of keys; returns the final frame (utf8; escapes preserved)
+// drive vv-tui with a byte sequence of keys; returns the final frame (utf8; escapes preserved).
+// stdin is EXPLICITLY 'ignore' (→ /dev/null → instant EOF): vv-tui drains a non-TTY stdin to EOF
+// (ADR-0036 piped documents), so inheriting a harness stdin that never closes would hang every run.
 function drive(keys, file, extra) {
   const kf = path.join(tmp, 'keys-' + Math.abs(hash(keys + (extra || ''))) + '.bin');
   fs.writeFileSync(kf, Buffer.from(keys, 'binary'));
   return execFileSync('node', [TUI, '--drive', kf, ...(extra || []), file],
-                      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+                      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+// drive vv-tui with the DOCUMENT piped on stdin (no file arg) — the ADR-0036 stdin seam: --drive reads
+// keys from a file, so the pipe is free to carry the document; no pseudo-tty needed.
+function drivePiped(keys, input, extra) {
+  const kf = path.join(tmp, 'keys-p-' + Math.abs(hash(keys + (extra || []).join(''))) + '.bin');
+  fs.writeFileSync(kf, Buffer.from(keys, 'binary'));
+  const r = spawnSync('node', [TUI, '--drive', kf, ...(extra || [])],
+                      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, input,
+                        stdio: ['pipe', 'pipe', 'pipe'] });
+  return { code: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 function hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
 function strip(s) { return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, ''); }
@@ -39,8 +52,8 @@ const doc = path.join(tmp, 'doc.md');
 { let s = '# TUI Doc\n\n## Section Two\n\n'; for (let i = 1; i <= 30; i++) s += 'Line ' + i + ' content\n\n'; fs.writeFileSync(doc, s); }
 
 // ── 1. --version / --help ──────────────────────────────────────────────────────
-ok(execFileSync('node', [TUI, '--version'], { encoding: 'utf8' }).includes('vv --tui'), '--version prints the version');
-ok(execFileSync('node', [TUI, '--help'], { encoding: 'utf8' }).includes('scroll'), '--help documents the keys');
+ok(execFileSync('node', [TUI, '--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).includes('vv --tui'), '--version prints the version');
+ok(execFileSync('node', [TUI, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).includes('scroll'), '--help documents the keys');
 
 // ── 2. scroll: j/k and g/G move the window ─────────────────────────────────────
 const home = strip(drive('', doc, ['--no-color', '--width', '40']));
@@ -118,6 +131,37 @@ else:
   ok(out.includes('\x1b[?1049l'), 'pty: vv-tui LEAVES the alternate screen on q (clean teardown)');
   ok(out.includes('\x1b[?25h'), 'pty: the cursor is restored on q');
 })();
+
+// ── 7. ADR-0036: piped stdin documents + -t/--type ────────────────────────────────────────────────
+{
+  // a piped document renders with the status-bar name `stdin`; untyped = literal plain text
+  const raw = drivePiped('', '# piped-heading\nplain body line\n', ['--no-color', '--width', '60']);
+  ok(raw.code === 0 && strip(raw.out).includes('# piped-heading') && strip(raw.out).includes(' stdin '),
+     'an untyped piped document pages literally with the status-bar name "stdin"');
+
+  // -t markdown renders it through the markdown pipeline (the heading marker is consumed)
+  const md36 = drivePiped('', '# piped-heading\n\nbody\n', ['--no-color', '--width', '60', '-t', 'markdown']);
+  ok(md36.code === 0 && strip(md36.out).includes('piped-heading') && !strip(md36.out).includes('# piped-heading'),
+     '-t markdown renders the piped document (not literal text)');
+
+  // the acceptance shape: a piped git diff with -t diff pages through the diff IR
+  const diffText = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n';
+  const df = drivePiped('', diffText, ['--no-color', '--width', '60', '-t', 'diff']);
+  ok(df.code === 0 && strip(df.out).includes('modified x') && strip(df.out).includes('+new'),
+     'git diff | vv --tui -t diff pages the diff IR (file banner + ± lines)');
+
+  // an unknown type fails fast (before any stdin drain), exit ≠ 0 with the hint
+  const bad = drivePiped('', 'x\n', ['-t', 'diph']);
+  ok(bad.code === 1 && /unknown type 'diph'/.test(bad.err) && /valid types/.test(bad.err),
+     'an unknown type errors with the valid-token hint (exit 1)');
+
+  // -t python on an extensionless FILE forces highlighted source in the frame
+  const noExt = path.join(tmp, 'script-no-ext');
+  fs.writeFileSync(noExt, 'def f():\n    return 1\n');
+  const py = drive('', noExt, ['--width', '60', '-t', 'py']);
+  ok(py.includes(ESC + '[38;2') && strip(py).includes('return 1'),
+     '-t py highlights an extensionless file as python source in the frame');
+}
 
 console.log('\ntui-smoke: ' + passed + ' checks passed');
 fs.rmSync(tmp, { recursive: true, force: true });

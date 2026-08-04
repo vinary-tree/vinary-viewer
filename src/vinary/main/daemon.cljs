@@ -7,9 +7,17 @@
 
    TWO message shapes, one connection each (the client half-closes; the server replies, then ends):
 
-     {\"args\": [\"/abs/file\", \"https://…\"], \"cwd\": \"/abs\"}   open — one JSON line, unchanged since v0.2
-     vv1 ping                                                  control — status of the resident process
-     vv1 stop                                                  control — quit gracefully (release lock + socket)
+     {\"args\": [\"/abs/file\", \"sftp://…\"],       open — one JSON line. v2 (ADR-0036) ADDS optional
+      \"types\": [\"diff\", …],                     fields: `types` (raw `-t` tokens, flag order — the Nth
+      \"stdinIndex\": 0, \"cwd\": \"/abs\",           type applies to the Nth arg), `stdinIndex` (which arg
+      \"instanceId\": \"…\"}                        is the spilled stdin document), `cwd` (the invoking
+                                                 dir, for stdin diff enrichment). A legacy client omits
+                                                 them; a legacy daemon ignores them — both skews stay
+                                                 well-formed. The open path replies ONLY on rejection
+                                                 (one JSON line {\"ok\":false,\"error\":\"vv: …\"}), so a
+                                                 legacy client — which reads nothing — sees no change.
+     vv1 ping                                    control — status of the resident process
+     vv1 stop                                    control — quit gracefully (release lock + socket)
 
    The control frames are deliberately NOT valid JSON. A pre-`vv1` daemon parses every message with
    `JSON.parse` inside a try/catch and only opens a window on success, so it rejects a control frame as
@@ -83,17 +91,29 @@
       ;; bare `vv`. `instanceId` is the launch's idempotency key: the daemon opens at most one window per id,
       ;; so redundant signals of one `vinary-viewer` invocation (socket + second-instance racing) coalesce to
       ;; a single window at the source. A pre-instance-id client simply omits the field (id → nil).
-      (let [^js parsed (js/JSON.parse msg)]
-        (on-open {:args        (vec (js->clj (.-args parsed)))
-                  :instance-id (not-empty (.-instanceId parsed))}))
-      (end! conn nil)
+      ;; v2 (ADR-0036): optional `types`/`stdinIndex`/`cwd` ride along (all nil-safe for legacy clients).
+      ;; `on-open` may return {:error "vv: …"} — an invalid open (unknown type, mispaired types) — which is
+      ;; written back as the ONLY open-path reply so the new client can print it to the invoking terminal;
+      ;; a valid open still ends the connection silently (what a legacy client expects).
+      (let [^js parsed (js/JSON.parse msg)
+            result     (on-open {:args        (vec (js->clj (.-args parsed)))
+                                 :types       (vec (js->clj (or (.-types parsed) #js [])))
+                                 :stdin-index (let [i (.-stdinIndex parsed)] (when (number? i) i))
+                                 :cwd         (not-empty (.-cwd parsed))
+                                 :instance-id (not-empty (.-instanceId parsed))})]
+        (if-let [err (:error result)]
+          (end! conn (js/JSON.stringify #js {:ok false :error (str err)}))
+          (end! conn nil)))
       (catch :default e
         (js/console.error "[vv daemon] bad request:" (str e))
         (end! conn nil)))))
 
 (defn listen!
-  "Start the daemon socket server. Handlers: `:on-open` receives `{:args [...] :instance-id \"…\"|nil}` for
-   each open message (args are cwd-resolved by the client; instance-id is the launch idempotency key);
+  "Start the daemon socket server. Handlers: `:on-open` receives
+   `{:args [...] :types [...] :stdin-index int|nil :cwd \"…\"|nil :instance-id \"…\"|nil}` for each open
+   message (args are cwd-resolved by the client; types/stdin-index/cwd are the ADR-0036 open grammar, nil
+   for a legacy client; instance-id is the launch idempotency key) and may return {:error \"vv: …\"} to
+   reject the open — the error is written back to the client as the connection's only reply;
    `:on-stop` quits the process for `vv1 stop` and for
    SIGTERM/SIGINT; `:status` returns {:pid :version :bundle-mtime-ms :windows :daemon?} for `vv1 ping`.
    Returns the server (or nil if the socket could not be bound — e.g. a live daemon already owns it, which

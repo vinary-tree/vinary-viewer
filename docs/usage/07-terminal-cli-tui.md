@@ -69,11 +69,23 @@ separated by a blank line:
 vv --cli docs/usage/01-getting-started.md docs/usage/02-installation-and-build.md | less -R
 ```
 
+**Piped stdin is a document too** (ADR-0036): when stdin is not a terminal, its bytes become the
+**first** document in the list (a lone `-` among the files repositions it), rendered literally as
+plain text unless a `-t/--type` names its type. Stdin is drained to EOF — a piped document is a
+snapshot, so `tail -f x | vv --cli` waits for the producer to close the pipe.
+
+```bash
+git diff | vv --cli -t diff | less -R    # a colored diff straight from a pipe
+make 2>&1 | vv --cli                     # piped text, rendered literally
+curl -s https://x/y.md | vv --cli -t md  # pipe + explicit markdown type
+```
+
 ### 2.1 Options
 
 | Option | Effect |
 |--------|--------|
-| `-t`, `--toc` | Print the document outline (Contents) before the body. |
+| `-t`, `--type TYPE` | File type for the Nth file (repeatable; a piped-stdin document is file 0; files without a type deduce by extension, else plain text). `TYPE` is a MIME type (`text/x-diff`, `application/pdf`), a short alias (`diff`, `md`, `csv`, `log`, `table`), or a grammar language (`python`, `rust` — highlighted source). `--file-type` is an accepted alias. **Breaking change:** `-t` used to be the short form of `--toc`; it now means `--type` uniformly across `vv`, `--cli`, and `--tui`. |
+| `--toc` | Print the document outline (Contents) before the body. (Long-only — see `-t` above.) |
 | `--width N` | Wrap column (default: the terminal width, else 80). |
 | `--no-color` | Disable ANSI colour; this explicit opt-out takes precedence over every other setting. |
 | `--color` | Force colour even when stdout is not a TTY or `NO_COLOR` is set (e.g. through a pipe). |
@@ -89,6 +101,8 @@ Examples:
 vv --cli --toc --width 100 docs/usage/07-terminal-cli-tui.md
 vv --cli --plain README.md            # safest for logging / grep-ing the output
 vv --cli --graphics sixel diagram.png  # force sixel where auto-detection can't tell
+vv --cli -t csv exported.txt           # a delimited table by declaration, whatever the extension
+vv --cli -t py build-script            # highlighted python source, no extension needed
 ```
 
 ![CLI render sequence](../diagrams/seq-cli-render.svg)
@@ -118,6 +132,16 @@ key reminder.
 ```bash
 vv --tui CHANGELOG.txt
 vv --tui --width 100 README.md
+```
+
+The TUI accepts the same `-t/--type TYPE` as the other modes, and pages **piped stdin** too: the pipe
+carries the document, so the keyboard is reopened on `/dev/tty` (when no controlling terminal exists —
+rare — the session degrades to view-only with a stderr notice; `Ctrl+C` still exits cleanly). The
+status bar names a piped document `stdin`.
+
+```bash
+git diff | vv --tui -t diff        # page a diff straight from a pipe (keys on /dev/tty)
+journalctl -b | vv --tui -t log    # page piped output as a log
 ```
 
 ### 3.1 Keys

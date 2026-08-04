@@ -179,6 +179,9 @@ function sniffLog(text) {
   return hits >= Math.max(2, Math.ceil(lines.length * 0.25));
 }
 
+// Referenced ONLY by the two DISABLED delimiter-sniff arms (openLocal tail, bufferToPayload tail) — plain
+// text renders literally now, never delimiter-aligned. Retained so the disabled arms stay readable; the live
+// 'table' machinery (delimiterFor, streamDelimitedPage, delimitedTextPayload) never consulted this sniff.
 function sniffDelimited(text) {
   const sample = String(text || '').split(/\r?\n/).filter(Boolean).slice(0, 20);
   if (sample.length < 3) return null;
@@ -294,25 +297,33 @@ function dataUrlFor(name, bytes) {
   return `data:${type};base64,${Buffer.from(bytes).toString('base64')}`;
 }
 
-function bufferToPayload(uri, name, bytes, stamp, meta) {
-  const kind = classifyName(name);
+// `kindOverride` (when present) is an EXPLICIT user-chosen type threaded from openUri/openArchiveUri/
+// openRemoteUri — it replaces classifyName AND disables the content sniffs (explicit 'text' is literal
+// by declaration).
+function bufferToPayload(uri, name, bytes, stamp, meta, kindOverride) {
+  const explicit = typeof kindOverride === 'string' && kindOverride.length > 0;
+  const kind = explicit ? kindOverride : classifyName(name);
   if (kind === 'image') {
     return { path: uri, kind: 'image', dataUrl: dataUrlFor(name, bytes), stamp, meta };
   }
   if (kind === 'pdf') {
     return { path: uri, kind: 'pdf', bytes, stamp, meta };
   }
-  if (kind === 'markdown' || kind === 'mermaid' || kind === 'org' || kind === 'latex') {
+  if (kind === 'markdown' || kind === 'mermaid' || kind === 'org' || kind === 'latex' ||
+      kind === 'diff' || kind === 'source' || (explicit && (kind === 'text' || kind === 'html'))) {
     return { path: uri, kind, text: bytes.toString('utf8'), stamp, sourceable: true, meta };
   }
   if (kind === 'office') return officeBufferPayload(uri, name, bytes, stamp, meta);
   if (kind === 'table') return tableBufferPayload(uri, name, bytes, stamp, meta);
   if (kind === 'log') return logBufferPayload(uri, name, bytes, stamp, meta);
   const text = bytes.toString('utf8');
-  if (sniffLog(text)) return logTextPayload(uri, name, text, stamp, meta);
-  const delimiter = sniffDelimited(text);
-  if (delimiter) return delimitedTextPayload(uri, name, text, stamp, Object.assign({}, meta, { delimiter }));
-  return { path: uri, kind: 'text', text, stamp, sourceable: true, meta };
+  if (!explicit && sniffLog(text)) return logTextPayload(uri, name, text, stamp, meta);
+  // DISABLED (never delete): delimiter sniff on generic text entries (archive members and the remote
+  // fall-through) — the same plain-text-as-table mis-classification as openLocal's tail; see the note there.
+  // Explicitly named .csv/.tsv entries still classify 'table' above; the log sniff stays.
+  // const delimiter = sniffDelimited(text);
+  // if (delimiter) return delimitedTextPayload(uri, name, text, stamp, Object.assign({}, meta, { delimiter }));
+  return { path: uri, kind: explicit ? kind : 'text', text, stamp, sourceable: true, meta };
 }
 
 async function officeBufferPayload(uri, name, bytes, stamp, meta) {
@@ -673,8 +684,8 @@ function parseLogPage(text, pageIndex) {
   return { index: pageIndex || 0, lines: lines.slice(start, end), hasPrev: start > 0, hasNext: lines.length > end };
 }
 
-function imageOrBinaryEntryPayload(uri, name, bytes, stamp, meta) {
-  return bufferToPayload(uri, name, bytes, stamp, meta);
+function imageOrBinaryEntryPayload(uri, name, bytes, stamp, meta, kindOverride) {
+  return bufferToPayload(uri, name, bytes, stamp, meta, kindOverride);
 }
 
 function pageForTextPayload(req, text, name) {
@@ -717,10 +728,15 @@ async function contentPage(req) {
   return rememberPage(request, page);
 }
 
-async function openUri(uri, kind) {
-  if (isArchiveUri(uri)) return openArchiveUri(uri);
-  if (transport.isRemoteUri(uri)) return openRemoteUri(uri, kind || classifyName(uri));
-  return openLocal(uri);
+// `kind` is an EXPLICIT type when the caller has one (CLI `-t`, Settings ▸ File Type — via the
+// main-side doc-overrides registry) — it is authoritative: no re-classification, no content sniffing.
+// `opts` carries per-open extras: {delimiter} for an explicitly delimited type (`-t tsv`), {explicit}
+// for the remote reader (whose kind argument has ALWAYS been threaded, so presence alone can't mean
+// "user said so" there).
+async function openUri(uri, kind, opts) {
+  if (isArchiveUri(uri)) return openArchiveUri(uri, kind, opts);
+  if (transport.isRemoteUri(uri)) return openRemoteUri(uri, kind || classifyName(uri), opts);
+  return openLocal(uri, kind, opts);
 }
 
 // A gunzip-aware Readable over a remote file (mirrors localContentStream: `.gz` log names are decompressed).
@@ -733,7 +749,7 @@ async function remoteContentStream(uri) {
 // the SAME payload contract, reusing every existing parser (office/table/log/image/pdf/text sniff) and the
 // archive machinery. `kind` is the grammar-aware classification threaded from the CLJS caller (so a remote
 // `.rs` is "source", not sniffed "text"); it falls back to the name-based classifier for direct callers.
-async function openRemoteUri(uri, kind) {
+async function openRemoteUri(uri, kind, opts = {}) {
   const stamp = Date.now();
   const st = await transport.remoteStat(uri);
   if (st.isDirectory) {
@@ -745,6 +761,11 @@ async function openRemoteUri(uri, kind) {
     };
   }
   const meta = { size: st.size, mtime: st.mtime };
+  // `kind` has ALWAYS been threaded here (the grammar-aware CLJS classification), so unlike openLocal its
+  // mere presence can't mean "the user said so" — opts.explicit carries that bit (an override registered
+  // for this URI). Explicit disables the tail sniff and enables delimited-by-declaration, same as local.
+  const explicit = Boolean(opts && opts.explicit);
+  if (opts && opts.delimiter) meta.delimiter = opts.delimiter;
   const k = kind || classifyName(uri);
 
   // A remote archive browses exactly like a local one — archiveLayerSource reads the remote root into a buffer.
@@ -753,9 +774,13 @@ async function openRemoteUri(uri, kind) {
   if (k === 'office') return officeBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: OFFICE_PREVIEW_BYTES }), stamp, meta);
 
   if (k === 'table') {
-    if (delimitedExts.has(extname(uri)) && st.size > SMALL_TABLE_BYTES) {
-      const page = await streamDelimitedPage(await remoteContentStream(uri), delimiterFor(uri), 0);
+    const delimited = delimitedExts.has(extname(uri)) || (explicit && !workbookExts.has(extname(uri)));
+    if (delimited && st.size > SMALL_TABLE_BYTES) {
+      const page = await streamDelimitedPage(await remoteContentStream(uri), delimiterFor(uri, meta), 0);
       return { path: uri, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: TABLE_PAGE_ROWS }) };
+    }
+    if (delimited && !delimitedExts.has(extname(uri))) {
+      return delimitedTextPayload(uri, uri, await transport.remoteReadText(uri), stamp, meta);
     }
     return tableBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: WORKBOOK_PREVIEW_BYTES }), stamp, meta);
   }
@@ -783,8 +808,9 @@ async function openRemoteUri(uri, kind) {
   // `text` is carried too so the terminal (vv-cli/tui) can show the source.
   if (k === 'html') return { path: uri, kind: 'html', text: await transport.remoteReadText(uri), stamp, sourceable: true, meta, remoteHtml: true };
 
-  // generic text / unknown → whole-file sniff (log / delimited / plain text), like openLocal's tail
-  return bufferToPayload(uri, uri, await transport.remoteReadFile(uri), stamp, meta);
+  // generic text / unknown → whole-file sniff (log / plain text), like openLocal's tail. An explicit
+  // kind threads through as the bufferToPayload override, disabling the sniff (literal by declaration).
+  return bufferToPayload(uri, uri, await transport.remoteReadFile(uri), stamp, meta, explicit ? k : undefined);
 }
 
 // ── remote URI arithmetic + on-disk-companion resolution (shared by siblings / diff-sources / assets) ──
@@ -862,7 +888,7 @@ async function loadRemoteAsset(assetRef, relativeTo) {
   return dataUrlFor(assetUri, await transport.remoteReadFile(assetUri, { maxBytes: 64 * 1024 * 1024 }));
 }
 
-async function openLocal(filePath) {
+async function openLocal(filePath, kindOverride, opts = {}) {
   const stamp = Date.now();
   const fileStat = fs.statSync(filePath);
   // A directory must never reach the file parser: fs.readSync on a directory fd throws EISDIR
@@ -872,13 +898,25 @@ async function openLocal(filePath) {
     throw new Error(`Cannot preview a directory as a file: ${filePath}`);
   }
   const stat = { size: fileStat.size, mtime: fileStat.mtimeMs };
-  const kind = classifyName(filePath);
+  // an explicitly delimited type (`-t tsv`) rides in via opts — delimiterFor prefers meta.delimiter
+  if (opts && opts.delimiter) stat.delimiter = opts.delimiter;
+  // An EXPLICIT kind (CLI `-t`, Settings ▸ File Type) is authoritative: skip classifyName AND every
+  // content sniff below — the user has already answered the question the sniffs guess at.
+  const explicit = typeof kindOverride === 'string' && kindOverride.length > 0;
+  const kind = explicit ? kindOverride : classifyName(filePath);
   if (kind === 'archive') return archiveListingPayload(filePath, [], stamp);
   if (kind === 'office') return officeBufferPayload(filePath, filePath, readFileLimited(filePath, OFFICE_PREVIEW_BYTES), stamp, stat);
   if (kind === 'table') {
-    if (fs.statSync(filePath).size > SMALL_TABLE_BYTES && delimitedExts.has(extname(filePath))) {
-      const page = await streamDelimitedPage(localContentStream(filePath), delimiterFor(filePath), 0);
+    const ext = extname(filePath);
+    // delimited-by-NAME (.csv/.tsv/…) as always — or delimited-by-DECLARATION: an explicit table type on
+    // any non-workbook file (`vv -t csv notes.txt`, a piped stdin document) parses as delimited text.
+    const delimited = delimitedExts.has(ext) || (explicit && !workbookExts.has(ext));
+    if (delimited && fs.statSync(filePath).size > SMALL_TABLE_BYTES) {
+      const page = await streamDelimitedPage(localContentStream(filePath), delimiterFor(filePath, stat), 0);
       return { path: filePath, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, stat, { pageSize: TABLE_PAGE_ROWS }) };
+    }
+    if (delimited && !delimitedExts.has(ext)) {
+      return delimitedTextPayload(filePath, filePath, fs.readFileSync(filePath, 'utf8'), stamp, stat);
     }
     return tableBufferPayload(filePath, filePath, readFileLimited(filePath, WORKBOOK_PREVIEW_BYTES), stamp, stat);
   }
@@ -897,8 +935,10 @@ async function openLocal(filePath) {
   }
   // Source / diff, and well-known plain-text repo files (LICENSE/COPYING/…), likewise short-circuit the sniff:
   // a GNU Makefile's `target:`/tab-indented recipes and a diff's `@@`/`+`/`-` hunks are classic sniffDelimited
-  // false positives. Generic extensionless `text` still falls through to the sniff (unknown logs / CSVs).
-  if (kind === 'source' || kind === 'diff' || (kind === 'text' && wellKnownKind(filePath) === 'text')) {
+  // false positives. Generic extensionless `text` still falls through to the LOG sniff below (unknown syslogs).
+  // An EXPLICIT kind short-circuits too — text-backed kinds all share this raw-text payload shape, and their
+  // renderers key purely off `kind` (an explicit 'text' is literal by declaration; no sniff may second-guess it).
+  if (explicit || kind === 'source' || kind === 'diff' || (kind === 'text' && wellKnownKind(filePath) === 'text')) {
     return { path: filePath, kind, text: fs.readFileSync(filePath, 'utf8'), stamp, sourceable: true, meta: stat };
   }
   const sample = readPrefix(filePath, 64 * 1024);
@@ -909,18 +949,27 @@ async function openLocal(filePath) {
     }
     return logTextPayload(filePath, filePath, fs.readFileSync(filePath, 'utf8'), stamp, stat);
   }
-  const delimiter = sniffDelimited(sample);
-  if (delimiter) {
-    if (fs.statSync(filePath).size > SMALL_TABLE_BYTES) {
-      const page = await streamDelimitedPage(localContentStream(filePath), delimiter, 0);
-      return { path: filePath, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, stat, { delimiter, pageSize: TABLE_PAGE_ROWS }) };
-    }
-    return tableBufferPayload(filePath, filePath, fs.readFileSync(filePath), stamp, Object.assign({}, stat, { delimiter }));
-  }
+  // DISABLED (never delete): the delimiter sniff assumed plain text might be a delimited table, so prose with
+  // a stable comma/tab/pipe count across a few lines (notes, pasted CSV fragments, ASCII layouts in a .txt)
+  // rendered column-aligned instead of literally. Plain text must never be delimiter-aligned: a real delimited
+  // file is either NAMED .csv/.tsv/… (classifyName → 'table' well before this tail) or explicitly typed
+  // (`vv -t csv`, Settings ▸ File Type ▸ Delimited Table). The log sniff above is deliberately KEPT — an
+  // extensionless syslog still pages as a log, and a log view is not delimiter alignment.
+  // const delimiter = sniffDelimited(sample);
+  // if (delimiter) {
+  //   if (fs.statSync(filePath).size > SMALL_TABLE_BYTES) {
+  //     const page = await streamDelimitedPage(localContentStream(filePath), delimiter, 0);
+  //     return { path: filePath, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, stat, { delimiter, pageSize: TABLE_PAGE_ROWS }) };
+  //   }
+  //   return tableBufferPayload(filePath, filePath, fs.readFileSync(filePath), stamp, Object.assign({}, stat, { delimiter }));
+  // }
   return { path: filePath, kind: 'text', text: fs.readFileSync(filePath, 'utf8'), stamp, sourceable: true, meta: stat };
 }
 
-async function openArchiveUri(uri) {
+// `kindOverride`/`opts` — an explicit type for the LEAF ENTRY (Settings ▸ File Type on an open archive
+// member, `vv -t diff vv-archive://…`). A directory-ish chain still lists; an override of 'archive'
+// means "browse it", i.e. the normal listing path, never an entry re-type.
+async function openArchiveUri(uri, kindOverride, opts = {}) {
   const { root, entries } = parseArchiveUri(uri);
   if (archiveDepth(entries) > MAX_ARCHIVE_DEPTH) throw new Error(`Archive nesting limit exceeded (${MAX_ARCHIVE_DEPTH})`);
   const stamp = Date.now();
@@ -930,7 +979,9 @@ async function openArchiveUri(uri) {
     return archiveListingPayload(root, entries, stamp);
   }
   const source = await archiveEntrySource(uri);
-  const kind = classifyName(source.name);
+  const explicit = typeof kindOverride === 'string' && kindOverride.length > 0 && kindOverride !== 'archive';
+  if (opts && opts.delimiter) source.meta = Object.assign({}, source.meta, { delimiter: opts.delimiter });
+  const kind = explicit ? kindOverride : classifyName(source.name);
   if (kind === 'log' && (source.size > SMALL_LOG_BYTES || gzipLogName(source.name))) {
     const page = await streamLogPage(entryContentStream(source), 0);
     return { path: uri, kind: 'log', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, source.meta, { pageSize: LOG_PAGE_LINES }) };
@@ -940,7 +991,7 @@ async function openArchiveUri(uri) {
     return { path: uri, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, source.meta, { pageSize: TABLE_PAGE_ROWS }) };
   }
   const bytes = await readAll(entryContentStream(source), source.size);
-  return imageOrBinaryEntryPayload(uri, source.name, bytes, stamp, source.meta);
+  return imageOrBinaryEntryPayload(uri, source.name, bytes, stamp, source.meta, explicit ? kind : undefined);
 }
 
 async function archiveListingPayload(root, entries, stamp) {

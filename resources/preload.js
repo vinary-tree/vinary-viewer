@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('vv', {
   // renderer → main
   open: (path) => ipcRenderer.send('vv:open', path),
   close: (path) => ipcRenderer.send('vv:close', path),
+  // Settings ▸ File Type — re-type an open document ({path, kind, language?}); main registers the
+  // override and re-sends through the full open pipeline (ADR-0036).
+  setFileType: (req) => ipcRenderer.send('vv:set-file-type', req),
   syncRetainedFiles: (paths) => ipcRenderer.send('vv:retained-files', paths),
   watchAssets: (docPath, paths) => ipcRenderer.send('vv:watch-assets', { docPath, paths }),
   syncTreeRoots: (roots) => ipcRenderer.send('vv:tree-roots', roots),

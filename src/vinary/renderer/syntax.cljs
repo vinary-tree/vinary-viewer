@@ -91,6 +91,15 @@
   [path]
   (grammar-catalog/grammar-for-path path (all-grammars) @user-filetypes))
 
+(defn grammar-for-doc
+  "The grammar for a document: an explicit :doc/language (ADR-0036 — `-t python`, Settings ▸ File Type ▸
+   a language) beats the path-based pick, so an extensionless/piped document highlights as the language
+   the user named. `language` is a catalog id (aliases already resolved), looked up over ALL grammars
+   (user-config included); nil/unknown falls back to `grammar-for`."
+  [path language]
+  (or (some-> language (grammar-catalog/grammar-for-language (all-grammars)))
+      (grammar-for path)))
+
 (defn- grammar-by-id [id]
   (grammar-catalog/grammar-for-id id (all-grammars)))
 
@@ -389,12 +398,13 @@
    (source-fe/tree->ir → outline). Returns Promise<[{:level :text :id :line}]> — [] when there is no grammar
    for the extension or the parse fails. (@codemirror-free — tree-sitter + the IR only — so it stays in this eager
    ns rather than the lazily-loaded editor chunk.)"
-  [text path]
-  (if-let [grammar (grammar-for path)]
+  ([text path] (parse-outline text path nil))
+  ([text path language]
+  (if-let [grammar (grammar-for-doc path language)]
     (-> (load-grammar grammar)
         ;; thread the grammar's language so `outline` dispatches deterministically (markup → headings, code →
         ;; declarations) rather than guessing from node kinds Markdown/Org/LaTeX share
         (.then (fn [loaded] (source-fe/outline (source-fe/tree->ir (parse-tree loaded text) (or text ""))
                                                (or (:language grammar) (:id grammar)))))
         (.catch (fn [_] [])))
-    (js/Promise.resolve [])))
+    (js/Promise.resolve []))))

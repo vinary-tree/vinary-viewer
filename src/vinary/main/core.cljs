@@ -9,6 +9,8 @@
             [vinary.main.service :as service]
             [vinary.main.startup :as startup]
             [vinary.main.daemon :as daemon]
+            [vinary.main.doc-overrides :as doc-overrides]
+            [vinary.terminal.stdin :as stdin]
             [vinary.main.profile :as profile]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
@@ -84,12 +86,14 @@
     (when-let [dock (.-dock app)]
       (if visible? (.show dock) (.hide dock)))))
 
-(defn initial-args
-  "All non-flag document arguments passed on the command line (e.g. `vv a.md b.pdf https://…`),
-   normalized to canonical tab uris in order — see `startup/doc-uris`. node's `path.resolve` is the
-   injected cwd-relative resolver for local paths."
+(defn initial-specs
+  "The resolved open specs for this process's own command line (`vv a.md -t diff b.log …`), in order —
+   see `startup/doc-specs` (types paired positionally; a `--vv-stdin=` marker from the vv-open.mjs
+   direct-spawn fallback identifies the piped document). node's `path.resolve` is the injected
+   cwd-relative resolver for local paths; validation already happened in `main` (pre-lock strict exit),
+   so an error here is impossible by construction — `:specs` is taken directly."
   []
-  (startup/doc-uris (js->clj js/process.argv) #(.resolve path %)))
+  (:specs (startup/doc-specs (js->clj js/process.argv) #(.resolve path %) (.cwd js/process))))
 
 (defn- open-files!
   "Send `args` (canonical doc uris) to an already-loaded window's renderer, each in its own tab (first focused).
@@ -237,10 +241,14 @@
 
 (defn- open-window!
   "The ONLY caller of claim-window!. `source` classifies the trigger; `id` is the launch's instance-id (nil for
-   OS-originated signals that carry no launch identity); `args` are canonical doc uris (nil/empty = New-Tab).
-   At most one window per instance-id: a duplicate signal for an id whose window is still alive surfaces that
-   window instead of opening another."
-  [source id args]
+   OS-originated signals that carry no launch identity); `specs` are resolved open specs
+   ({:uri :kind? :language? :delimiter? :stdin? :cwd?} — startup/doc-specs · socket-specs; nil/empty =
+   New-Tab). At most one window per instance-id: a duplicate signal for an id whose window is still alive
+   surfaces that window instead of opening another. Each spec's type override / stdin facts are registered
+   in the doc-overrides registry BEFORE the window opens, so the renderer's ordinary `vv:open` round-trip
+   finds them on the very first send (`vv:open-files` itself still carries only the uris — the renderer
+   pipeline is unchanged)."
+  [source id specs]
   (case source
     ;; NON-authoritative signals — never open a window on their own identity:
     ;;   :activate — a macOS dock reactivation, NOT a `vv` invocation (so no instance-id). Reopen a window only
@@ -253,11 +261,15 @@
     (if-let [^js win (and id (get @served id))]
       (when-not (.isDestroyed win)
         (when-not headless? (.show win) (.focus win)))                     ; a duplicate signal → surface it
-      (let [^js win (claim-window! (seq args))]
-        (when (and id win)
-          (set! (.-vvInstance win) id)      ; the window holds its own instance-id
-          (swap! served assoc id win))
-        win))))
+      (do
+        ;; registration precedes claim-window! (which sends vv:open-files): a duplicate signal re-registers
+        ;; nothing because the `served` branch above short-circuits it.
+        (doseq [s specs] (doc-overrides/register! (:uri s) (dissoc s :uri)))
+        (let [^js win (claim-window! (seq (mapv :uri specs)))]
+          (when (and id win)
+            (set! (.-vvInstance win) id)      ; the window holds its own instance-id
+            (swap! served assoc id win))
+          win)))))
 
 (declare app-version)
 
@@ -352,6 +364,12 @@
     :help    (do (js/console.log startup/usage-text) (.exit js/process 0))
     :version (do (js/console.log (startup/version-text (app-version))) (.exit js/process 0))
     nil)
+  ;; strict argv validation (ADR-0036: `-t/--type` pairing, `-` without piped data, unknown type tokens) —
+  ;; BEFORE the single-instance lock, so an invalid second invocation errors in ITS OWN terminal and exits 2
+  ;; without ever signalling the primary (whose second-instance handler stays lenient for legacy argv).
+  (when-let [err (:error (startup/doc-specs (js->clj js/process.argv) #(.resolve path %) (.cwd js/process)))]
+    (js/console.error err)
+    (.exit js/process 2))
   ;; surface main-process crashes in a copyable dialog (the Electron default isn't copyable) + log them
   (install-crash-reporting!)
   ;; macOS' native-hidden headless analogue must not activate the Dock even though AppKit remains the display
@@ -407,9 +425,16 @@
          (let [argv (js->clj argv)]
            (if (some #{"--daemon"} argv)
              (open-window! :daemon-bootstrap nil nil)
-             (open-window! :second-instance
-                           (startup/instance-id argv)
-                           (startup/doc-uris argv #(.resolve path wd %)))))))
+             ;; LENIENT here, by design: the second process already strict-validated its OWN argv pre-lock,
+             ;; so an error can only mean version skew (an older `vv` shape). Warn and open the files with
+             ;; deduced types (doc-uris drops every dashed arg) rather than silently doing nothing.
+             (let [resolver #(.resolve path wd %)
+                   result   (startup/doc-specs argv resolver wd)]
+               (if-let [err (:error result)]
+                 (do (js/console.warn "[vinary] second-instance:" err "— opening without explicit types")
+                     (open-window! :second-instance (startup/instance-id argv)
+                                   (mapv (fn [u] {:uri u}) (startup/doc-uris argv resolver))))
+                 (open-window! :second-instance (startup/instance-id argv) (:specs result))))))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
                                 ;; macOS dock icon (unpackaged run — no .app bundle carries it; Linux/Win use the window :icon)
                                 (when (= "darwin" js/process.platform)
@@ -422,12 +447,26 @@
                                 ;; needs to guarantee a re-install ends on the new build (see daemon-status).
                                 ;; the socket open carries the launch's instance-id, so a `vv <file>` that also
                                 ;; reaches this process via second-instance opens exactly one window (see open-window!)
+                                ;; v2 open messages carry types/stdinIndex/cwd (ADR-0036); socket-specs
+                                ;; reconstructs the stdin spec and pairs types. An invalid open returns
+                                ;; {:error …} to daemon/handle!, which writes it back as the connection's
+                                ;; only reply — vv-open.mjs prints it on the invoking terminal and exits 1.
                                 (daemon/listen!
-                                  {:on-open (fn [{:keys [args instance-id]}]
-                                              (open-window! :socket instance-id
-                                                            (startup/doc-uris (into ["_" "_"] args) identity)))
+                                  {:on-open (fn [{:keys [args types stdin-index cwd instance-id]}]
+                                              (let [result (startup/socket-specs {:args args
+                                                                                  :types types
+                                                                                  :stdin-index stdin-index
+                                                                                  :cwd cwd})]
+                                                (if-let [err (:error result)]
+                                                  {:error err}
+                                                  (do (open-window! :socket instance-id (:specs result))
+                                                      nil))))
                                    :on-stop (fn [] (.quit app))
                                    :status  daemon-status})
+                                ;; sweep spill files of crashed/abandoned piped invocations. The 10-minute
+                                ;; age gate covers the one legitimate race: vv-open.mjs spills BEFORE
+                                ;; spawning the daemon that runs this sweep (spill→send is sub-second).
+                                (stdin/sweep-stale! (* 10 60 1000))
                                 ;; Authenticated SSH/SFTP live events: advertise a loopback-only endpoint in the
                                 ;; target user's private runtime descriptor. A source reaches it through SSH
                                 ;; direct-tcpip and proves possession of the descriptor's rotating secret.
@@ -448,7 +487,7 @@
                                       ;; resident daemon has no window yet — hide the Dock icon so it's an invisible
                                       ;; background service (claim-window! reveals it when a window opens)
                                       (set-dock-visible! false))
-                                  (open-window! :initial (startup/instance-id (js->clj js/process.argv)) (initial-args)))
+                                  (open-window! :initial (startup/instance-id (js->clj js/process.argv)) (initial-specs)))
                                 ;; Register `activate` HERE — inside whenReady, AFTER the first window exists — not
                                 ;; at top level (the canonical macOS pattern). On launch macOS emits `activate` in the
                                 ;; same native batch as `ready`; registering post-create means the initial window is

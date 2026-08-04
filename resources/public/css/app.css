@@ -805,7 +805,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-menu-item-focused .vv-menu-item-arrow { color: var(--vv-fg-strong); }
 .vv-menu-subdropdown { position: absolute; left: 100%; top: -5px; z-index: 52; min-width: 200px;
   background: var(--vv-bg2); border: 1px solid var(--vv-dialog-border); border-radius: 6px;
-  box-shadow: var(--vv-shadow-menu); padding: 4px 0; }
+  box-shadow: var(--vv-shadow-menu); padding: 4px 0;
+  /* long flyouts (Settings ▸ File Type lists ~58 rows) scroll instead of overflowing the window; the
+     keyboard-focused row is kept visible by row-item's scrollIntoView */
+  max-height: calc(100vh - 80px); overflow-y: auto; }
 .vv-menu-item-radio { justify-content: flex-start; gap: 6px; }
 .vv-radio-dot { display: inline-block; width: 12px; color: var(--vv-head1); font-size: 11px; }
 .vv-radio-dot::before { content: "\25CB"; }            /* ○ */

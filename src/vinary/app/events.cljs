@@ -90,10 +90,14 @@
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged siblings] :as payload}]]
+                            sourceable paged siblings language stdin baseDir] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
+         ;; :doc/language must NOT linger: Settings ▸ File Type ▸ Source (auto) clears the override
+         ;; main-side, and the re-send then carries no :language — retract the stale attr (an upsert
+         ;; only overwrites present keys) or the grammar pick would stay pinned to the old language.
+         cur-lang (and eid (ds/doc-attr snap path :doc/language))
          stamp   (if (some? stamp) stamp (js/Date.now))
          ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
          ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
@@ -113,6 +117,8 @@
                    (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
                    (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
                    siblings              (assoc :doc/siblings (vec siblings))   ; the collocated document group (Preview/Source combo)
+                   language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
+                   baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
                    ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
@@ -121,13 +127,16 @@
          ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
          ;; does not resolve under :advanced compilation.
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
-         tx      (cond-> [base] cur-err (conj [:db/retract eid :doc/error cur-err]))
+         tx      (cond-> [base]
+                   cur-err (conj [:db/retract eid :doc/error cur-err])
+                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang]))
          ;; the CLI/initial file arrives before any tab exists → it opens the first tab
          db'     (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
          ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
-         ;; background live-refresh — so the MRU + trail track where the user actually went.
+         ;; background live-refresh — so the MRU + trail track where the user actually went. A piped-stdin
+         ;; document (payload :stdin) never enters the MRU: its spill path dies with the tab.
          active? (= path (nav/active-path db'))
-         db'     (if active? (record-recent db' path (#{"directory" "archive"} kind)) db')
+         db'     (if (and active? (not stdin)) (record-recent db' path (#{"directory" "archive"} kind)) db')
          ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
          ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
          ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
@@ -139,9 +148,11 @@
        {:db db'
         :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
                      [:ds/transact tx]]
-              ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx
+              ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx.
+              ;; :base-dir (a piped document's invoking cwd, ADR-0036) overrides the path-derived asset base
+              ;; so `cat README.md | vv -t md` resolves relative images against the directory it was piped from.
               (and (= kind "markdown") (not stream?))
-              (conj [:markdown/render {:text text :path path :stamp stamp
+              (conj [:markdown/render {:text text :path path :stamp stamp :base-dir baseDir
                                        :on-done [:content/rendered path stamp]}])
               ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
               ir-office?          (conj [:office/render {:html html :path path
@@ -149,12 +160,12 @@
               ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown.
               ;; A streaming doc is driven by ir-stream-body from the file path → skip the batch render fx.
               (and (= kind "org") (not stream?))
-              (conj [:org/render {:text text :path path :stamp stamp
+              (conj [:org/render {:text text :path path :stamp stamp :base-dir baseDir
                                   :on-done [:content/rendered path stamp]}])
               ;; latex (.tex) → the common-IR render via unified-latex (HTML + heading TOC + assets), like org.
               ;; LaTeX always batch-renders (not in stream-flag/streamable-kinds), but keep the guard for symmetry.
               (and (= kind "latex") (not stream?))
-              (conj [:latex/render {:text text :path path :stamp stamp
+              (conj [:latex/render {:text text :path path :stamp stamp :base-dir baseDir
                                     :on-done [:content/rendered path stamp]}])
               ;; diff (.diff/.patch) → the unified colored HTML + per-file Contents outline (ir.frontend.diff).
               (= kind "diff")
@@ -403,6 +414,19 @@
  (fn [{:keys [db]} _] (if-let [id (nav/active-id db)] {:fx [[:dispatch [:tab/close id]]]} {})))
 
 (rf/reg-event-fx :tab/reload (fn [{:keys [db]} _] {:fx (load-fx (nav/active-uri db))}))
+
+;; ── Settings ▸ File Type (ADR-0036): re-interpret the SHOWN document under an explicit type ──
+;; The override must live main-side (send-content! re-classifies from the path on EVERY send, including
+;; watcher live-refreshes), so this only names the file and the chosen type over vv:set-file-type; main
+;; registers it and re-sends through the full open pipeline — the :tab/reload shape. No optimistic ds
+;; write: :content/received stays the single ingestion point (the re-sent payload carries the new kind).
+;; `language` is a grammar catalog id for a "source with THIS grammar" pick, nil for a plain kind pick.
+(rf/reg-event-fx
+ :doc/set-file-type
+ (fn [{:keys [db]} [_ {:keys [kind language]}]]
+   (when-let [p (some-> (facet/active-content-path db) uri/file-path)]
+     (when (string? kind)
+       {:fx [[:vv/set-file-type {:path p :kind kind :language language}]]}))))
 
 ;; ── the view FACET (which collocated representation is shown, as preview/source) — see vinary.app.facet ──
 ;; Flip the ACTIVE file between preview + source (the [Preview|Source] main flip / C-S-s / "View Source"). Lands on

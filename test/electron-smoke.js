@@ -543,6 +543,20 @@ function installIpc(state) {
       state.openedPaths.push(filePath);
     }
   });
+  // Settings ▸ File Type (ADR-0036) — mirror the REAL main handler's observable behavior: re-read the
+  // file through the real content service with the EXPLICIT kind (authoritative — no classifyName, no
+  // sniffing) and re-send, decorating :language exactly as service.cljs decorate-js-payload! does. The
+  // main-side registry/persistence half is unit-tested (doc_overrides_test) and daemon-smoked; this seam
+  // proves the renderer half: menu → :doc/set-file-type → vv:set-file-type → re-sent kind re-renders.
+  ipcMain.on('vv:set-file-type', (event, req) => {
+    state.fileTypeRequests = (state.fileTypeRequests || []).concat([req]);
+    contentService.openUri(req.path, req.kind)
+      .then((p) => {
+        if (req.language) p.language = req.language;
+        event.sender.send('vv:content', p);
+      })
+      .catch((e) => event.sender.send('vv:error', { path: req.path, message: e.message }));
+  });
   ipcMain.on('vv:pdf-show', (_event, payload) => {
     state.pdfShow = payload;
   });
@@ -690,7 +704,8 @@ async function main() {
   await waitFor(
     () => evalIn(win, `(() => {
       const ui = window.__vvdb().ui;
-      return ui['menu-submenu'] === 'Key Bindings' && ui['menu-submenu-focus'] === 0;
+      // focus 1 is Theme now — File Type (ADR-0036) sits first in Settings
+      return ui['menu-submenu'] === 'Theme' && ui['menu-submenu-focus'] === 0;
     })()`),
     'Settings submenu ArrowRight focus'
   );
@@ -968,6 +983,92 @@ async function main() {
     'toggling back shows the unified view', 8000
   );
   console.log('[ok] the [Unified | Split] toggle switches diff layouts');
+
+  // ── Settings ▸ File Type (ADR-0036): the menu re-types the SHOWN document in place ──
+  // Drives the REAL menu DOM (Settings → File Type flyout → row click) so the whole renderer half is
+  // exercised: menus → :doc/set-file-type → :vv/set-file-type → vv:set-file-type → the re-sent payload's
+  // kind re-renders the pane. The fixture is diff-shaped text in a .txt, the exact re-type use case.
+  {
+    const ftDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-filetype-'));
+    const ftPath = path.join(ftDir, 'pasted-diff.txt');
+    const ftText = 'diff --git a/y.js b/y.js\n--- a/y.js\n+++ b/y.js\n@@ -1 +1 @@\n-const OLD = 1;\n+const NEW = 2;\n';
+    fs.writeFileSync(ftPath, ftText);
+    state.contentByPath.set(ftPath, {
+      path: ftPath, kind: 'text', text: ftText, sourceable: true, meta: { size: ftText.length }
+    });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(ftPath)})`);
+    await waitFor(
+      () => evalIn(win, `(document.querySelector('.vv-content pre.vv-plain')?.textContent || '').includes('diff --git')`),
+      'the .txt fixture to open as LITERAL plain text (never delimiter-aligned)', 8000
+    );
+
+    // open Settings → hover File Type → its flyout lists the kinds, a separator, and the grammar languages
+    const openFileTypeMenu = async () => {
+      await evalIn(win, `(() => {
+        const label = Array.from(document.querySelectorAll('.vv-menubar .vv-menu-label'))
+          .find((el) => el.textContent.trim().startsWith('Settings'));
+        label.click();
+        return true;
+      })()`);
+      await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-menu-dropdown'))`),
+        'the Settings dropdown to open');
+      assert.strictEqual(await hoverMenuItem(win, 'File Type'), true, 'File Type submenu row must exist');
+      await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-menu-subdropdown'))`),
+        'the File Type flyout to open');
+    };
+    await openFileTypeMenu();
+    const rows = await evalIn(win, `(() => {
+      const els = Array.from(document.querySelectorAll('.vv-menu-subdropdown .vv-menu-item-radio'));
+      return {
+        labels: els.map((el) => el.textContent.trim()),
+        selected: els.filter((el) => el.getAttribute('aria-checked') === 'true').map((el) => el.textContent.trim()),
+        seps: document.querySelectorAll('.vv-menu-subdropdown .vv-menu-sep').length
+      };
+    })()`);
+    assert.ok(rows.labels.length > 40, `the File Type flyout lists kinds + every grammar language (got ${rows.labels.length})`);
+    for (const want of ['Plain Text', 'Markdown', 'Diff / Patch', 'Delimited Table', 'Source (auto)', 'Python', 'Rust', 'C++']) {
+      assert.ok(rows.labels.some((l) => l.includes(want)), `the flyout offers "${want}"`);
+    }
+    assert.ok(rows.seps >= 1, 'a separator divides the kinds from the languages');
+    assert.ok(rows.selected.some((l) => l.includes('Plain Text')), 'the current kind (Plain Text) is radio-marked');
+
+    // pick "Diff / Patch" → the same file re-renders through the diff pipeline
+    await evalIn(win, `(() => {
+      Array.from(document.querySelectorAll('.vv-menu-subdropdown .vv-menu-item-radio'))
+        .find((el) => el.textContent.includes('Diff / Patch')).click();
+      return true;
+    })()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-line'))`),
+      'the re-typed document to render through the diff pipeline', 8000);
+    assert.deepStrictEqual(state.fileTypeRequests[state.fileTypeRequests.length - 1],
+      { path: ftPath, kind: 'diff' },
+      'the menu pick names the shown file and the chosen kind over vv:set-file-type');
+    console.log('[ok] Settings ▸ File Type re-types a .txt as a diff in place (menu → IPC → re-render)');
+
+    // pick a LANGUAGE ("Python") → source kind + the explicit grammar (the extensionless/piped-doc case)
+    await openFileTypeMenu();
+    await evalIn(win, `(() => {
+      Array.from(document.querySelectorAll('.vv-menu-subdropdown .vv-menu-item-radio'))
+        .find((el) => el.textContent.trim() === 'Python').click();
+      return true;
+    })()`);
+    await waitCalm(win, `Boolean(document.querySelector('.vv-content .vv-source'))`,
+      'the source view to mount for the language-typed doc');
+    assert.deepStrictEqual(state.fileTypeRequests[state.fileTypeRequests.length - 1],
+      { path: ftPath, kind: 'source', language: 'python' },
+      'a language pick sends kind source + the resolved grammar id');
+    // …and the radio now marks the explicit language, not Source (auto)
+    await openFileTypeMenu();
+    const marked = await evalIn(win, `(() => {
+      return Array.from(document.querySelectorAll('.vv-menu-subdropdown .vv-menu-item-radio'))
+        .filter((el) => el.getAttribute('aria-checked') === 'true').map((el) => el.textContent.trim());
+    })()`);
+    assert.ok(marked.some((l) => l === 'Python'), `the explicit language is radio-marked (got ${JSON.stringify(marked)})`);
+    assert.ok(!marked.some((l) => l.includes('Source (auto)')), 'Source (auto) is NOT marked when a language override is set');
+    await evalIn(win, `(() => { document.querySelector('.vv-menu-overlay')?.click(); return true; })()`);
+    console.log('[ok] Settings ▸ File Type language pick renders highlighted source with the chosen grammar');
+    fs.rmSync(ftDir, { recursive: true, force: true });
+  }
 
   // ── Remote SSH (ADR-0027): open a remote file + browse a remote directory against a hermetic in-process SFTP
   //    fixture, and exercise the SSH auth-prompt modal. Configures the REAL transport (agent off, temp home,

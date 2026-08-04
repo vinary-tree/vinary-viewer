@@ -9,14 +9,17 @@
   (:require ["../main/content_service.js" :as cs]
             ["path" :as path]
             ["fs" :as fs]
+            ["tty" :as tty]
             [clojure.string :as str]
             [vinary.cli.render :as render]
             ;; eager (non-lazy) population of the shared renderer.heavy-registry — Node has no shadow.lazy, so
             ;; unified-latex/uniorg are bundled + wired at startup (see main) instead of code-split like the renderer.
             [vinary.renderer.heavy-node :as heavy-node]
             [vinary.terminal.caps :as caps]
+            [vinary.terminal.stdin :as stdin]
             [vinary.terminal.syntax :as tsyntax]
             [vinary.terminal.stream :as tstream]
+            [vinary.file-type :as ft]
             [vinary.grammar-catalog :as gc]
             [vinary.tui.term :as term]
             [vinary.tui.keys :as keys]
@@ -29,9 +32,13 @@
 (def ^:private usage
   (str/join "\n"
     ["vv --tui — interactively page a document in the terminal"
-     "" "Usage: vv --tui [options] <file>" ""
+     "" "Usage: vv --tui [options] <file>"
+     "       git diff | vv --tui -t diff     page a piped document (keys reopen on /dev/tty)" ""
      "Keys:  ↑/k ↓/j scroll · Space/b page · g/G top/bottom · / find (n/N next/prev) · t contents · q quit" ""
      "Options:"
+     "  -t, --type TYPE     file type: a MIME type (text/x-diff), a short alias (diff, md, csv, log), or"
+     "                      a grammar language (python, rust); --file-type is an accepted alias. Without"
+     "                      it the type deduces from the extension, else plain text."
      "      --width N       wrap column (default: terminal width)"
      "      --no-color      disable ANSI colour"
      "      --drive FILE    (test) replay key bytes from FILE headlessly and dump the final frame"
@@ -70,31 +77,60 @@
   (let [k0 (.classifyName cs file)]
     (if (and (= "text" k0) (gc/grammar-for-path file gc/bundled-grammars {})) "source" k0)))
 
+(defn- effective-kind
+  "The kind a spec renders as: the explicit type (ADR-0036) wins; a bare stdin document is plain text (an
+   extensionless snapshot); everything else classifies by name with the text→source grammar upgrade."
+  [{:keys [uri kind stdin?]}]
+  (or kind (if stdin? "text" (kind-of uri))))
+
 (defn- big? [file] (> (.-size (.statSync fs file)) stream-threshold))
 
-;; ── loading a document → {:lines :anchors :toc :ir :base-dir :streaming?} ──────
+;; ── loading a document → {:lines :anchors :toc :ir :base-dir :streaming? :file} ──────
 (defn- load-batch [payload aopts base-dir]
   (-> (render/render-doc payload aopts)
       (.then (fn [{:keys [ir toc lines anchors]}]
                {:lines lines :anchors anchors :toc toc :ir ir :base-dir base-dir :streaming? false}))))
 
 (defn- load-doc
-  "Promise<{:lines :anchors :toc :ir? :base-dir :streaming? :file file}>. Text kinds read directly (bypassing
-   content_service content-sniffing); a large log/text streams (empty initial lines, filled by the stream)."
-  [file aopts]
-  (let [kind (kind-of file)
-        base-dir (some->> file (.dirname path))]
+  "Promise<{:lines :anchors :toc :ir? :base-dir :streaming? :file}> for one resolved open spec
+   ({:uri :kind? :language? :delimiter? :stdin?} — vinary.file-type). Text kinds read directly (bypassing
+   content_service content-sniffing); a large log/text streams (empty initial lines, filled by the
+   stream — :file is the READABLE source path, which for a large piped document is its spill). A piped
+   snapshot renders straight from `buf`, spilling only where a real path is required (the stream engine,
+   the image port, the table parser); its base-dir is the invoking cwd."
+  [{:keys [uri language delimiter stdin?] :as spec} buf aopts]
+  (let [kind      (effective-kind spec)
+        explicit  (some? (:kind spec))
+        base-dir  (if stdin? (.cwd js/process) (some->> uri (.dirname path)))
+        with-lang (fn [payload] (cond-> payload language (assoc :language language)))
+        cs-opts   (clj->js (cond-> {}
+                             explicit  (assoc :explicit true)
+                             delimiter (assoc :delimiter delimiter)))]
     (cond
-      (and (#{"log" "text"} kind) (big? file))
-      (js/Promise.resolve {:lines [] :anchors {} :toc [] :ir nil :base-dir base-dir :streaming? true :file file})
+      stdin?
+      (cond
+        (= "pdf" kind)   (load-batch {:kind "pdf" :path uri :bytes buf} aopts base-dir)
+        (= "image" kind) (load-batch {:kind "image" :path (stdin/spill! buf)} aopts base-dir)
+        (and (#{"log" "text"} kind) (> (.-length buf) stream-threshold))
+        (js/Promise.resolve {:lines [] :anchors {} :toc [] :ir nil :base-dir base-dir :streaming? true
+                             :file (stdin/spill! buf)})
+        (= "table" kind)
+        (-> (.openUri cs (stdin/spill! buf) kind cs-opts)
+            (.then (fn [p] (load-batch (with-lang (js->clj p :keywordize-keys true)) aopts base-dir))))
+        :else (load-batch (with-lang {:kind kind :path uri :text (.toString buf "utf8")}) aopts base-dir))
+      (and (#{"log" "text"} kind) (big? uri))
+      (js/Promise.resolve {:lines [] :anchors {} :toc [] :ir nil :base-dir base-dir :streaming? true :file uri})
       (contains? text-kinds kind)
-      (load-batch {:kind kind :path file :text (.readFileSync fs file "utf8")} aopts base-dir)
+      (load-batch (with-lang {:kind kind :path uri :text (.readFileSync fs uri "utf8")}) aopts base-dir)
       (= "image" kind)
-      (load-batch {:kind "image" :path file} aopts base-dir)
+      (load-batch {:kind "image" :path uri} aopts base-dir)
       (= "pdf" kind)
-      (load-batch {:kind "pdf" :path file :bytes (.readFileSync fs file)} aopts base-dir)
+      (load-batch {:kind "pdf" :path uri :bytes (.readFileSync fs uri)} aopts base-dir)
       :else
-      (-> (.openUri cs file) (.then (fn [p] (load-batch (js->clj p :keywordize-keys true) aopts base-dir)))))))
+      ;; office/table/log-paged/archive/directory/remote — content_service parses them; an explicit kind
+      ;; threads through (openLocal treats its presence as authoritative; openRemoteUri via opts.explicit).
+      (-> (.openUri cs uri (when explicit kind) cs-opts)
+          (.then (fn [p] (load-batch (with-lang (js->clj p :keywordize-keys true)) aopts base-dir)))))))
 
 ;; ── frame composition (pure over the state + size) ────────────────────────────
 (defn- body-rows [st w body-h]
@@ -122,7 +158,8 @@
          (str/join "" (map-indexed (fn [r ln] (str (term/cursor (inc r) 1) (term/clear-eol) ln)) all)))))
 
 ;; ── the interactive app ───────────────────────────────────────────────────────
-(defn- run-interactive [doc file opts]
+;; `key-input` (nil = process.stdin) is the /dev/tty stream a piped-stdin document reopens for keys.
+(defn- run-interactive [doc file opts key-input]
   (let [{:keys [w h]} (term/size)
         aopts   (atom (ansi-opts opts w))
         name    (.basename path file)
@@ -169,17 +206,17 @@
         resize-timer (atom nil)
         on-resize (fn [] (when @resize-timer (js/clearTimeout @resize-timer))
                     (reset! resize-timer (js/setTimeout relayout 90)))]   ; debounce a SIGWINCH storm
-    ;; stream a large log into the viewport ring
+    ;; stream a large log into the viewport ring — from the doc's READABLE source (a piped document's spill)
     (when (:streaming? doc)
       (reset! stop-stream
               (tstream/stream-records!
-               file
+               (or (:file doc) file)
                {:pace     (fn [f] (js/setImmediate f))
                 :on-blocks (fn [blocks]
                              (swap! st state/append-lines (str/split (render/render-record-blocks blocks @aopts) #"\n" -1))
                              (paint!))
                 :on-error (fn [e] (term/restore!) (.error js/console (str "vv-tui: " (.-message e))) (js/process.exit 1))})))
-    (term/init! {:on-key on-key :on-resize on-resize :on-resume paint! :no-tty? false})
+    (term/init! {:on-key on-key :on-resize on-resize :on-resume paint! :no-tty? false :input key-input})
     (paint!)))
 
 ;; ── --drive: replay keys headlessly, dump the final frame (deterministic test seam) ──
@@ -199,29 +236,74 @@
                 (.write js/process.stdout "\n")
                 (js/process.exit 0))]
     (if (:streaming? doc)
-      ;; drain the stream fully first (test logs are small), then replay keys
+      ;; drain the stream fully first (test logs are small), then replay keys — from the READABLE source
       (tstream/stream-records!
-       file
+       (or (:file doc) file)
        {:on-blocks (fn [blocks] (swap! st state/append-lines (str/split (render/render-record-blocks blocks aopts) #"\n" -1)))
         :on-done drive
         :on-error (fn [e] (.error js/console (str "vv-tui: " (.-message e))) (js/process.exit 1))})
       (drive))))
 
+(defn- ewrite [s] (.write js/process.stderr (str s "\n")))
+
+(defn- key-input-for
+  "The key-input stream for the session: nil (process.stdin) normally; for a piped-stdin document the
+   terminal is reopened at /dev/tty (the pipe carried the DOCUMENT, so keys need their own fd). When
+   /dev/tty cannot be opened (no controlling terminal) the session is view-only: a warning is printed and
+   key input is simply absent — Ctrl+C (SIGINT → the term teardown handlers) still exits cleanly."
+  [spec opts]
+  (when (and (:stdin? spec) (not (:drive opts)))
+    (try
+      (tty/ReadStream. (.openSync fs "/dev/tty" "r"))
+      (catch :default _
+        (ewrite "vv-tui: keyboard unavailable (/dev/tty could not be opened): view-only, Ctrl+C to quit")
+        nil))))
+
 (defn ^:export main []
   (heavy-node/install!)   ; wire unified-latex/uniorg into the shared pipeline before any doc renders (Node: no shadow.lazy)
-  (let [{:keys [file opts]} (parse-args (drop 2 (js->clj js/process.argv)))]
+  ;; the shared open grammar (files, -t/--type tokens, the `-` stdin placeholder) is scanned FIRST — the
+  ;; parity core (ADR-0036); vv-tui's own flags parse from its :passthrough (--width/--drive take values).
+  (let [args (drop 2 (js->clj js/process.argv))
+        scan (ft/scan-open-args args {:value-flags #{"--width" "--drive"}})
+        opts (:opts (parse-args (:passthrough scan)))]
     (cond
+      (:error scan)   (do (ewrite (:error scan)) (set! (.-exitCode js/process) 1) (js/Promise.resolve nil))
       (:help opts)    (do (println usage) (js/Promise.resolve nil))
       (:version opts) (do (println version) (js/Promise.resolve nil))
-      (nil? file)     (do (.write js/process.stderr (str usage "\n")) (set! (.-exitCode js/process) 1) (js/Promise.resolve nil))
       :else
-      (let [{:keys [w]} (term/size)]
-        (-> (load-doc file (ansi-opts opts w))
-            (.then (fn [doc]
-                     (if (:drive opts)
-                       (run-drive doc file opts (:drive opts))
-                       (run-interactive doc file opts))))
-            (.catch (fn [e]
-                      (term/restore!)
-                      (.write js/process.stderr (str "vv-tui: " file ": " (.-message e) "\n"))
-                      (js/process.exit 1))))))))
+      ;; unknown type tokens fail fast, BEFORE the stdin drain blocks on the producer's EOF
+      (if-let [bad (first (remove ft/resolve-type-token (:types scan)))]
+        (do (ewrite (str "vv: unknown type '" bad "' — " (ft/valid-tokens-hint)))
+            (set! (.-exitCode js/process) 1)
+            (js/Promise.resolve nil))
+        (-> (stdin/read-all!)
+            (.then
+             (fn [buf]
+               (let [result (ft/resolve-specs {:files      (vec (:files scan))
+                                               :types      (:types scan)
+                                               :stdin      (when buf {:path "stdin" :cwd (.cwd js/process)})
+                                               :dash-index (:dash-index scan)})
+                     specs  (:specs result)]
+                 (cond
+                   (:error result)
+                   (do (ewrite (:error result)) (set! (.-exitCode js/process) 1))
+
+                   (empty? specs)
+                   (do (ewrite usage) (set! (.-exitCode js/process) 1))
+
+                   :else
+                   (let [spec (first specs)                 ; the TUI pages ONE document at a time
+                         file (:uri spec)]
+                     (when (> (count specs) 1)
+                       (ewrite (str "vv-tui: one document at a time — ignoring "
+                                    (str/join ", " (map :uri (rest specs))))))
+                     (let [{:keys [w]} (term/size)]
+                       (-> (load-doc spec (when (:stdin? spec) buf) (ansi-opts opts w))
+                           (.then (fn [doc]
+                                    (if (:drive opts)
+                                      (run-drive doc file opts (:drive opts))
+                                      (run-interactive doc file opts (key-input-for spec opts)))))
+                           (.catch (fn [e]
+                                     (term/restore!)
+                                     (ewrite (str "vv-tui: " file ": " (.-message e)))
+                                     (js/process.exit 1)))))))))))))))

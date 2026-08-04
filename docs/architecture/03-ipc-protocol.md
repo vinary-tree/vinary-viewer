@@ -298,7 +298,7 @@ after the client's FIN.
 
 | Frame | Meaning | Reply |
 |---|---|---|
-| `{"args":["/abs/file","https://…"],"instanceId":"<uuid>"}` | open these in a new window (empty `args` → a New-Tab window, like bare `vv`) | none |
+| `{"args":["/abs/file","sftp://…"],"types":["diff",…],"stdinIndex":0,"cwd":"/abs","instanceId":"<uuid>"}` | open these in a new window (empty `args` → a New-Tab window, like bare `vv`). `types`/`stdinIndex`/`cwd` are the **v2 (ADR-0036) open grammar** — all optional: `types` are the raw `-t` tokens in flag order (the Nth type applies to the Nth arg), `stdinIndex` names which arg is the client-spilled piped-stdin document, `cwd` is the invoking directory (piped-diff enrichment). A legacy client omits them; a legacy daemon ignores them — both skews stay well-formed. | **only on rejection** (unknown type, mispaired types): one line `{"ok":false,"error":"vv: …"}`, which the client prints on the invoking terminal (exit 1). A valid open still ends silently, exactly what a legacy client expects. |
 | `vv1 ping` | who are you, and which build are you running? | `{"ok":true,"pid":…,"version":…,"bundleMtimeMs":…,"windows":N,"daemon":bool}` |
 | `vv1 stop` | quit gracefully — `app.quit()`, so `before-quit` runs (SSH pools torn down, window bounds persisted) | the same status object, sent *before* quitting |
 | anything else | logged `bad request`; **no window is opened** | none |

@@ -9,7 +9,8 @@ watching model, and per-tab history behavior.
 
 | Entry point | Behavior |
 |-------------|----------|
-| `vv <path\|URL> …` or `vinary-viewer <path\|URL> …` | Launches Electron, opening **every** non-flag argument in its own tab (in argument order; the **first** is focused). Accepts local file paths and `file://` / `http(s)://` / `ssh://` / `sftp://` / archive URIs; relative paths resolve against the launch directory (remote and URL arguments are kept verbatim). Flags (leading `-`) are ignored. |
+| `vv <path\|URL> …` or `vinary-viewer <path\|URL> …` | Launches Electron, opening **every** non-flag argument in its own tab (in argument order; the **first** is focused). Accepts local file paths and `file://` / `http(s)://` / `ssh://` / `sftp://` / archive URIs; relative paths resolve against the launch directory (remote and URL arguments are kept verbatim). `-t/--type TYPE` (repeatable) names the Nth file's type — see §2a; other flags are ignored. |
+| Piped stdin (`git diff \| vv`) | When stdin is not a terminal, its bytes become the **first** document (a lone `-` among the files repositions it), in a tab named `stdin`. Untyped piped text renders literally as plain text; `-t diff` (or any type, §2a) re-interprets it — the primary use case is `git diff \| vv -t diff`, whose side-by-side view enriches from the invoking repo. Stdin is drained to EOF (a piped document is a snapshot); the empty pipe opens nothing. Piped documents never enter Open Recent, and `vv --no-daemon` does not read stdin. |
 | `electron . <path\|URL> …` or `npm run start -- <path\|URL> …` | Development equivalent; same multi-argument open. |
 | `File > Open` | Native multi-file dialog. One selected file navigates the active tab; multiple selected files open one tab each. |
 | Sidebar file tree | Clicking a file dispatches `[:doc/open path]`. |
@@ -50,6 +51,45 @@ Mermaid source files render as diagrams. Other diagram source files open as
 source text unless you embed generated SVG output in Markdown. Directories are
 detected before the extension classifier and list their children rather than being
 read as text.
+
+Plain text renders **literally**: the delimiter sniff that used to flip prose with a stable
+comma/tab/pipe count into a column-aligned table is disabled (ADR-0036). A real delimited file is
+either *named* `.csv`/`.tsv`/… or *declared* — `-t csv`, or Settings ▸ File Type ▸ Delimited Table.
+(The log sniff is kept: an extensionless syslog still opens as a pageable log.)
+
+---
+
+## 2a. Explicit file types — `-t/--type` and Settings ▸ File Type (ADR-0036)
+
+The classifier above is only the *default*. An explicit type overrides it, per file:
+
+- **At the CLI** — repeatable `-t/--type TYPE` (alias `--file-type`), pairing positionally: the Nth
+  type applies to the Nth file, and a piped-stdin document is file 0 (or wherever `-` placed it).
+  Fewer types than files is fine — the rest deduce by extension, else plain text. `TYPE` is a
+  standard MIME type (`text/x-diff`, `application/pdf`, `text/csv;charset=utf-8`), a short alias
+  (`diff`, `patch`, `md`, `org`, `tex`, `log`, `csv`, `tsv`, `psv`, `table`, `mermaid`, `html`,
+  `source`, `pdf`, `image`, `text`), or a **grammar language** (`python`, `rs`, `clojure` — rendered
+  as highlighted source with that grammar). Kind tokens win over grammar names: `-t markdown` means
+  the *rendered* document, exactly as the `.md` extension does. An unknown token is a usage error
+  (with the valid-token list), printed on the invoking terminal even for the GUI (`vv` reads the
+  daemon's rejection reply).
+
+  ```bash
+  git diff | vv -t diff              # THE use case: a piped diff, unified/side-by-side
+  vv -t diff sftp://arch-ws/x.log    # types work on remote URIs too
+  vv -t md notes.txt -t py tool      # notes.txt as markdown, `tool` as python source
+  ```
+
+- **In the app** — **Settings ▸ File Type** re-interprets the *shown* document (the active facet's
+  file): the text-representable kinds first (Plain Text, Markdown, Org, LaTeX, Diff / Patch, Log,
+  Delimited Table, Mermaid, HTML, Source (auto)), then every bundled grammar language. The pick
+  re-reads and re-renders in place, and it **sticks**: the override lives in the main process keyed
+  by the path, so Reload, facet switches, history navigation, and file-save live-refreshes all keep
+  it. Closing the tab forgets it (reopening returns to extension deduction).
+
+Types on a directory or an `http(s)://` page are ignored (directories always list; web pages render
+in the web view). `office`/`archive` types are refused for piped input (their parsers need a named
+on-disk file).
 
 ---
 

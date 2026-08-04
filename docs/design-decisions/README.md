@@ -93,6 +93,7 @@ The next free number is **0036**.
 | [0033](0033-asynchronous-text-input.md) | Text fields own their own DOM value; one keyed scheduler (`debounce!`/`coalesce!`/`slice!`/`cancel!`) replaces four deferral idioms; find flattens incrementally; one configurable search model replaces five matchers | Accepted |
 | [0034](0034-expansion-scoped-file-tree-watchers.md) | Expansion-scoped shallow file-tree watchers, refresh-before-open controlled disclosures, and explicit subtree/root/all refresh | Accepted |
 | [0035](0035-authenticated-remote-daemon-events.md) | Authenticate SSH-forwarded daemon events for remote files and trees | Accepted |
+| [0036](0036-stdin-documents-and-explicit-file-types.md) | Piped-stdin documents (spilled temp file) + explicit `-t/--type` file types (one shared resolver, a main-side override registry, Settings ▸ File Type); plain text is never delimiter-sniffed | Accepted |
 
 ---
 

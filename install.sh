@@ -160,11 +160,23 @@ case "\${1:-}" in
 vinary-viewer — preview Markdown, PDFs, images, diagrams & source
 
 Usage:
-  vv [--gui] [files…]   open in the desktop GUI (default), one tab per file/URL
-  vv --cli  <file>      render a document to the terminal  (pipe-friendly:  vv --cli x.md | less)
-  vv --tui  <file>      interactively page a document       (scroll · / find · t contents · q quit)
-  vv --no-daemon [files…]   open in a fresh process (do not reuse the warm daemon)
+  vv [-t TYPE …] [files…]     open in the desktop GUI (default), one tab per file/URL/URI
+  vv --cli  [opts] [files…]   render documents to the terminal  (pipe-friendly:  vv --cli x.md | less)
+  vv --tui  [opts] <file>     interactively page a document      (scroll · / find · t contents · q quit)
+  vv --no-daemon [files…]     open in a fresh process (do not reuse the warm daemon; stdin not read)
   vv --help | --version
+
+Files may be local paths or URIs (https:// · ssh:// · sftp:// · vv-archive://).
+
+Piped stdin becomes the FIRST document in every mode (a lone '-' repositions it):
+  git diff | vv -t diff              GUI diff view (unified/side-by-side)
+  git diff | vv --cli -t diff        colored diff in the terminal
+  make 2>&1 | vv                     piped text, rendered literally (plain text)
+
+  -t, --type TYPE   file type for the Nth file (repeatable; stdin is file 0; untyped files deduce by
+                    extension, else plain text). TYPE is a MIME type (text/x-diff, application/pdf),
+                    a short alias (diff, md, csv, log, table), or a grammar language (python, rust).
+                    --file-type is an accepted alias.
 
 Mode options:  vv --cli --help   ·   vv --tui --help
 USAGE

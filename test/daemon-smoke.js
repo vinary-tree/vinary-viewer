@@ -166,6 +166,39 @@ async function main() {
   await request(JSON.stringify({ args: [] }));                             // no id (OS/legacy) → never deduped
   await waitUntil(async () => (await ping()).windows === base + 3, 30000, 'an id-less open always produces a window');
 
+  // 6b. ADR-0036 OPEN GRAMMAR — a v2 message carries types/stdinIndex/cwd, and the daemon replies on the
+  //     open path ONLY to reject. A typed open produces a window exactly like an untyped one…
+  const typedReply = await request(JSON.stringify({
+    args: [path.join(ROOT, 'README.md')], types: ['diff'], stdinIndex: null, cwd: ROOT,
+    instanceId: 'smoke-v2-typed' }));
+  assert.strictEqual(typedReply, '', 'a valid typed open is taken silently (no reply)');
+  await waitUntil(async () => (await ping()).windows === base + 4, 30000, 'a typed open to produce a window');
+
+  //     …while an UNKNOWN type is refused with the connection's only reply, and no window opens.
+  const rejected = JSON.parse(await request(JSON.stringify({
+    args: [path.join(ROOT, 'README.md')], types: ['not-a-type'], instanceId: 'smoke-v2-bad' })));
+  assert.strictEqual(rejected.ok, false, 'an unknown type is refused');
+  assert.ok(/unknown type 'not-a-type'/.test(rejected.error || ''), `the rejection names the token: ${rejected.error}`);
+  await sleep(1500);                                                       // give any wrongful window time to appear
+  assert.strictEqual((await ping()).windows, base + 4, 'a refused open opens no window');
+
+  // 6c. PIPED STDIN end-to-end through the real client: vv-open.mjs drains the pipe, spills it under this
+  //     smoke's isolated XDG_RUNTIME_DIR, and the daemon opens it as a document — the `git diff | vv -t diff`
+  //     shape. A daemon-side rejection then round-trips to the client's stderr with exit 1.
+  const diffText = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
+  const piped = runNode(path.join(APP, 'scripts', 'vv-open.mjs'), ['-t', 'diff'],
+                        { input: diffText, stdio: ['pipe', 'pipe', 'pipe'] });
+  assert.strictEqual(piped.code, 0, `piped open should succeed: ${piped.stderr || ''}`);
+  await waitUntil(async () => (await ping()).windows === base + 5, 30000, 'the piped document to open a window');
+  const spillRoot = path.join(RUNTIME_DIR, 'vinary-viewer', 'stdin');
+  assert.ok(fs.existsSync(spillRoot) && fs.readdirSync(spillRoot).length >= 1,
+    'the piped document was spilled under the runtime dir');
+  const badType = runNode(path.join(APP, 'scripts', 'vv-open.mjs'), ['-t', 'diph', path.join(ROOT, 'README.md')]);
+  assert.strictEqual(badType.code, 1, 'a daemon-rejected open exits 1 at the client');
+  assert.ok(/unknown type 'diph'/.test(badType.stderr || ''), `the daemon's error reaches the client stderr: ${badType.stderr}`);
+  await sleep(1500);
+  assert.strictEqual((await ping()).windows, base + 5, 'a client-rejected open opens no window');
+
   // 7. stop quits the process and frees the socket, so the lock is available to the next launch.
   const stopped = runNode(path.join(APP, 'scripts', 'vv-daemon.mjs'), ['stop', '--notice']);
   assert.strictEqual(stopped.code, 0, `stop should succeed: ${stopped.stderr || ''}`);

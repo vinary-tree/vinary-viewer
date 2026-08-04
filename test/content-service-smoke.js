@@ -151,6 +151,53 @@ async function main() {
     const lic = await content.openUri(licPath);
     assert.strictEqual(lic.kind, 'text', 'a LICENSE opens as plain text');
 
+    // Plain text is NEVER delimiter-sniffed (the delimiter-sniff arms are disabled): prose whose lines share
+    // a stable comma/pipe count used to flip the whole document to a column-aligned table. It must stay
+    // literal text — sourceable, with meta.size intact (the streaming gate).
+    const proseCsvPath = path.join(tmp, 'notes.txt');
+    fs.writeFileSync(proseCsvPath, Array.from({ length: 12 }, (_, i) => `item ${i}, first thing, second thing`).join('\n'));
+    const proseCsv = await content.openUri(proseCsvPath);
+    assert.strictEqual(proseCsv.kind, 'text', 'comma-stable prose in a .txt stays plain text (not a table)');
+    assert.strictEqual(proseCsv.sourceable, true, 'plain text keeps its source view');
+    assert.ok(proseCsv.meta && typeof proseCsv.meta.size === 'number', 'plain text keeps :size (the streaming gate)');
+    const pipeProsePath = path.join(tmp, 'layout-notes');
+    fs.writeFileSync(pipeProsePath, Array.from({ length: 8 }, (_, i) => `cell ${i} | detail | remark`).join('\n'));
+    const pipeProse = await content.openUri(pipeProsePath);
+    assert.strictEqual(pipeProse.kind, 'text', 'pipe-stable extensionless prose stays plain text (not a table)');
+
+    // …while an explicitly NAMED delimited file still parses as a table (classifyName, not the sniff).
+    const smallCsvPath = path.join(tmp, 'people.csv');
+    fs.writeFileSync(smallCsvPath, 'name,age\nAlice,30\nBob,25\n');
+    const smallCsv = await content.openUri(smallCsvPath);
+    assert.strictEqual(smallCsv.kind, 'table', 'a .csv still opens as a delimited table');
+    assert.ok(smallCsv.sheets && smallCsv.sheets[0].rows.length >= 3, 'the .csv payload carries parsed sheet rows');
+
+    // An EXPLICIT kind (openUri's second argument — `vv -t …`, Settings ▸ File Type) is authoritative:
+    // no classifyName, no sniffing. The same .txt re-opens as a diff, as literal text, or as a table.
+    const typedPath = path.join(tmp, 'typed.txt');
+    fs.writeFileSync(typedPath, 'diff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-a\n+b\n');
+    const typedDiff = await content.openUri(typedPath, 'diff');
+    assert.strictEqual(typedDiff.kind, 'diff', 'an explicit diff type forces the diff kind on a .txt');
+    assert.ok(/\+b/.test(typedDiff.text), 'the explicit-diff payload carries the raw text');
+    const typedText = await content.openUri(proseCsvPath, 'text');
+    assert.strictEqual(typedText.kind, 'text', 'an explicit text type is literal by declaration');
+    assert.strictEqual(typedText.sourceable, true);
+    const typedTable = await content.openUri(proseCsvPath, 'table', { delimiter: ',' });
+    assert.strictEqual(typedTable.kind, 'table', 'an explicit table type parses any file as delimited text');
+    assert.ok(typedTable.sheets && typedTable.sheets[0].rows.length >= 3, 'explicit-table rows parsed');
+    assert.strictEqual(typedTable.meta.delimiter, ',', 'the explicit delimiter rides meta for paging');
+    const tabbedPath = path.join(tmp, 'tabbed');
+    fs.writeFileSync(tabbedPath, 'a\tb\n1\t2\n3\t4\n');
+    const typedTsv = await content.openUri(tabbedPath, 'table', { delimiter: '\t' });
+    assert.strictEqual(typedTsv.kind, 'table');
+    assert.deepStrictEqual(typedTsv.sheets[0].rows[0], ['a', 'b'], 'tab delimiter honored via meta.delimiter');
+    // an explicit markdown type on an extensionless file returns kind markdown with the raw text
+    const mdish = path.join(tmp, 'readme-ish');
+    fs.writeFileSync(mdish, '# Title\n\nBody with **bold**.\n');
+    const typedMd = await content.openUri(mdish, 'markdown');
+    assert.strictEqual(typedMd.kind, 'markdown', 'an explicit markdown type forces the markdown kind');
+    assert.ok(typedMd.meta && typeof typedMd.meta.size === 'number', 'explicit kinds keep :size (streaming gate)');
+
     // Diffs (.diff/.patch) classify as their own kind and carry raw text for the diff IR front-end.
     assert.strictEqual(content.classifyName('change.diff'), 'diff', '.diff classifies as diff');
     assert.strictEqual(content.classifyName('fix.patch'), 'diff', '.patch classifies as diff');
@@ -209,6 +256,7 @@ async function main() {
     const bundle = await tarBuffer([
       { name: 'logs/app.log', body: Buffer.from('2026-06-29T10:00:00Z ERROR failed\n') },
       { name: 'notes.org', body: Buffer.from('#+TITLE: Archived\n* Head\n| a | b |\n|---+---|\n| 1 | 2 |\n') },
+      { name: 'notes.txt', body: Buffer.from(Array.from({ length: 10 }, (_, i) => `item ${i}, first, second`).join('\n')) },
       { name: 'nested.tar', body: nested }
     ]);
     fs.writeFileSync(bundlePath, bundle);
@@ -232,6 +280,11 @@ async function main() {
     assert.strictEqual(archivedOrg.kind, 'org', 'an .org inside an archive is kind "org", not "text"/"table"');
     assert.ok(archivedOrg.text.includes('#+TITLE'), 'the nested org entry carries its raw text for uniorg');
     assert.strictEqual(archivedOrg.sourceable, true, 'a nested org entry has a source view');
+
+    // bufferToPayload's disabled delimiter arm: a comma-stable .txt archive member stays literal plain text.
+    const archivedTxt = await content.openUri(content.archiveUri(bundlePath, ['notes.txt']));
+    assert.strictEqual(archivedTxt.kind, 'text', 'comma-stable prose inside an archive stays plain text (not a table)');
+    assert.strictEqual(archivedTxt.sourceable, true, 'a nested text entry keeps its source view');
 
     const nestedListing = await content.openUri(content.archiveUri(bundlePath, ['nested.tar']));
     assert.strictEqual(nestedListing.kind, 'archive');

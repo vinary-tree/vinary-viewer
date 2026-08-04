@@ -17,6 +17,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [vinary.main.dir-walk :as dir-walk]
+            [vinary.main.doc-overrides :as doc-overrides]
             [vinary.main.file-kind :as file-kind]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
@@ -208,12 +209,12 @@
               (filter (fn [m] (contains? file-kind/group-kinds (:kind m)))))
         (file-kind/group-candidate-paths p)))
 
-(defn- resolve-diff-source
-  "Locate a diff's referenced file `rel` on disk: try it relative to the diff's own directory, then walk up the
-   ancestors (a diff is usually generated from a repo root but may be viewed from a subdirectory). Returns an
-   absolute path, or nil when not found. Powers the side-by-side view's full-file enrichment."
-  [diff-path rel]
-  (loop [dir (.dirname path diff-path) depth 0]
+(defn- resolve-diff-source-from
+  "Locate a diff's referenced file `rel` on disk: try it relative to `dir`, then walk up the ancestors (a
+   diff is usually generated from a repo root but may be viewed from a subdirectory). Returns an absolute
+   path, or nil when not found. Powers the side-by-side view's full-file enrichment."
+  [start-dir rel]
+  (loop [dir start-dir depth 0]
     (when (and dir (< depth 30))
       (let [cand (.join path dir rel)]
         (if (try (.isFile (.statSync fs cand)) (catch :default _ false))
@@ -223,28 +224,60 @@
 
 (defn- load-diff-sources
   "Resolve each referenced `rel` path of the diff at `diff-path` against the filesystem and read the found ones →
-   {rel → utf8-content}. The renderer has no fs access, so the side-by-side view requests this over IPC."
+   {rel → utf8-content}. The renderer has no fs access, so the side-by-side view requests this over IPC.
+   A piped-stdin diff has no meaningful on-disk directory of its own — its spill dir — so resolution starts
+   from the INVOKING cwd instead (doc-overrides :cwd): `git diff | vv -t diff` enriches the side-by-side
+   view from the repo the diff was generated in."
   [diff-path rels]
-  (reduce (fn [acc rel]
-            (if-let [p (resolve-diff-source diff-path rel)]
-              (if-let [content (try (.readFileSync fs p "utf8") (catch :default _ nil))]
-                (assoc acc rel content)
-                acc)
-              acc))
-          {} (or rels [])))
+  (let [base (or (doc-overrides/stdin-base-dir diff-path) (.dirname path diff-path))]
+    (reduce (fn [acc rel]
+              (if-let [p (resolve-diff-source-from base rel)]
+                (if-let [content (try (.readFileSync fs p "utf8") (catch :default _ nil))]
+                  (assoc acc rel content)
+                  acc)
+                acc))
+            {} (or rels []))))
 
-(defn- send-parsed-content! [^js wc path]
-  (-> (.openUri content-service path)
-      (.then (fn [payload] (.send wc "vv:content" payload)))
+(defn- decorate-js-payload!
+  "Attach the override-carried presentation keys to an outgoing JS vv:content payload: :language (the
+   renderer's source-grammar pick), :stdin (tab labeled from a pipe — excluded from Open Recent), and
+   :baseDir (the invoking cwd a piped document's relative assets resolve against)."
+  [^js payload ov]
+  (when ov
+    (when (:language ov) (set! (.-language payload) (:language ov)))
+    (when (:stdin? ov)   (set! (.-stdin payload) true))
+    (when (and (:stdin? ov) (:cwd ov)) (set! (.-baseDir payload) (:cwd ov))))
+  payload)
+
+(defn- decorate-payload
+  "decorate-js-payload! for the CLJS-map payload sends (pre-clj->js)."
+  [m ov]
+  (cond-> m
+    (:language ov)               (assoc :language (:language ov))
+    (:stdin? ov)                 (assoc :stdin true)
+    (and (:stdin? ov) (:cwd ov)) (assoc :baseDir (:cwd ov))))
+
+(defn- send-parsed-content! [^js wc path kind ov]
+  ;; `kind` is passed to openUri ONLY when an override exists — for openLocal/openArchiveUri, presence of
+  ;; the argument means "explicit, skip classifyName and every content sniff".
+  (-> (.openUri content-service path
+                (when (:kind ov) kind)
+                (clj->js (cond-> {} (:delimiter ov) (assoc :delimiter (:delimiter ov)))))
+      (.then (fn [payload] (.send wc "vv:content" (decorate-js-payload! payload ov))))
       (.catch (fn [e] (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))
 
 ;; A remote (ssh://sftp://) URI is read ASYNCHRONOUSLY by the transport-backed content service. The grammar-aware
-;; `kind-of` is threaded in so a remote `.rs` renders as highlighted source (not sniffed text); openRemoteUri
-;; stats internally to decide list-vs-read and to fill meta.size (the streaming gate). Errors surface as vv:error.
+;; `kind-of` (behind any explicit override) is threaded in so a remote `.rs` renders as highlighted source (not
+;; sniffed text); openRemoteUri stats internally to decide list-vs-read and to fill meta.size (the streaming
+;; gate). Because that kind argument is ALWAYS passed, remote explicitness travels separately as opts.explicit.
 (defn- send-remote-content! [^js wc uri]
-  (-> (.openRemoteUri content-service uri (kind-of uri))
-      (.then  (fn [payload] (.send wc "vv:content" payload)))
-      (.catch (fn [e] (.send wc "vv:error" (clj->js {:path uri :message (.-message e)}))))))
+  (let [ov (doc-overrides/for-path uri)]
+    (-> (.openRemoteUri content-service uri (doc-overrides/effective-kind kind-of uri)
+                        (clj->js (cond-> {}
+                                   (:kind ov)      (assoc :explicit true)
+                                   (:delimiter ov) (assoc :delimiter (:delimiter ov)))))
+        (.then  (fn [payload] (.send wc "vv:content" (decorate-js-payload! payload ov))))
+        (.catch (fn [e] (.send wc "vv:error" (clj->js {:path uri :message (.-message e)})))))))
 
 (defn- conf-dir []
   (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
@@ -264,7 +297,10 @@
 (defn- send-content! [^js wc path]
   (if (file-kind/remote-uri? path)
     (send-remote-content! wc path)
-    (let [kind  (kind-of path)
+    (let [ov    (doc-overrides/for-path path)
+          ;; the effective kind — an explicit type (CLI `-t`, Settings ▸ File Type) beats classification on
+          ;; EVERY send, including every watcher live-refresh, so the override can never silently revert.
+          kind  (doc-overrides/effective-kind kind-of path)
           stamp (js/Date.now)]
     (case (service-util/route {:directory? (directory? path)
                                :archive?   (archive-uri? path)
@@ -276,19 +312,19 @@
       (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
 
       ;; archive URI or parser-owned local kind — main streams/parses and returns a bounded preview payload.
-      ;; Plain text routes through the parser so extensionless logs / delimited files can be sniffed
-      ;; before falling back to escaped text.
+      ;; Plain text routes through the parser for the LOG sniff (extensionless syslogs) before falling back
+      ;; to escaped text — the delimiter sniff is disabled (plain text renders literally; ADR-0036).
       :parsed
-      (send-parsed-content! wc path)
+      (send-parsed-content! wc path kind ov)
 
       ;; image — render by file:// path (binary, not read as text)
       :image
-      (.send wc "vv:content" (clj->js {:path path :kind "image" :stamp stamp}))
+      (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "image" :stamp stamp} ov)))
 
       ;; html — render live in the web view (loaded by its file:// URL), not shown as escaped source.
       ;; Live-refresh re-sends with a new stamp → content-view remounts the web host → the page reloads.
       :html
-      (.send wc "vv:content" (clj->js {:path path :kind "html" :stamp stamp}))
+      (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "html" :stamp stamp} ov)))
 
       ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
@@ -299,7 +335,7 @@
                  ;; the Preview/Source combo over every representation (paper.pdf ↔ paper.tex/paper.org). A lone
                  ;; PDF's group is size 1 → the renderer shows no toggle.
                  grp   (siblings-group path)]
-             (.send wc "vv:content" (clj->js {:path path :kind "pdf" :bytes bytes :stamp stamp :siblings grp})))
+             (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "pdf" :bytes bytes :stamp stamp :siblings grp} ov))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
 
       ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
@@ -313,9 +349,11 @@
                  ;; (its exported PDF + any sibling sources), so the renderer offers the Preview/Source combo over
                  ;; every representation. Non-group text kinds (source/text) carry no group → no toggle.
                  grp  (when (contains? file-kind/group-kinds kind) (siblings-group path))]
-             (.send wc "vv:content" (clj->js (cond-> {:path path :kind kind :text text :stamp stamp}
-                                               size (assoc :meta {:size size})
-                                               grp  (assoc :siblings grp)))))
+             (.send wc "vv:content" (clj->js (decorate-payload
+                                              (cond-> {:path path :kind kind :text text :stamp stamp}
+                                                size (assoc :meta {:size size})
+                                                grp  (assoc :siblings grp))
+                                              ov))))
            (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
 
 (declare unwatch-file!)
@@ -841,6 +879,13 @@
     (swap! remote-event-subs disj path)
     (ignore-remote-error! (.unsubscribeContent daemon-events path path)))
   (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
+  ;; a piped-stdin document's spilled snapshot dies with its last retaining tab: unlink the temp file and
+  ;; its per-invocation uuid dir (rmdirSync only removes it when empty — exactly the contract we want).
+  (when (doc-overrides/stdin-doc? path)
+    (try (.rmSync fs path #js {:force true}) (catch :default _ nil))
+    (try (.rmdirSync fs (path/dirname path)) (catch :default _ nil)))
+  ;; type overrides live exactly as long as retention: close the tab, reopen the file → extension deduction.
+  (doc-overrides/clear! path)
   (release-doc-assets! path))
 
 (defn sync-retained!
@@ -862,11 +907,16 @@
   (send-content! wc path)
   (if (file-kind/remote-uri? path)
     (open-remote-tree! wc path)
-    (when-not (archive-uri? path) (send-tree! wc path)))
+    ;; a piped-stdin document skips the sidebar tree like an archive does: its spill dir is not a project,
+    ;; and adopting $XDG_RUNTIME_DIR as a synthetic root would be pure noise.
+    (when-not (or (archive-uri? path) (doc-overrides/stdin-doc? path)) (send-tree! wc path)))
   (cond
     ;; remote (ssh://sftp://): prefer the authenticated target daemon event channel; polling stays opt-in fallback.
     (file-kind/remote-uri? path)
     (start-remote-live! path)
+    ;; a stdin document is an immutable snapshot (drained to EOF before open) — there is nothing to watch.
+    (doc-overrides/stdin-doc? path)
+    nil
     :else
     (ensure-content-watcher! path)))
 
@@ -950,6 +1000,15 @@
                         :releaseSession target-release-session!}})
   (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
   (.on ipcMain "vv:close" (fn [^js e path] (close! (.-sender e) path)))
+  ;; Settings ▸ File Type — re-type an open document in place: register the override (kind/language replace
+  ;; as a unit; a piped doc's stdin facts survive) and re-send through the FULL open pipeline to every
+  ;; retaining window (the :tab/reload shape — re-read, re-parse, re-render under the new kind).
+  (.on ipcMain "vv:set-file-type"
+       (fn [_e req]
+         (let [{:keys [path kind language]} (js->clj req :keywordize-keys true)]
+           (when (and (string? path) (string? kind))
+             (doc-overrides/set-type! path kind language)
+             (send-open-content! path)))))
   (.handle ipcMain "vv:content-page" (fn [_e req] (.contentPage content-service req)))
   ;; bounded-memory document streaming (session pull-cursor) — open/pull/close a paused file read
   (.handle ipcMain "vv:stream-open"  (fn [_e req] (.streamOpen  content-service req)))

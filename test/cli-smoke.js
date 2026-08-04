@@ -31,18 +31,35 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-cli-smoke-'));
 let passed = 0;
 function ok(cond, msg) { assert.ok(cond, msg); console.log('  ✓ ' + msg); passed++; }
 
-// run the CLI capturing stdout (small fixtures only; large logs go through the /proc RSS path below)
+// run the CLI capturing stdout (small fixtures only; large logs go through the /proc RSS path below).
+// stdin is EXPLICITLY 'ignore' (→ /dev/null → instant EOF): vv-cli drains a non-TTY stdin to EOF
+// (ADR-0036 piped documents), so inheriting a harness stdin that never closes would hang every run.
 function run(args, env) {
   return execFileSync('node', [CLI, ...args], {
     encoding: 'utf8', env: { ...process.env, ...(env || {}) }, maxBuffer: 128 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
+// run the CLI with `input` PIPED on stdin, capturing exit code + both streams (the ADR-0036 stdin cases)
+function runPiped(args, input, env) {
+  try {
+    const stdout = execFileSync('node', [CLI, ...args], {
+      encoding: 'utf8', env: { ...process.env, ...(env || {}) }, maxBuffer: 128 * 1024 * 1024,
+      input, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { code: 0, out: stdout, err: '' };
+  } catch (e) {
+    return { code: e.status, out: (e.stdout || '').toString(), err: (e.stderr || '').toString() };
+  }
+}
+
 // Async runner — required when the CLI subprocess must talk to an in-process server (a synchronous execFileSync
-// would block the event loop the server runs on).
+// would block the event loop the server runs on). stdin 'ignore' for the same reason as `run`.
 function runAsync(args, env) {
   return new Promise((resolve, reject) => {
-    const p = spawn('node', [CLI, ...args], { env: { ...process.env, ...(env || {}) } });
+    const p = spawn('node', [CLI, ...args], { env: { ...process.env, ...(env || {}) },
+                                              stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
@@ -221,6 +238,76 @@ if (fs.existsSync(pdf)) {
   const pout = run(['--no-color', '--width', '60', pdf]);
   ok(pout.includes('Vinary PDF Smoke'), 'PDF renders its extracted text (pdf.js reflow)');
   ok(!pout.startsWith('%PDF') && !pout.includes('┌'), 'PDF is NOT dumped as raw bytes or a box-drawing table');
+}
+
+// ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────
+{
+  const diffText = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n';
+
+  // untyped piped text renders LITERALLY (plain text — the '#' survives; no delimiter alignment)
+  const rawMd = runPiped(['--no-color'], '# piped-title\n\nitem 1, a, b\nitem 2, c, d\n');
+  ok(rawMd.code === 0 && rawMd.out.includes('# piped-title') && !rawMd.out.includes('┌'),
+     'untyped piped text is literal plain text (no markdown render, no table alignment)');
+
+  // …while -t markdown renders it (the heading marker is consumed by the renderer)
+  const typedMd = runPiped(['--no-color', '-t', 'markdown'], '# piped-title\n\nbody\n');
+  ok(typedMd.code === 0 && typedMd.out.includes('piped-title') && !typedMd.out.includes('# piped-title'),
+     '-t markdown renders piped text through the markdown pipeline');
+
+  // the acceptance shape: git diff | vv --cli -t diff → the diff IR (colored ± lines when forced)
+  const typedDiff = runPiped(['--color', '-t', 'diff'], diffText);
+  ok(typedDiff.code === 0 && typedDiff.out.includes(ESC + '[') && typedDiff.out.includes('+new'),
+     'piped diff with -t diff renders through the diff IR with colour');
+  const untypedDiff = runPiped(['--no-color'], diffText);
+  ok(untypedDiff.code === 0 && untypedDiff.out.includes('diff --git a/x b/x'),
+     'the same pipe untyped stays literal text (the header line survives verbatim)');
+
+  // a full MIME spelling is the same type as its short alias
+  const mimeDiff = runPiped(['--color', '--type=text/x-diff'], diffText);
+  ok(mimeDiff.out === typedDiff.out, '-t text/x-diff ≡ -t diff (byte-identical output)');
+
+  // -t python on an extensionless FILE forces source + that grammar
+  const noExt = path.join(tmp, 'script-no-ext');
+  fs.writeFileSync(noExt, 'def f():\n    return 1\n');
+  const typedPy = run(['--color', '-t', 'py', noExt]);
+  ok(typedPy.includes(ESC + '[') && typedPy.includes('return'), '-t py highlights an extensionless file as python source');
+
+  // piped CSV with -t csv parses as a delimited table (box-drawing), never sniffed
+  const typedCsv = runPiped(['--no-color', '-t', 'csv'], 'a,b\n1,2\n3,4\n');
+  ok(typedCsv.code === 0 && typedCsv.out.includes('┌') && typedCsv.out.includes('│'),
+     'piped CSV with -t csv renders as a box-drawing table');
+
+  // pairing: the Nth type applies to the Nth file; `-` repositions the stdin document
+  const posOut = runPiped(['--no-color', md, '-', '-t', 'markdown', '-t', 'text'], 'tail-piped-doc\n');
+  ok(posOut.code === 0 && posOut.out.indexOf('Title') < posOut.out.indexOf('tail-piped-doc'),
+     "a lone '-' positions the stdin document after the named file (types pair around it)");
+
+  // errors: unknown token (fast-fail, before any stdin drain), too many types, '-' with no data
+  const bad = runPiped(['-t', 'diph'], 'x\n');
+  ok(bad.code === 1 && /unknown type 'diph'/.test(bad.err) && /valid types/.test(bad.err),
+     'an unknown type errors with the valid-token hint (exit 1)');
+  const extra = run2(['--no-color', '-t', 'diff', '-t', 'md', md]);
+  ok(extra.code === 1 && /2 types/.test(extra.err), 'more types than files errors (exit 1)');
+  const dashNoData = run2(['--no-color', '-']);
+  ok(dashNoData.code === 1 && /no piped data/.test(dashNoData.err), "'-' without piped data errors (exit 1)");
+
+  // --toc is long-only now (the -t short form moved to --type; user-approved breaking change)
+  const tocStill = run(['--no-color', '--toc', md]);
+  ok(/Contents/.test(tocStill), '--toc still prints the outline (long form)');
+  const tNotToc = runPiped(['--no-color', '-t', 'markdown'], '# only-doc\n');
+  ok(!/Contents/.test(tNotToc.out), '-t no longer means --toc (it consumed a type value instead)');
+}
+
+// like runPiped but with stdin 'ignore' (no piped data) — for pure argv-error cases
+function run2(args, env) {
+  try {
+    const stdout = execFileSync('node', [CLI, ...args], {
+      encoding: 'utf8', env: { ...process.env, ...(env || {}) }, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { code: 0, out: stdout, err: '' };
+  } catch (e) {
+    return { code: e.status, out: (e.stdout || '').toString(), err: (e.stderr || '').toString() };
+  }
 }
 
 // ── 5. bounded-memory streaming: peak RSS must NOT scale with file size ───────────────────────────

@@ -1,0 +1,58 @@
+@startuml seq-stdin-typed-open
+'' PlantUML over Mermaid: this is a four-participant, three-phase hand-off (drain/spill → socket →
+'' registry-mediated open) whose whole point is WHERE facts live at each step — a sequence diagram with
+'' phase dividers and per-concept colors states that precisely. Amber = IPC seams, slate = main-process
+'' services, teal = renderer, brown = filesystem/terminal.
+!include _vv-theme.iuml
+
+title ADR-0036 — <latex>\texttt{git\ diff\ |\ vv\ -t\ diff}</latex> : a piped document with an explicit type
+
+participant "terminal\n(git diff | …)" as Term FS_TINT
+participant "vv-open.mjs\n(GUI client)" as Client IPC_TINT
+participant "daemon socket\n+ startup/socket-specs" as Daemon MAIN_TINT
+participant "doc-overrides\nregistry (main)" as Reg DATASCRIPT_TINT
+participant "service.cljs\nsend-content!" as Svc MAIN_TINT
+participant "renderer\n(:content/received)" as R RENDERER_TINT
+
+== drain + spill (client side — the resident daemon cannot see this terminal's pipe) ==
+Term -> Client : piped bytes … EOF
+activate Client
+Client -> Client : scan argv: files=[], types=["diff"]
+Client -> Term : spill → $XDG_RUNTIME_DIR/vinary-viewer/\nstdin/<uuid>/stdin  (0700/0600)
+note right of Client #F4F1E1: zero piped bytes ⇒ NO stdin document\n(types shift to the named files)
+
+== the v2 open message (additive; a legacy daemon ignores the new fields) ==
+Client -> Daemon : {args:[…/stdin], types:["diff"],\nstdinIndex:0, cwd:"/work/repo", instanceId}
+deactivate Client
+activate Daemon
+Daemon -> Daemon : socket-specs → resolve-specs\n(vinary.file-type — the ONE resolver)
+alt unknown type / mispaired types
+  Daemon --> Client : {"ok":false,"error":"vv: unknown type '…'"}
+  note right of Client #FBE9E7: printed on the invoking terminal,\nspill unlinked, exit 1
+else valid specs
+  Daemon -> Reg : register! path {:kind "diff"\n:stdin? true :cwd "/work/repo"}
+  Daemon -> R : vv:open-files {paths:[…/stdin]}\n(the UNCHANGED renderer pipeline)
+end
+deactivate Daemon
+
+== every send consults the registry (override survives Reload / facet nav / watcher refreshes) ==
+R -> Svc : vv:open "…/stdin"
+activate Svc
+Svc -> Reg : effective-kind → "diff"\nstdin-doc? → skip tree + watcher
+Svc -> Svc : openLocal(path, "diff")\n(explicit kind ⇒ no classify, no sniff)
+Svc --> R : vv:content {kind:"diff", text, stdin:true,\nbaseDir:"/work/repo", meta{size}}
+deactivate Svc
+R -> R : :diff/render → unified view;\nstdin flag ⇒ no Recent-MRU entry
+note over Reg, R #EEE6EF: Settings ▸ File Type later re-types the SAME path:\nvv:set-file-type → set-type! (stdin facts survive) → re-send.\nSide-by-side enrichment resolves a/… b/… against baseDir\n(the repo the diff was generated in).
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| terminal / filesystem |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (client · socket · channels) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main-process services |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| doc-overrides registry (per-path facts) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer |
+  The registry is why the type can never silently revert: send-content!
+  consults it on EVERY send, including watcher live-refreshes.
+endlegend
+@enduml

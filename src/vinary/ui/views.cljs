@@ -655,7 +655,7 @@
    editor scrolls, the source-toc section at the viewport top is marked :ui/active-heading — the same highlight
    the preview uses, but measured in editor LINES instead of DOM pixel offsets (the source Contents ids are
    `L<line>`, not host-DOM element ids, and the CodeMirror `.cm-scroller` scrolls internally, not `.vv-content`)."
-  [_text _path _stamp]
+  [_text _path _stamp _language]
   (let [node (atom nil) view (atom nil) path* (atom nil)
         cur*    (atom nil)        ; [path stamp], prevents unrelated app renders rebuilding CodeMirror
         lease*  (atom nil)        ; prepared highlight spans + outline
@@ -685,9 +685,9 @@
             ;; mount the EditorView + wire its scroll-spy + derive the Contents outline. Factored out of build! so
             ;; the (warm) chunk-ready path stays SYNCHRONOUS (identical to the pre-split behavior) while the cold
             ;; path runs it from cm/ensure!'s .then. `token` fences a stale build (see build*).
-            (mount-editor! [text path prepared token]
+            (mount-editor! [text path grammar prepared token]
               (when (and (= token @build*) @node)
-                (reset! view (cm/create-source-view @node text (syntax/grammar-for path) (:spans prepared)))
+                (reset! view (cm/create-source-view @node text grammar (:spans prepared)))
                 ;; follow the editor's own scroller so the Contents highlight tracks scrolling (rAF-throttled)
                 (let [scroller (.-scrollDOM ^js @view)
                       handler  (fn [_] (spy!))]
@@ -698,9 +698,12 @@
                   (reset! toc* outline)
                   (spy!))))
             (build! [this]
-              (let [[_ text path stamp] (r/argv this)
+              (let [[_ text path stamp language] (r/argv this)
                     token   (swap! build* inc)
-                    grammar (syntax/grammar-for path)
+                    ;; an explicit :doc/language (ADR-0036) beats the extension pick, so a piped/extensionless
+                    ;; document highlights as the language the user named; the grammar VALUE keys the warm
+                    ;; cache, so distinct languages of one path/stamp never collide.
+                    grammar (syntax/grammar-for-doc path language)
                     lease   (warm-cache/acquire!
                              {:key [:source path stamp grammar]
                               :path path :stamp stamp
@@ -709,7 +712,7 @@
                                        (let [spans-p (if grammar
                                                        (syntax/highlight-spans text grammar)
                                                        (js/Promise.resolve #js []))
-                                             toc-p   (syntax/parse-outline text path)]
+                                             toc-p   (syntax/parse-outline text path language)]
                                          (-> (js/Promise.all #js [spans-p toc-p])
                                              (.then (fn [values]
                                                       {:spans (aget values 0)
@@ -719,7 +722,7 @@
                 (reset! cur* [path stamp])
                 (reset! lease* lease)
                 (-> (js/Promise.all #js [ready-p (:promise lease)])
-                    (.then (fn [values] (mount-editor! text path (aget values 1) token)))
+                    (.then (fn [values] (mount-editor! text path grammar (aget values 1) token)))
                     (.catch (fn [e] (js/console.warn "[vv] source-view preparation failed:" e))))))
             (destroy! []
               (swap! build* inc)   ; cancel any in-flight build so its .then can't mount a stale/orphan view
@@ -751,11 +754,13 @@
        {:display-name           "vv-source-view"
         :component-did-mount     (fn [this] (build! this) (scroll/apply! @node))
         :component-did-update    (fn [this]
+                                   ;; a language override re-arrives with a fresh stamp (main re-sends through
+                                   ;; the full pipeline), so [path stamp] remains a sufficient rebuild key.
                                    (let [[_ _text path stamp] (r/argv this)]
                                      (when (not= [path stamp] @cur*)
                                        (destroy!) (build! this) (scroll/apply! @node))))
         :component-will-unmount  (fn [_] (destroy!) (reset! cur* nil))
-        :reagent-render          (fn [_text _path _stamp] [:div.vv-source {:ref (fn [el] (reset! node el))
+        :reagent-render          (fn [_text _path _stamp _language] [:div.vv-source {:ref (fn [el] (reset! node el))
                                                                      :on-context-menu on-ctx}])}))))
 
 (defn mermaid-view
@@ -1166,7 +1171,7 @@
        ;; Explicit Source precedes the streaming Preview policy (content-route). This is
        ;; what makes Source reachable for Markdown/Org/LaTeX above the streaming threshold.
        :source                     ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [post-paint-surface [source-view (:doc/text doc) (:doc/path doc) (:doc/stamp doc)]]
+                                   [post-paint-surface [source-view (:doc/text doc) (:doc/path doc) (:doc/stamp doc) (:doc/language doc)]]
        ;; a large streamable doc renders as a bounded-memory INCREMENTAL stream (ir-stream-body drives it from
        ;; the file path); keyed by [path stamp] so a live-refresh remounts and re-streams. Small docs never set
        ;; :doc/streaming? (stream-flag/enabled?), so they fall through to the byte-identical batch renderers.

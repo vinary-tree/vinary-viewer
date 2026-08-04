@@ -208,8 +208,9 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | `:diff/split-ready` | `{:path :html}` | The enriched side-by-side HTML arrived → stored as `:doc/diff-split-html`. |
 | `:pdf/sibling-ready` | `{:path :bytes}` | The sibling PDF's bytes arrived (over `vv:load-pdf-bytes`) → cached for the pdf view. |
 | `:tab/reload` | — | Re-open the active tab's URI (re-read + re-render). |
+| `:doc/set-file-type` | `{:kind :language?}` | Settings ▸ File Type: re-interpret the SHOWN document (the active facet's file) under an explicit type. Fires `[:vv/set-file-type {:path :kind :language}]` — main registers the override in its doc-overrides registry and re-sends through the full open pipeline (the `:tab/reload` shape), so the override survives watcher refreshes. `language` is a grammar-catalog id for a "source with THIS grammar" pick. No optimistic DataScript write (`:content/received` stays the single ingestion point). |
 
-See [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md) / [ADR-0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md).
+See [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md) / [ADR-0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md) / [ADR-0036](../design-decisions/0036-stdin-documents-and-explicit-file-types.md).
 
 ### 1.17 Remote files over SSH
 
@@ -305,6 +306,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:find/clear` | `_` | `finder/clear!` (delete both highlights, disconnect the MutationObserver, reset state) | — |
 | `:toc/scroll` | `id` | `getElementById id` → `scroll/scroll-el-to! {:block :start :behavior "smooth"}` — a **confined** `.vv-content` scrollTo, never `el.scrollIntoView` (ADR-0032) | — |
 | `:vv/open` | `path` | `window.vv.open(path)` → `vv:open` IPC (guarded on `window.vv`) | — |
+| `:vv/set-file-type` | `{:path :kind :language?}` | `window.vv.setFileType(req)` → `vv:set-file-type` IPC (guarded on `.-setFileType` — a stale preload lacks it): main registers the explicit type override and re-sends the doc to every retaining window (ADR-0036) | — |
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |

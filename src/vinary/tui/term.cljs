@@ -15,9 +15,15 @@
 (def ^:private enter-seq (str (csi "?1049h") (csi "?25l") (csi "?2004h") (csi "2J") (csi "H")))
 (def ^:private leave-seq (str (csi "?2004l") (csi "?25h") (csi "?1049l")))
 
-(defonce ^:private st (atom {:raw? false :active? false :done? false :no-tty? false :on-resume nil}))
+(defonce ^:private st (atom {:raw? false :active? false :done? false :no-tty? false :on-resume nil :input nil}))
 
 (defn stdin-tty? [] (boolean (and js/process.stdin (.-isTTY js/process.stdin))))
+
+;; The ACTIVE key-input stream. Default: process.stdin. A piped-stdin document (ADR-0036) hands the pipe
+;; to the document loader and reopens /dev/tty for keys — that tty.ReadStream arrives via init! :input,
+;; and every raw-mode enter/leave/resume/data binding below operates on it instead of process.stdin.
+(defn- input-stream ^js [] (or (:input @st) js/process.stdin))
+(defn- input-tty? [] (let [^js in (input-stream)] (boolean (and in (.-isTTY in)))))
 
 (defn size []
   (let [o js/process.stdout]
@@ -33,13 +39,14 @@
   []
   (when (and (:active? @st) (not (:no-tty? @st)))
     (write-sync! leave-seq)
-    (when (and (:raw? @st) (stdin-tty?))
-      (try (.setRawMode js/process.stdin false) (catch :default _ nil)))))
+    (when (and (:raw? @st) (input-tty?))
+      (try (let [^js in (input-stream)] (.setRawMode in false)) (catch :default _ nil)))))
 
 (defn- enter! []
   (when-not (:no-tty? @st)
-    (when (stdin-tty?)
-      (try (.setRawMode js/process.stdin true) (swap! st assoc :raw? true) (catch :default _ nil)))
+    (when (input-tty?)
+      (try (let [^js in (input-stream)] (.setRawMode in true) (swap! st assoc :raw? true))
+           (catch :default _ nil)))
     (write-sync! enter-seq)))
 
 (defn restore!
@@ -70,18 +77,21 @@
 
 (defn init!
   "Enter the full-screen raw terminal and wire input. opts:
-     :on-key    (fn [buf])   — raw stdin bytes (a Node Buffer)
+     :on-key    (fn [buf])   — raw key bytes (a Node Buffer)
      :on-resize (fn [])      — SIGWINCH
      :on-resume (fn [])      — repaint after a Ctrl-Z / SIGCONT resume
-     :no-tty?   bool         — skip raw mode + alt-screen (the --drive test seam); stdin is still read
+     :no-tty?   bool         — skip raw mode + alt-screen (the --drive test seam); input is still read
+     :input     stream       — the key-input stream (default process.stdin). A piped-stdin document
+                               passes a /dev/tty tty.ReadStream here (ADR-0036) so the pipe can carry
+                               the DOCUMENT while the terminal still carries the KEYS.
    Returns nil; call `restore!` (or exit) to tear down."
-  [{:keys [on-key on-resize on-resume no-tty?]}]
-  (swap! st assoc :active? true :no-tty? (boolean no-tty?) :on-resume on-resume :done? false)
+  [{:keys [on-key on-resize on-resume no-tty? input]}]
+  (swap! st assoc :active? true :no-tty? (boolean no-tty?) :on-resume on-resume :done? false :input input)
   (enter!)
   (install-handlers!)
-  (when js/process.stdin
-    (when (and (not no-tty?) (stdin-tty?)) (.resume js/process.stdin))
-    (.on js/process.stdin "data" (fn [buf] (when (and on-key (not (:done? @st))) (on-key buf)))))
+  (when-let [^js in (input-stream)]
+    (when (and (not no-tty?) (input-tty?)) (.resume in))
+    (.on in "data" (fn [buf] (when (and on-key (not (:done? @st))) (on-key buf)))))
   (when (and on-resize js/process.stdout)
     (.on js/process.stdout "resize" (fn [] (when-not (:done? @st) (on-resize)))))
   nil)

@@ -3,7 +3,8 @@
    the app's invariant Chromium switches, the GPU-mode predicates, and command-line argument parsing
    without loading electron."
   (:require [clojure.string :as str]
-            [vinary.app.uri :as uri]))
+            [vinary.app.uri :as uri]
+            [vinary.file-type :as file-type]))
 
 (def chromium-switches
   "Chromium command-line switches the app appends unconditionally at launch (applied by the doseq in
@@ -70,9 +71,22 @@
      ""
      "Usage:"
      "  vv [--gui] [files…]   open in the desktop GUI (default), one tab per file/URL"
-     "  vv --cli  <file>      render a document to the terminal  (pipe-friendly:  vv --cli x.md | less)"
-     "  vv --tui  <file>      interactively page a document       (scroll · / find · t contents · q quit)"
+     "  vv --cli  [files…]    render documents to the terminal  (pipe-friendly:  vv --cli x.md | less)"
+     "  vv --tui  <file>      interactively page a document      (scroll · / find · t contents · q quit)"
      "  vv --help | --version"
+     ""
+     "Files may be local paths or URIs (https:// · ssh:// · sftp:// · vv-archive://)."
+     ""
+     "Stdin:  piped input becomes the FIRST document (a lone '-' repositions it):"
+     "  git diff | vv -t diff        view a diff from a pipe (unified/side-by-side)"
+     "  make 2>&1 | vv               view piped text literally (plain text)"
+     ""
+     "Options:"
+     "  -t, --type TYPE       file type for the Nth file (repeatable; stdin is file 0; files without a"
+     "                        type deduce from their extension, else plain text). TYPE is a MIME type"
+     "                        (text/x-diff, application/pdf), a short alias (diff, md, csv, log, table),"
+     "                        or a grammar language (python, rust — highlighted source). --file-type is"
+     "                        accepted as an alias."
      ""
      "Mode options:  vv --cli --help   ·   vv --tui --help"]))
 
@@ -102,25 +116,89 @@
                   (not-empty (subs a (count instance-id-flag)))))
         argv))
 
+(defn- normalize-doc-arg
+  "One command-line document argument → its canonical tab uri, or nil for a blank. http(s), vv-archive://
+   and ssh://sftp:// URIs are kept verbatim (NEVER resolve-abs'd — they are virtual addresses, not local
+   paths); a file:// URI is reduced to its path; a local path (absolute or relative) is made absolute via
+   `resolve-abs` (a 1-argument, cwd-relative resolver — node's `path.resolve`, injected so this stays
+   electron- and node-builtin-free)."
+  [resolve-abs arg]
+  (let [u (uri/normalize arg)]   ; blank→nil, http kept, archive kept, file:// stripped, else as-is
+    (cond
+      (nil? u)         nil
+      (uri/http? u)    u
+      (uri/archive? u) u
+      (uri/remote? u)  u          ; ssh://sftp:// kept verbatim (never resolve-abs a remote URI)
+      :else            (resolve-abs u))))
+
 (defn doc-uris
   "Ordered, normalized tab uris for the non-flag document arguments in `argv` — supporting any number of
    files/URIs named on the command line (`vv a.md b.pdf https://example.com`), each opened in its own tab.
 
    argv[0]=electron, argv[1]=app path (install.sh runs `electron \"$REPO\" \"$@\"`, and `npm start` =
-   `electron .`), so the user's arguments begin at index 2. http(s) and vv-archive:// URLs are kept
-   verbatim; a file:// URI is reduced to its path; a local path (absolute or relative) is made absolute
-   via `resolve-abs` (a 1-argument, cwd-relative resolver — node's `path.resolve`, injected so this stays
-   electron- and node-builtin-free). Leading-'-' flags and blank arguments are dropped."
+   `electron .`), so the user's arguments begin at index 2. Leading-'-' flags and blank arguments are
+   dropped. `doc-specs` (below) is the full open grammar — types, stdin — built on the same normalization;
+   this stays the flags-blind uri view (the lenient fallback for a skewed/invalid second-instance argv)."
   [argv resolve-abs]
   (->> (drop 2 argv)
        (remove #(str/starts-with? % "-"))
-       (map (fn [arg]
-              (let [u (uri/normalize arg)]   ; blank→nil, http kept, archive kept, file:// stripped, else as-is
-                (cond
-                  (nil? u)         nil
-                  (uri/http? u)    u
-                  (uri/archive? u) u
-                  (uri/remote? u)  u          ; ssh://sftp:// kept verbatim (never resolve-abs a remote URI)
-                  :else            (resolve-abs u)))))
+       (map (partial normalize-doc-arg resolve-abs))
        (remove nil?)
        vec))
+
+(def ^:private stdin-flag "--vv-stdin=")
+
+(defn- stdin-marker
+  "The spilled stdin temp path named by a `--vv-stdin=<path>` flag among `args` — how the direct-spawn
+   fallback (scripts/vv-open.mjs last resort) marks WHICH positional argument is the piped document — or
+   nil. The temp path itself also appears among the files, at the stdin document's position."
+  [args]
+  (some (fn [a] (when (and (string? a) (str/starts-with? a stdin-flag))
+                  (not-empty (subs a (count stdin-flag)))))
+        args))
+
+(defn doc-specs
+  "The FULL open grammar for an argv-shaped launch (`:initial`, `:second-instance`, the direct-spawn
+   fallback): scan `-t/--type/--file-type` and `-` (vinary.file-type/scan-open-args), normalize each file
+   argument (normalize-doc-arg — URIs verbatim, local paths via `resolve-abs`), read a `--vv-stdin=<path>`
+   marker back out of argv, and pair types with files (vinary.file-type/resolve-specs; the stdin document
+   is file 0 or wherever `-`/the marker placed it). `cwd` is the invoking working directory, carried on
+   the stdin spec so a piped diff's side-by-side view resolves against the repo it was generated in.
+
+   → {:specs [{:uri :kind? :language? :delimiter? :stdin? :cwd?} …]} | {:error \"vv: …\"}"
+  ([argv resolve-abs] (doc-specs argv resolve-abs nil))
+  ([argv resolve-abs cwd]
+   (let [args (vec (drop 2 argv))
+         scan (file-type/scan-open-args args)]
+     (if (:error scan)
+       {:error (:error scan)}
+       (let [files  (into [] (comp (map (partial normalize-doc-arg resolve-abs)) (remove nil?)) (:files scan))
+             marker (some->> (stdin-marker args) (normalize-doc-arg resolve-abs))
+             mi     (when marker (.indexOf files marker))
+             spill? (and marker (some? mi) (>= mi 0))]
+         (file-type/resolve-specs
+          {:files      (if spill? (into (subvec files 0 mi) (subvec files (inc mi))) files)
+           :types      (:types scan)
+           :stdin      (when spill? {:path marker :cwd cwd})
+           :dash-index (if spill? mi (:dash-index scan))}))))))
+
+(defn socket-specs
+  "The FULL open grammar for a daemon-socket open message (scripts/vv-open.mjs): the client has already
+   consumed flags, cwd-resolved local paths, drained+spilled stdin, and inserted the spill path into
+   `args` at `stdin-index`. Reconstruct the stdin spec from that index and pair types positionally
+   (vinary.file-type/resolve-specs). A legacy client sends neither :types nor :stdin-index — the result
+   is then byte-identical to the pre-ADR-0036 behavior (bare specs).
+
+   → {:specs […]} | {:error \"vv: …\"}"
+  [{:keys [args types stdin-index cwd]}]
+  (let [args       (into [] (comp (map uri/normalize) (remove nil?)) args)
+        stdin-path (when (and (number? stdin-index) (<= 0 stdin-index) (< stdin-index (count args)))
+                     (nth args stdin-index))
+        files      (if stdin-path
+                     (into (subvec args 0 stdin-index) (subvec args (inc stdin-index)))
+                     args)]
+    (file-type/resolve-specs
+     {:files      files
+      :types      (vec types)
+      :stdin      (when stdin-path {:path stdin-path :cwd cwd})
+      :dash-index (when stdin-path stdin-index)})))

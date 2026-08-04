@@ -5,7 +5,10 @@
 
 (def parser-kinds
   "Local kinds main streams/parses into a bounded preview payload (logs, delimited tables, office docs,
-   archives, and plain text sniffed for the same) — vs. reading the bytes as escaped source text."
+   archives, and plain text log-sniffed for the same) — vs. reading the bytes as escaped source text.
+   Plain text stays in this set for the LOG sniff and the sourceable text tail only: the delimiter sniff
+   that used to flip prose into a delimited table is disabled in content_service (plain text renders
+   literally; a delimited table is named .csv/.tsv/… or explicitly typed)."
   #{"office" "table" "log" "archive" "text"})
 
 (defn route

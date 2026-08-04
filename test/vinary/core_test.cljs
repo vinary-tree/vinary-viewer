@@ -566,10 +566,10 @@
           idx       (first (keep-indexed (fn [i label] (when (= "Developer Tools" label) i)) labels))]
       (is (number? idx))
       (is (= "re-frame-10x" (get labels (inc idx))))))
-  (testing "Settings exposes Theme and Key Bindings as the first two submenus"
+  (testing "Settings exposes File Type, Theme and Key Bindings as the first three submenus (ADR-0036)"
     (let [settings-menu (first (filter #(= "Settings" (:label %)) menubar/menus))]
-      (is (= ["Theme" "Key Bindings"]
-             (->> (:items settings-menu) (filter map?) (take 2) (map :submenu) vec)))))
+      (is (= ["File Type" "Theme" "Key Bindings"]
+             (->> (:items settings-menu) (filter map?) (take 3) (map :submenu) vec)))))
   (testing "open menu access keys resolve actions and submenus"
     (is (= {:action :dispatch :event [:file/open-dialog]}
            (menubar/access-action {:ui {:menu "File"}} "o")))

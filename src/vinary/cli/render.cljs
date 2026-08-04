@@ -114,8 +114,10 @@
       "mermaid"  (done (code-block-ir text "mermaid") "\n\n")
       "image"    (done (image-ir path) "\n\n")
       ("directory" "archive") (done (dir->ir entries) "\n")
-      ;; a source file IS its (highlighted) code — render it as one fenced code block in the file's language
-      "source"   (done (code-block-ir text (some-> (gc/grammar-for-path path gc/bundled-grammars {}) :id)) "\n")
+      ;; a source file IS its (highlighted) code — render it as one fenced code block in the file's language.
+      ;; An explicit :language (ADR-0036 — `-t python`, a typed stdin document) beats the path-based pick.
+      "source"   (done (code-block-ir text (or (some-> (:language payload) (gc/grammar-for-language gc/bundled-grammars) :id)
+                                               (some-> (gc/grammar-for-path path gc/bundled-grammars {}) :id))) "\n")
       ;; a diff/patch → the unified (colored) IR; the ANSI backend colours ±/hunk lines. Single-newline blocks
       ;; (a line-structured document), like logs — never a blank line between diff lines.
       "diff"     (done (ir-diff/diff->ir text) "\n")

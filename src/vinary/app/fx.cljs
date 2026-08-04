@@ -90,10 +90,11 @@
 ;; byte-identical output to the retired legacy string render (proven by ir.parity-test + the electron smoke).
 (rf/reg-fx
  :markdown/render
- (fn [{:keys [text path stamp on-done]}]
+ (fn [{:keys [text path stamp base-dir on-done]}]
    ;; the common IR IS the render path (ADR-0017/0029): remark-parse + remark-gfm (micromark) → mdast → hast →
-   ;; IR → the shared app-hast-suffix + apply-posts. base-dir resolves relative URLs → file://.
-   (-> (md/render-ir text (md/dir-of path) stamp)
+   ;; IR → the shared app-hast-suffix + apply-posts. base-dir resolves relative URLs → file:// — an explicit
+   ;; :base-dir (a piped document's invoking cwd, ADR-0036) overrides the path-derived one.
+   (-> (md/render-ir text (or base-dir (md/dir-of path)) stamp)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "render error: " (.-message e))}]))))))
 
@@ -110,8 +111,8 @@
 ;; — base-dir resolves relative Org image URLs to file://, and nested #+begin_src blocks highlight via apply-posts.
 (rf/reg-fx
  :org/render
- (fn [{:keys [text path stamp on-done]}]
-   (-> (md/render-org-ir text (md/dir-of path) stamp)    ; the proven uniorg pipeline (the sole Org path)
+ (fn [{:keys [text path stamp base-dir on-done]}]
+   (-> (md/render-org-ir text (or base-dir (md/dir-of path)) stamp)   ; the proven uniorg pipeline (the sole Org path)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "org render error: " (.-message e))}]))))))
 
@@ -120,8 +121,8 @@
 ;; fenced code highlight via apply-posts.
 (rf/reg-fx
  :latex/render
- (fn [{:keys [text path stamp on-done]}]
-   (-> (md/render-latex-ir text (md/dir-of path) stamp)
+ (fn [{:keys [text path stamp base-dir on-done]}]
+   (-> (md/render-latex-ir text (or base-dir (md/dir-of path)) stamp)
        (.then (fn [result] (rf/dispatch (conj on-done result))))
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "latex render error: " (.-message e))}]))))))
 
@@ -235,6 +236,14 @@
 
 ;; renderer → main (over the contextBridge seam)
 (rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))
+;; Settings ▸ File Type — main registers the override and re-sends the doc (ADR-0036). Guarded like every
+;; newer preload fn (a stale preload from a not-yet-restarted daemon simply lacks it).
+(rf/reg-fx :vv/set-file-type
+           (fn [{:keys [path kind language]}]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-setFileType vv)
+                 (.setFileType vv (clj->js (cond-> {:path path :kind kind}
+                                             language (assoc :language language))))))))
 (rf/reg-fx :vv/close (fn [path] (when-let [^js vv (.-vv js/window)] (.close vv path))))
 (rf/reg-fx :vv/watch-assets
            (fn [{:keys [doc-path paths]}]

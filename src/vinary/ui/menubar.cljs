@@ -5,8 +5,11 @@
    closes on click-away; hovering another top-level label switches menus."
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [vinary.app.ds :as ds]
+            [vinary.app.facet :as facet]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
+            [vinary.file-type :as file-type]
             [vinary.input.keymaps-registry :as registry]
             [vinary.ui.access-keys :as access]
             [vinary.ui.icons :as icons]
@@ -42,7 +45,8 @@
             {:label "Developer Tools" :access-key "d" :accel "Ctrl+Shift+I" :event [:view/devtools]}
             {:label "re-frame-10x"   :access-key "x" :event [:view/re-frame-10x] :dev-only true}]}
    {:label "Settings" :access-key "s"
-    :items [{:submenu "Theme"        :access-key "t" :radio :sub/theme}
+    :items [{:submenu "File Type"    :access-key "f" :radio :sub/file-type}
+            {:submenu "Theme"        :access-key "t" :radio :sub/theme}
             {:submenu "Key Bindings" :access-key "k" :radio :sub/keymaps}
             :sep
             {:label "Preferences…"   :access-key "p" :event [:settings/open]}
@@ -86,6 +90,28 @@
                               [{:label "Fit Width"   :access-key "w" :selected? (= :width cur)  :event [:pdf/fit :width]}
                                {:label "Fit Page"    :access-key "p" :selected? (= :page cur)   :event [:pdf/fit :page]}
                                {:label "Actual Size" :access-key "a" :selected? (= :actual cur) :event [:pdf/fit :actual]}])
+               ;; Settings ▸ File Type (ADR-0036): re-interpret the SHOWN document under an explicit type.
+               ;; Kinds first, then every catalog grammar (source-with-that-grammar). The radio marks the
+               ;; OVERRIDE state: a kind row (Source (auto) = grammar by path), or the explicitly chosen
+               ;; language ­— :doc/kind + :doc/language, straight from the doc entity (reactive re-render).
+               :sub/file-type
+               (let [path (some-> (facet/active-content-path db) uri/file-path)
+                     doc  (when path (ds/active-doc (ds/snapshot) path))]
+                 (if (nil? doc)
+                   [{:label "No document" :event [:menu/close]}]
+                   (let [kind (:doc/kind doc)
+                         lang (:doc/language doc)]
+                     (-> (mapv (fn [[k label]]
+                                 {:label     label
+                                  :selected? (and (= k kind) (or (not= k "source") (nil? lang)))
+                                  :event     [:doc/set-file-type {:kind k}]})
+                               file-type/kind-menu-rows)
+                         (conj :sep)
+                         (into (mapv (fn [[id label]]
+                                       {:label     label
+                                        :selected? (and (= "source" kind) (= id lang))
+                                        :event     [:doc/set-file-type {:kind "source" :language id}]})
+                                     (file-type/language-menu-rows)))))))
                nil)]
     (access/annotate-rows (or rows []) submenu-preferred-keys)))
 
@@ -195,11 +221,13 @@
    (str base (when extra (str " " extra)) (when focused? " vv-menu-item-focused"))))
 
 (defn- row-item [row access-active? focused? on-focus]
-  [:div {:class (menu-item-class "vv-menu-item vv-menu-item-radio" focused?)
-         :role "menuitemradio"
-         :aria-checked (when (contains? row :selected?) (boolean (:selected? row)))
-         :on-mouse-enter on-focus
-         :on-click #(act! (:event row))}
+  [:div (cond-> {:class (menu-item-class "vv-menu-item vv-menu-item-radio" focused?)
+                 :role "menuitemradio"
+                 :aria-checked (when (contains? row :selected?) (boolean (:selected? row)))
+                 :on-mouse-enter on-focus
+                 :on-click #(act! (:event row))}
+          ;; long submenus scroll (File Type has ~58 rows) — keep the keyboard-focused row in view
+          focused? (assoc :ref (fn [el] (when el (.scrollIntoView el #js {:block "nearest"})))))
    (if (contains? row :selected?)
      [:span.vv-radio-dot {:class (when (:selected? row) "vv-radio-dot-on")}]
      [:span.vv-radio-dot.vv-radio-dot-blank])

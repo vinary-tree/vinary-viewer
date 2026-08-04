@@ -26,19 +26,22 @@ in, and it *mode-dispatches* on the first argument. The generated `case`:
 case "${1:-}" in
   --cli)        shift; exec node "$REPO/dist/cli/vv-cli.js" "$@" ;;
   --tui)        shift; exec node "$REPO/dist/tui/vv-tui.js" "$@" ;;
-  --gui)        shift; exec "$REPO/node_modules/.bin/electron" "$REPO" "$@" ;;
+  --gui)        shift ;;
+  --no-daemon)  shift; exec "$REPO/node_modules/.bin/electron" "$REPO" "$@" ;;
   -h|--help)    cat <<'USAGE' … USAGE
                 exit 0 ;;
-  -V|--version) echo "vinary-viewer $VERSION" ;;
-  *)            exec "$REPO/node_modules/.bin/electron" "$REPO" "$@" ;;
+  -V|--version) echo "vinary-viewer $VERSION"; exit 0 ;;
 esac
+# GUI (default): hand the files to the warm resident process over its Unix socket
+exec node "$REPO/scripts/vv-open.mjs" "$@"
 ```
 
 | Invocation | Dispatches to | Notes |
 |------------|---------------|-------|
-| `vv [files…]` | Electron GUI (`node_modules/.bin/electron "$REPO" "$@"`) | The **default** case (`*`). All args pass through, one tab per file/URL. |
-| `vv --gui [files…]` | Electron GUI | Explicit GUI; `--gui` is shifted, an accepted no-op that documents intent. |
-| `vv --cli <file>` | `node dist/cli/vv-cli.js` | The headless terminal renderer. Pipe-friendly: `vv --cli x.md \| less`. |
+| `vv [files…]` | `node scripts/vv-open.mjs "$@"` | The **default** (fall-through). The GUI client: sends the files to the warm resident daemon over its Unix socket (spawning `--daemon` if none is reachable), so a window opens with no cold start. One tab per file/URI. |
+| `vv --gui [files…]` | same as the default | Explicit GUI; `--gui` is shifted, an accepted no-op that documents intent. |
+| `vv --no-daemon [files…]` | Electron directly (`electron "$REPO" "$@"`) | A fresh process, bypassing the daemon/socket path. Because vv-open.mjs is what drains a pipe, **`--no-daemon` does not read stdin** (documented limitation); `-t` on named files still works (argv → `startup/doc-specs`). |
+| `vv --cli [files…]` | `node dist/cli/vv-cli.js` | The headless terminal renderer. Pipe-friendly: `vv --cli x.md \| less`. |
 | `vv --tui <file>` | `node dist/tui/vv-tui.js` | The interactive terminal pager (scroll · `/` find · `t` contents · `q` quit). |
 | `vv --help` / `vv -h` | Prints usage, `exit 0` | Never launches a window. |
 | `vv --version` / `vv -V` | Prints `vinary-viewer <VERSION>` | `$VERSION` is read from `package.json` at install time. |
@@ -47,6 +50,30 @@ The design keeps a single memorable entry point: the common case (`vv README.md`
 is the shortest, the terminal modes are one flag away, and `--help` / `--version`
 answer without booting Electron. Per-mode help is reachable with `vv --cli --help`
 and `vv --tui --help`.
+
+**Piped stdin — the drain/spill hand-off (ADR-0036).** The `-t/--type` flags and a lone `-` are the
+shared open grammar (`vinary.file-type/scan-open-args`); the stdin *mechanics* differ by necessity of
+process boundary, never in semantics:
+
+- **GUI** — the resident daemon cannot see the invoking terminal's pipe, so `scripts/vv-open.mjs`
+  drains stdin to EOF (binary-safe) and **spills** it to
+  `$XDG_RUNTIME_DIR/vinary-viewer/stdin/<uuid>/stdin` (dir `0700`, file `0600`; `$TMPDIR` fallback
+  mirrors the socket-path rules), inserts that path into the file list (first, or at `-`), and sends
+  the v2 socket message `{args, types, stdinIndex, cwd, instanceId}`. The daemon owns the spill's
+  lifetime from then on: it is unlinked when the last retaining tab closes, and a 10-minute age-gated
+  sweep at daemon boot collects spills of crashed invocations. The daemon replies on the open
+  connection **only to reject** (unknown type) — vv-open.mjs prints that on the invoking terminal,
+  removes its spill, and exits 1.
+- **cli/tui** — `vinary.terminal.stdin` (the cljs twin of the vv-open.mjs block) drains in-process;
+  text-backed kinds and PDF render **straight from the Buffer**, and only the paths that genuinely
+  need a file (the bounded stream engine for >5 MiB pipes, the image port, the table parser) spill —
+  with a process-exit unlink, since a terminal spill dies with its process. The TUI additionally
+  reopens `/dev/tty` for keys (the pipe carried the document) and degrades to view-only when no
+  controlling terminal exists.
+- **Zero piped bytes** (e.g. `< /dev/null`) means *no* stdin document in every mode, and unknown type
+  tokens fail **before** the drain, so a typo never waits on a slow producer. Draining to EOF is the
+  contract: `tail -f x | vv` waits for the producer to close the pipe (a piped document is a
+  snapshot, cat semantics).
 
 ![The terminal renderer over the shared IR/streaming spine](../diagrams/component-terminal-renderer.svg)
 
