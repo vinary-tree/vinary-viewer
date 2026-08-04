@@ -68,6 +68,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 /* source (code) view: drop the prose reading gutter so the CodeMirror editor + its line-number gutter fill
    edge-to-edge (the gutter's --vv-bg2 otherwise floats inset, reading as "not filling"). Keep overflow:auto. */
 .vv-content.vv-content-source { padding: 0; }
+/* directory/archive listing: edge-to-edge (rows carry their own inset). Dropping the top gutter is what lets
+   the sticky .vv-fb-header sit flush to the pane top — with a top gutter a top:0 sticky floats below it and
+   scrolled rows show in the gap above. Keep overflow:auto for vertical scrolling. */
+.vv-content.vv-content-dir { padding: 0; }
 
 /* in-renderer PDF view (pdf.js): pages render to <canvas> inside the scrolling .vv-content, with a
    transparent text layer (real selection/find/copy) + a link layer overlaid — parity with markdown. */
@@ -1001,8 +1005,10 @@ details[open] > .vv-project-name > .vv-folder-open { display: inline-block; }
 
 /* ===== In-pane directory browser (detailed list) ===== */
 .vv-fb { display: flex; flex-direction: column; min-height: 100%; outline: none; }
+/* The whole header block (title + column labels) floats as one unit while the list scrolls beneath it. */
+.vv-fb-header { position: sticky; top: 0; z-index: 1; background: var(--vv-bg1); }
 .vv-fb-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-  border-bottom: 1px solid var(--vv-border); position: sticky; top: 0; z-index: 1; background: var(--vv-bg1); }
+  border-bottom: 1px solid var(--vv-border); }
 .vv-fb-path { font-weight: 600; color: var(--vv-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vv-fb-empty { padding: 28px 16px; color: var(--vv-fg-dim); text-align: center; }
 .vv-fb-head-row, .vv-fb-row {

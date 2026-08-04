@@ -992,6 +992,19 @@ async function main() {
       'a remote ssh:// directory lists its entries in-pane', 12000);
     console.log('[ok] a remote ssh:// directory browses in the in-pane file list');
 
+    // The header must FLOAT and the pane must be edge-to-edge: a top gutter on the scroller would make the
+    // top:0 sticky header float below it, showing scrolled rows in the gap above. Assert the gutter is dropped
+    // for a directory and the header block is sticky (deterministic — no flaky scroll geometry).
+    const dirChrome = await evalIn(win, `(() => {
+      const cs = getComputedStyle(document.querySelector('.vv-content'));
+      const hd = document.querySelector('.vv-fb-header');
+      return { padTop: cs.paddingTop, padLeft: cs.paddingLeft, headerPos: hd ? getComputedStyle(hd).position : null };
+    })()`);
+    assert.strictEqual(dirChrome.padTop, '0px', 'the directory pane drops the top gutter so the sticky header sits flush');
+    assert.strictEqual(dirChrome.padLeft, '0px', 'the directory pane is edge-to-edge (rows carry their own inset)');
+    assert.strictEqual(dirChrome.headerPos, 'sticky', 'the Name/Size/Modified header block floats (position: sticky)');
+    console.log('[ok] the directory listing header floats flush (edge-to-edge, sticky header block)');
+
     // The pinned ".." parent row: present for a subdirectory (with the parent authority-path kept), navigates up
     // one directory when activated, and is absent at the remote root (uri/dirname → nil, so nothing to go up to).
     const upAtSub = await evalIn(win, `(() => {

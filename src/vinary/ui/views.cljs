@@ -1081,11 +1081,15 @@
                            (when (and (= (.-key e) "Enter")
                                       (not (.-altKey e)) (not (.-ctrlKey e)) (not (.-metaKey e)))
                              (.preventDefault e) (rf/dispatch [:nav/open-target])))}
-           [:div.vv-fb-head
-            [:span.vv-fb-path {:title (uri/display path)}
-             (str label "  ·  " (count sorted) (if (= 1 (count sorted)) " item" " items"))]]
-           (when (or parent (seq sorted))
-             [:div.vv-fb-head-row [:span.vv-fb-col-icon] [:span "Name"] [:span "Size"] [:span "Modified"]])
+           ;; The title bar and the Name/Size/Modified column labels float together as ONE sticky block, so
+           ;; the whole header stays pinned while the list scrolls beneath it (a single wrapper avoids a
+           ;; brittle top-offset between two independent stickies).
+           [:div.vv-fb-header
+            [:div.vv-fb-head
+             [:span.vv-fb-path {:title (uri/display path)}
+              (str label "  ·  " (count sorted) (if (= 1 (count sorted)) " item" " items"))]]
+            (when (or parent (seq sorted))
+              [:div.vv-fb-head-row [:span.vv-fb-col-icon] [:span "Name"] [:span "Size"] [:span "Modified"]])]
            (if (or parent (seq sorted))
              (into [:div.vv-fb-body]
                    (concat
@@ -1122,6 +1126,9 @@
                    ;; entity now) supplies its own gutter → drop the prose reading gutter so pages sit flush.
                    (= "pdf" (:doc/kind doc))       "vv-content-pdf-flush"  ; PDF: edge-to-edge (keeps scroll)
                    src?                                            "vv-content-source"    ; code editor: edge-to-edge
+                   ;; directory/archive listing: drop the prose gutter so the sticky header sits flush to the
+                   ;; pane top (a top gutter makes a top:0 sticky float below it, showing rows in the gap above)
+                   (#{"directory" "archive"} (:doc/kind doc))      "vv-content-dir"        ; file list: edge-to-edge
                    :else                                           nil)
       ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
       ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri
