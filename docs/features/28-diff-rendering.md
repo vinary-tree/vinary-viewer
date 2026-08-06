@@ -1,8 +1,10 @@
 # 28 — Diff (`.diff` / `.patch`) rendering
 
 vinary-viewer renders **unified and git diffs** the way a modern code-review tool does: a colored **unified**
-view (added / removed / hunk / file banners) and, on demand, a **side-by-side (split)** view, with full
-**multi-file** support. A diff is not a bespoke widget — it is an *input frontend* over the
+view and, on demand, a **side-by-side (split)** view, both with syntax highlighting for the changed file's
+language and full **multi-file** support. Diff add/delete colouring remains the outer layer, as on GitHub, so
+language tokens stay legible without losing the change signal. A diff is not a bespoke widget — it is an
+*input frontend* over the
 [common document IR](../theory/08-common-document-ir.md), so it inherits find, scroll-spy, the themed context
 menu, a Contents outline, and — for free — a colored **terminal** rendering in `vv --cli` / `vv --tui`. See
 [ADR-0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md) for the full design.
@@ -15,10 +17,11 @@ menu, a Contents outline, and — for free — a colored **terminal** rendering 
 
 | Capability | Behaviour |
 |---|---|
-| **Unified view** | `.diff` / `.patch` opens as a colored single-column diff: green insertions, red deletions, bold-cyan `@@` hunk headers, dim notes, and an `<h2>` **banner per file** (`added` / `deleted` / `renamed` / `binary` / `modified`). |
-| **Split (side-by-side)** | A two-column old-vs-new layout, toggled on demand. Changed lines pair delete-left / insert-right; context lines show on both sides. |
+| **Unified view** | `.diff` / `.patch` opens as a colored single-column diff: green insertions, red deletions, bold-cyan `@@` hunk headers, dim notes, and a collapsible **summary per file** (`added` / `deleted` / `renamed` / `binary` / `modified`). Source tokens are highlighted by the old/new file's grammar beneath those diff tints. |
+| **Split (side-by-side)** | A two-column old-vs-new layout, toggled on demand. Changed lines pair delete-left / insert-right; context lines show on both sides; each side uses its own file path to select a syntax grammar. |
 | **On-disk enrichment** | When Split is chosen *and* the diff's referenced files are found on disk, the real file's unchanged regions are spliced around the hunks so the **whole file** shows side-by-side; long unchanged runs collapse into native `<details>` gaps (no JavaScript). |
 | **Multi-file** | Every `diff --git` / `--- /+++` section becomes its own banner and feeds a multi-file **Contents outline** — click a file to jump. |
+| **Navigable file names** | A file name in a diff summary becomes a link only when main resolves it to an existing local or SSH/SFTP file. Left-click replaces the current view; `Ctrl`+left-click opens a new tab. A rename exposes separate old and new links when each side resolves. |
 | **git-format-patch** | The email header + commit message + diffstat preamble of a `git format-patch` output renders as a leading `<pre>` block; the `-- ` signature trailer is correctly excluded from the last hunk. |
 | **Line numbers** | Old / new line numbers render in the gutter of the unified view — as CSS pseudo-content, so they are **visible in the GUI yet invisible to a copy/paste or the terminal** (see *The `data-*` gutter trick*). |
 | **View Source** | Toggle to the raw `.diff`, syntax-highlighted like any source file. |
@@ -35,10 +38,14 @@ A diff travels through **one pure parser** and then diverges into exactly the tw
 bespoke rendering code:
 
 1. `vinary.diff/parse` turns the text into a DOM-free, fs-free **model** (`{:preamble :files}`).
-2. `vinary.ir.frontend.diff/diff->ir` lowers that model to the common IR for the **unified** view, which the
-   existing **HTML back-end** (`ir.backend.html`) serializes for the GUI and the existing **ANSI back-end**
-   (`ir.backend.ansi`) serializes for the terminal — the same two back-ends Markdown, Org, and LaTeX use.
-3. `vinary.diff/split-html` renders the **split** view directly to an HTML string (GUI-only; a wide two-column
+2. In the GUI, `vinary.renderer.diff-view/highlight-model` projects each hunk side into logical source lines,
+   runs those buffers through the existing tree-sitter grammar registry, and attaches per-line token spans to
+   the model. A missing/unsupported grammar simply leaves that side as escaped plain text.
+3. `vinary.ir.frontend.diff/model->ir` lowers that enriched model to the common IR for the **unified** view,
+   while `diff->ir` remains the parse-and-lower entry point used by CLI/TUI. The existing **HTML back-end**
+   (`ir.backend.html`) serializes for the GUI and the existing **ANSI back-end** (`ir.backend.ansi`) serializes
+   for the terminal — the same two back-ends Markdown, Org, and LaTeX use.
+4. `vinary.diff/split-html` renders the **split** view directly to an HTML string (GUI-only; a wide two-column
    layout has no terminal analog).
 
 Both GUI views render through the **existing `markdown-body`** component, so find, scroll-spy, the themed
@@ -49,7 +56,9 @@ context menu, and the Contents outline all work with zero extra code.
 `vinary.diff/parse` recognizes `diff --git`, plain `diff -u` (`--- /+++` with trailing-timestamp stripping),
 `@@ -a,b +c,d @@` (counts default to `1`), renames, new / deleted files, `Binary files … differ`,
 `\ No newline at end of file`, combined / merge `@@@` headers (degraded to a heading), and the
-`git format-patch` preamble. Its shape:
+`git format-patch` preamble. Git C-quoted path tokens are decoded—including octal UTF-8—before `a/`/`b/`
+prefix stripping, so spaces, quotes, backslashes, and non-ASCII filenames reach both grammar selection and
+target resolution as their actual paths. Its shape:
 
 ```clojure
 ;; parse : text → {:preamble string
@@ -133,6 +142,29 @@ the code span by a grid (`.vv-diff-code { order: 2 }`). The consequence is preci
 
 The colouring rules and gutters live in `resources/public/css/app.css`.
 
+### Syntax highlighting beneath the diff colouring
+
+The renderer does not highlight the `.diff` grammar inside a preview. Instead it selects the grammar from each
+referenced file path and highlights the source text with the same tree-sitter registry used by ordinary source
+previews. Old-side deletions use the old path, new-side insertions use the new path, and context prefers the new
+grammar with the old grammar as a fallback. This matters for renames such as `config.json` → `config.edn`, where
+the two sides legitimately have different languages.
+
+Captures are projected back onto the parsed diff lines as escaped, whitelisted `cm-*` token spans. The marker
+(`+`, `-`, or space) stays outside the token spans, and the insertion/deletion class stays on the outer line or
+split cell. Generic and Markdown-specific token classes receive foreground/font styling only in the rendered
+body; token backgrounds are intentionally omitted there. CSS therefore composes the layers rather than choosing
+between them:
+
+```text
+diff line/cell background (insert/delete/context)
+  └─ source token foreground (`cm-keyword`, `cm-string`, …)
+```
+
+For enriched Split, the complete on-disk new file is highlighted as one logical buffer so unchanged regions
+spliced around hunks receive the same tokens as the changed windows. The ANSI backend deliberately ignores the
+GUI-only token metadata, preserving its established green/red/cyan output byte-for-byte.
+
 ### Side-by-side (split) — always from the hunks, enriched by the real files
 
 Split is produced by `vinary.diff/split-html` in two tiers:
@@ -140,15 +172,17 @@ Split is produced by `vinary.diff/split-html` in two tiers:
 - **Baseline — always available.** `split-rows` aligns a file's hunks with no external input: a context line
   becomes a both-sides row; a run of deletes paired with the following run of inserts becomes *changed* rows
   (delete left / insert right); leftovers become one-sided rows. A unified diff fully determines both sides
-  *within* its hunks, so this needs no source files and renders instantly.
+  *within* its hunks, so this needs no source files. While its grammar pass is pending the already-rendered
+  unified view remains visible, avoiding a flash of unhighlighted split HTML.
 - **Enriched — when the source files are accessible.** When the referenced file is found on disk, the real
   file's unchanged regions are spliced around the hunks so the **whole file** shows, with long unchanged runs
   collapsed into native `<details>` gaps. Resolution is main-side (the sandboxed renderer has no `fs`):
-  `vv:load-diff-sources` walks the diff's directory and its ancestors for each referenced path. The fetch is
-  **lazy** (only when Split is first selected) and **asynchronous**: the baseline renders immediately, then the
-  enriched HTML replaces it when the sources arrive — the same pattern PDF reflow uses.
+  `vv:load-diff-sources` checks an absolute reference directly or walks the diff's directory and its ancestors
+  for a relative path. Full-content reads are **lazy** (only when Split is first selected) and asynchronous;
+  enriched HTML replaces the baseline when source text and its syntax pass are ready — the same pattern PDF
+  reflow uses.
 
-![Selecting Split renders the sources-free baseline instantly, then asynchronously loads the on-disk sources over vv:load-diff-sources and swaps in the enriched full-file view](../diagrams/seq-diff-split-enrich.svg)
+![Opening a diff resolves navigable paths without reading files; selecting Split lazily loads file contents and swaps in the syntax-highlighted full-file view](../diagrams/seq-diff-split-enrich.svg)
 
 *Diagram source: [`../diagrams/seq-diff-split-enrich.puml`](../diagrams/seq-diff-split-enrich.puml).*
 
@@ -156,10 +190,19 @@ The split HTML lands on the document as `:doc/diff-split-html` (built by the `:d
 `vinary.app.fx`, committed by the `:diff/split-ready` event); `content-view` shows it when the tab's diff view
 is `:split` and the enriched HTML is ready, otherwise it falls back to the unified HTML while the split builds.
 
+Path resolution is a separate, path-only use of the same IPC channel. It begins when the unified diff opens,
+does not wait for Split, and does not read file contents. The renderer initially emits inert
+`a.vv-diff-file-path[data-vv-diff-path]` placeholders; only a successful main-side existence check projects a
+safe `file:`/`ssh:`/`sftp:` href onto the matching element. Missing paths remain ordinary summary text. This
+also makes live refresh and remounts deterministic: the target map is app state and is re-applied after every
+`innerHTML` replacement. Empty results are authoritative too, so a refresh or later Split lookup removes a link
+whose target disappeared. The href codec round-trips POSIX, Windows drive, UNC, and percent-encoded SSH/SFTP
+paths without letting spaces, `#`, `?`, or Unicode filename bytes become URL syntax.
+
 ### The Unified ⇄ Split choice — the Preview combo's caret menu
 
 A per-tab `:diff-view` (`:unified` | `:split`, default `:unified` — split is opt-in so opening a diff never
-triggers a disk fetch) mirrors LaTeX's per-tab `:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)).
+reads referenced file contents) mirrors LaTeX's per-tab `:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)).
 It surfaces the same three ways every view switch does:
 
 - the **`Preview ▾` combo's caret menu** ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
@@ -180,7 +223,9 @@ diff tab has up to three surfaces: **Unified** (default), **Split**, and **Sourc
 
 Every file's preview is collapsible, in both layouts ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
 
-- **Click the file's banner** (its `<summary>`) to toggle that one file. The native `<details>` toggle is
+- **Click the file's banner** (its `<summary>`) to toggle that one file. A click on a resolved file-name link is
+  intercepted first and navigates instead (`Ctrl`+click opens a new tab), without collapsing the file. The
+  native `<details>` toggle is
   deliberately cancelled and re-dispatched (`[:diff/toggle-file id]`) so *state* owns openness: the
   per-tab **`:diff-collapsed`** set survives tab switches, live refreshes (the watcher re-send rebuilds
   the innerHTML; `markdown-body` re-applies the set synchronously, before paint), the unified⇄split flip
@@ -192,9 +237,10 @@ Every file's preview is collapsible, in both layouts ([ADR-0037](../design-decis
   list comes from the diff's Contents outline, never the DOM. Palette commands **Collapse all diff
   files** / **Expand all diff files** reach the same events from any keymap.
 - **Vim**: the fold idiom — **`z M`** collapses all, **`z R`** expands all (self-gated: no-ops outside a
-  diff) — and **`f` link-hints treat the banners as targets**: each visible banner gets a hint label, and
-  typing it toggles that file exactly as a click would (the hint re-finds the banner by its stable id and
-  fires its real click, so mouse and hint share one behavior source). There is deliberately no `z a` —
+  diff) — and **`f` link-hints treat the banners and resolved file-name links as targets**: the banner toggle
+  hint is placed by the status chip so it does not overlap the nested navigation hint. Following either hint
+  fires the target's real click, so a banner hint toggles and a path hint navigates through the same behavior
+  source as the mouse. There is deliberately no `z a` —
   the preview has no cursor-over-file concept; the hints *are* the per-file affordance.
 - **Contents interplay**: a Contents click on a collapsed file **auto-expands it** before scrolling (a
   jump is explicit intent to *see* the file, and the scroll offset must measure the expanded layout).
@@ -234,13 +280,14 @@ correctly even when no grammar is bundled for it:
 | Piece | Where |
 |---|---|
 | Pure diff model (`parse`) + the GUI-only split layout (`split-rows` / `split-html`, enrichment, `<details>` gaps) | `vinary.diff` |
-| Unified-diff IR frontend (file `<h2>` banners, `@@`/±/context line nodes, `data-*` gutters, Contents `outline`) | `vinary.ir.frontend.diff` |
+| Unified-diff IR frontend (file `<summary>` banners, syntax-token spans, `@@`/±/context line nodes, `data-*` gutters, Contents `outline`) | `vinary.ir.frontend.diff` |
 | HTML back-end (serializes tags / classes / `data-*` verbatim) | `vinary.ir.backend.html` |
 | ANSI back-end + `diff-line-style` (green / red / cyan / dim SGR) | `vinary.ir.backend.ansi` |
 | Split-build effect (`:diff/build-split`), completion event (`:diff/split-ready`), per-tab `:diff-view` | `vinary.app.fx` · `vinary.app.events` · `vinary.app.nav` |
-| Toolbar segmented control + `markdown-body` render of unified / split | `vinary.ui.views` (`view-switch-toolbar`, `content-view`) |
-| `[Unified | Split]` command + default keybinding | `vinary.app.commands` (`:view/toggle-diff-split`) · `resources/keymaps/default.edn` |
-| On-disk source resolution (`vv:load-diff-sources` handler, ancestor walk) | `vinary.main.service` · `vinary.main.content_service.js` |
+| Preview combo + `markdown-body` render/remount of unified / split | `vinary.ui.views` (`view-switch`, `content-view`) |
+| Unified/Split command + default keybinding | `vinary.app.commands` (`:view/toggle-diff-split`) · `resources/keymaps/default.edn` |
+| Diff syntax projection and resolved-target DOM projection | `vinary.renderer.syntax` · `vinary.renderer.diff-view` |
+| Path-only target / lazy full-source resolution (`vv:load-diff-sources`, exact absolute or ancestor walk) | `vinary.main.diff-source` · `vinary.main.service` · `vinary.main.content_service.js` |
 | Deterministic classification (`well-known-kind`, `diff-exts`) + built-in highlighting map | `vinary.main.file-kind` · `vinary.grammar-catalog` |
 | Diff colouring, gutters, split grid | `resources/public/css/app.css` |
 
@@ -261,6 +308,8 @@ correctly even when no grammar is bundled for it:
   from its checkout, a deletion, or a renamed-with-no-content-change file), Split falls back to the hunk
   windows rather than full-file context. It prefers the **new** side (the post-image, matching the working
   tree).
+- **Syntax fallback.** Unknown file types, unavailable user-supplied grammar WASM, and binary diffs keep the
+  normal diff colouring and escaped text; every bundled grammar is verified by the build's grammar gate.
 - **Combined / merge diffs.** A `@@@ … @@@` header is degraded to a heading-only hunk so the file still lists;
   its body lines have no budget and are not colourized per side.
 - **Binary payloads.** `Binary files … differ` / `GIT binary patch` render as a `Binary file — no textual
@@ -270,9 +319,12 @@ correctly even when no grammar is bundled for it:
 
 The diff HTML never passes through `rehype-sanitize`, unlike Markdown — and this is safe **by construction**,
 not by omission. The unified HTML is produced by `ir.backend.html` (whose serializer escapes every text node)
-and the split HTML by `vinary.diff/split-html` (which escapes every interpolated value). All tags, classes, and
-`data-*` attributes are fixed literals under the app's control; the only untrusted data — the diff's own bytes
-and the referenced files' bytes — becomes **text-node content only**, which cannot open an injection vector.
+and the split HTML by `vinary.diff/split-html` (which escapes every interpolated value). Syntax capture classes
+must match the fixed `cm-*` whitelist before serialization. File-name anchors initially have no `href`; main
+must resolve an existing path before the renderer projects a safely encoded `file:`/`ssh:`/`sftp:` target. All
+other tags, classes, and `data-*` attributes are fixed literals under the app's control; the only untrusted data
+— the diff's own bytes and the referenced files' bytes — becomes **text-node/attribute content only**, which
+cannot open an injection vector.
 Markdown needs the sanitizer because it renders untrusted *markup*; a diff has no such surface. See the
 [threat model](../security/threat-model.md).
 

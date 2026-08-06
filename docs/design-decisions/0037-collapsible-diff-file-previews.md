@@ -1,7 +1,7 @@
 # 0037 — Collapsible per-file diff previews (a controlled `<details>` wrapper in the shared IR)
 
 - **Status:** Accepted (amends [0026](0026-diff-rendering-side-by-side-and-repo-filetypes.md)'s
-  two-backend structural contract)
+  two-backend structural contract; nested resolved path links added by the 2026-08-06 ADR-0026 amendment)
 - **Date:** 2026-08-04
 - **Deciders:** vinary-viewer maintainers
 
@@ -52,12 +52,15 @@ re-projected after every rebuild (the sidebar tree's controlled-`<details>` patt
 rendered content for the first time).
 
 **One behavior source for the toggle.** The delegated content click handler
-(`attach-content-interactions!`) gains a first branch: a click landing on `.vv-diff-file-head`
+(`attach-content-interactions!`) handles an active nested file-path `a[href]` before the summary branch; that
+link navigates without collapsing the file. Otherwise, a click landing on `.vv-diff-file-head`
 preventDefaults the native `<details>` activation and dispatches `[:diff/toggle-file id]`. Real
 clicks, keyboard summary activation, and the link-hints' synthetic `.click()` all converge there. The
 hints layer adds `.vv-diff-file-head` to its collection selector, classifies banners as a serializable
 `{:kind :toggle :path <id>}` target (the pure `classify-target` core is DOM-free and unit-tested), and
-follows by `getElementById → .click()` — id re-find survives a scroll between collect and follow.
+follows by `getElementById → .click()` — id re-find survives a scroll between collect and follow. Resolved
+path anchors remain ordinary link-hint targets; the toggle hint is positioned at the status chip so the two
+labels do not overlap.
 
 **Surfaces.** View ▸ **Collapse All Files** — one `:diff-only` item whose label is realized
 dynamically ("Expand All Files" once everything is collapsed) at the single seam (`filter-items`) both

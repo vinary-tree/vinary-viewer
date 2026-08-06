@@ -718,7 +718,30 @@
   (is (= "sec"   (:path (link/classify "#sec" "x"))))
   (is (= :file   (:kind (link/classify "file:///a/b.md" "x"))))
   (is (= "/a/b.md" (:path (link/classify "file:///a/b.md" "x"))))
-  (is (= :dir    (:kind (link/classify "file:///a/" "x")))))
+  (is (= :dir    (:kind (link/classify "file:///a/" "x"))))
+  (is (= {:kind :file :path "ssh://u@host:22/repo/a.cljs" :text "a.cljs"}
+         (link/classify "ssh://u@host:22/repo/a.cljs" "a.cljs")))
+  (is (= {:kind :file :path "sftp://host/repo/a.cljs" :text "a.cljs"}
+         (link/classify "sftp://host/repo/a.cljs" "a.cljs")))
+  (is (= "file:///tmp/a%20b%23c.cljs" (link/href-for-path "/tmp/a b#c.cljs")))
+  (is (= "file:///tmp/%E6%97%A5.cljs" (link/href-for-path "/tmp/日.cljs")))
+  (is (= {:kind :file :path "/tmp/a b#c.cljs" :text "x"}
+         (link/classify "file:///tmp/a%20b%23c.cljs" "x")))
+  (is (= "file:///C:/Users/A%20B/x%23y.cljs"
+         (link/href-for-path "C:\\Users\\A B\\x#y.cljs")))
+  (is (= {:kind :file :path "C:/Users/A B/x#y.cljs" :text "x"}
+         (link/classify "file:///C:/Users/A%20B/x%23y.cljs" "x")))
+  (is (= "file://server/share/a%20b.cljs"
+         (link/href-for-path "\\\\server\\share\\a b.cljs")))
+  (is (= {:kind :file :path "//server/share/a b.cljs" :text "x"}
+         (link/classify "file://server/share/a%20b.cljs" "x")))
+  (is (= "file:///tmp/dir/" (link/href-for-path "/tmp/dir/")))
+  (is (= :dir (:kind (link/classify "file:///tmp/dir/" "dir"))))
+  (is (nil? (link/href-for-path "relative/file.cljs")))
+  (is (nil? (link/classify "file:///tmp/bad%ZZ.cljs" "x")))
+  (is (= "ssh://host/a%20b.cljs" (link/href-for-path "ssh://host/a%20b.cljs")))
+  (is (= "ssh://host/%E6%97%A5.js" (link/href-for-path "ssh://host/日.js")))
+  (is (nil? (link/href-for-path "ssh://"))))
 
 (deftest local-media-url-cache-busting
   (testing "local file media urls get a stable cache-busting parameter"

@@ -202,19 +202,19 @@
               (when-let [event (preview-nav/open-event target new-tab?)]
                 (rf/dispatch event))))]
     (let [on-click (fn [^js e]
-                     ;; a diff file banner toggles its file's collapse (ADR-0037). preventDefault cancels the
-                     ;; NATIVE <details> toggle so per-tab STATE owns openness (re-applied after every rebuild);
-                     ;; real clicks, keyboard summary activation, and the link-hints' synthetic .click() all
-                     ;; land here — one behavior source. Banners are never <a> descendants, so the branches
-                     ;; are disjoint (and gap summaries carry a different class — they stay native).
-                     (if-let [^js h (.closest (.-target e) ".vv-diff-file-head")]
-                       (do (.preventDefault e)
-                           (rf/dispatch [:diff/toggle-file (.-id h)]))
-                       (when-let [^js a (.closest (.-target e) "a")] (follow a (.-ctrlKey e) e))))
+                     ;; A resolved diff filename is an <a href> INSIDE the collapsible summary. Give the link
+                     ;; branch priority so opening it never toggles the enclosing file; every other point on the
+                     ;; summary keeps the state-owned ADR-0037 collapse behavior. Unresolved placeholders have
+                     ;; no href and therefore remain ordinary banner text/toggle surface.
+                     (if-let [^js a (.closest (.-target e) "a[href]")]
+                       (follow a (.-ctrlKey e) e)
+                       (when-let [^js h (.closest (.-target e) ".vv-diff-file-head")]
+                         (.preventDefault e)
+                         (rf/dispatch [:diff/toggle-file (.-id h)]))))
           on-aux   (fn [^js e] (when (= 1 (.-button e))
-                                 (when-let [^js a (.closest (.-target e) "a")] (follow a true e))))
+                                 (when-let [^js a (.closest (.-target e) "a[href]")] (follow a true e))))
           on-over  (fn [^js e]
-                     (let [^js a (.closest (.-target e) "a")
+                     (let [^js a (.closest (.-target e) "a[href]")
                            href  (when a (link/target-for-anchor a))]
                        (when (not= href @last-link)
                          (reset! last-link href)
@@ -224,7 +224,7 @@
                      (let [source @source*
                            path @path*
                            ^js body node
-                           ^js a (.closest (.-target e) "a")
+                           ^js a (.closest (.-target e) "a[href]")
                            target (or (when a (preview-link-target a source path))
                                       (let [{:keys [text node offset]} (selection-or-term body e)
                                             source-node (or node (.-target e))
@@ -257,11 +257,12 @@
    Intercepts link clicks (→ in-pane navigation, never replacing the window), shows the hovered link's URI
    in the status bar, font-matches embedded SVG figures, restores the per-history scroll position, and
    opens a themed context menu on right-click. Middle-click / Ctrl+click open a link in a new tab."
-  [_html _source _path]
+  [_html _source _path _diff-targets]
   (let [node (atom nil)
         html* (atom nil)
         source* (atom nil)
         path* (atom nil)
+        diff-targets* (atom nil)
         render-token (atom 0)
         raf  (atom false)
         resize-observer (atom nil)
@@ -297,6 +298,10 @@
                          ;; mount, unified⇄split remount, and the split-enrichment in-place swap. A cheap
                          ;; no-op for non-diff bodies; sub-deref in a callback = the refresh-toc! idiom.
                          (diff-view/apply-collapsed! @node @(rf/subscribe [:ui/active-diff-collapsed]))
+                         ;; Header anchors are emitted without href. Only main-resolved targets activate them;
+                         ;; apply synchronously after every innerHTML rebuild so layout/view remounts cannot
+                         ;; transiently expose a stale or document-derived navigation target.
+                         (diff-view/apply-targets! @node @diff-targets*)
                          ;; a remote doc's ssh:// media URLs can't be reached by the renderer or file:// — fetch
                          ;; their bytes over the vv bridge and inline them as data: URLs (best-effort, async)
                          (when (media/remote-url? @path*)
@@ -323,22 +328,27 @@
     (r/create-class
      {:display-name "vv-markdown-body"
       :component-did-mount  (fn [this]
-                              (let [[_ html source path] (r/argv this)]
+                              (let [[_ html source path diff-targets] (r/argv this)]
                                 (reset! source* source)
                                 (reset! path* path)
+                                (reset! diff-targets* diff-targets)
                                 (render-html! html))
                               (observe-resize!)
                               (reset! detach* (attach-content-interactions! @node source* path* last-link)))
       :component-did-update (fn [this]
-                              (let [[_ html source path] (r/argv this)
-                                    doc-changed? (not= path @path*)]
+                              (let [[_ html source path diff-targets] (r/argv this)
+                                    doc-changed? (not= path @path*)
+                                    targets-changed? (not= diff-targets @diff-targets*)]
                                 (reset! source* source)
                                 (reset! path* path)
+                                (reset! diff-targets* diff-targets)
                                 ;; a new doc with byte-identical HTML doesn't re-render (html unchanged) but the
                                 ;; scroll-spy's doc-key changed → re-measure so the highlight follows the new doc.
                                 (cond
                                   (not= html @html*) (render-html! html)
-                                  doc-changed?       (refresh-toc!))))
+                                  doc-changed?       (do (diff-view/apply-targets! @node diff-targets)
+                                                         (refresh-toc!))
+                                  targets-changed?   (diff-view/apply-targets! @node diff-targets))))
       :component-will-unmount (fn [_]
                                 (.removeEventListener js/window "resize" on-resize)
                                 (when @resize-observer
@@ -346,7 +356,8 @@
                                     (.disconnect o))
                                   (reset! resize-observer nil))
                                 (when @detach* (@detach*) (reset! detach* nil)))
-      :reagent-render       (fn [_html _source _path] [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
+      :reagent-render       (fn [_html _source _path _diff-targets]
+                              [:div.markdown-body {:ref (fn [el] (reset! node el))}])})))
 
 ;; Scroll re-anchor across a streamed doc's remount (live-refresh bumps :doc/stamp → the [path stamp]-keyed
 ;; ir-stream-body remounts and re-streams from the top; a tab-switch away/back likewise re-streams). We save the
@@ -1199,7 +1210,7 @@
        :pdf-reflow-stream          ^{:key (str "pdf-reflow-stream:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [ir-stream-body (:doc/path doc) "pdf-reflow" nil (:doc/stamp doc)]
        :pdf-reflow                 ^{:key (str "pdf-reflow:" (:doc/path doc))}
-                                   [markdown-body (:doc/reflow-html doc) nil (:doc/path doc)]
+                                   [markdown-body (:doc/reflow-html doc) nil (:doc/path doc) nil]
        :pdf                        ^{:key (str "pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [post-paint-surface [pdf-view (:doc/path doc) (:doc/stamp doc)]]
        :image                      ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
@@ -1208,14 +1219,16 @@
        ;; built (falls back to unified while the split is still building). Both render through markdown-body, so
        ;; find / scroll-spy / the themed context menu / the Contents outline all work. "Source" (above) shows raw.
        :diff-split                 ^{:key (str "diff-split:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)]
+                                   [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)
+                                    (:doc/diff-targets doc)]
        :diff                       ^{:key (str "diff:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+                                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)
+                                    (:doc/diff-targets doc)]
        :diff-rendering             [:div.vv-empty "Rendering…"]
-       :diagram                    [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]]
+       :diagram                    [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc) nil]]
        :mermaid                    ^{:key (str "mermaid:" (:doc/path doc) ":" (:doc/stamp doc))}
                                      [mermaid-view (:doc/text doc) (:doc/path doc)]
-       :office                     [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       :office                     [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc) nil]
        :table                      ^{:key (str "table:" (:doc/path doc) ":" (:doc/stamp doc))}
                                    [table-view doc]
        :log                        ^{:key (str "log:" (:doc/path doc) ":" (:doc/stamp doc))}
@@ -1227,7 +1240,7 @@
        ;; While the render is still in flight :doc/html is nil, so the "Rendering…" branch below still wins.
        :blank
        [:div.vv-empty "Nothing to preview — this document has no renderable content. Use View Source to see the file."]
-       :html-doc                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)]
+       :html-doc                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc) nil]
        :rendering                  [:div.vv-empty "Rendering…"])]))
 
 (defn- breadcrumb

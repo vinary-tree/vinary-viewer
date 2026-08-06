@@ -134,33 +134,93 @@
        (.catch (fn [e] (rf/dispatch [:content/error {:path path :message (str "latex render error: " (.-message e))}]))))))
 
 ;; Diff (.diff/.patch) UNIFIED render → the colored single-column HTML + a per-file Contents outline. Pure
-;; (ir.frontend.diff → ir.backend.html): the HTML is fixed structure + escaped text nodes, so it needs no
-;; post-passes and no runtime sanitizer (there is no raw-HTML vector — untrusted content is only ever text).
+;; after the renderer-only tree-sitter pass (ir.frontend.diff → ir.backend.html): the HTML is fixed structure +
+;; escaped text/token nodes, so it needs no runtime sanitizer (there is no raw-HTML vector).
+(defn- diff-source-entries
+  "Normalize both vv:load-diff-sources wire shapes. The opt-in structured response is
+   `{rel {\"path\" resolved \"content\" text?}}`; an older main (or a legacy request) returns `{rel text}`.
+   Keeping this tolerance makes renderer/main hot reloads degrade to no links rather than breaking Split."
+  [payload]
+  (into {}
+        (map (fn [[rel v]]
+               [rel (if (string? v)
+                      {:content v}
+                      {:path (or (get v "path") (:path v))
+                       :content (or (get v "content") (:content v))})]))
+        (or (js->clj payload) {})))
+
+(defn- diff-targets [entries]
+  (into {} (keep (fn [[rel {:keys [path]}]] (when (string? path) [rel path]))) entries))
+
+(defn- diff-sources [entries]
+  (into {} (keep (fn [[rel {:keys [content]}]] (when (string? content) [rel content]))) entries))
+
+(defn- request-diff-entries [path model include-content?]
+  (when-let [^js v (.-vv js/window)]
+    (when (.-loadDiffSources v)
+      (.loadDiffSources v
+                        (clj->js {:diffPath path
+                                  :files (diff/referenced-paths model)
+                                  :includePaths true
+                                  :includeContent (boolean include-content?)})))))
+
 (rf/reg-fx
  :diff/render
- (fn [{:keys [text path on-done]}]
+ (fn [{:keys [text path stamp on-done]}]
    (try
-     (let [ir (ir-diff/diff->ir text)]
-       (rf/dispatch (conj on-done {:html (ir-html/lower ir) :toc (ir-diff/outline ir) :assets []})))
+     (let [model (diff/parse text)]
+       ;; Path discovery is independent of syntax rendering and never delays first paint. Only main can turn a
+       ;; diff-relative name into an existing local/remote address; a failed request leaves inert header text.
+       (when-let [p (request-diff-entries path model false)]
+         (-> p
+             (.then (fn [payload]
+                      (rf/dispatch [:diff/targets-ready path stamp
+                                    (diff-targets (diff-source-entries payload))])))
+             (.catch (fn [_] nil))))
+       (-> (diff-view/highlight-model model)
+           (.then (fn [highlighted]
+                    (let [ir (ir-diff/model->ir highlighted)]
+                      (rf/dispatch (conj on-done {:html (ir-html/lower ir)
+                                                  :toc (ir-diff/outline ir)
+                                                  :assets []})))))
+           (.catch (fn [e]
+                     (rf/dispatch [:content/error {:path path :message (str "diff render error: " (.-message e))}])))))
      (catch :default e
        (rf/dispatch [:content/error {:path path :message (str "diff render error: " (.-message e))}])))))
 
-;; Diff SIDE-BY-SIDE (split) build: parse once, emit the baseline two-column HTML immediately (derivable from the
-;; hunks alone), then ask main to resolve the referenced files on disk and, when any are found, re-emit an
-;; ENRICHED split with full-file context. Both land on the doc as :doc/diff-split-html (:diff/split-ready).
+;; Diff SIDE-BY-SIDE (split) build: parse once and syntax-highlight the patch-derived baseline while Unified
+;; remains visible, then ask main for full source files and, when any are found, emit an ENRICHED split with
+;; full-file context. Both results land on the doc as :doc/diff-split-html (:diff/split-ready).
 (rf/reg-fx
  :diff/build-split
- (fn [{:keys [path text]}]
-   (let [model (diff/parse text)]
-     (rf/dispatch [:diff/split-ready path (diff/split-html model)])          ; instant, sources-free baseline
-     (when-let [^js v (.-vv js/window)]
-       (when (.-loadDiffSources v)
-         (-> (.loadDiffSources v (clj->js {:diffPath path :files (diff/referenced-paths model)}))
-             (.then (fn [srcs]
-                      (let [sources (js->clj srcs)]
-                        (when (seq sources)
-                          (rf/dispatch [:diff/split-ready path (diff/split-html model sources)])))))
-             (.catch (fn [_] nil))))))))
+ (fn [{:keys [path text stamp]}]
+   (let [model (diff/parse text)
+         highlighted-p (diff-view/highlight-model model)]
+     ;; Baseline stays source-independent, but waits for the already-cached grammar pass so Split never flashes
+     ;; plain text before token colors arrive. Until then content-route keeps the Unified preview mounted.
+     (-> highlighted-p
+         (.then (fn [highlighted]
+                  (rf/dispatch [:diff/split-ready path stamp (diff/split-html highlighted)])))
+         (.catch (fn [_]
+                   (rf/dispatch [:diff/split-ready path stamp (diff/split-html model)]))))
+     ;; The full-file read remains lazy: only selecting Split (or refreshing an already-built Split) reaches
+     ;; this structured includeContent request. Highlight full sources once, then overlay them on enriched rows.
+     (when-let [source-p (request-diff-entries path model true)]
+       (-> (js/Promise.all #js [highlighted-p source-p])
+           (.then (fn [results]
+                    (let [highlighted (aget results 0)
+                          entries (diff-source-entries (aget results 1))
+                          targets (diff-targets entries)
+                          sources (diff-sources entries)]
+                      ;; The latest existence result is authoritative even when empty: a referenced file can be
+                      ;; deleted between initial path-only resolution and this lazy Split request.
+                      (rf/dispatch [:diff/targets-ready path stamp targets])
+                      (when (seq sources)
+                        (-> (diff-view/highlight-sources highlighted sources)
+                            (.then (fn [source-highlights]
+                                     (rf/dispatch [:diff/split-ready path stamp
+                                                   (diff/split-html highlighted sources source-highlights)]))))))))
+           (.catch (fn [_] nil)))))))
 
 ;; project the per-tab collapsed diff-file set onto the mounted DOM (ADR-0037) — the state-change half;
 ;; markdown-body calls the same applier synchronously after every innerHTML rebuild (the re-render half).

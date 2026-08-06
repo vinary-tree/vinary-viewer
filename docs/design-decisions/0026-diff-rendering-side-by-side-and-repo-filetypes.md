@@ -1,8 +1,8 @@
 # 0026 — Diff (`.diff`/`.patch`) rendering + side-by-side, standard repo filetypes, and the reverse PDF↔source switch
 
-- **Status:** Accepted — amended by [0037](0037-collapsible-diff-file-previews.md) (the unified view's
-  per-file structure gained a collapsible `<details>` wrapper, and the `[Unified | Split]` seg control
-  moved into the Preview combo's caret menu)
+- **Status:** Accepted — amended by [0037](0037-collapsible-diff-file-previews.md) (collapsible per-file
+  wrappers and the Preview combo), then amended in place on 2026-08-06 (per-file syntax layering and
+  main-resolved file-name navigation)
 - **Date:** 2026-07-10
 - **Deciders:** Vinary Tree (maintainer)
 
@@ -57,7 +57,8 @@ back-ends, and is exhaustively node-testable.
 **The parser** (`vinary.diff/parse [text] → {:preamble :files}`) handles `diff --git`, plain `diff -u`
 (`--- /+++` with trailing-timestamp stripping), `@@ -a,b +c,d @@` (counts default to 1), renames, new/deleted
 files, `Binary files … differ`, `\ No newline at end of file`, combined/merge `@@@` (degraded to a heading), and
-a **git-format-patch preamble** (the email header + commit message + diffstat, captured as `:preamble`).
+a **git-format-patch preamble** (the email header + commit message + diffstat, captured as `:preamble`). Git
+C-quoted paths—including octal UTF-8—are decoded before prefix stripping, so the model carries actual filenames.
 
 The one subtlety worth recording: a hunk is **bounded to its declared old/new line budget**. A hunk header
 `@@ -1,C +1,D @@` promises `C` old-side and `D` new-side lines; the parser consumes exactly that many and then
@@ -80,26 +81,54 @@ It is layered in two tiers:
 - **Baseline — always available.** `split-rows` aligns a file's hunks with no external input: a context line →
   both sides; a run of deletes paired with the following run of inserts → *changed* rows (delete left / insert
   right); leftovers → one-sided rows. A unified diff fully determines both sides *within* its hunks, so this
-  needs no source files and renders instantly.
+  needs no source files. After the 2026-08-06 amendment, the unified view stays mounted while the cached grammar
+  pass builds this baseline, so Split does not flash unhighlighted text.
 - **Enriched — "when the respective source files are accessible."** When the diff's referenced file is found on
   disk, the real file's unchanged regions are spliced around the hunks so the **whole file** shows side-by-side.
   Long unchanged runs collapse into native `<details>` gaps (no JavaScript). Resolution is main-side (the
   renderer has no `fs`): `vv:load-diff-sources` walks the diff's directory and its ancestors for each referenced
-  path. The fetch is **lazy** — only when Split is first selected — and asynchronous: the baseline renders
-  immediately, then the enriched HTML replaces it when the sources arrive (the same pattern as PDF reflow's
+  path. Full-content reads are **lazy** — only when Split is first selected — and asynchronous: enriched HTML
+  replaces the baseline when source text and its syntax pass are ready (the same pattern as PDF reflow's
   `:doc/reflow-html`).
 
 Both views render through the **existing `markdown-body`** component, so a diff inherits in-page find,
-scroll-spy, the themed context menu, and — because each file is an `<h2>` banner — a multi-file **Contents
-outline** with zero extra code.
+scroll-spy, the themed context menu, and — because each file has a heading-kind `<summary>` banner — a
+multi-file **Contents outline** with zero extra code.
+
+### 2.1 2026-08-06 amendment — source grammar beneath diff tint; resolved file-name links
+
+**Syntax layering.** The GUI projects each old/new hunk side into a logical source buffer and sends it through
+the existing tree-sitter grammar registry, selected by that side's file path. Token captures are then projected
+back to lines: deletions use old-side tokens, insertions use new-side tokens, and context prefers new with old as
+a fallback. Renames can consequently use different grammars on their two sides. Enriched Split additionally
+highlights the complete fetched new source so unchanged rows outside hunks receive tokens. Token foregrounds
+are nested inside the existing line/cell elements; their insertion/deletion backgrounds remain outside, giving
+GitHub-style syntax colours beneath diff tint. Missing grammars degrade to the prior escaped plain text. The
+ANSI backend does not consume token metadata, so its established output remains byte-identical.
+
+**Navigation.** Both renderers emit escaped, inert file-path anchors keyed by their diff-relative path. For a
+rename the old and new paths are separate anchors. On initial Unified render, the renderer asks
+`vv:load-diff-sources` for a structured, path-only resolution. Main walks the same local/SSH/SFTP candidates as
+Split enrichment but reads no contents; an absolute reference is checked directly and a relative one walks the
+diff directory's ancestors. Only existing targets return. `markdown-body` projects safe encoded hrefs from this
+app-state map after every innerHTML remount; POSIX, Windows-drive, UNC, and remote URI forms round-trip without
+turning filename syntax into URL syntax. Missing targets never gain `href`, and an authoritative empty refresh
+removes a formerly active link. Delegated link
+handling runs before the enclosing summary toggle, so left-click replaces the current document and
+`Ctrl`+left-click opens a new tab without collapsing the diff file.
+
+**IPC compatibility.** The channel accepts optional `includePaths` / `includeContent` flags. Opting into paths
+returns `{rel → {path, content?}}`; an optionless caller still receives the original `{rel → content}` map. This
+keeps old renderer/main version skew well formed while separating cheap eager target discovery from lazy Split
+content reads.
 
 ### 3. The Unified⇄Split toggle reuses the representation-switch pattern
 
-A per-tab `:diff-view` (`:unified` | `:split`, default `:unified` — split is opt-in so opening a diff never
-triggers a disk fetch) mirrors ADR-0025's per-tab `:representation`. It surfaces as a segmented
-`[Unified | Split]` control in `view-switch-toolbar` beside the existing `[Preview | Source]`, plus a command
-(`:view/toggle-diff-split`) and a self-gating key (`C-S-b`) — the same three-surface pattern (toolbar + palette +
-keymap) as the other view switches.
+A per-tab `:diff-view` (`:unified` | `:split`, default `:unified`) mirrors ADR-0025's per-tab
+`:representation`. ADR-0037 moved the layout rows into the `Preview ▾` combo's caret menu and removed the
+standalone segmented control; the command (`:view/toggle-diff-split`) and self-gating key (`C-S-b`) remain. Split
+is opt-in, so opening a diff performs only the 2026-08-06 amendment's path-only target lookup, never a source
+content read.
 
 ### 4. Standard repo filetypes — two decoupled layers
 
@@ -151,10 +180,11 @@ standard `pdf-view`**; only the CSS wrapper differed.
 
 The diff HTML never passes through `rehype-sanitize`, unlike Markdown. This is safe **by construction**, not by
 omission: the unified HTML is produced by `ir.backend.html` (whose `rehype-stringify` escapes every text node)
-and the split HTML by `vinary.diff/split-html` (which escapes every interpolated value). All tags, classes, and
-`data-*` attributes are fixed literals under our control; the only untrusted data — the diff's own bytes and the
-referenced files' bytes — becomes **text-node content only**, which cannot open an injection vector. Markdown
-needs the sanitizer because it renders untrusted *markup*; a diff has no such surface.
+and the split HTML by `vinary.diff/split-html` (which escapes every interpolated value). Tree-sitter capture
+classes must match the app's fixed `cm-*` whitelist. Diff paths are emitted into escaped inert placeholders,
+not hrefs; only a successful main-side existence check activates one with a safely encoded local/SSH/SFTP
+target. All other tags, classes, and `data-*` attributes are fixed literals under our control. Markdown needs
+the sanitizer because it renders untrusted *markup*; a diff has no such surface.
 
 ## Consequences
 
@@ -166,19 +196,28 @@ needs the sanitizer because it renders untrusted *markup*; a diff has no such su
   text nodes, stay **invisible to the terminal's text-reading ANSI back-end** — one IR, correct in both media.
 - **Classification is grammar-independent.** Repo files classify correctly whether or not their grammar bundles;
   highlighting is a separable enhancement.
+- **Syntax and tint compose.** GUI token foregrounds are nested within the existing diff-colored rows/cells;
+  terminal output remains the diff-only ANSI representation.
+- **Existence controls affordance.** A diff path looks and behaves like a link only after main resolves it, and
+  the path-only request avoids eagerly reading every referenced file.
 - **Theme variable added.** `--vv-accent` (used by the segmented controls' active state with a `--vv-head1`
   fallback) was referenced but undefined; it is now defined in every theme (the lint had been red on it).
 
 ## Testing
 
 - **Unit (DOM-free, `npm test`):** `vinary.diff-test` covers the parser (git/plain/rename/new/deleted/binary/
-  no-newline/multi-file, and the format-patch preamble + `-- ` signature boundary), `split-rows` alignment,
-  split-HTML enrichment, and the unified IR lowered through **both** back-ends (HTML classes + `data-*` gutters,
-  and green/red/cyan SGR). `file-kind-test` and `grammar-catalog-test` cover `well-known-kind`,
+  no-newline/multi-file/C-quoted paths, and the format-patch preamble + `-- ` signature boundary), `split-rows`
+  alignment, split-HTML enrichment, per-line syntax projection/layering/class validation, inert rename path
+  placeholders, cross-platform file-URL round trips, and the unified IR
+  lowered through **both** back-ends (HTML classes + `data-*` gutters, and unchanged green/red/cyan SGR).
+  `diff-source-test` drives the production local absolute/ancestor/path-only/content/legacy resolver against real
+  temporary files. `file-kind-test` and `grammar-catalog-test` cover `well-known-kind`,
   `source-sibling-paths`, `diff-exts`, and the `built-in-filetypes` resolutions.
-- **Integration:** `content-service-smoke` opens a real Makefile (→ `source`, not a sniffed table), a LICENSE
-  (→ text), a `.gitignore`/`.git/config` (→ source), and a diff (→ `diff`). `cli-smoke` runs `vv-cli` on a diff
-  and asserts the green/red SGR and the `--toc` file list. `electron-smoke` covers the GUI paths.
+- **Integration:** `content-service-smoke` covers legacy and structured path/content diff-source replies,
+  absolute remote paths, and percent-encoded special-character targets over the real hermetic SFTP transport.
+  `cli-smoke` asserts the unchanged green/red SGR and `--toc` file list. `electron-smoke` checks visible JS and
+  Markdown token colours over diff tints in both layouts, resolved-only links, left/Ctrl navigation, stale-link
+  removal, no accidental summary collapse, and target reapplication after remount.
 
 ## See also
 

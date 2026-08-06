@@ -59,7 +59,7 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 | `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
 | `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
 | `vv:load-pdf-bytes` *(invoke)* | `loadPdfBytes(path)` | string path | `content_service` | Load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch; no new tab). |
-| `vv:load-diff-sources` *(invoke)* | `loadDiffSources(req)` | request map | `content_service` | Resolve a diff's referenced source files from disk/SFTP for the enriched side-by-side view. |
+| `vv:load-diff-sources` *(invoke)* | `loadDiffSources(req)` | `{diffPath, files, includePaths?, includeContent?}` | `content_service` | Resolve existing referenced files from disk/SFTP (absolute directly, relative by ancestor walk). Structured opt-in returns `{rel → {path, content?}}` for eager path-only header links or lazy Split enrichment; the optionless legacy response remains `{rel → content}`. |
 | `vv:load-remote-asset` *(invoke)* | `loadRemoteAsset(req)` | `{uri, relativeTo}` | `content_service` | Fetch a remote asset's bytes over SFTP → a `data:` URL (remote Markdown/Office relative images). |
 
 ### 2.2 Document streaming (credit-1 pull cursor)

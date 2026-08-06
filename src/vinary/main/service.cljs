@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [vinary.main.dir-walk :as dir-walk]
             [vinary.main.doc-overrides :as doc-overrides]
+            [vinary.main.diff-source :as diff-source]
             [vinary.main.file-kind :as file-kind]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
@@ -209,34 +210,21 @@
               (filter (fn [m] (contains? file-kind/group-kinds (:kind m)))))
         (file-kind/group-candidate-paths p)))
 
-(defn- resolve-diff-source-from
-  "Locate a diff's referenced file `rel` on disk: try it relative to `dir`, then walk up the ancestors (a
-   diff is usually generated from a repo root but may be viewed from a subdirectory). Returns an absolute
-   path, or nil when not found. Powers the side-by-side view's full-file enrichment."
-  [start-dir rel]
-  (loop [dir start-dir depth 0]
-    (when (and dir (< depth 30))
-      (let [cand (.join path dir rel)]
-        (if (try (.isFile (.statSync fs cand)) (catch :default _ false))
-          cand
-          (let [parent (.dirname path dir)]
-            (when (not= parent dir) (recur parent (inc depth)))))))))
-
 (defn- load-diff-sources
   "Resolve each referenced `rel` path of the diff at `diff-path` against the filesystem and read the found ones →
-   {rel → utf8-content}. The renderer has no fs access, so the side-by-side view requests this over IPC.
+   the legacy `{rel → utf8-content}` shape, or (when `:include-paths?`) the structured
+   `{rel → {:path absolute-path :content optional-utf8}}` shape used by navigable headers and Split enrichment.
+   Structured path-only requests do not read file bytes.
+
+   The renderer has no fs access, so the side-by-side view requests this over IPC.
    A piped-stdin diff has no meaningful on-disk directory of its own — its spill dir — so resolution starts
    from the INVOKING cwd instead (doc-overrides :cwd): `git diff | vv -t diff` enriches the side-by-side
    view from the repo the diff was generated in."
-  [diff-path rels]
-  (let [base (or (doc-overrides/stdin-base-dir diff-path) (.dirname path diff-path))]
-    (reduce (fn [acc rel]
-              (if-let [p (resolve-diff-source-from base rel)]
-                (if-let [content (try (.readFileSync fs p "utf8") (catch :default _ nil))]
-                  (assoc acc rel content)
-                  acc)
-                acc))
-            {} (or rels []))))
+  ([diff-path rels] (load-diff-sources diff-path rels nil))
+  ([diff-path rels {:keys [include-paths? include-content?]}]
+   (let [base (or (doc-overrides/stdin-base-dir diff-path) (.dirname path diff-path))]
+     (diff-source/load-local base rels {:include-paths? include-paths?
+                                        :include-content? include-content?}))))
 
 (defn- decorate-js-payload!
   "Attach the override-carried presentation keys to an outgoing JS vv:content payload: :language (the
@@ -1032,10 +1020,14 @@
   ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"
            (fn [_e req]
-             (let [{:keys [diffPath files]} (js->clj req :keywordize-keys true)]
+             (let [{:keys [diffPath files includePaths includeContent]}
+                   (js->clj req :keywordize-keys true)
+                   opts {:include-paths? includePaths :include-content? includeContent}]
                (if (file-kind/remote-uri? diffPath)
-                 (.loadRemoteDiffSources content-service diffPath (clj->js files))
-                 (clj->js (load-diff-sources diffPath files))))))
+                 (.loadRemoteDiffSources content-service diffPath (clj->js files)
+                                         #js {:includePaths (boolean includePaths)
+                                              :includeContent (boolean includeContent)})
+                 (clj->js (load-diff-sources diffPath files opts))))))
   ;; fetch a remote asset's bytes → a data: URL, so a remote Markdown/Office doc's relative images render (the
   ;; renderer can't reach the host, and file:// cannot either). `relativeTo` is the remote doc's URI.
   (.handle ipcMain "vv:load-remote-asset"

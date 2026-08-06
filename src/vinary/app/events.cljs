@@ -120,6 +120,9 @@
                    language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
                    baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
+                   ;; Resolution is stamp-scoped and asynchronous. Clear the previous diff's targets immediately
+                   ;; so a live refresh cannot leave a now-missing header path clickable while main re-checks it.
+                   (= kind "diff")       (assoc :doc/diff-targets {})
                    ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
                    ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
                    (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex") (not= kind "diff"))
@@ -169,10 +172,11 @@
                                     :on-done [:content/rendered path stamp]}])
               ;; diff (.diff/.patch) → the unified colored HTML + per-file Contents outline (ir.frontend.diff).
               (= kind "diff")
-              (conj [:diff/render {:text text :path path :on-done [:content/rendered path stamp]}])
+              (conj [:diff/render {:text text :path path :stamp stamp
+                                   :on-done [:content/rendered path stamp]}])
               ;; a live-refresh of a diff whose side-by-side view was already built → rebuild it against the new text
               (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
-              (conj [:diff/build-split {:path path :text text}])
+              (conj [:diff/build-split {:path path :text text :stamp stamp}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
               (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
               ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
@@ -473,10 +477,11 @@
                          path  (facet/active-content-path db')   ; the shown facet (a diff may be one of several)
                          snap  (ds/snapshot)
                          text  (ds/doc-attr snap path :doc/text)
+                         stamp (ds/doc-attr snap path :doc/stamp)
                          built? (some? (ds/doc-attr snap path :doc/diff-split-html))]
                      (cond-> {:db db'}
                        (and (= view :split) text (not built?))
-                       (assoc :fx [[:diff/build-split {:path path :text text}]])))))
+                       (assoc :fx [[:diff/build-split {:path path :text text :stamp stamp}]])))))
 
 ;; flip the active diff's view (:unified ↔ :split) — the command-palette / keybinding entry. No-op unless the
 ;; active doc is a diff. Delegates to :tab/set-diff-view (which builds the split HTML on demand).
@@ -522,12 +527,23 @@
                  (fn [{:keys [db]} _]
                    {:fx [[:dispatch (if (facet/diff-all-collapsed? db) [:diff/expand-all] [:diff/collapse-all])]]}))
 
-;; the side-by-side (split) HTML for a diff finished building (baseline or on-disk-enriched) → store it on the doc
-(rf/reg-event-fx :diff/split-ready
-                 (fn [_ [_ path html]]
+;; main resolved diff-relative names to existing local/remote files. Stamp-gated because the stat walk is async
+;; and live refresh can replace the file list while it is in flight.
+(rf/reg-event-fx :diff/targets-ready
+                 (fn [_ [_ path stamp targets]]
                    (let [snap (ds/snapshot)]
                      (when-let [eid (ds/eid-for-path snap path)]
-                       {:fx [[:ds/transact [[:db/add eid :doc/diff-split-html html]]]]}))))
+                       (when (= stamp (ds/doc-attr snap path :doc/stamp))
+                         {:fx [[:ds/transact [[:db/add eid :doc/diff-targets (or targets {})]]]]})))))
+
+;; the side-by-side (split) HTML for a diff finished building (baseline or on-disk-enriched) → store it on the
+;; doc, but never let an older async grammar/read result overwrite a live-refreshed document.
+(rf/reg-event-fx :diff/split-ready
+                 (fn [_ [_ path stamp html]]
+                   (let [snap (ds/snapshot)]
+                     (when-let [eid (ds/eid-for-path snap path)]
+                       (when (= stamp (ds/doc-attr snap path :doc/stamp))
+                         {:fx [[:ds/transact [[:db/add eid :doc/diff-split-html html]]]]})))))
 
 ;; ── bidirectional source⇄preview jump ("Go to source" / "Go to preview" context-menu items + keymap) ──
 ;; The EVENT decides whether the pane must toggle (it knows the current view), and the FX either scrolls the

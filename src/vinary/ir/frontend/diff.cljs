@@ -30,7 +30,27 @@
 ;; the line's text lives in an inner <span class="vv-diff-code"> so the two line-number gutters can be CSS
 ;; pseudo-elements (::before/::after) ordered around it by a grid — the gutters are then drawn in the GUI but,
 ;; being pseudo-content rather than text nodes, are invisible to the terminal's text-reading ANSI backend.
-(defn- code-span [s] (node/node :span [(text-leaf s)] {:tag "span" :attrs {"className" ["vv-diff-code"]}}))
+(def ^:private syntax-class-re #"^cm-[a-z0-9-]+$")
+
+(defn- syntax-nodes
+  "Token segments from renderer.syntax → escaped IR text leaves under fixed `cm-*` spans. The renderer's
+   style map is already fixed, but validate again at this HTML construction boundary so an arbitrary class can
+   never be smuggled through an enriched model."
+  [segments]
+  (mapv (fn [{:keys [text class]}]
+          (if (and (string? class) (re-matches syntax-class-re class))
+            (node/node :span [(text-leaf text)] {:tag "span" :attrs {"className" [class]}})
+            (text-leaf text)))
+        segments))
+
+(defn- code-span
+  ([s] (node/node :span [(text-leaf s)] {:tag "span" :attrs {"className" ["vv-diff-code"]}}))
+  ([marker text segments]
+   (node/node :span
+              (if (seq segments)
+                (into [(text-leaf marker)] (syntax-nodes segments))
+                [(text-leaf (str marker text))])
+              {:tag "span" :attrs {"className" ["vv-diff-code"]}})))
 
 (defn- note-line [text]
   (node/node :diff-line [(code-span text)]
@@ -39,11 +59,13 @@
 (defn- line-node
   "One unified-diff body line → a class-tagged div carrying the ±/space marker in its (span-wrapped) text — so
    the terminal reads naturally — and the old/new line numbers as data-* gutters (drawn by CSS in the GUI)."
-  [{:keys [kind text old-n new-n no-newline?]}]
+  [{:keys [kind text old-n new-n no-newline?] :as line}]
   (let [marker (case kind :insert "+" :delete "-" " ")
+        syntax (case kind :delete (:old-syntax line) :insert (:new-syntax line)
+                     (or (:new-syntax line) (:old-syntax line)))
         cls    (cond-> ["vv-diff-line" (str "vv-diff-" (name kind))]
                  no-newline? (conj "vv-diff-no-newline"))]
-    (node/node :diff-line [(code-span (str marker text))]
+    (node/node :diff-line [(code-span marker text syntax)]
                {:tag "div"
                 :attrs (cond-> {"className" cls}
                          old-n (assoc "dataOld" (str old-n))
@@ -53,6 +75,20 @@
   (node/node :diff-line
              [(code-span (str "@@ -" old-start " +" new-start " @@" (when (seq heading) (str " " heading))))]
              {:tag "div" :attrs {"className" ["vv-diff-line" "vv-diff-hunk"]}}))
+
+(defn- path-anchor [path]
+  ;; Deliberately no href: only main can establish that a diff-relative path exists. markdown-body projects the
+  ;; resolved target map onto these placeholders after mount; unresolved paths stay inert/plain.
+  (node/node :span [(text-leaf path)]
+             {:tag "a" :attrs {"className" ["vv-diff-file-path"] "dataVvDiffPath" path}}))
+
+(defn- file-label-nodes [{:keys [old-path new-path rename?]}]
+  (cond
+    (and rename? old-path new-path (not= old-path new-path))
+    [(path-anchor old-path) (text-leaf " → ") (path-anchor new-path)]
+    new-path [(path-anchor new-path)]
+    old-path [(path-anchor old-path)]
+    :else [(text-leaf "/dev/null")]))
 
 (defn- file-heading
   "The file's banner — a `<summary>` (the wrapper's native toggle target; Settings/none of the GUI relies on
@@ -67,7 +103,7 @@
                [(node/node :span [(text-leaf status)]
                            {:tag "span" :attrs {"className" ["vv-diff-file-status" (str "vv-diff-status-" status)]}})
                 (text-leaf " ")
-                (node/node :span [(text-leaf label)]
+                (node/node :span (file-label-nodes file)
                            {:tag "span" :attrs {"className" ["vv-diff-file-name"]}})]
                {:tag "summary" :level 2 :id id :toc-text label
                 :attrs {"id" id "className" ["vv-diff-file-head"] "dataStatus" status}})))
@@ -91,18 +127,23 @@
                  :id (str "vv-diff-file-" idx)
                  :attrs {"className" ["vv-diff-file"] "dataStatus" status "open" true}})]))
 
-(defn diff->ir
-  "Parse `text` and lower it to the unified diff IR — a :document of file `<h2>` banners + `@@`/±/context
-   lines, preceded by any git-format-patch preamble (commit message + diffstat) as a `<pre>` block."
-  [text]
-  (let [{:keys [preamble files]} (diff/parse text)
-        pre  (when (seq (str/trim (or preamble "")))
+(defn model->ir
+  "Lower an already-parsed (optionally renderer-syntax-enriched) model to unified diff IR. Keeping this entry
+   point separate lets the GUI parse/highlight asynchronously while `diff->ir` remains the pure CLI/TUI path."
+  [{:keys [preamble files]}]
+  (let [pre  (when (seq (str/trim (or preamble "")))
                [(node/node :code-block
                            [(node/node :code [(text-leaf preamble)] {:tag "code"})]
                            {:tag "pre" :attrs {"className" ["vv-diff-preamble"]}})])]
     (node/node :document
                (into (vec pre) (mapcat file-nodes files (range)))
                {})))
+
+(defn diff->ir
+  "Parse `text` and lower it to the unified diff IR — a :document of file banners + `@@`/±/context lines,
+   preceded by any git-format-patch preamble (commit message + diffstat) as a `<pre>` block."
+  [text]
+  (model->ir (diff/parse text)))
 
 (defn outline
   "A Contents outline for a diff IR: one entry per file banner (its :toc-text label, anchored by :id).

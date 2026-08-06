@@ -584,9 +584,20 @@ function installIpc(state) {
   ipcMain.handle('vv:stream-pull',  (_event, req) => contentService.streamPull(req));
   ipcMain.handle('vv:stream-close', (_event, req) => contentService.streamClose(req));
   ipcMain.on('vv:watch-assets', () => {});
-  // the diff side-by-side view asks main to resolve referenced files on disk; the smoke returns whatever the
-  // active test staged in state.diffSources (default none → the split view falls back to the hunk windows).
-  ipcMain.handle('vv:load-diff-sources', (_event, _req) => state.diffSources || {});
+  // Diff headers ask for path-only structured entries; Split later asks for the same entries with content.
+  // Requests without includePaths keep the legacy {rel: content} contract.
+  ipcMain.handle('vv:load-diff-sources', (_event, req) => {
+    const sources = state.diffSources || {};
+    if (!req || !req.includePaths) return sources;
+    const targets = state.diffTargets || {};
+    const out = {};
+    for (const rel of req.files || []) {
+      if (!targets[rel]) continue;
+      out[rel] = { path: targets[rel] };
+      if (req.includeContent && typeof sources[rel] === 'string') out[rel].content = sources[rel];
+    }
+    return out;
+  });
   // SSH remote files: capture the (secret) prompt reply for assertions; serve remote assets from the fixture.
   ipcMain.on('vv:ssh-prompt-reply', (_event, payload) => { state.sshReply = payload; });
   ipcMain.handle('vv:load-remote-asset', (_event, req) => contentService.loadRemoteAsset(req.uri, req.relativeTo));
@@ -629,6 +640,8 @@ async function main() {
     pwSearch: null, pwFill: null, pwSave: null, pwDismiss: null,
     openedPaths: [],
     contentByPath: new Map(),
+    diffSources: null,
+    diffTargets: null,
     // Every renderer console error whose text mentions the CSP. Injecting MathJax's stylesheet (which carries an
     // @font-face with a data: URL) silently tripped `font-src` on every launch, printed only as noise among the
     // re-frame warnings. Collect them so a CSP regression fails the run instead of scrolling past.
@@ -933,8 +946,17 @@ async function main() {
     '+# Project',
     ''
   ].join('\n');
-  // stage the on-disk NEW file so the split view can splice full-file context beyond the hunk window
-  state.diffSources = { 'src/greet.js': 'function greet(name) {\n  return "hello " + name;\n}\nconst VERSION = "1.0";\nmodule.exports = greet;\n' };
+  // Stage one resolved NEW file. Initial render receives only its path (navigable header, no eager bytes);
+  // selecting Split receives the same path + content for full-file enrichment. README.md stays unresolved.
+  const diffTargetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-diff-target-'));
+  tempDirs.push(diffTargetDir);
+  const greetTarget = path.join(diffTargetDir, 'src', 'greet.js');
+  fs.mkdirSync(path.dirname(greetTarget), { recursive: true });
+  const greetSource = 'function greet(name) {\n  return "hello " + name;\n}\nconst VERSION = "1.0";\nmodule.exports = greet;\n';
+  fs.writeFileSync(greetTarget, greetSource);
+  state.contentByPath.set(greetTarget, await contentService.openUri(greetTarget));
+  state.diffSources = { 'src/greet.js': greetSource };
+  state.diffTargets = { 'src/greet.js': greetTarget };
   await evalIn(win, `window.__vvopen(${JSON.stringify(diffPath)})`);
   win.webContents.send('vv:content', { path: diffPath, kind: 'diff', text: diffText, stamp: Date.now(), meta: { size: diffText.length } });
   await waitFor(
@@ -948,7 +970,22 @@ async function main() {
       hasHunk: Boolean(document.querySelector('.vv-diff-hunk')),
       insertText: (document.querySelector('.vv-diff-insert .vv-diff-code') || {}).textContent || '',
       deleteText: (document.querySelector('.vv-diff-delete .vv-diff-code') || {}).textContent || '',
-      dataNew: insert ? (insert.getAttribute('data-new') || '') : ''
+      dataNew: insert ? (insert.getAttribute('data-new') || '') : '',
+      syntaxTokens: document.querySelectorAll('.vv-diff-code [class^="cm-"]').length,
+      insertBg: insert ? getComputedStyle(insert).backgroundColor : '',
+      jsString: (() => {
+        const token = document.querySelectorAll('details.vv-diff-file')[0]?.querySelector('.cm-string');
+        const line = token?.closest('.vv-diff-line');
+        return token && line ? { color: getComputedStyle(token).color, lineColor: getComputedStyle(line).color } : null;
+      })(),
+      mdHeading: (() => {
+        const file = document.querySelectorAll('details.vv-diff-file')[1];
+        const token = file?.querySelector('.cm-md-heading, .cm-md-heading-marker');
+        const line = token?.closest('.vv-diff-line');
+        return token && line ? { color: getComputedStyle(token).color, lineColor: getComputedStyle(line).color } : null;
+      })(),
+      greetHref: document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"]')?.getAttribute('href') || '',
+      readmeHref: document.querySelector('.vv-diff-file-path[data-vv-diff-path="README.md"]')?.getAttribute('href') || ''
     };
   })()`);
   assert.strictEqual(diffUnified.banners, 2, 'a multi-file diff renders one banner per file (also the Contents anchors)');
@@ -956,7 +993,17 @@ async function main() {
   assert.ok(/hello/.test(diffUnified.insertText) && diffUnified.insertText.startsWith('+'), 'the inserted line renders with its + marker');
   assert.ok(/hi /.test(diffUnified.deleteText) && diffUnified.deleteText.startsWith('-'), 'the deleted line renders with its - marker');
   assert.ok(diffUnified.dataNew && Number(diffUnified.dataNew) > 0, 'the insert line carries a data-new gutter number');
-  console.log('[ok] diff renders a colored, multi-file unified view with gutter line numbers');
+  assert.ok(diffUnified.syntaxTokens > 0, 'deducible .js/.md files receive tree-sitter token spans in Unified');
+  assert.ok(diffUnified.jsString && diffUnified.jsString.color !== diffUnified.jsString.lineColor,
+    'the .js section applies its language highlighter foreground, not merely token markup');
+  assert.ok(diffUnified.mdHeading && diffUnified.mdHeading.color !== diffUnified.mdHeading.lineColor,
+    'the .md section applies its Markdown-specific language foreground');
+  assert.ok(diffUnified.insertBg && diffUnified.insertBg !== 'rgba(0, 0, 0, 0)',
+    'the insert tint remains on the row behind syntax-token foreground colors');
+  assert.ok(diffUnified.greetHref.startsWith('file://') && decodeURIComponent(diffUnified.greetHref).endsWith('/src/greet.js'),
+    'a main-resolved diff header path is activated as an encoded file link');
+  assert.strictEqual(diffUnified.readmeHref, '', 'an unresolved diff header path remains inert (no href)');
+  console.log('[ok] diff renders syntax colors under diff tints, gutters, and resolved-only header links');
 
   // ── collapsible per-file previews (ADR-0037): each file is <details class="vv-diff-file" open> whose
   //    <summary> banner toggles it; state is per-tab and re-applied after every innerHTML rebuild ──
@@ -1053,9 +1100,22 @@ async function main() {
   const split = await evalIn(win, `(() => ({
     hasOld: Boolean(document.querySelector('.vv-diff-side-old')),
     hasNew: Boolean(document.querySelector('.vv-diff-side-new')),
-    text: document.querySelector('.vv-diff-splitview').textContent
+    text: document.querySelector('.vv-diff-splitview').textContent,
+    syntaxTokens: document.querySelectorAll('.vv-diff-splitview .vv-diff-side [class^="cm-"]').length,
+    jsString: Boolean(document.querySelectorAll('.vv-diff-splitview details.vv-diff-file')[0]?.querySelector('.cm-string')),
+    mdHeading: Boolean(document.querySelectorAll('.vv-diff-splitview details.vv-diff-file')[1]?.querySelector('.cm-md-heading, .cm-md-heading-marker')),
+    greetHref: document.querySelector('.vv-diff-splitview .vv-diff-file-path[data-vv-diff-path="src/greet.js"]')?.getAttribute('href') || '',
+    readmeHref: document.querySelector('.vv-diff-splitview .vv-diff-file-path[data-vv-diff-path="README.md"]')?.getAttribute('href') || '',
+    changedBg: getComputedStyle(document.querySelector('.vv-diff-row-change .vv-diff-side-new')).backgroundColor
   }))()`);
   assert.ok(split.hasOld && split.hasNew, 'the split view has old and new side columns');
+  assert.ok(split.syntaxTokens > 0, 'Split carries tree-sitter token spans on both hunk/full-source rows');
+  assert.ok(split.jsString && split.mdHeading,
+    'Split independently highlights the deducible JavaScript and Markdown file types');
+  assert.ok(split.greetHref.startsWith('file://') && !split.readmeHref,
+    'resolved-only header navigation is re-projected after the Unified-to-Split innerHTML remount');
+  assert.ok(split.changedBg && split.changedBg !== 'rgba(0, 0, 0, 0)',
+    'Split keeps its changed-row tint behind token foreground colors');
   // enrichment: the staged on-disk file contributes context lines BEYOND the hunk window (textContent
   // includes a collapsed details' hidden children, so file 0's enrichment is still assertable)
   assert.ok(/VERSION/.test(split.text) && /module\.exports/.test(split.text),
@@ -1149,6 +1209,59 @@ async function main() {
   await waitFor(() => evalIn(win, `window.__vvdb().ui.keymaps.active === 'default'`), 'default keymap restored after the fold chords');
   await delay(60);
   console.log('[ok] vim z M / z R collapse and expand all diff files');
+
+  // A target can disappear after the first existence check. Live refresh must clear the prior href immediately,
+  // and a later successful resolution must reactivate it on the newly mounted HTML.
+  state.diffTargets = {};
+  state.diffSources = {};
+  win.webContents.send('vv:content', {
+    path: diffPath, kind: 'diff', text: diffText, stamp: Date.now(), meta: { size: diffText.length }
+  });
+  await waitFor(() => evalIn(win,
+    `!document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]')`),
+  'live refresh removes a href whose target no longer resolves', 8000);
+  state.diffTargets = { 'src/greet.js': greetTarget };
+  state.diffSources = { 'src/greet.js': greetSource };
+  win.webContents.send('vv:content', {
+    path: diffPath, kind: 'diff', text: diffText, stamp: Date.now() + 1, meta: { size: diffText.length }
+  });
+  await waitFor(() => evalIn(win,
+    `Boolean(document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]'))`),
+  'a later refresh reapplies a newly resolved href', 8000);
+  assert.ok((await detailsState()).every(d => d.open),
+    'target disappearance/reappearance does not disturb controlled file-collapse state');
+  console.log('[ok] live refresh removes stale diff links and reapplies newly resolved targets');
+
+  // Resolved filename navigation shares the preview-link contract but must outrank the enclosing summary's
+  // collapse toggle: Ctrl+left-click opens a new tab; plain left-click replaces the current view.
+  const diffNavBefore = await evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    return { tabCount: ui.tabs.length, active: ui['active-tab'] };
+  })()`);
+  await evalIn(win, `(() => {
+    const a = document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]');
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true, button: 0 }));
+  })()`);
+  await waitFor(() => evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    const t = ui.tabs.find(x => x.id === ui['active-tab']);
+    return ui.tabs.length === ${diffNavBefore.tabCount + 1} && t && t.uri === ${JSON.stringify(greetTarget)};
+  })()`), 'Ctrl+click on a resolved diff filename opens it in a new tab', 8000);
+  await sendChord(win, 'W', ['control']);
+  await waitFor(() => evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    const t = ui.tabs.find(x => x.id === ui['active-tab']);
+    return ui.tabs.length === ${diffNavBefore.tabCount} && t && t.uri === ${JSON.stringify(diffPath)}
+      && Boolean(document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]'));
+  })()`), 'closing the Ctrl+click tab returns to the diff with its resolved link reapplied', 8000);
+  assert.ok((await detailsState()).every(d => d.open), 'following the nested filename link did not toggle collapse');
+  await evalIn(win, `document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]').click()`);
+  await waitFor(() => evalIn(win, `(() => {
+    const ui = window.__vvdb().ui;
+    const t = ui.tabs.find(x => x.id === ui['active-tab']);
+    return t && t.uri === ${JSON.stringify(greetTarget)};
+  })()`), 'left-click on a resolved diff filename replaces the current view', 8000);
+  console.log('[ok] diff filename links navigate current/new tabs without collapsing their file');
 
   // ── Settings ▸ File Type (ADR-0036): the menu re-types the SHOWN document in place ──
   // Drives the REAL menu DOM (Settings → File Type flyout → row click) so the whole renderer half is
@@ -1313,6 +1426,7 @@ async function main() {
   // restore the PDF as the active view — this diff test navigated the tab away from it, and the PDF
   // selection / hit-test / find steps below operate on the pdf.js view.
   state.diffSources = null;
+  state.diffTargets = null;
   await evalIn(win, `window.__vvopen(${JSON.stringify(pdfFixture)})`);
   win.webContents.send('vv:content', { path: pdfFixture, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(pdfFixture)), stamp: Date.now() });
   await waitFor(

@@ -14,26 +14,69 @@
 
 ;; ─────────────────────────────── parse ───────────────────────────────
 
+(def ^:private git-c-escape-bytes
+  {"a" 7 "b" 8 "t" 9 "n" 10 "v" 11 "f" 12 "r" 13 "\\" 92 "\"" 34})
+
+(defonce ^:private utf8-encoder (js/TextEncoder.))
+(defonce ^:private utf8-decoder (js/TextDecoder. "utf-8"))
+
+(defn- append-utf8 [bytes s]
+  (into bytes (array-seq (.encode utf8-encoder s))))
+
+(defn- decode-git-quoted-path
+  "Decode Git's double-quoted C path form, including octal UTF-8 bytes. Git uses this form when a path contains
+   whitespace, quotes, backslashes, control bytes, or non-ASCII bytes under `core.quotePath`. Unquoted input is
+   returned unchanged. Invalid/incomplete escapes are retained literally rather than dropping filename bytes."
+  [s]
+  (if-not (and (> (count s) 1) (str/starts-with? s "\"") (str/ends-with? s "\""))
+    s
+    (let [end (dec (count s))]
+      (loop [i 1 bytes []]
+        (if (>= i end)
+          (.decode utf8-decoder (js/Uint8Array. (clj->js bytes)))
+          (let [ch (subs s i (inc i))]
+            (if-not (= ch "\\")
+              ;; Preserve a complete UTF-16 code point before TextEncoder turns it into UTF-8 bytes.
+              (let [cp (.codePointAt s i)
+                    width (if (> cp 65535) 2 1)]
+                (recur (+ i width) (append-utf8 bytes (subs s i (+ i width)))))
+              (if (>= (inc i) end)
+                (recur (inc i) (conj bytes 92))
+                (let [next-ch (subs s (inc i) (+ i 2))]
+                  (if (re-matches #"[0-7]" next-ch)
+                    (let [oct-end (loop [j (+ i 2) n 1]
+                                    (if (and (< j end) (< n 3)
+                                             (re-matches #"[0-7]" (subs s j (inc j))))
+                                      (recur (inc j) (inc n))
+                                      j))
+                          octal   (subs s (inc i) oct-end)
+                          value   (js/parseInt octal 8)]
+                      (recur oct-end (if (<= value 255)
+                                       (conj bytes value)
+                                       (append-utf8 bytes (str "\\" octal)))))
+                    (if-let [b (get git-c-escape-bytes next-ch)]
+                      (recur (+ i 2) (conj bytes b))
+                      (recur (+ i 2) (append-utf8 (conj bytes 92) next-ch)))))))))))))
+
 (defn- strip-path
   "Normalize a `--- a/foo`, `+++ b/foo`, or `diff --git` path token: drop a trailing tab+timestamp (plain
-   `diff -u`), a surrounding pair of quotes (git quotes paths with odd bytes), and a leading `a/`/`b/` prefix.
+   `diff -u`), decode Git's surrounding C quotes, and drop a leading `a/`/`b/` prefix.
    `/dev/null` → nil (an absent side: a new or deleted file)."
   [s]
   (let [s (-> (str s) (str/replace #"\t.*$" "") str/trim)
-        s (if (and (> (count s) 1) (str/starts-with? s "\"") (str/ends-with? s "\""))
-            (subs s 1 (dec (count s)))
-            s)]
+        s (decode-git-quoted-path s)]
     (cond
       (= s "/dev/null")     nil
       (re-find #"^[ab]/" s) (subs s 2)
       :else                 (not-empty s))))
 
 (defn- git-header-paths
-  "The two paths in a `diff --git a/OLD b/OLD` line, as [old new] (best-effort; the `--- `/`+++ ` lines below
-   are authoritative when present). Handles the common unquoted, space-free case and falls back to nil paths."
+  "The two path tokens in a `diff --git a/OLD b/NEW` line. Each token is either unquoted/non-space or a Git
+   C-quoted string; `strip-path` performs quote decoding and prefix removal. The `---`/`+++` lines remain
+   authoritative when present, while rename-only and binary sections can rely on this header."
   [line]
-  (if-let [[_ a b] (re-matches #"^diff --git (?:\"?a/)?(.+?)\"? (?:\"?b/)?(.+?)\"?$" line)]
-    [(not-empty a) (not-empty b)]
+  (if-let [[_ a b] (re-matches #"^diff --git (\"(?:\\.|[^\"])*\"|\S+) (\"(?:\\.|[^\"])*\"|\S+)$" line)]
+    [(strip-path a) (strip-path b)]
     [nil nil]))
 
 (defn- hunk-header
@@ -231,7 +274,12 @@
 
 ;; ─────────────────────────────── split (side-by-side) rows ───────────────────────────────
 
-(defn- cell [line] (when line {:n (or (:old-n line) (:new-n line)) :text (:text line) :no-newline? (:no-newline? line)}))
+(defn- cell [line side]
+  (when line
+    {:n (case side :old (:old-n line) :new (:new-n line))
+     :text (:text line)
+     :syntax (case side :old (:old-syntax line) :new (:new-syntax line))
+     :no-newline? (:no-newline? line)}))
 
 (defn- pair-runs
   "Zip a run of deletes with the following run of inserts into aligned change/delete/insert rows."
@@ -240,7 +288,7 @@
     (mapv (fn [i]
             (let [d (nth dels i nil) ins (nth inss i nil)]
               {:kind (cond (and d ins) :change d :delete :else :insert)
-               :old (cell d) :new (cell ins)}))
+               :old (cell d :old) :new (cell ins :new)}))
           (range n))))
 
 (defn split-rows
@@ -262,7 +310,7 @@
                (let [{:keys [kind] :as ln} (first ls)]
                  (case kind
                    :context (recur (rest ls) [] [] (-> (into rows (pair-runs dels inss))
-                                                       (conj {:kind :context :old (cell ln) :new (cell ln)})))
+                                                       (conj {:kind :context :old (cell ln :old) :new (cell ln :new)})))
                    :delete  (recur (rest ls) (conj dels ln) inss rows)
                    :insert  (recur (rest ls) dels (conj inss ln) rows)
                    (recur (rest ls) dels inss rows)))))))
@@ -282,16 +330,31 @@
 
 (defn- num-cell [n side] (str "<span class=\"vv-diff-num vv-diff-num-" side "\">" (when n (esc n)) "</span>"))
 
-(defn- side-cell [text side]
+(def ^:private syntax-class-re #"^cm-[a-z0-9-]+$")
+
+(defn- syntax-html [segments]
+  (apply str
+         (map (fn [{:keys [text class]}]
+                (if (and (string? class) (re-matches syntax-class-re class))
+                  (str "<span class=\"" (esc class) "\">" (esc text) "</span>")
+                  (esc text)))
+              segments)))
+
+(defn- side-cell [cell side]
   (str "<span class=\"vv-diff-side vv-diff-side-" side "\">"
-       (if (str/blank? (str text)) "" (esc text)) "</span>"))
+       (cond
+         (nil? cell) ""
+         (seq (:syntax cell)) (syntax-html (:syntax cell))
+         (str/blank? (str (:text cell))) ""
+         :else (esc (:text cell)))
+       "</span>"))
 
 (defn- row-html
   "One 4-column split row (old-num, old-text, new-num, new-text) with a kind class."
   [{:keys [kind old new]}]
   (str "<div class=\"vv-diff-row vv-diff-row-" (name kind) "\">"
-       (num-cell (:n old) "old") (side-cell (:text old) "old")
-       (num-cell (:n new) "new") (side-cell (:text new) "new")
+       (num-cell (:n old) "old") (side-cell old "old")
+       (num-cell (:n new) "new") (side-cell new "new")
        "</div>"))
 
 (defn- hunk-sep-html [{:keys [heading old-start new-start]}]
@@ -301,6 +364,25 @@
 
 (defn- context-row [old-n new-n text]
   {:kind :context :old {:n old-n :text text} :new {:n new-n :text text}})
+
+(defn- line-syntax [lines n]
+  (when (and (seq lines) (number? n) (pos? n))
+    (nth lines (dec n) nil)))
+
+(defn- apply-source-syntax
+  "Overlay full NEW-file syntax onto enriched rows. New cells use their new-file line number. Old context is
+   byte-identical to the new source and may use the old path's grammar at the corresponding NEW line number;
+   deleted/changed old cells retain the hunk-derived old-side syntax because no complete old file is available."
+  [rows {:keys [old new]}]
+  (mapv (fn [{:keys [kind] :as row}]
+          (let [new-n (get-in row [:new :n])]
+            (cond-> row
+              (and (:new row) (line-syntax new new-n))
+              (assoc-in [:new :syntax] (line-syntax new new-n))
+
+              (and (= :context kind) (:old row) (line-syntax old new-n))
+              (assoc-in [:old :syntax] (line-syntax old new-n)))))
+        rows))
 
 (defn- rows->html
   "Render a seq of split rows, collapsing runs of >gap-threshold CONTEXT rows into a native `<details>` gap
@@ -326,11 +408,12 @@
   "Splice a file's hunk rows with the real on-disk NEW-file lines so unchanged regions between (and around)
    hunks show as full context. `new-lines` is the resolved file split into lines. Falls back to the plain
    hunk rows when the file has no usable new side (a deletion / missing source)."
-  [file new-lines]
+  [file new-lines source-syntax]
   (if (or (:deleted? file) (nil? (:new-path file)) (empty? new-lines))
     [(split-rows file) false]
     (let [hunks (:hunks file)]
-      [(loop [hs hunks, old-at 1, new-at 1, out []]
+      [(apply-source-syntax
+        (loop [hs hunks, old-at 1, new-at 1, out []]
          (if (empty? hs)
            ;; tail: unchanged lines after the last hunk
            (into out (map-indexed (fn [i t] (context-row (+ old-at i) (+ new-at i) t))
@@ -342,21 +425,35 @@
              (recur (rest hs)
                     (+ old-start old-count) (+ new-start new-count)
                     (into (into out gap) (split-rows (assoc file :hunks [h])))))))
+        source-syntax)
        true])))
+
+(defn- path-anchor-html [path]
+  (str "<a class=\"vv-diff-file-path\" data-vv-diff-path=\"" (esc path) "\">" (esc path) "</a>"))
+
+(defn- file-label-html [{:keys [old-path new-path rename?]}]
+  (cond
+    (and rename? old-path new-path (not= old-path new-path))
+    (str (path-anchor-html old-path) " → " (path-anchor-html new-path))
+    new-path (path-anchor-html new-path)
+    old-path (path-anchor-html old-path)
+    :else "/dev/null"))
 
 (defn- file-split-html
   "One file's side-by-side section — a collapsible `<details class=\"vv-diff-file\" open>` whose
    `<summary>` is the file banner (ADR-0037; mirrors the unified view's per-file wrapper, same
    `vv-diff-file-N` id space, so the per-tab collapsed set applies to whichever view is mounted).
    The unchanged-run `vv-diff-gap` details nested inside stay native/uncontrolled."
-  [file sources]
+  [file sources source-highlights]
   (let [status (file-status file)
         src    (get sources (:new-path file))
-        [rows collapse?] (if src (enrich-rows file (str/split src #"\n" -1)) [(split-rows file) false])]
+        [rows collapse?] (if src
+                           (enrich-rows file (str/split src #"\n" -1) (get source-highlights (:new-path file)))
+                           [(split-rows file) false])]
     (str "<details class=\"vv-diff-file vv-diff-split\" data-status=\"" status "\" open>"
          "<summary class=\"vv-diff-file-head\" id=\"vv-diff-file-" (:idx file) "\">"
          "<span class=\"vv-diff-file-status vv-diff-status-" status "\">" status "</span>"
-         "<span class=\"vv-diff-file-name\">" (esc (file-label file)) "</span></summary>"
+         "<span class=\"vv-diff-file-name\">" (file-label-html file) "</span></summary>"
          (cond
            (:binary? file) "<div class=\"vv-diff-row vv-diff-row-note\">Binary file — no textual diff</div>"
            (and (empty? (:hunks file)) (:rename? file)) "<div class=\"vv-diff-row vv-diff-row-note\">Renamed with no content change</div>"
@@ -370,6 +467,9 @@
    (unchanged runs collapse into `<details>` gaps), absent ones fall back to the hunk windows."
   ([model] (split-html model nil))
   ([{:keys [files]} sources]
+   (split-html {:files files} sources nil))
+  ([{:keys [files]} sources source-highlights]
    (str "<div class=\"vv-diff vv-diff-splitview\">"
-        (apply str (map-indexed (fn [i f] (file-split-html (assoc f :idx i) (or sources {}))) files))
+        (apply str (map-indexed (fn [i f] (file-split-html (assoc f :idx i) (or sources {})
+                                                          (or source-highlights {}))) files))
         "</div>")))

@@ -282,6 +282,14 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
   `preventDefault`s every click and only dispatches an open event for recognized safe targets, so a
   `javascript:` link (already stripped by the sanitizer) can never navigate the app frame. A stray
   navigation is additionally blocked by the `will-navigate`/`setWindowOpenHandler` guard (§6).
+- **Diff file links and syntax spans.** Unified/Split diff HTML is fixed structure with escaped source text.
+  Tree-sitter capture classes are serialized only when they match the app's `cm-*` token-class whitelist.
+  Diff-provided file names begin as anchors without `href`; the privileged side must resolve an existing local
+  or authenticated SSH/SFTP path before the renderer projects a safely encoded target. The initial resolver is
+  path-only (no file read), while full source reads remain lazy until Split enrichment. Both kinds of link still
+  pass through the fail-closed delegated click handler and Electron navigation guard. Local POSIX/drive/UNC and
+  remote URI codecs percent-encode filename syntax (`#`, `?`, spaces, Unicode); malformed/relative href inputs
+  fail closed.
 - **Images.** `<img src=url>` (Markdown or raw HTML) loads local (`file://`) and `data:` images, and — by
   project decision — remote **https** images (`http:` is blocked to force TLS). The renderer CSP
   `img-src 'self' file: data: https:` enforces this, and `connect-src` blocks remote fetch/XHR exfil.
@@ -341,7 +349,7 @@ renderer sandbox remains planned.
 | **HTML sanitizer stage** (`rehype-raw` + `rehype-sanitize`) | (Markdown HTML)                    | Parses raw HTML, then strips everything outside GitHub's allowlist (script, `on*`, `javascript:`, iframe, style, meta, base) before the `innerHTML` write — the primary control (§5). | **Applied** |
 | **Strict `Content-Security-Policy`** (`<meta>` in `index.html`) | "7. Define a Content-Security-Policy" | `default-src 'none'`; `script-src` with **no `'unsafe-inline'`** (inline `<script>`/`on*` can't run even on a sanitizer miss) but `'unsafe-eval'`+`'wasm-unsafe-eval'`+`file:`/`blob:` for pdf.js/MathJax/mermaid/tree-sitter; https-only remote images; `connect-src` blocks remote exfil; `object-src`/`base-uri`/`form-action`/`frame-src` locked. | **Applied** |
 | **Navigation lock-down**                                | "13. Disable or limit navigation"       | `will-navigate` is denied for any URL other than the bundled `index.html`, and `setWindowOpenHandler` denies new windows, so a stray navigation can't hand `window.vv` to another origin. | **Applied** |
-| **Link-scheme fail-closed**                             | (Markdown links)                        | The in-content `<a>` handler `preventDefault`s all clicks and only opens recognized safe targets, so a `javascript:` link cannot navigate the app frame. | **Applied** |
+| **Link-scheme fail-closed**                             | (Rendered links)                        | The in-content `<a>` handler `preventDefault`s all clicks and only opens recognized safe targets, so a `javascript:` link cannot navigate the app frame. Diff file anchors remain inert until main resolves an existing target. | **Applied** |
 | **Enable `sandbox: true`** on the renderer             | "4. Enable process sandboxing"          | OS-level renderer sandbox, reducing blast radius. **Requires migrating the preload off CommonJS `require`** (today `preload.js` does `require('electron')`). | Forthcoming (planned) |
 
 > **Preload migration caveat.** Turning on `sandbox:true` is the single highest-value hardening, but it

@@ -148,6 +148,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-diff-status-renamed  { background: rgba(210, 153, 34, 0.22); color: #bb8009; }
 .vv-diff-status-binary   { background: var(--vv-bg-code); color: var(--vv-fg-dim); }
 .markdown-body .vv-diff-file-name { flex: 1 1 auto; word-break: break-all; }
+/* paths are inert anchor placeholders until main resolves the diff-relative name to an existing file. Only an
+   activated [href] looks/acts like a link; unresolved names retain the banner's ordinary text treatment. */
+.markdown-body .vv-diff-file-path { color: inherit; text-decoration: none; cursor: inherit; }
+.markdown-body .vv-diff-file-path[href] { color: var(--vv-head1); text-decoration: underline;
+  text-underline-offset: 2px; cursor: pointer; }
 /* unified diff lines: a grid [old-gutter | new-gutter | code], gutters ordered ahead of the code by `order` */
 .markdown-body .vv-diff-line { display: grid; grid-template-columns: 3.2em 3.2em 1fr; align-items: start;
   border-left: 1px solid var(--vv-border); border-right: 1px solid var(--vv-border); color: var(--vv-fg); }
@@ -309,6 +314,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .markdown-body .cm-punctuation { color: var(--vv-fg-dim); }
 .markdown-body .cm-bracket     { color: var(--vv-fg); }
 .markdown-body .cm-label       { color: var(--vv-meta); }
+/* Markdown grammars use semantic cm-md-* captures rather than only the generic classes above. Keep these
+   foreground/font treatments in rendered code (including diffs), but deliberately omit the source editor's
+   token backgrounds: a diff row/cell owns the outer insert/delete tint and must remain visible beneath tokens. */
+.markdown-body .cm-md-heading        { color: var(--vv-head1); font-weight: 700; }
+.markdown-body .cm-md-heading-marker { color: var(--vv-fg-dim); font-weight: 600; }
+.markdown-body .cm-md-code,
+.markdown-body .cm-md-code-block     { color: var(--vv-head4); }
+.markdown-body .cm-md-url,
+.markdown-body .cm-md-link           { color: var(--vv-head1); text-decoration: underline;
+  text-underline-offset: 2px; }
+.markdown-body .cm-md-strong         { color: var(--vv-const); font-weight: 700; }
+.markdown-body .cm-md-emphasis       { color: var(--vv-em); font-style: italic; }
+.markdown-body .cm-md-strike         { color: var(--vv-fg-dim); text-decoration: line-through; }
+.markdown-body .cm-md-list,
+.markdown-body .cm-md-task           { color: var(--vv-meta); font-weight: 600; }
+.markdown-body .cm-md-quote          { color: var(--vv-head2); }
 
 /* ----- Sidebar: tabbed (Files / Contents), collapsible, resizable ----- */
 .vv-sidebar { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 140px;

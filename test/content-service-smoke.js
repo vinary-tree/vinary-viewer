@@ -338,6 +338,7 @@ async function testRemote() {
       'paper.tex': '\\documentclass{article}\\begin{document}Hi\\end{document}',
       'paper.pdf': '%PDF-1.4\n%fake pdf bytes\n',
       'src/greet.js': 'function greet(){ return "hello"; }',
+      'src/a file#日.js': 'export const special = true;',
       'doc.md': '# Doc\n![pic](./assets/pic.png)',
       'assets/pic.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       'app.log': Array.from({ length: 20000 }, (_, i) => `log line ${i}`).join('\n') + '\n',
@@ -384,6 +385,31 @@ async function testRemote() {
     // remote diff on-disk enrichment (resolve a referenced file over SFTP, walking ancestors)
     const diffSrcs = await content.loadRemoteDiffSources(srv.url('/change.diff'), ['src/greet.js']);
     assert.ok(/hello/.test(diffSrcs['src/greet.js'] || ''), 'remote diff-source enrichment resolves a referenced file over SFTP');
+    const absoluteDiffSrc = await content.loadRemoteDiffSources(srv.url('/change.diff'), ['/src/greet.js']);
+    assert.ok(/hello/.test(absoluteDiffSrc['/src/greet.js'] || ''),
+      'an absolute path in a plain remote unified diff resolves directly');
+    const diffPaths = await content.loadRemoteDiffSources(
+      srv.url('/change.diff'), ['src/greet.js', 'missing.js'], { includePaths: true, includeContent: false }
+    );
+    assert.strictEqual(diffPaths['src/greet.js'].path, srv.url('/src/greet.js'),
+      'structured remote diff resolution returns the navigable SSH URI');
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(diffPaths['src/greet.js'], 'content'), false,
+      'path-only diff resolution does not eagerly read source content');
+    assert.strictEqual(diffPaths['missing.js'], undefined, 'unresolved diff paths are omitted');
+    const diffEntries = await content.loadRemoteDiffSources(
+      srv.url('/change.diff'), ['src/greet.js'], { includePaths: true, includeContent: true }
+    );
+    assert.ok(/hello/.test(diffEntries['src/greet.js'].content || ''),
+      'structured Split enrichment returns content alongside the resolved path');
+    const specialUri = new URL(srv.url('/'));
+    specialUri.pathname = '/src/a file#日.js';
+    const specialEntries = await content.loadRemoteDiffSources(
+      srv.url('/change.diff'), ['src/a file#日.js'], { includePaths: true, includeContent: true }
+    );
+    assert.strictEqual(specialEntries['src/a file#日.js'].path, specialUri.href,
+      'remote diff resolution percent-encodes filename syntax in the navigable SSH URI');
+    assert.strictEqual(specialEntries['src/a file#日.js'].content, 'export const special = true;',
+      'the encoded remote target still addresses the real SFTP file');
 
     // remote relative asset → data URL (neither the sandboxed renderer nor file:// can reach the host)
     const asset = await content.loadRemoteAsset('./assets/pic.png', srv.url('/doc.md'));

@@ -329,7 +329,11 @@
       (str/replace #">" "&gt;")
       (str/replace #"\"" "&quot;")))
 
-(defn- spans->html [text spans]
+(defn- spans->segments
+  "Project capture spans onto `text` as ordered, non-overlapping `{:text :class?}` segments. Capture overlap
+   follows the rendered-code rule that already existed here: after the outer/earlier capture wins, a later
+   capture beginning before the emitted cursor is skipped. Every source byte is retained exactly once."
+  [text spans]
   (let [text  (or text "")
         spans (->> spans
                    (filter #(and (:class %) (number? (:from %)) (number? (:to %)) (< (:from %) (:to %))))
@@ -338,16 +342,61 @@
       (if-let [{:keys [from to class]} (first spans)]
         (if (< from pos)
           (recur pos (rest spans) out)
-          (recur to
+          (let [from (min (count text) (max 0 from))
+                to   (min (count text) (max from to))]
+            (recur to
                  (rest spans)
-                 (conj out
-                       (escape-html (subs text pos (min from (count text))))
-                       "<span class=\""
-                       (escape-html class)
-                       "\">"
-                       (escape-html (subs text from (min to (count text))))
-                       "</span>")))
-        (apply str (conj out (escape-html (subs text pos))))))))
+                 (cond-> out
+                   (< pos from) (conj {:text (subs text pos from)})
+                   (< from to)  (conj {:text (subs text from to) :class class})))))
+        (cond-> out (< pos (count text)) (conj {:text (subs text pos)}))))))
+
+(defn spans->line-segments
+  "Split tree-sitter capture spans over `(str/join \"\\n\" lines)` back into one token-segment vector per
+   input line. Multi-line captures are clipped at line boundaries, which lets line-oriented renderers keep
+   their own DOM/grid structure while still parsing a whole logical source side at once. Pure and exported
+   for the diff renderer and DOM-free regression tests."
+  [lines spans]
+  (let [lines (vec (or lines []))]
+    (if (empty? lines)
+      []
+      (let [segments (spans->segments (str/join "\n" lines) spans)]
+        (reduce
+         (fn [out {:keys [text class]}]
+           (reduce-kv
+            (fn [acc i part]
+              (let [acc (if (pos? i) (conj acc []) acc)]
+                (if (seq part)
+                  (update acc (dec (count acc)) conj (cond-> {:text part} class (assoc :class class)))
+                  acc)))
+            out
+            (vec (str/split (or text "") #"\n" -1))))
+         [[]]
+         segments)))))
+
+(defn- segments->html [segments]
+  (apply str
+         (map (fn [{:keys [text class]}]
+                (if class
+                  (str "<span class=\"" (escape-html class) "\">" (escape-html text) "</span>")
+                  (escape-html text)))
+              segments)))
+
+(defn- spans->html [text spans]
+  (segments->html (spans->segments text spans)))
+
+(defn highlight-path-lines
+  "Return `Promise<vector<vector<segment>>|nil>` for `lines`, choosing the grammar through the same path /
+   filename / user-filetype registry as the source viewer. A missing or failed grammar resolves to nil so the
+   caller can retain its escaped plain-text rendering."
+  [path lines]
+  (if-let [grammar (grammar-for path)]
+    (-> (highlight-spans (str/join "\n" (or lines [])) grammar)
+        (.then (fn [spans] (spans->line-segments lines (array-seq spans))))
+        (.catch (fn [e]
+                  (js/console.warn "[vv] diff source grammar failed:" e)
+                  nil)))
+    (js/Promise.resolve nil)))
 
 (defn highlight-language-html
   "Return Promise<string|null> with tree-sitter-highlighted HTML for text in language."

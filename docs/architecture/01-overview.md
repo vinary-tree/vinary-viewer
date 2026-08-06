@@ -140,7 +140,7 @@ Available now:
 | Launchers | `./install.sh` installs `vinary-viewer`, `vv`, `vv-cli`, and `vv-tui`. |
 | Markdown | GFM render, slugged headings, code highlighting, MathJax, TOC metadata, asset tracking, sanitized raw HTML. |
 | Org / LaTeX | `.org` via uniorg and `.tex`/`.latex`/`.ltx` via unified-latex, rendered through the common IR like Markdown (ADR-0020/0024/0025). |
-| Diffs | `.diff` / `.patch` colored unified view plus on-demand side-by-side (split) and a multi-file Contents (ADR-0026). |
+| Diffs | `.diff` / `.patch` syntax-highlighted unified and on-demand side-by-side (split) views, with diff tint layered over token colours, resolved file-name navigation, and a multi-file Contents (ADR-0026). |
 | Office / tables | docx/ODF office documents and spreadsheet/delimited tables (`.xlsx`, `.ods`, `.csv`, …) as sanitized HTML / paged tables. |
 | Logs / archives | Bounded log/table paging and in-place archive browsing (virtual `vv-archive://` URIs, never extracted to disk). |
 | Live refresh | Retained-path watcher reconciliation, bounded DataScript cache eviction, authenticated target-daemon invalidations/remote trees, and opt-in remote-content polling fallback. |

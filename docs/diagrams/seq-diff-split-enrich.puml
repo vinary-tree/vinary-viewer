@@ -4,31 +4,44 @@
 '' expresses that far better than a flowchart, and the palette keeps amber = IPC everywhere.
 !include _vv-theme.iuml
 
-title Split diff — enriching the hunk window with the on-disk pre/post files
+title Diff preview — resolved headers, then lazy Split enrichment
 
-participant "`[Unified | Split]`\ntoggle" as Toggle APPDB_TINT
+participant "`Preview ▾`\nlayout choice" as Toggle APPDB_TINT
 participant "renderer\n(diff view)" as Rend RENDERER_TINT
 participant "preload seam\n`window.vv`" as Seam IPC_TINT
 participant "main.service" as Main MAIN_TINT
 participant "disk\n(pre / post files)" as FS FS_TINT
 
-== unified (no round trip) ==
-Toggle -> Rend : select Unified
-note right of Rend #D8F0E6: unified renders from the `.diff` ALONE —\nhunks + `data-*` gutters, no filesystem read
-
-== switch to split ==
-Toggle -> Rend : select Split
-Rend -> Seam : `vv:load-diff-sources`\n{old-path, new-path}
+== open unified ==
+Toggle -> Rend : render Unified
+Rend -> Rend : parse hunks; highlight old/new\nlogical buffers by file grammar
+Rend -> Seam : `vv:load-diff-sources`\n{includePaths: true, includeContent: false}
 activate Seam
 Seam -> Main : ipc invoke
 activate Main
-Main -> FS : read old + new files\n(full context beyond the hunk window)
-FS --> Main : old-text, new-text
-Main --> Seam : {old, new}
+Main -> FS : existence/stat only\n(no content read)
+FS --> Main : resolved paths
+Main --> Seam : {rel: {path}}
+deactivate Main
+Seam --> Rend : target map
+deactivate Seam
+Rend -> Rend : activate only resolved\nfile-name anchors
+note right of Rend #D8F0E6: diff rows come from the `.diff` alone;\nmain only proves navigation targets exist
+
+== switch to split ==
+Toggle -> Rend : select Split
+Rend -> Rend : highlight the hunk-derived\nSplit baseline
+Rend -> Seam : `vv:load-diff-sources`\n{includePaths: true, includeContent: true}
+activate Seam
+Seam -> Main : ipc invoke
+activate Main
+Main -> FS : read available source files\n(full context beyond the hunk window)
+FS --> Main : path + content
+Main --> Seam : {rel: {path, content}}
 deactivate Main
 Seam --> Rend : {old, new}
 deactivate Seam
-Rend -> Rend : align hunks over the full files\n-> old | new columns
+Rend -> Rend : highlight full source; align hunks\n-> syntax-coloured old | new columns
 note over Rend #FFF6D6: the terminal (vv-cli/tui) has NO split view —\nit renders the unified ANSI diff only
 
 legend right
@@ -38,6 +51,6 @@ legend right
   |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
   |<#3A5BA0>&#160;&#160;&#160;&#160;| main.service |
   |<#9F8766>&#160;&#160;&#160;&#160;| on-disk pre/post files |
-  Unified is self-contained; split enriches with the files on disk.
+  Unified diff rows are self-contained; existence resolution activates links; Split lazily reads full sources.
 endlegend
 @enduml

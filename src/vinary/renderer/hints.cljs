@@ -70,7 +70,12 @@
          (remove nil?)
          (mapcat (fn [^js root] (array-seq (.querySelectorAll root "a[href], [data-path], .vv-diff-file-head"))))
          (keep (fn [^js el]
-                 (let [r (.getBoundingClientRect el)]
+                 ;; A navigable filename anchor now lives inside the diff banner. Keep BOTH affordances hintable
+                 ;; without stacking their labels: the banner-toggle hint is pinned to the status chip/disclosure
+                 ;; side, while the ordinary anchor hint uses the filename's own rectangle.
+                 (let [diff-head? (.contains (.-classList el) "vv-diff-file-head")
+                       ^js pos-el (if diff-head? (or (.querySelector el ".vv-diff-file-status") el) el)
+                       r (.getBoundingClientRect pos-el)]
                    (when (and (> (.-width r) 0) (> (.-height r) 0)
                               (< (.-top r) vh) (> (.-bottom r) 0)
                               (< (.-left r) vw) (> (.-right r) 0))

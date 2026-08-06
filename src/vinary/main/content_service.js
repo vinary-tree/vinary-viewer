@@ -819,6 +819,15 @@ function remotePartsJs(uri) {
   return m ? [m[1], m[2] || '/'] : [String(uri), '/'];
 }
 
+// Build a canonical remote URI from an already-separated authority + decoded/mixed pathname. Assigning the
+// pathname through WHATWG URL percent-encodes literal filename syntax (` `, `#`, `?`, Unicode) while preserving
+// valid existing escapes. Direct string concatenation would turn `#`/`?` in a remote filename into URL parts.
+function remoteUriForPath(prefix, pathname) {
+  const u = new URL(prefix + '/');
+  u.pathname = pathname;
+  return u.href;
+}
+
 function posixDirname(p) {
   const s = String(p).replace(/\/+$/, '');
   const i = s.lastIndexOf('/');
@@ -852,19 +861,36 @@ async function remoteSiblingsGroup(uri) {
   return out;
 }
 
-// A remote diff's referenced file, resolved relative to the diff's directory then walking up ancestors → its
-// utf8 content, or null. The SFTP analog of service.cljs/resolve-diff-source, for the side-by-side enrichment.
-async function loadRemoteDiffSources(diffUri, rels) {
+// A remote diff's referenced file, resolved relative to the diff's directory then walking up ancestors. Legacy
+// callers receive {rel: utf8}; opts.includePaths opts into {rel: {path, content?}}, allowing header navigation
+// to stat without eagerly reading every referenced file. The SFTP analog of service.cljs/load-diff-sources.
+async function loadRemoteDiffSources(diffUri, rels, opts = {}) {
   const [prefix, p] = remotePartsJs(diffUri);
+  const structured = Boolean(opts && opts.includePaths);
+  const includeContent = structured ? Boolean(opts && opts.includeContent) : true;
   const out = {};
   for (const rel of rels || []) {
+    if (typeof rel !== 'string' || rel.trim() === '') continue;
     let dir = posixDirname(p);
-    for (let depth = 0; depth < 30; depth++) {
-      const cand = prefix + path.posix.join(dir, rel);
+    for (;;) {
+      const absolute = path.posix.isAbsolute(rel);
+      const cand = remoteUriForPath(prefix, absolute ? path.posix.normalize(rel) : path.posix.join(dir, rel));
       try {
         const s = await transport.remoteStat(cand);
-        if (s.isFile) { out[rel] = await transport.remoteReadText(cand); break; }
+        if (s.isFile) {
+          if (structured) {
+            const entry = { path: cand };
+            if (includeContent) {
+              try { entry.content = await transport.remoteReadText(cand); } catch (_e) { /* path still navigable */ }
+            }
+            out[rel] = entry;
+          } else {
+            out[rel] = await transport.remoteReadText(cand);
+          }
+          break;
+        }
       } catch (_e) { /* keep walking up */ }
+      if (absolute) break;
       const parent = posixDirname(dir);
       if (parent === dir) break;
       dir = parent;

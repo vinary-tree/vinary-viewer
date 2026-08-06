@@ -9,7 +9,8 @@
             [vinary.ir.frontend.diff :as ir-diff]
             [vinary.ir.backend.html :as ir-html]
             [vinary.ir.backend.ansi :as ansi]
-            [vinary.ir.node :as node]))
+            [vinary.ir.node :as node]
+            [vinary.renderer.syntax :as syntax]))
 
 (def ^:private git-modify
   (str "diff --git a/src/foo.txt b/src/foo.txt\n"
@@ -53,6 +54,20 @@
        "similarity index 100%\n"
        "rename from old_name.txt\n"
        "rename to new_name.txt\n"))
+
+(def ^:private git-quoted-paths
+  (str "diff --git \"a/src/a file.js\" \"b/src/a file.js\"\n"
+       "--- \"a/src/a file.js\"\n"
+       "+++ \"b/src/a file.js\"\n"
+       "@@ -1 +1 @@\n"
+       "-const oldName = 1;\n"
+       "+const newName = 1;\n"))
+
+(def ^:private git-octal-utf8-path
+  ;; Git core.quotePath's C form for 日.js (UTF-8 e6 97 a5), used by a binary section with no ---/+++ lines so
+  ;; the diff --git header itself is authoritative.
+  (str "diff --git \"a/src/\\346\\227\\245.js\" \"b/src/\\346\\227\\245.js\"\n"
+       "Binary files \"a/src/\\346\\227\\245.js\" and \"b/src/\\346\\227\\245.js\" differ\n"))
 
 (def ^:private git-binary
   (str "diff --git a/logo.png b/logo.png\n"
@@ -133,6 +148,17 @@
     (is (= "old_name.txt → new_name.txt" (diff/file-label f)))
     (is (empty? (:hunks f)))))
 
+(deftest parse-git-c-quoted-paths
+  (let [spaced (first (:files (diff/parse git-quoted-paths)))
+        utf8   (first (:files (diff/parse git-octal-utf8-path)))]
+    (testing "quoted spaces survive as the real path used for grammar selection and resolution"
+      (is (= "src/a file.js" (:old-path spaced)))
+      (is (= "src/a file.js" (:new-path spaced))))
+    (testing "Git octal UTF-8 quoting decodes before prefix stripping"
+      (is (= "src/日.js" (:old-path utf8)))
+      (is (= "src/日.js" (:new-path utf8)))
+      (is (:binary? utf8)))))
+
 (deftest parse-binary
   (let [f (first (:files (diff/parse git-binary)))]
     (is (:binary? f))
@@ -188,6 +214,61 @@
     (is (str/includes? html "<details class=\"vv-diff-file vv-diff-split\" data-status=\"modified\" open>"))
     (is (str/includes? html "<summary class=\"vv-diff-file-head\" id=\"vv-diff-file-0\">"))
     (is (not (str/includes? html "<header")) "the banner is a <summary> now, not a <header>")))
+
+(deftest syntax-spans-project-back-to-lines
+  ;; One capture crosses a newline. The diff renderer parses a whole logical side, then needs token fragments
+  ;; clipped back to its line-oriented grid without losing or duplicating a source byte.
+  (let [lines ["abcd" "efgh"]
+        projected (syntax/spans->line-segments lines [{:from 2 :to 6 :class "cm-comment"}])]
+    (is (= [[{:text "ab"} {:text "cd" :class "cm-comment"}]
+            [{:text "e" :class "cm-comment"} {:text "fgh"}]]
+           projected))
+    (is (= lines (mapv #(apply str (map :text %)) projected)))))
+
+(deftest syntax-segments-layer-under-diff-structure
+  (let [model (-> (diff/parse git-modify)
+                  (assoc-in [:files 0 :hunks 0 :lines 1 :old-syntax]
+                            [{:text "line "} {:text "two" :class "cm-string"}])
+                  (assoc-in [:files 0 :hunks 0 :lines 2 :new-syntax]
+                            [{:text "line "} {:text "2" :class "cm-number"}]))
+        html  (ir-html/lower (ir-diff/model->ir model))
+        split (diff/split-html model)]
+    (is (str/includes? html "vv-diff-delete"))
+    (is (str/includes? html "-line <span class=\"cm-string\">two</span>"))
+    (is (str/includes? html "+line <span class=\"cm-number\">2</span>"))
+    (is (str/includes? split "vv-diff-row-change"))
+    (is (str/includes? split "<span class=\"cm-string\">two</span>"))
+    (is (str/includes? split "<span class=\"cm-number\">2</span>"))
+    ;; Syntax wrapper nodes are transparent to ANSI: the established diff marker/color contract survives.
+    (let [out (ansi/render (ir-diff/model->ir model) {:width 80 :color? false :block-sep "\n"})]
+      (is (str/includes? out "-line two"))
+      (is (str/includes? out "+line 2")))))
+
+(deftest syntax-segments-remain-escaped-and-class-whitelisted
+  (let [model (-> (diff/parse git-modify)
+                  (assoc-in [:files 0 :hunks 0 :lines 1 :old-syntax]
+                            [{:text "<script>alert(1)</script>"
+                              :class "cm-string\" onclick=\"alert(1)"}]))
+        unified (ir-html/lower (ir-diff/model->ir model))
+        split   (diff/split-html model)]
+    (doseq [html [unified split]]
+      (is (and (str/includes? html "alert(1)")
+               (not (str/includes? html "<script>")))
+          "token text survives but never serializes as an element")
+      (is (not (str/includes? html "onclick"))
+          "a class outside the fixed cm-* grammar is discarded rather than serialized"))))
+
+(deftest diff-header-path-placeholders
+  (let [unified (ir-html/lower (ir-diff/diff->ir git-modify))
+        rename-u (ir-html/lower (ir-diff/diff->ir git-rename))
+        rename-s (diff/split-html (diff/parse git-rename))]
+    (is (str/includes? unified "class=\"vv-diff-file-path\" data-vv-diff-path=\"src/foo.txt\""))
+    (is (not (str/includes? unified "href=")) "main has not resolved the inert placeholder yet")
+    (doseq [html [rename-u rename-s]]
+      (is (= 2 (count (re-seq #"class=\"vv-diff-file-path\"" html)))
+          "rename old/new paths are independently activatable")
+      (is (str/includes? html "data-vv-diff-path=\"old_name.txt\""))
+      (is (str/includes? html "data-vv-diff-path=\"new_name.txt\"")))))
 
 (deftest unified-ir->html
   (let [ir   (ir-diff/diff->ir git-modify)
