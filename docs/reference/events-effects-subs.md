@@ -287,30 +287,37 @@ The state/items/save-prompt/result pushes from main land as `[:passwords/*-recei
 | `:view/devtools` | — | Toggle renderer devtools. |
 | `:app/quit` | — | Quit the application. |
 
-### 1.23 Commits surfaces (ADR-0039)
+### 1.23 Commits surfaces (ADR-0039/0040)
 
 Per-repo state lives at `[:ui :commits :repos <root>]` (the
 [state-schema reference](../architecture/04-state-schema-reference.md) documents the shape). The
 lane fold (`:graph`) is stored **incrementally** on every received page, so the sidebar rail and
-the forthcoming Commit Graph document read one source of truth; stale async replies are dropped by
+the Commit Graph document read one source of truth; stale async replies are dropped by
 a per-repo generation (`:gen`), the `:find` pattern. Hash-keyed UI state (selection, expanded
 rows, rendered bodies) survives a page-0 refresh via `commits/keep-surviving`. See
-[ADR-0039](../design-decisions/0039-commits-sidebar-and-git-data-layer.md).
+[ADR-0039](../design-decisions/0039-commits-sidebar-and-git-data-layer.md). Since the Commit
+Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)), the
+window's `.git`-watch set is **derived**: each surface owns a slot under
+`[:ui :commits :watch-owners {:panel :graph}]` and `:commits/sync-watch` sends the slots' union —
+`vv:git-watch` *replaces* the window's set, so neither surface's unmount may release the other's
+watcher.
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:commits/shown` | fx | `root` | — | `[:ui :commits :last-root]` ← root | `[:vv/git-watch [root]]` (acquire this window's `.git` watcher ownership), `[:dispatch [:commits/ensure root]]` — the panel's mount hook (nil root → no-op) |
-| `:commits/hidden` | fx | — | — | — | `[:vv/git-watch []]` — panel unmount releases this window's watcher ownership (last owner out closes the repo's watcher) |
-| `:commits/set-root` | fx | `root` | — | `[:ui :commits :root]` ← root (the explicit **pin** — a non-nil pin IS "stop following the active doc") | `[:vv/git-watch [root]]`, `[:dispatch [:commits/ensure root]]` — the header repo switcher |
+| `:commits/sync-watch` | fx | — | `[:ui :commits :watch-owners]` | — | `[:vv/git-watch <the distinct non-nil slot values>]` — the ONE place the window's watched-repo set is computed (ADR-0040's union; dispatched by every slot write below and by the `:git-graph/shown`/`hidden` pair) |
+| `:commits/shown` | fx | `root` | — | `[:ui :commits :last-root]` ← root; `[:ui :commits :watch-owners :panel]` ← root | `[:dispatch [:commits/sync-watch]]`, `[:dispatch [:commits/ensure root]]` — the panel's mount hook (nil root → no-op) |
+| `:commits/hidden` | fx | — | — | `[:ui :commits :watch-owners :panel]` ← nil | `[:dispatch [:commits/sync-watch]]` — panel unmount releases only the **panel slot**; main closes the repo's watcher when the union no longer names it |
+| `:commits/set-root` | fx | `root` | — | `[:ui :commits :root]` ← root (the explicit **pin** — a non-nil pin IS "stop following the active doc"); `[:ui :commits :watch-owners :panel]` ← root | `[:dispatch [:commits/sync-watch]]`, `[:dispatch [:commits/ensure root]]` — the header repo switcher |
 | `:commits/ensure` | fx | `root` | the repo's `:branches` / `:commits` / `:loading?` | ensure `[:repos root]` exists | **idempotent**: `:vv/git-branches` only when branches are missing; `[:commits/load root {:skip 0}]` only when no commits are loaded and no load is in flight |
-| `:commits/load` | fx | `root {:skip}` | the repo's `:ref`, `:gen` | `:loading?` ← true; `:gen`++ | `:vv/git-log {root skip limit 250 ref?}` → on-done `[:commits/log-received root gen page0?]` / on-error `[:commits/log-error root]` |
-| `:commits/load-more` | fx | `root` | `:loading?`, `:exhausted?`, `:commits` | — | `[:commits/load root {:skip (count commits)}]` — unless already loading or exhausted (the footer button) |
-| `:commits/log-received` | db | `root gen page0? {:commits :exhausted :empty :error}` | the repo's `:gen`, `:graph` | stale `gen` → **reply dropped**; error → `:error`; else page 0 replaces / later pages append `:commits`, and the page folds through `graph/assign` into the **stored** `:graph {:rows :state :max-lane}` (R2 — the one fold site); page 0 additionally prunes `:selection`/`:expanded`/`:bodies` to surviving hashes (`commits/keep-surviving`) | — |
+| `:commits/load` | fx | `root {:skip}` | the repo's `:ref`, `:gen`, `:mode`, `:history-target` | `:loading?` ← true; `:gen`++ | **mode-aware** (ADR-0040): merges `commits/history-args` into the request — `:file-history` → `{:file … :follow true}`, `:line-history` → `{:lineRange {file start end}}`, `:log` → nothing — then `:vv/git-log {root skip limit 250 …}`; the viewed `:ref` is added **only for the plain branch log** (history follows HEAD) → on-done `[:commits/log-received root gen page0?]` / on-error `[:commits/log-error root]` |
+| `:commits/load-more` | fx | `root` | `:loading?`, `:exhausted?`, `:commits` | — | `[:commits/load root {:skip (count commits)}]` — unless already loading or exhausted (the footer button; also the graph's `:git-graph/near-end` target) |
+| `:commits/log-received` | db | `root gen page0? {:commits :exhausted :empty :error}` | the repo's `:gen`, `:graph`, `:mode` | stale `gen` → **reply dropped**; error → `:error`; else page 0 replaces / later pages append `:commits`, and the page folds through `graph/assign` into the **stored** `:graph {:rows :state :max-lane}` (R2 — the one fold site); in a **history mode** the fold is stored **empty** (`{:rows [] :state init}` — a non-contiguous listing must not fabricate lanes; both rails degrade to lane-0 dots, ADR-0040); page 0 additionally prunes `:selection`/`:expanded`/`:bodies` to surviving hashes (`commits/keep-surviving`) | — |
 | `:commits/log-error` | db | `root msg` | — | `:loading?` ← false; `:error` ← msg (e.g. "git is not available on PATH", "git output too large (>64 MiB)") | — |
 | `:commits/branches-received` | db | `root payload` | the repo's `:ref` | error → `:error`; else `:branches` ← `{:head :detached? :branches}`; a viewed `:ref` no longer among the branch names → nil (branch deleted — fall back to HEAD, D8) | — |
 | `:commits/set-ref` | fx | `root ref` | — | `:ref` ← ref | `[:commits/load root {:skip 0}]` — the branch combo's pick |
 | `:commits/activate` | fx | `root hash` | — | — | `:vv/git-open-diff {root :to hash :parent? true}` — diff vs the FIRST parent; main resolves `hash^`, empty tree for a root commit (R4) |
 | `:commits/select` | db | `root hash mode` | the loaded hash order | `:selection` ← `commits/select` (R3: `:single` / `:toggle` (Ctrl) / `:range` (Shift, anchor-to-hash; falls back to `:single` when an end left the window)) | — |
+| `:commits/cursor-to` | fx | `root idx {:extend? :move-only?}` | the loaded hash order | `:selection` — `move-only?` (Ctrl) writes `:cursor` only (the selection stands); `extend?` (Shift) applies `commits/select … :range`; else `:single` — all by the hash at `idx` (out-of-window idx → no-op) | `[:git-graph/reveal-row idx]` — the graph's keyboard model funnels here (ADR-0040) so both surfaces share one cursor |
 | `:commits/clear-selection` | db | `root` | — | `:selection` ← `{:cursor nil :anchor nil :selected #{}}` | — |
 | `:commits/diff-selected` | fx | `root` | `:selection`, the loaded hash order | — | when **exactly two** commits are selected: `:vv/git-open-diff {root :from older :to newer}` (`commits/diff-pair` orders by log index — the "Diff selected" pill) |
 | `:commits/toggle-expand` | fx | `root hash` | `:expanded`, `:bodies`, the commit's `:body` | toggle hash in `:expanded` | first expansion of a non-blank, not-yet-cached body: `[:commits/render-body {root hash body}]` — lazy GFM (D3) |
@@ -319,6 +326,56 @@ rows, rendered bodies) survives a page-0 refresh via `commits/keep-surviving`. S
 | `:commits/range-submit` | fx | `root` | `:range-input` | unparsable non-blank input → `:range-error` "unrecognized range" | parsed (`commits/parse-range`: `A..B` / `A...B` / single-rev-vs-parent): `:vv/git-open-diff` with `{:from? :to :dots? :parent?}` + `:root` — main rev-parse-verifies every side |
 | `:commits/open-diff-error` | db | `root msg` | — | `:range-error` ← msg (e.g. main's "unknown revision: …") — surfaced inline under the range input | — |
 | `:commits/git-changed` | fx | `{:root}` | is `[:repos root]` loaded? | — | loaded repos only (D8's **conservative refresh**): `:vv/git-branches` + `[:dispatch [:commits/load root {:skip 0}]]` — the `:gen` bump strands in-flight page replies; `keep-surviving` preserves selection |
+
+### 1.24 History modes (ADR-0040)
+
+`--follow` file history and `-L` line-range history are **modes of the shared Commits store**
+(`:mode` / `:history-target` per repo), so the sidebar panel and the Commit Graph both show a
+history the moment it is requested. Entering a history **pins the panel to the file's repo and
+reveals the Commits tab** — the results must be looked at. See
+[ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md) and
+[feature 34](../features/34-git-blame-and-file-history.md).
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:git/file-history` | fx | `{:file?}` (default: the active path) | `[:ui :projects]` (root derivation) | `enter-history`: `[:ui :commits :root]` ← the file's repo (pin); the repo's `:mode` ← `:file-history`, `:history-target` ← `{:file}`; commits/fold/selection/expanded/bodies reset | `[:commits/load root {:skip 0}]` (mode-aware → `--follow`), `[:sidebar/show]`, `[:sidebar/tab :commits]` — no derivable git root → silent no-op (the palette pattern) |
+| `:git/line-history` | fx | `{:file :start :end}` | `[:ui :projects]` | as `:git/file-history` with `:mode` ← `:line-history`, `:history-target` ← `{:file :start :end}` (swapped bounds normalize) | same three effects; the load carries `{:lineRange …}` — main runs the single-shot `-L` walk (`-n 500`, reply `exhausted`), repo-relative with an outside-repo guard |
+| `:git/line-history-from-selection` | fx | — | the active path | — | `[:git/selection-line-history file]` — the palette/menu entry with no explicit range; the mounted source view's selection (cursor line twice when empty) names the lines, read through the fx (the DOM's business) |
+| `:git/history-exit` | fx | `root` | — | the repo's `:mode` ← `:log`, `:history-target` ← nil; commits/fold/selection/expanded/bodies reset | `[:commits/load root {:skip 0}]` — the × on the history chip in either header |
+
+### 1.25 The Commit Graph document (ADR-0040)
+
+The graph is a **virtual document** (`vv-git-graph://<root>`, kind `"git-graph"`) rendering a
+second view over `[:ui :commits]`; it registers no new subscriptions and drives the shared
+`:commits/*` selection events. See [feature 33](../features/33-commit-graph.md).
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:git-graph/open` | fx | `root?` | `[:ui :projects]`, the pin/last-root, the active path | — | `[:doc/open "vv-git-graph://<root>"]` — an explicit root (project-header menu, panel Graph pill) must be a **non-synthetic** (git) project; the no-arg palette form derives one exactly like the panel (`commits/derive-root`); underivable → silent no-op |
+| `:git-graph/data-ensure` | fx | `root` | — | — | `[:commits/ensure root]` — dispatched by `:content/received` for kind `"git-graph"` (R9: the document ingests through the same idempotent path the panel mounts through) |
+| `:git-graph/shown` | fx | `root` | — | `[:ui :commits :watch-owners :graph]` ← root | `[:dispatch [:commits/sync-watch]]`, `[:dispatch [:commits/ensure root]]` — the view's mount hook |
+| `:git-graph/hidden` | fx | — | — | `[:ui :commits :watch-owners :graph]` ← nil | `[:dispatch [:commits/sync-watch]]` — releases only the **graph slot** of the watch-owner union |
+| `:git-graph/near-end` | fx | `root approx-hi` (the visible band's end row, from the scroll listener) | `:commits`, `:loading?`, `:exhausted?` | — | `[:commits/load-more root]` — **only** when the band is within 30 rows of the loaded end, not loading, not exhausted; the guard lives here so paging is event-decided, never a render-time dispatch |
+| `:git-graph/cursor-move` | fx | `root key {:extend? :move-only? :vis-rows}` | the loaded hash order, `:selection :cursor` | — | `[:commits/cursor-to root nidx {…}]` — `ggeo/next-cursor` maps `:up`/`:down`/`:pgup`/`:pgdn`/`:home`/`:end` over the loaded indices (clamped); no cursor yet → the newest commit (index 0) |
+| `:git-graph/toggle-at-cursor` | fx | `root` | `:selection :cursor` | — | `[:commits/select root cursor :toggle]` — Space |
+| `:git-graph/activate-cursor` | fx | `root` | `:selection :cursor` | — | `[:commits/activate root cursor]` — Enter, diff vs first parent (R4) |
+
+### 1.26 Git blame (ADR-0040)
+
+Blame is **one global mode** (`[:ui :blame]`): every source-view mount reports itself, so facet
+flips, tab switches, and live refreshes all re-ensure the gutter through a single hook; one
+`git blame` runs per `(file, stamp)` and replies are **stamp-gated** so a refresh race can never
+paint a stale gutter. See [feature 34](../features/34-git-blame-and-file-history.md).
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:blame/source-mounted` | fx | `{:file :stamp}` | `[:ui :blame :on?]` | `[:ui :blame :file]` ← file; `[:ui :blame :stamp]` ← stamp | when the mode is on: `[:dispatch [:blame/ensure]]` — the ONE hook (dispatched from `mount-editor!`) covering toggle-while-shown, facet flips, tab switches, and live refresh (a new stamp re-blames) |
+| `:blame/toggle` | fx | — | `[:ui :blame]` (`:on?`, `:file`) | on → `:on?` ← false; off→on (only for a **local, plain-path** mounted source file — `blameable?`; else a silent no-op) → `:on?` ← true | on→off: `[:blame/clear-view]`; off→on: `[:dispatch [:blame/ensure]]` — palette "Toggle git blame", `C-S-g`, `window.__vvblame` |
+| `:blame/ensure` | fx | — | `[:ui :blame]` (`:on?`, `:file`/`:stamp`, the `:hunks-file`/`:hunks-stamp` cache keys) | cache miss: `:loading?` ← true, `:error` ← nil | cache hit for the mounted `(file, stamp)`: `[:blame/apply-view hunks]`; miss: `[:vv/git-blame {:file :stamp}]` — inert unless the mode is on and the file is blameable |
+| `:blame/received` | fx | `file stamp {:root :hunks :error}` | `[:ui :blame :file]`/`:stamp` (the **stamp gate** — a reply for a no-longer-mounted `(file, stamp)` is dropped) | error → `:loading?` ← false, `:error`; else `:root`/`:hunks` + the cache keys `:hunks-file`/`:hunks-stamp`, `:loading?` ← false | still on → `[:blame/apply-view hunks]` |
+| `:blame/error` | db | `msg` | — | `[:ui :blame :loading?]` ← false; `[:ui :blame :error]` ← msg (also the `:git/open-commit-diff` on-error target) | — |
+| `:blame/line-click` | fx | `hunk` (resolved by the gutter via `blame/hunk-for-line`) | `[:ui :blame :root]` | — | committed hunk → `[:git/open-commit-diff root {:to (:hash hunk)}]`; an **uncommitted** (zero-hash) line is a no-op — there is no commit to open |
+| `:git/open-commit-diff` | fx | `root {:from? :to}` | — | — | the shared open-a-commit-diff entry (blame click; the graph funnels through `:commits/activate`): `:vv/git-open-diff {root :to …}` with `:from` when given, else `:parent? true` — main resolves `<to>^`, empty tree for a root commit (R4); errors → `[:blame/error]` |
 
 ---
 
@@ -348,10 +405,15 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
 | `:vv/sync-tree-roots` | root vector | `window.vv.syncTreeRoots(roots)` → `vv:tree-roots` IPC | — |
-| `:vv/git-log` | `{:root :ref? :skip :limit :file? :follow? :on-done :on-error}` | `window.vv.gitLog(req)` ⮐ → `vv:git-log` — one async, main-parsed page of history (ADR-0039). A missing preload fn (stale daemon) degrades to the on-error path — the panel shows a sentence instead of hanging | `(conj on-done reply)` / `(conj on-error msg)` |
+| `:vv/git-log` | `{:root :ref? :skip :limit :file? :follow? :lineRange? :on-done :on-error}` | `window.vv.gitLog(req)` ⮐ → `vv:git-log` — one async, main-parsed page of history (ADR-0039). `:file`+`:follow` = file history; `:lineRange {file start end}` = the single-shot `-L` walk (ADR-0040). A missing preload fn (stale daemon) degrades to the on-error path — the panel shows a sentence instead of hanging | `(conj on-done reply)` / `(conj on-error msg)` |
 | `:vv/git-branches` | `{:root :on-done :on-error}` | `window.vv.gitBranches(req)` ⮐ → `vv:git-branches` — refs for the branch combo (same stale-preload degradation) | `(conj on-done reply)` / `(conj on-error msg)` |
 | `:vv/git-open-diff` | `{:root :from? :to :parent? :dots? :on-error}` | `window.vv.gitOpenDiff(req)` ⮐ → `vv:git-open-diff` — main verifies both revs, runs `git diff`, spills + registers the document (ADR-0039 D4) | reply `{path}` → **`[:tab/navigate path]`** (navigation is renderer-owned — history, retention, facets; main only returns the path); `{error}` / reject → `(conj on-error msg)` |
-| `:vv/git-watch` | root vector | `window.vv.gitWatch(roots)` → `vv:git-watch` — replace this window's watched-repo set (`[]` releases; the Commits panel syncs on mount/root-change/unmount) | — (main pushes `vv:git-changed` → `[:commits/git-changed]`) |
+| `:vv/git-watch` | root vector | `window.vv.gitWatch(roots)` → `vv:git-watch` — replace this window's watched-repo set (`[]` releases). Fed exclusively by `:commits/sync-watch`'s **union of the panel/graph watch-owner slots** (ADR-0040) — the surfaces write slots, never this effect directly | — (main pushes `vv:git-changed` → `[:commits/git-changed]`) |
+| `:vv/git-blame` | `{:file :stamp}` | `window.vv.gitBlame({file})` ⮐ → `vv:git-blame` — main re-derives the repo from the file's own directory, blames the **working tree** (`--line-porcelain`), and replies with coalesced hunks (~100× smaller than the porcelain; ADR-0040). The `:stamp` never crosses the seam — it rides the reply event so `:blame/received` can stamp-gate | `[:blame/received file stamp reply]` (also on reject / missing preload fn, with `{:error …}`) |
+| `:blame/apply-view` | hunks | `cm/set-blame! hunks on-line-click` — reconfigure the mounted source view's blame `Compartment` with the gutter extension (guarded: no mounted view, or a facet-flip-destroyed view whose DOM is disconnected → no-op); the click callback resolves the 1-based line through `blame/hunk-for-line` | `[:blame/line-click hunk]` on a gutter click |
+| `:blame/clear-view` | — | `cm/clear-blame!` — reconfigure the blame `Compartment` empty (same destroyed-view guard) | — |
+| `:git/selection-line-history` | `file` | `cm/selection-lines` — the mounted source view's primary selection as 1-based `[start end]` (the cursor line twice when empty); silently nothing without a mounted source view (the palette pattern) | `[:git/line-history {:file :start :end}]` |
+| `:git-graph/reveal-row` | `idx` | clamp the Commit Graph's enclosing `.vv-content` scroller so the fixed-height row at `idx` sits inside the viewport — native `scrollTop` writes only (the single scroll owner, ADR-0032) | — |
 | `:commits/render-body` | `{:root :hash :body}` | `md/render-ir body root` — ONE commit message body through the **single** sanitizing markdown pipeline, base-dir = the repo root so relative links resolve like a README's (lazy, on first row expand — never eagerly for a page; ADR-0039 D3) | `[:commits/body-rendered root hash html]`; render failure → `[:commits/body-rendered root hash false]` (plain-text fallback) |
 | `:vv/sync-tree-expanded` | `[{root, path}]` | `window.vv.syncTreeExpanded(scopes)` → `vv:tree-expanded` IPC | — |
 | `:vv/refresh-tree` | `{root path on-success on-failure}` | invoke `window.vv.refreshTree`; convert the listing/error at the edge | configured success/failure event |

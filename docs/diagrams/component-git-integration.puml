@@ -1,0 +1,114 @@
+@startuml component-git-integration
+'' ============================================================================
+'' vinary-viewer — Component: the WHOLE git integration (ADR-0039 + ADR-0040).
+''
+'' PlantUML over Mermaid because the picture is concept-colored end-to-end:
+'' one slate main-side data layer, one amber channel seam, blue re-frame
+'' registrations over blue-violet stores (plus the purple DataScript edge),
+'' and four teal consuming surfaces — with the pure, process-agnostic
+'' vinary.git.* namespaces in model orange between them.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title The git integration — data layer, channels, stores, surfaces (ADR-0039/0040)
+
+'' Three tiers as three columns (main -> seam -> renderer), each package stacking
+'' its components vertically — the layered read keeps the sheet near house width.
+left to right direction
+
+package "Electron MAIN (Node)" MAIN_FILL {
+  component "vinary.main.service\nsync `git` helper (tiny interactive calls:\nrepo trees; Commit Graph root validation\n-> vv:content {kind git-graph, git {root}})" as Svc MAIN_TINT
+  component "vinary.main.git\nasync run-git (execFile, argv arrays, 64 MiB)\nhandle-log (+ --follow / -L lineRange)\nhandle-branches / handle-open-diff\nhandle-blame / load-rev-sources" as MGit MAIN_TINT
+  component "`.git` watcher\nchokidar: HEAD + refs + packed-refs\n(worktree-safe dirs; owner-scoped;\n300 ms debounce per root)" as Watcher MAIN_TINT
+  component "doc-overrides registry\ncommit diff = {:kind diff :stdin? true\n:cwd root :git {:root :from :to}}\n(MRU exclusion, unlink-on-release,\nADR-0038 adoption opt-out)" as Overrides MAIN_TINT
+  database "commit-diff spills\n$XDG_RUNTIME_DIR/vinary-viewer/\ngit-diff/<uuid>/<range>.diff\n(0700/0600; dedupe keyed by\nroot+shas+dots+paths; boot sweep)" as Spills FS_TINT
+  cloud "git CLI (read-only)\nlog / for-each-ref / rev-parse\ndiff / cat-file / blame" as CLI FS_TINT
+}
+
+package "pure vinary.git.* (Electron/DOM-free, node-tested)" IR_FILL {
+  component "log\nargv builders; %x1f/%x00 records;\n%x1e -L line-log discipline" as PLog IR_TINT
+  component "blame\nline-porcelain -> coalesced hunks\n(~100x smaller; zero hash = uncommitted)" as PBlame IR_TINT
+  component "graph\nincremental lane fold (R2)" as PGraph IR_TINT
+  component "graph-geometry\nSVG cells, badges, cursor math,\nhistory chip labels" as PGeo IR_TINT
+}
+
+package "preload `window.vv` — the mediator seam (ADR-0009)" IPC_FILL {
+  component "vv:git-log (invoke)\nlog pages; --follow file history;\n-L lineRange line history" as PGitLog IPC_TINT
+  component "vv:git-branches (invoke)\nbranch combo data" as PGitBranches IPC_TINT
+  component "vv:git-open-diff (invoke)\ndiff-vs-parent / selected pair / range" as PGitOpenDiff IPC_TINT
+  component "vv:git-blame (invoke)\nblame the mounted source file" as PGitBlame IPC_TINT
+  component "vv:git-watch (send)\nreplace this window's watched set" as PGitWatch IPC_TINT
+  component "vv:load-diff-sources (invoke)\nthe :git rev-aware arm" as PLoadSources IPC_TINT
+  component "vv:git-changed (push)\ndebounced repo-changed notice" as PGitChanged IPC_TINT
+  component "vv:content (push)\nkind git-graph, git {root}" as PContent IPC_TINT
+}
+
+package "Renderer (Chromium)" RENDERER_FILL {
+  component "re-frame git events + fx\n:commits/* (incl. sync-watch, cursor-to)\n:git-graph/* · :blame/* · :git/*\n(history modes; :git/open-commit-diff)" as RF REFRAME_TINT
+  component "[:ui :commits]\nper-repo commits + stored lane fold\nhash-keyed selection · :mode/:history-target\nwatch-owners {:panel :graph} -> UNION" as StoreC APPDB_TINT
+  component "[:ui :blame]\n:on? (global mode) · file/stamp\n(file, stamp)-keyed hunk cache" as StoreB APPDB_TINT
+  database "DataScript\n:doc/git-root on the\nCommit Graph doc entity" as DS DATASCRIPT_TINT
+  component "Commits panel\n(sidebar tab, feature 32)" as Panel RENDERER_TINT
+  component "Commit Graph document\nvv-git-graph:// tab, windowed rows,\n[data-vv-keynav] (feature 33)" as Graph RENDERER_TINT
+  component "blame gutter\nsecond CM6 gutter behind its own\nCompartment (feature 34)" as Gutter RENDERER_TINT
+  component "diff documents\nspilled commit diffs; unified + \nrev-aware Split (feature 28)" as Diffs RENDERER_TINT
+}
+
+' ---- renderer -> seam (requests) ----
+RF --> PGitLog
+RF --> PGitBranches
+RF --> PGitOpenDiff
+RF --> PGitBlame
+RF --> PGitWatch : the UNION of\npanel + graph slots
+Diffs --> PLoadSources : Split enrichment
+
+' ---- seam -> main ----
+PGitLog --> MGit
+PGitBranches --> MGit
+PGitOpenDiff --> MGit
+PGitBlame --> MGit
+PGitWatch --> MGit : sync-owner-roots!
+PLoadSources --> MGit : :git override ->\nload-rev-sources
+
+' ---- main internals ----
+MGit --> CLI : argv arrays, --end-of-options,\nrev pre-validation, --no-ext-diff,\ncat-file blob <to>:<rel>
+MGit --> PLog : build argv;\nparse records
+MGit --> PBlame : parse porcelain
+MGit --> Overrides : register spilled diff
+MGit --> Spills : spill + dedupe + sweep
+MGit --> Watcher : start/stop per owned root
+Svc --> CLI : rev-parse (sync, tiny)
+
+' ---- main -> renderer (pushes + content) ----
+Watcher ..> PGitChanged : debounced {root}
+PGitChanged ..> RF : [:commits/git-changed]\nconservative page-0 refresh
+Svc ..> PContent : the validated graph payload
+PContent ..> RF : :content/received ->\n:doc/git-root + data-ensure
+RF --> DS : transact :doc/git-root
+
+' ---- stores and surfaces ----
+RF --> StoreC : one fold site\n(empty fold in history modes)
+RF --> StoreB : stamp-gated replies
+RF --> PGraph : fold each page
+StoreC --> Panel : list + mini rail\n+ history chip
+StoreC --> Graph : same commits, same\nselection, same chip
+DS --> Graph : :doc/git-root
+Graph --> PGeo : row cells, badges,\ncursor math
+Panel --> RF : shared selection events
+Graph --> RF : shared selection events\n+ near-end paging (guarded)
+RF --> Gutter : :blame/apply-view hunks\n(clear on toggle-off)
+Gutter --> RF : line click ->\n:git/open-commit-diff
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN / Node data layer |
+  |<#E67E22>&#160;&#160;&#160;&#160;| pure vinary.git.* model |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (window.vv) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events / fx |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db stores |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer surfaces |
+  |<#9F8766>&#160;&#160;&#160;&#160;| git CLI / fs resources |
+  Read-only by construction: no mutating git subcommand exists in the layer.
+endlegend
+@enduml

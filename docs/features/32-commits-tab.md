@@ -99,7 +99,7 @@ git output.
 the one fold site — threads the page through `vinary.git.graph/assign` into
 `[:ui :commits :repos <root> :graph {:rows :state :max-lane}]`. The fold is **incremental**
 (property-tested: folding pages equals folding the concatenation), so "Load more" costs one
-page's assignment, and the same stored rows will feed the forthcoming Commit Graph document.
+page's assignment, and the same stored rows feed the [Commit Graph document](33-commit-graph.md).
 
 Each list row draws its own small SVG **rail cell** — a pure function of *(previous row's edges,
 this row's edges, this row's lane)*. The previous row's edge *targets* tell the cell what ink
@@ -187,12 +187,13 @@ Ownership follows the panel: unmounting (collapsing the sidebar, switching tabs)
 - **Merge commits diff against their first parent only.** Combined merge diffs (`-m`/`--cc`) are
   out of scope for now; select the merge and a parent explicitly for the other leg.
 - **The sidebar rail caps at 8 lanes.** Deeper lanes clamp to the last slot (colors cycle); the
-  forthcoming Commit Graph document is the roomier surface for wide histories.
+  [Commit Graph document](33-commit-graph.md) is the roomier surface for wide histories.
 - **Deep paging costs git an O(skip) walk** (`--skip`-based pages). Fine for human "Load more"
   browsing; jumping to commit 100 000 of a monorepo is not what this panel is for.
-- **Per-file and line-range history are not here yet.** The request schema already reserves
-  `file`/`follow`/`lineRange` (a `lineRange` request answers an explicit error), and the coming
-  history feature fills them in.
+- **Per-file and line-range history run as MODES of this panel** — File History / Line Range
+  History replace the listing (with a dismissible chip back to the branch log) rather than opening
+  a separate surface. See [feature 34](34-git-blame-and-file-history.md) and
+  [ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md).
 - **Remote (`ssh://`) repositories are out of scope** — the git data layer serves local
   filesystems only.
 

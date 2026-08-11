@@ -46,6 +46,7 @@ are scalar cardinality-one fields.
 | `:doc/sourceable?` / `:doc/source-sibling` | boolean / string | Whether a Preview↔Source toggle exists, and the collocated source path a PDF can switch to. |
 | `:doc/pdf-sibling` | string | Path of a collocated same-stem `.pdf` a document can switch to (Document↔PDF switch, [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)/[0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md)). |
 | `:doc/diff-split-html` | string | The GUI-only, on-disk-enriched side-by-side (split) rendering of a diff. |
+| `:doc/git-root` | string | The validated repository root of a **Commit Graph** virtual document (`:doc/kind = "git-graph"`, `vv-git-graph://` — [ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)). The entity is deliberately tiny: the commit data lives in `[:ui :commits]`, not DataScript. Added to the `active-doc` pull list per the rule below. |
 | `:doc/streaming?` / `:doc/stream-progress` / `:doc/stream-note` | boolean / number / string | Whether the doc renders incrementally, its progress in `[0,1]`, and a user-facing status note. |
 | `:doc/error` | string | Read/render error message. |
 | `:doc/stamp` | number | Content timestamp used to ignore stale async render results. |
@@ -98,11 +99,18 @@ Current default shape:
                 :items [] :selected 0}
       :commits {:root nil                 ; explicit repo pin (nil = follow the active document)
                 :last-root nil            ; repo last shown (anti-thrash fallback, ADR-0039)
-                :repos {}}}}              ; per-repo cache: root → {:ref :branches :commits
+                :repos {}}                ; per-repo cache: root → {:ref :branches :commits
                                           ;   :graph {:rows :state :max-lane} :exhausted? :empty?
                                           ;   :loading? :error :gen
                                           ;   :selection {:cursor :anchor :selected}
-                                          ;   :expanded :bodies :range-input :range-error}
+                                          ;   :expanded :bodies :range-input :range-error
+                                          ;   :mode :history-target}          (ADR-0040 history modes)
+                                          ; runtime top-level key (ADR-0040):
+                                          ;   :watch-owners {:panel <root|nil> :graph <root|nil>}
+      ;; git blame (ADR-0040): one GLOBAL mode; the runtime cache keys
+      ;; :hunks-file/:hunks-stamp gate stale replies (the stamp gate)
+      :blame {:on? false :file nil :stamp nil :root nil
+              :hunks nil :loading? false :error nil}}}
 ```
 
 Important slices:
@@ -123,7 +131,8 @@ Important slices:
 | `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic? :extras?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. An optional `:extras` vector attaches documents adopted into the project (ADR-0038: a diff pinned inside the repository it describes — `[{:path :name :kind :transient?}]`; `:transient?` extras are pruned when document retention drops their path). Merge rules live in `vinary.app.projects`. |
-| `[:ui :commits]` | The Commits surfaces (ADR-0039): panel targeting plus a per-repo cache shared by the sidebar tab and the forthcoming Commit Graph document. Top level: `:root` (the explicit pin; nil = follow the active document — a non-nil pin IS the "stop following" state), `:last-root` (the repo last shown — the panel must not thrash while browsing non-repo files), `:repos {root → …}`. Each repo map: `:ref` (viewed branch/tag; nil = HEAD), `:branches` (`{:head :detached? :branches [{name kind current?}]}`), `:commits` (the loaded pages, newest first), `:graph {:rows :state :max-lane}` — the **stored incremental lane fold** (`vinary.git.graph`; one fold site, appended per page), `:exhausted?` / `:empty?` / `:loading?` / `:error`, `:gen` (staleness guard for async replies), `:selection {:cursor :anchor :selected #{hash}}` (hash-keyed, so it survives refresh), `:expanded #{hash}`, `:bodies {hash → html\|false}` (the lazy GFM message cache; `false` = plain-text fallback), `:range-input` / `:range-error` (the free-form ref-range input). Pure reducers live in `vinary.app.commits`. |
+| `[:ui :commits]` | The Commits surfaces ([ADR-0039](../design-decisions/0039-commits-sidebar-and-git-data-layer.md)/[0040](../design-decisions/0040-commit-graph-blame-and-history.md)): panel targeting plus a per-repo cache shared by the sidebar tab and the Commit Graph document. Top level: `:root` (the explicit pin; nil = follow the active document — a non-nil pin IS the "stop following" state), `:last-root` (the repo last shown — the panel must not thrash while browsing non-repo files), `:repos {root → …}`, and (runtime, ADR-0040) `:watch-owners {:panel <root\|nil> :graph <root\|nil>}` — each surface owns one slot and `:commits/sync-watch` sends the slots' **union** over `vv:git-watch`, so neither surface's unmount can release the other's `.git` watcher. Each repo map: `:ref` (viewed branch/tag; nil = HEAD), `:branches` (`{:head :detached? :branches [{name kind current?}]}`), `:commits` (the loaded pages, newest first), `:graph {:rows :state :max-lane}` — the **stored incremental lane fold** (`vinary.git.graph`; one fold site, appended per page; stored **empty** in history modes — non-contiguous listings render dots-only rails), `:exhausted?` / `:empty?` / `:loading?` / `:error`, `:gen` (staleness guard for async replies), `:selection {:cursor :anchor :selected #{hash}}` (hash-keyed, so it survives refresh; shared by both surfaces), `:expanded #{hash}`, `:bodies {hash → html\|false}` (the lazy GFM message cache; `false` = plain-text fallback), `:range-input` / `:range-error` (the free-form ref-range input), and (runtime, ADR-0040) `:mode` (`:log` \| `:file-history` \| `:line-history`) / `:history-target` (`{:file}` or `{:file :start :end}` — the history-chip payload; history follows HEAD). Pure reducers live in `vinary.app.commits`. |
+| `[:ui :blame]` | Git blame ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)): one **global** mode, not per-tab state. `:on?` (the mode flag), `:file` / `:stamp` (the mounted source view, written by every `:blame/source-mounted`), `:root` (the blamed file's repository, re-derived by main), `:hunks` (the coalesced blame hunks feeding the CM6 gutter), `:loading?` / `:error` (a not-a-repository file records main's honest error here — no gutter is invented). Runtime cache keys `:hunks-file` / `:hunks-stamp` record which `(file, stamp)` the hunks describe: `:blame/ensure` re-applies on a match instead of re-blaming, and `:blame/received` drops any reply whose `(file, stamp)` no longer matches the mounted view (the stamp gate — a live-refresh race can never paint a stale gutter). |
 | `[:ui :tree-open]` | Persistent disclosure intent as `[project-root absolute-directory]` scopes. Effective expansion additionally requires every ancestor and a mounted/visible Files tree. |
 | `[:ui :tree-expanding]` | Scopes whose explicit expansion is awaiting a main-process listing; they remain rendered closed. |
 | `[:ui :tree-restoring?]` | Returning from a hidden/unmounted Files view is refreshing remembered open roots before the tree remounts. |

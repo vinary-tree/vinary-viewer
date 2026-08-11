@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0040**.
+The next free number is **0041**.
 
 ---
 
@@ -97,6 +97,7 @@ The next free number is **0040**.
 | [0037](0037-collapsible-diff-file-previews.md) | Collapsible per-file diff previews: a controlled `<details>` wrapper in the shared IR (byte-neutral ANSI, meta-id TUI anchors), per-tab `:diff-collapsed` state re-projected after every innerHTML rebuild, hintable banners, View ▸ Collapse All Files, vim `z M`/`z R`; the `[Unified \| Split]` seg control folded into the Preview combo | Accepted |
 | [0038](0038-diff-documents-adopt-described-project.md) | Diff documents adopt the project they describe: a piped diff's invoking cwd (seam 1, `open!`) or an on-disk diff's resolved targets (seam 2, `vv:load-diff-sources`) prove a git repository, pushed as a normal `vv:tree` entry with the diff attached via `:extras` — "(piped diff)" transient with retention, on-disk persistent; git-repos-only, in-root suppression, dominant root for multi-repo diffs, commit-diff `:git` opt-out | Accepted |
 | [0039](0039-commits-sidebar-and-git-data-layer.md) | The Commits sidebar tab and a strictly read-only, three-layer git data layer: pure `vinary.git.*` (nine-field `%x1f`/`%x00` records, `--date-order` incremental lane assignment) under async `vinary.main.git` (argv arrays, `--end-of-options`, rev pre-validation, `--no-ext-diff`; the ownership-scoped worktree-safe `.git` watcher, a bounded depth-4 exception to 0034) under a reactive panel over `[:ui :commits]` — paged log with a mini lane rail, filterable branch combo, lazy GFM bodies through the one sanitizer, and commit diffs spilled as ordinary ADR-0036 documents (first-parent default, empty-tree root commits, `A..B`/`A...B` ranges, rev-aware `cat-file` Split enrichment) | Accepted |
+| [0040](0040-commit-graph-blame-and-history.md) | The Commit Graph document, the blame gutter, and history modes — three edges on 0039's spine, no new one: a `vv-git-graph://` virtual document through the **unchanged** nav pipeline (route-first, path-only keying, MRU-excluded, `:doc/git-root`) rendering a second windowed hiccup-SVG view over the same `[:ui :commits]` store (shared hash-keyed selection, `[data-vv-keynav]` carve-out, watch-owner **union** — refactoring 0039's shown/hidden/set-root); blame as a second CM6 gutter behind its own Compartment (prototype-derived markers, main-side porcelain→hunks ~100×, one global stamp-gated mode, working-tree zero-hash "Uncommitted"); `--follow`/`-L` history as **modes** of the shared store (the `%x1e` record-start discipline tolerating pre-2.42 patch bleed, HEAD-pinned, single-shot `-L`, dots-only rails) | Accepted |
 
 ---
 

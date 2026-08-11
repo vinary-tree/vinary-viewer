@@ -14,6 +14,58 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - File and line-range history (ADR-0040): ask for one file's commit history
+      or one line range's, and both Commits surfaces -- the sidebar tab and the
+      Commit Graph -- show that focused log at once. File History (right-click a
+      file in the Files tree or a tab, or the palette) runs git log --follow, so
+      renames are crossed; Line Range History (select lines in a source view,
+      right-click -- or the palette, which uses the selection or the cursor
+      line) runs git log -L, tracing the content itself backward through edits
+      and renames. Entering a history pins the Commits panel to the file's
+      repository and reveals the tab; a dismissible "History: file . L10-42"
+      chip in both headers returns to the branch log. History follows HEAD (the
+      branch combos disable and say so), draws honest flat dot rails instead of
+      lanes (a filtered listing's parents are absent -- lanes would lie), and
+      line history is a bounded single shot (500 commits, marked exhausted).
+      Old gits that bleed patch text into -L output despite --no-patch parse
+      identically to clean ones (the record-start discipline discards the
+      bleed). See docs/features/34-git-blame-and-file-history.md and
+      docs/design-decisions/0040-commit-graph-blame-and-history.md.
+    - Commit Graph document (ADR-0040): the full-pane, GitLens-style history
+      view opens as a normal tab titled "Commits . <repo>" -- from the palette
+      ("Open commit graph"), a Files project header's right-click menu, or the
+      Graph pill in the Commits panel. Rows pair a wide lane graph (12 lanes,
+      an >> chip past the cap, theme-colored) with ref badges (HEAD -> branch,
+      tags, remotes), the subject, author, and date; more commits page in
+      automatically as you scroll. A full keyboard model drives it: arrows move
+      the cursor, Shift extends a range, Ctrl moves the cursor without touching
+      the selection, PgUp/PgDn/Home/End jump, Space toggles, Enter opens the
+      commit's diff against its parent; double-click and a right-click menu
+      (Diff vs Parent, Diff Selected (2), Copy hash/short hash/subject) do the
+      same by mouse. The graph shares its data AND its selection with the
+      Commits sidebar tab -- select in either surface and the other mirrors it
+      -- refreshes live when the repository changes (preserving selection by
+      hash), and survives reloads without losing scroll or cursor. The virtual
+      vv-git-graph:// document never enters Open Recent. See
+      docs/features/33-commit-graph.md and
+      docs/design-decisions/0040-commit-graph-blame-and-history.md.
+    - Per-line git blame gutter (ADR-0040): toggle blame onto any source view
+      with Ctrl+Shift+G, the palette ("Toggle git blame"), or window.__vvblame.
+      Each blame hunk's first line shows an "author . age" chip (now/5m/3h/6d,
+      then the ISO date); lines you have edited but not committed read
+      "Uncommitted" in italics, and boundary commits dim. Hovering shows the
+      commit -- short hash, summary, author -- and clicking a line's gutter
+      opens that commit's diff against its parent as an ordinary diff tab (a
+      root commit shows its full addition). Blame is one global mode: it
+      follows you across tabs and Preview/Source flips, and a live refresh
+      re-blames the new content so chips never describe stale lines (one git
+      blame runs per file version; stale replies are dropped). Blame serves
+      local files; a file outside any repository gets an honest error rather
+      than an invented gutter. The blame itself is parsed in the main process
+      (coalesced hunks cross IPC at ~1/100th the porcelain's size), read-only
+      like the whole git layer. See
+      docs/features/34-git-blame-and-file-history.md and
+      docs/design-decisions/0040-commit-graph-blame-and-history.md.
     - Commits sidebar tab (ADR-0039): a fourth sidebar tab shows the active
       document's repository history -- a paged git log (250 per page, "Load
       more") with a mini lane-graph rail that draws branches forking and
