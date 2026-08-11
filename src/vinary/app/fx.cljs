@@ -13,6 +13,7 @@
             [vinary.renderer.hints :as hints]
             [vinary.renderer.cm :as cm]
             [vinary.git.blame :as blame]
+            [vinary.git.graph-geometry :as ggeo]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
@@ -385,6 +386,20 @@
                             (fn [line]
                               (rf/dispatch [:blame/line-click (blame/hunk-for-line hunks line)])))))
 (rf/reg-fx :blame/clear-view (fn [_] (cm/clear-blame!)))
+;; keep the graph's keyboard cursor visible: clamp the confined .vv-content scroller so the fixed-
+;; height row at `idx` is inside the viewport (native scroll writes only — the single scroll owner)
+(rf/reg-fx :git-graph/reveal-row
+           (fn [idx]
+             (when-let [^js gg (.querySelector js/document ".vv-gg")]
+               (when-let [^js body (.querySelector gg ".vv-gg-body")]
+                 (when-let [^js sc (.closest gg ".vv-content")]
+                   (let [row-top (+ (.-offsetTop body) (* (long idx) ggeo/row-h))
+                         row-bot (+ row-top ggeo/row-h)
+                         top     (.-scrollTop sc)
+                         vh      (.-clientHeight sc)]
+                     (cond
+                       (< row-top top)          (set! (.-scrollTop sc) row-top)
+                       (> row-bot (+ top vh))   (set! (.-scrollTop sc) (- row-bot vh)))))))))
 (rf/reg-fx :commits/render-body
            (fn [{:keys [root hash body]}]
              (-> (md/render-ir body root)

@@ -603,6 +603,33 @@ function installIpc(state) {
   ipcMain.handle('vv:load-remote-asset', (_event, req) => contentService.loadRemoteAsset(req.uri, req.relativeTo));
   // ADR-0040: fixture hunks for the blame-gutter arm (the real main is exercised by git-blame-smoke.js;
   // here the seam is mocked exactly like vv:open, so the arm proves the renderer's gutter pipeline)
+  // ADR-0040: a three-commit fixture page for the Commit Graph arm (kebab string keys — exactly the
+  // clj->js wire shape vinary.main.git's parser produces). The real data layer is pinned by
+  // git-log-smoke.js; this proves the renderer's store → fold → windowed view → keyboard pipeline.
+  const GG_HASHES = ['1'.repeat(40), '2'.repeat(40), '3'.repeat(40)];
+  state.ggHashes = GG_HASHES;
+  ipcMain.handle('vv:git-log', () => ({
+    commits: [
+      { hash: GG_HASHES[0], parents: [GG_HASHES[1]], 'author-name': 'Ada', 'author-email': 'ada@x',
+        'author-date': '2026-08-11T10:00:00+02:00', 'committer-date': '2026-08-11T10:00:00+02:00',
+        refs: ['HEAD -> main', 'tag: v1.0'], subject: 'feat: newest', body: '' },
+      { hash: GG_HASHES[1], parents: [GG_HASHES[2]], 'author-name': 'Ada', 'author-email': 'ada@x',
+        'author-date': '2026-08-11T09:00:00+02:00', 'committer-date': '2026-08-11T09:00:00+02:00',
+        refs: [], subject: 'feat: middle', body: 'a body' },
+      { hash: GG_HASHES[2], parents: [], 'author-name': 'Bob', 'author-email': 'bob@x',
+        'author-date': '2026-08-11T08:00:00+02:00', 'committer-date': '2026-08-11T08:00:00+02:00',
+        refs: [], subject: 'root', body: '' },
+    ],
+    exhausted: true,
+  }));
+  ipcMain.handle('vv:git-branches', () => ({
+    head: 'main', 'detached?': false,
+    branches: [{ name: 'main', kind: 'local', 'current?': true }],
+  }));
+  ipcMain.handle('vv:git-open-diff', (_event, req) => {
+    state.gitOpenDiffRequests.push(req);
+    return { error: 'mocked: this harness opens no diff documents' };
+  });
   ipcMain.handle('vv:git-blame', (_event, req) => {
     state.gitBlameRequests.push(req);
     return {
@@ -642,6 +669,7 @@ async function main() {
     lastOpenSeed: null,   // ordered candidate folder paths the renderer passed with the last vv:open-dialog
     zoomRequests: 0,   // vv:zoom-request boot-pull calls (Bug-1 restart-% regression)
     gitBlameRequests: [],   // ADR-0040: vv:git-blame invocations (the blame-gutter arm asserts the seam fired)
+    gitOpenDiffRequests: [],   // ADR-0040: vv:git-open-diff invocations (the graph arm asserts Enter's request shape)
     pdfShow: null,
     pdfBounds: null,
     pdfHidden: false,
@@ -2704,6 +2732,53 @@ async function main() {
       await waitFor(() => evalIn(win, `!document.querySelector('.vv-source .cm-editor')`),
         'blame arm restores the preview facet', 8000);
     }
+  }
+
+  // ---- ADR-0040: the Commit Graph document (mocked vv:git-log/branches; real store, fold, view) ------
+  {
+    const GG_ROOT = '/fixture/gg-repo';
+    const ggUri = `vv-git-graph://${GG_ROOT}`;
+    const H = state.ggHashes;
+    state.contentByPath.set(ggUri, { path: ggUri, kind: 'git-graph', git: { root: GG_ROOT } });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(ggUri)})`);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row').length >= 3`),
+      'the graph document renders its fixture rows', 8000);
+    const gg = await evalIn(win, `(() => {
+      const rows = Array.from(document.querySelectorAll('.vv-gg-row'));
+      return { count: rows.length,
+               firstHash: rows[0] && rows[0].getAttribute('data-hash'),
+               rails: document.querySelectorAll('.vv-gg-rail path').length,
+               dots: document.querySelectorAll('.vv-gg-dot').length,
+               refs: Array.from(document.querySelectorAll('.vv-gg-ref')).map((e) => e.textContent) };
+    })()`);
+    assert.strictEqual(gg.count, 3, 'three fixture commits render');
+    assert.strictEqual(gg.firstHash, H[0], 'newest first');
+    assert.strictEqual(gg.dots, 3, 'every row carries its lane dot');
+    assert.ok(gg.rails >= 2, 'the linear chain draws connecting rail ink');
+    assert.ok(gg.refs.includes('main') && gg.refs.includes('v1.0'),
+      `HEAD and tag decorations render as badges (got ${JSON.stringify(gg.refs)})`);
+    const key = (k) => evalIn(win, `(() => {
+      const gg = document.querySelector('.vv-gg'); gg.focus();
+      gg.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true }));
+      return true; })()`);
+    await key('ArrowDown');
+    await waitFor(() => evalIn(win,
+      `(window.__vvdb().ui.commits.repos[${JSON.stringify(GG_ROOT)}].selection || {}).cursor === ${JSON.stringify(H[0])}`),
+      'the first ArrowDown places the cursor on the newest commit', 8000);
+    await key('ArrowDown');
+    await waitFor(() => evalIn(win,
+      `(window.__vvdb().ui.commits.repos[${JSON.stringify(GG_ROOT)}].selection || {}).cursor === ${JSON.stringify(H[1])}`),
+      'a second ArrowDown moves the cursor down one row', 8000);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-gg-row-cur[data-hash=${JSON.stringify(H[1])}]'))`),
+      'the cursor row carries the vv-gg-row-cur marker in the DOM (next Reagent frame)', 8000);
+    await key('Enter');
+    await waitFor(() => Promise.resolve(state.gitOpenDiffRequests.length > 0),
+      'Enter asks main for the cursor commit\'s diff', 8000);
+    const req = state.gitOpenDiffRequests[state.gitOpenDiffRequests.length - 1];
+    assert.strictEqual(req.to, H[1], 'the request targets the cursor commit');
+    assert.strictEqual(Boolean(req['parent?']), true, 'diff-vs-parent asks main to resolve to^ (R4)');
+    console.log('[ok] Commit Graph: rows + badges render, keyboard cursor + Enter drive the diff seam (ADR-0040)');
   }
 
   await evalIn(win, `(() => {

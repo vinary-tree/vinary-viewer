@@ -65,6 +65,13 @@
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "source"})))
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "markdown"})))))
 
+(deftest git-graph-routes-first
+  (testing "a Commit Graph uri outranks EVERY other arm — it names no filesystem object"
+    (is (= :git-graph (service-util/route {:git-graph? true :directory? true :archive? false :kind "text"})))
+    (is (= :git-graph (service-util/route {:git-graph? true :directory? false :archive? true :kind "markdown"}))))
+  (testing "absence of the key leaves every existing route untouched"
+    (is (= :text (service-util/route {:directory? false :archive? false :kind "source"})))))
+
 (deftest diff-extra-entries
   (testing "a diff inside the adopted root gets NO extra (ls-files --others already lists it)"
     (is (nil? (service-util/diff-extra {:path "/repo/fix.patch" :basename "fix.patch"

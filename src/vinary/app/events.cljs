@@ -16,6 +16,7 @@
             [vinary.app.projects :as projects]
             [vinary.app.commits :as commits]
             [vinary.git.graph :as graph]
+            [vinary.git.graph-geometry :as ggeo]
             [vinary.app.tree-state :as tree-state]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -74,25 +75,37 @@
 
 (defn- commits-path [root & ks] (into [:ui :commits :repos root] ks))
 
+;; The window's watched-repo set is the UNION of the mounted surfaces' interests — the sidebar
+;; panel and the Commit Graph document each own one slot, so either unmounting never silently
+;; releases the other's `.git` watcher (vv:git-watch REPLACES the window's set).
+(rf/reg-event-fx
+ :commits/sync-watch
+ (fn [{:keys [db]} _]
+   {:fx [[:vv/git-watch (into [] (distinct (keep val (get-in db [:ui :commits :watch-owners]))))]]}))
+
 (rf/reg-event-fx
  :commits/shown
  (fn [{:keys [db]} [_ root]]
    (when root
-     {:db (assoc-in db [:ui :commits :last-root] root)
-      :fx [[:vv/git-watch [root]]
+     {:db (-> db
+              (assoc-in [:ui :commits :last-root] root)
+              (assoc-in [:ui :commits :watch-owners :panel] root))
+      :fx [[:dispatch [:commits/sync-watch]]
            [:dispatch [:commits/ensure root]]]})))
 
 (rf/reg-event-fx
  :commits/hidden
- (fn [_ _] {:fx [[:vv/git-watch []]]}))
+ (fn [{:keys [db]} _]
+   {:db (assoc-in db [:ui :commits :watch-owners :panel] nil)
+    :fx [[:dispatch [:commits/sync-watch]]]}))
 
 (rf/reg-event-fx
  :commits/set-root
  (fn [{:keys [db]} [_ root]]
    {:db (-> db
-            (assoc-in [:ui :commits :root] root)
-            (assoc-in [:ui :commits :follow-active?] false))
-    :fx [[:vv/git-watch [root]]
+            (assoc-in [:ui :commits :root] root)   ; a non-nil pin IS "stop following the active doc"
+            (assoc-in [:ui :commits :watch-owners :panel] root))
+    :fx [[:dispatch [:commits/sync-watch]]
          [:dispatch [:commits/ensure root]]]}))
 
 (rf/reg-event-fx
@@ -192,6 +205,19 @@
      (update-in db (commits-path root :selection)
                 (fn [sel] (commits/select (or sel {}) order hash mode))))))
 
+(rf/reg-event-fx
+ :commits/cursor-to
+ (fn [{:keys [db]} [_ root idx {:keys [extend? move-only?]}]]
+   (let [order (mapv :hash (get-in db (commits-path root :commits)))]
+     (when-let [hash (get order idx)]
+       {:db (update-in db (commits-path root :selection)
+                       (fn [sel]
+                         (cond
+                           move-only? (assoc (or sel {}) :cursor hash)
+                           extend?    (commits/select (or sel {}) order hash :range)
+                           :else      (commits/select (or sel {}) order hash :single))))
+        :fx [[:git-graph/reveal-row idx]]}))))
+
 (rf/reg-event-db
  :commits/clear-selection
  (fn [db [_ root]]
@@ -259,6 +285,75 @@
                               :on-done  [:commits/branches-received root]
                               :on-error [:commits/log-error root]}]
            [:dispatch [:commits/load root {:skip 0}]]]})))
+
+;; ── the Commit Graph document (ADR-0040) ────────────────────────────────────────────────────────
+
+(rf/reg-event-fx
+ :git-graph/open
+ (fn [{:keys [db]} [_ root]]
+   ;; explicit root (a project-header menu, the panel button) must be a GIT project; the no-arg
+   ;; palette form derives one exactly like the sidebar panel does
+   (let [projs (get-in db [:ui :projects])
+         root  (or root
+                   (commits/derive-root {:pinned    (get-in db [:ui :commits :root])
+                                         :last-root (get-in db [:ui :commits :last-root])}
+                                        projs
+                                        (nav/active-path db)))]
+     (when (and root
+                (not (:synthetic? (some #(when (= (:root %) root) %) projs))))
+       {:fx [[:dispatch [:doc/open (str "vv-git-graph://" root)]]]}))))
+
+(rf/reg-event-fx
+ :git-graph/data-ensure
+ (fn [_ [_ root]]
+   (when root {:fx [[:dispatch [:commits/ensure root]]]})))
+
+(rf/reg-event-fx
+ :git-graph/shown
+ (fn [{:keys [db]} [_ root]]
+   {:db (assoc-in db [:ui :commits :watch-owners :graph] root)
+    :fx [[:dispatch [:commits/sync-watch]]
+         [:dispatch [:commits/ensure root]]]}))
+
+(rf/reg-event-fx
+ :git-graph/hidden
+ (fn [{:keys [db]} _]
+   {:db (assoc-in db [:ui :commits :watch-owners :graph] nil)
+    :fx [[:dispatch [:commits/sync-watch]]]}))
+
+(rf/reg-event-fx
+ :git-graph/near-end
+ (fn [{:keys [db]} [_ root approx-hi]]
+   (let [{:keys [commits loading? exhausted?]} (get-in db (commits-path root))]
+     (when (and (pos? (count commits))
+                (>= (long approx-hi) (- (count commits) 30))
+                (not loading?) (not exhausted?))
+       {:fx [[:dispatch [:commits/load-more root]]]}))))
+
+(rf/reg-event-fx
+ :git-graph/cursor-move
+ (fn [{:keys [db]} [_ root key {:keys [extend? move-only? vis-rows]}]]
+   (let [order (mapv :hash (get-in db (commits-path root :commits)))
+         n     (count order)
+         cur   (get-in db (commits-path root :selection :cursor))
+         idx   (first (keep-indexed #(when (= %2 cur) %1) order))
+         nidx  (if (nil? idx)
+                 (when (pos? n) 0)                       ; no cursor yet → the newest commit
+                 (ggeo/next-cursor idx n key vis-rows))]
+     (when (some? nidx)
+       {:fx [[:dispatch [:commits/cursor-to root nidx {:extend? extend? :move-only? move-only?}]]]}))))
+
+(rf/reg-event-fx
+ :git-graph/toggle-at-cursor
+ (fn [{:keys [db]} [_ root]]
+   (when-let [cur (get-in db (commits-path root :selection :cursor))]
+     {:fx [[:dispatch [:commits/select root cur :toggle]]]})))
+
+(rf/reg-event-fx
+ :git-graph/activate-cursor
+ (fn [{:keys [db]} [_ root]]
+   (when-let [cur (get-in db (commits-path root :selection :cursor))]
+     {:fx [[:dispatch [:commits/activate root cur]]]})))
 
 ;; ══ git blame (ADR-0040) ════════════════════════════════════════════════════════════════════════
 ;; One GLOBAL mode flag: whenever a source view mounts while blame is on, the gutter is (re)ensured
@@ -387,7 +482,7 @@
 (rf/reg-event-fx
  :content/received
  (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged siblings language stdin baseDir] :as payload}]]
+                            sourceable paged siblings language stdin baseDir git] :as payload}]]
    (let [snap    (ds/snapshot)
          eid     (ds/eid-for-path snap path)
          cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -416,6 +511,7 @@
                    siblings              (assoc :doc/siblings (vec siblings))   ; the collocated document group (Preview/Source combo)
                    language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
                    baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
+                   (= kind "git-graph")  (assoc :doc/git-root (:root git))   ; the Commit Graph's repo (ADR-0040)
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    ;; Resolution is stamp-scoped and asynchronous. Clear the previous diff's targets immediately
                    ;; so a live refresh cannot leave a now-missing header path clickable while main re-checks it.
@@ -436,7 +532,10 @@
          ;; background live-refresh — so the MRU + trail track where the user actually went. A piped-stdin
          ;; document (payload :stdin) never enters the MRU: its spill path dies with the tab.
          active? (= path (nav/active-path db'))
-         db'     (if (and active? (not stdin)) (record-recent db' path (#{"directory" "archive"} kind)) db')
+         ;; …nor does a Commit Graph virtual uri: Open Recent must offer real, reopenable documents
+         db'     (if (and active? (not stdin) (not= kind "git-graph"))
+                   (record-recent db' path (#{"directory" "archive"} kind))
+                   db')
          ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
          ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
          ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
@@ -448,6 +547,8 @@
        {:db db'
         :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
                      [:ds/transact tx]]
+              ;; the Commit Graph reads [:ui :commits] — ensure its repo's branches + first page (R9)
+              (= kind "git-graph") (conj [:dispatch [:git-graph/data-ensure (:root git)]])
               ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx.
               ;; :base-dir (a piped document's invoking cwd, ADR-0036) overrides the path-derived asset base
               ;; so `cat README.md | vv -t md` resolves relative images against the directory it was piped from.

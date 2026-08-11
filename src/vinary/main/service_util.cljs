@@ -19,8 +19,11 @@
      directory? — path is a real filesystem directory (already excludes archive URIs)
      archive?   — path is an archive URI / archive file main lists internally
      kind       — file-kind/kind-of classification of the path's name"
-  [{:keys [directory? archive? kind]}]
+  [{:keys [git-graph? directory? archive? kind]}]
   (cond
+    ;; the Commit Graph virtual document (ADR-0040) routes FIRST — its uri names no filesystem
+    ;; object, so no stat/name-based arm below may ever see it
+    git-graph?                                  :git-graph
     directory?                                  :directory
     (or archive? (contains? parser-kinds kind)) :parsed
     (= "image" kind)                            :image

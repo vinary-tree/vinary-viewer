@@ -16,6 +16,15 @@
              (route/route {:doc (assoc large-markdown :doc/kind kind)
                            :tabs [{}] :uri (str "/large." kind) :source? true}))))))
 
+(deftest git-graph-kind-routes-to-its-view
+  (is (= :git-graph
+         (route/route {:doc {:doc/path "vv-git-graph:///repo" :doc/kind "git-graph" :doc/stamp 1}
+                       :tabs [{}] :uri "vv-git-graph:///repo" :source? false})))
+  (testing "never the source view — a graph doc has no :doc/text facet"
+    (is (= :git-graph
+           (route/route {:doc {:doc/path "vv-git-graph:///repo" :doc/kind "git-graph" :doc/stamp 1}
+                         :tabs [{}] :uri "vv-git-graph:///repo" :source? true})))))
+
 (deftest non-source-routes-remain-specific
   (is (= :http-pdf
          (route/route {:doc {:doc/kind "pdf"} :tabs [{}]

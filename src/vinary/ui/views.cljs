@@ -27,6 +27,7 @@
             [vinary.ui.menubar :as menubar]
             [vinary.ui.zoombar :as zoombar]
             [vinary.ui.context-menu :as ctx-menu]
+            [vinary.ui.git-graph :as git-graph]
             [vinary.ui.preview-context :as preview-ctx]
             [vinary.ui.preview-navigation :as preview-nav]
             [vinary.ui.settings :as settings-ui]
@@ -1164,6 +1165,8 @@
                    ;; directory/archive listing: drop the prose gutter so the sticky header sits flush to the
                    ;; pane top (a top gutter makes a top:0 sticky float below it, showing rows in the gap above)
                    (#{"directory" "archive"} (:doc/kind doc))      "vv-content-dir"        ; file list: edge-to-edge
+                   ;; the Commit Graph shares the listing recipe: sticky header flush to the pane top
+                   (= "git-graph" (:doc/kind doc))                 "vv-content-dir"
                    :else                                           nil)
       ;; per-doc identity for the scroll-spy cache (toc/cached): .vv-content is one identity-stable node
       ;; reused across doc switches, so a stable key that changes per doc invalidates stale offsets. Path/uri
@@ -1198,6 +1201,12 @@
        ;; (:doc/kind doc), nil for an absent doc).
        :loading                    [:div.vv-empty "Loading…"]
        :error                      [:div.vv-error "Error: " (:doc/error doc)]
+       ;; the Commit Graph document (ADR-0040): keyed by PATH ONLY — a reload/re-send must never
+       ;; remount the component (scroll + selection live through it); data freshness flows through
+       ;; [:ui :commits], not :doc/stamp.
+       :git-graph
+       ^{:key (str "gg:" (:doc/path doc))}
+       [git-graph/graph-view (:doc/path doc) (:doc/git-root doc)]
        ;; Explicit Source precedes the streaming Preview policy (content-route). This is
        ;; what makes Source reachable for Markdown/Org/LaTeX above the streaming threshold.
        :source                     ^{:key (str "src:" (:doc/path doc) ":" (:doc/stamp doc))}

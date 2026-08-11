@@ -65,11 +65,24 @@
           (str/starts-with? t "file://")  (subs t 7)
           :else                           t)))
 
+(def ^:private git-graph-prefix "vv-git-graph://")
+
+(defn git-graph?
+  "Is uri a Commit Graph document (ADR-0040)? The scheme wraps a raw absolute repository root."
+  [uri]
+  (str/starts-with? (str uri) git-graph-prefix))
+
+(defn git-graph-root
+  "The absolute repository root inside a vv-git-graph:// uri, or nil."
+  [uri]
+  (when (git-graph? uri)
+    (subs (str uri) (count git-graph-prefix))))
+
 (defn display
   "How a uri appears in the URI bar: http(s) as-is; a local path shown file://-prefixed."
   [uri]
   (cond (nil? uri) "" (http? uri) uri (archive? uri) (archive-display uri)
-        (remote? uri) uri :else (str "file://" uri)))
+        (remote? uri) uri (git-graph? uri) (str uri) :else (str "file://" uri)))
 
 (defn basename
   "Short tab label: a file's basename, or for http the last path segment (falling back to the host)."
@@ -84,6 +97,7 @@
     (remote? uri) (let [[_ p] (remote-parts uri)
                         segs  (remove str/blank? (str/split p #"/"))]
                     (or (some-> (last segs) decode-component) "/")) ; decoded label; "/" at remote root
+    (git-graph? uri) (str "Commits · " (last (remove str/blank? (str/split (git-graph-root uri) #"/"))))
     :else       (last (str/split uri #"/"))))
 
 (defn- strip-trailing-slash

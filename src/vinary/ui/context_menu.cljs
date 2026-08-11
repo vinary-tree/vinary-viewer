@@ -46,6 +46,8 @@
     ;; a Files-tab project header — a directory, plus the one action only a root has: leaving the sidebar
     :project [{:label "Open"                 :event [:doc/open path]}
               {:label "Open in new tab"      :event [:doc/open-new path]}
+              ;; self-gates: :git-graph/open no-ops for a synthetic (non-git) project root
+              {:label "Open Commit Graph"    :event [:git-graph/open (or root path)]}
               {:label "Refresh"              :event [:tree/refresh {:root (or root path) :path path}]}
               {:label "Open in file manager" :event [:shell/open-path path]}
               :sep

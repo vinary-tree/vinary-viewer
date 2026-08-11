@@ -42,6 +42,7 @@
       (= "office" kind)                                 :office
       (= "table" kind)                                  :table
       (= "log" kind)                                    :log
+      (= "git-graph" kind)                              :git-graph
       (#{"directory" "archive"} kind)                    :directory
       (and (some? (:doc/html doc)) (ir-html/blank? (:doc/html doc))) :blank
       (:doc/html doc)                                    :html-doc

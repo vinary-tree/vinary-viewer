@@ -170,8 +170,11 @@ Reagent view components and their pure view-helpers.
 |-----------|----------------|
 | `vinary.ui.views` | Main shell, content strategy (per-kind view selection), Markdown body lifecycle, toolbar, status/modeline; hosts the in-pane directory browser (`:doc/kind = "directory"`) and the Ctrl-hover breadcrumb URI bar. |
 | `vinary.ui.tabs` | The tab strip + the shared tab-item used by the horizontal strip and the sidebar's vertical Tabs list. |
-| `vinary.ui.sidebar` | The left sidebar shell: a tabbed pane hosting the multi-project Files tree and the Contents (TOC) outline. |
+| `vinary.ui.sidebar` | The left sidebar shell: a tabbed pane hosting the multi-project Files tree, the Contents (TOC) outline, open Tabs, and the Commits panel. |
 | `vinary.ui.tree` | The Files tree view: controlled refresh-before-open `<details>`, automatic watcher-scope sync, and file navigation. Narrowing/folding and expansion arithmetic live in pure app models (ADRs 0033/0034). |
+| `vinary.ui.commits` | The Commits sidebar tab (ADR-0039): paged list + mini lane rail (self-contained per-row SVG cells), branch combo, ref-range input, selection, lazy GFM bodies. Reducers live in `vinary.app.commits`; lanes in `vinary.git.graph`. |
+| `vinary.ui.combo-select` | The reusable filterable dropdown (combo-button shell + ADR-0033 async-input + `search.match` under the `:branch-combo` surface): grouped keyboard-navigable rows, current-pick check, row cap with a type-to-filter hint. |
+| `vinary.ui.git-graph` | The Commit Graph document (ADR-0040): a full-pane windowed view over the same `[:ui :commits]` store as the sidebar panel — lanes/refs/author/date columns, its own keyboard model (`[data-vv-keynav]`), shared selection. Geometry lives in `vinary.git.graph-geometry`. |
 | `vinary.ui.text-input` | The one text `<input>` whose DOM value is owned locally, so a re-render can never take a typed character back out of it. Used by the find bar, tree filter, palette, and Preferences fields. |
 | `vinary.ui.context-menu` | The themed right-click context menu: targets and actions. |
 | `vinary.ui.menubar` | The custom, theme-matched menu bar (File / View / Settings / Help), incl. the `View ▸ Fit` radio submenu. |
@@ -315,6 +318,7 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 | `vinary.git.log` | Pure git-log plumbing (ADR-0039): the exact argv builders (`log`/`for-each-ref`/`rev-parse --verify`/`diff`) and the `%x1f`/`%x00` record parsers. Electron/fs-free; `vinary.main.git` executes what this builds. |
 | `vinary.git.graph` | Deterministic, incremental lane assignment for commit graphs — the single shared row shape (`{:hash :lane :edges :active}`) behind the sidebar mini-rail and the Commit Graph document. |
 | `vinary.git.blame` | Pure `git blame --line-porcelain` parsing (ADR-0040): per-line records coalesced into hunks with cached per-commit metadata, the binary-search line lookup, and the gutter's relative-date buckets. |
+| `vinary.git.graph-geometry` | Pure SVG geometry for the Commit Graph document (ADR-0040): per-kind edge paths, self-contained row cells with incoming top-half ink, lane clamping + overflow, ref-badge normalization, keyboard cursor math, and the shared history-chip label. |
 | `vinary.grammar-catalog` | Compile-time catalog of bundled tree-sitter grammars. |
 
 ---

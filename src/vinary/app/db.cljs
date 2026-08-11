@@ -81,7 +81,7 @@
         ;; Commits sidebar tab + Commit Graph document (ADR-0039): panel targeting + per-repo state
         ;; (:repos "/abs/root" → {:ref :branches :commits :graph :exhausted? :empty? :loading? :error
         ;;                        :gen :selection :expanded :bodies :range-input :range-error})
-        :commits {:root nil :follow-active? true :last-root nil :repos {}}
+        :commits {:root nil :last-root nil :repos {}}
         ;; git blame (ADR-0040): a single global mode; :file/:stamp track the mounted source view,
         ;; :hunks cache one file's blame per (file, stamp)
         :blame {:on? false :file nil :stamp nil :root nil :hunks nil :loading? false :error nil}}})

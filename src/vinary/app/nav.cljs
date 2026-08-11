@@ -14,9 +14,11 @@
 (defn active-path [db] (uri/file-path (active-uri db)))
 (defn local-fs-path?
   "True when uri/path `u` names a browsable LOCAL filesystem location — not http, an archive-internal entry,
-   or a remote (ssh/sftp) address, none of which the native Open dialog can seed a folder from."
+   a remote (ssh/sftp) address, or a vv-git-graph:// virtual document, none of which the native Open dialog
+   can seed a folder from."
   [u]
-  (boolean (and u (not (uri/http? u)) (not (uri/archive? u)) (not (uri/remote? u)))))
+  (boolean (and u (not (uri/http? u)) (not (uri/archive? u)) (not (uri/remote? u))
+                (not (uri/git-graph? u)))))
 (defn dialog-seed-path
   "The active tab's LOCAL filesystem path (a file OR a directory) to seed the native Open dialog, or nil
    when the active tab is http / archive / remote / absent — those aren't browsable local folders. Main

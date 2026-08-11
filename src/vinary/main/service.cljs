@@ -353,9 +353,20 @@
           ;; EVERY send, including every watcher live-refresh, so the override can never silently revert.
           kind  (doc-overrides/effective-kind kind-of path)
           stamp (js/Date.now)]
-    (case (service-util/route {:directory? (directory? path)
+    (case (service-util/route {:git-graph? (file-kind/git-graph-uri? path)
+                               :directory? (directory? path)
                                :archive?   (archive-uri? path)
                                :kind       kind})
+      ;; the Commit Graph virtual document (ADR-0040): validate + canonicalize the wrapped repo root
+      ;; (the sync git helper is fine — one rev-parse on an interactive open) and send a tiny payload;
+      ;; the commit data itself flows through [:ui :commits], shared with the sidebar panel.
+      :git-graph
+      (let [req-root (subs path (count "vv-git-graph://"))
+            root     (git ["rev-parse" "--show-toplevel"] req-root)]
+        (if (and root (not (str/blank? root)))
+          (.send wc "vv:content" (clj->js {:path path :kind "git-graph" :git {:root root} :stamp stamp}))
+          (.send wc "vv:error" (clj->js {:path path :message "Not a git repository"}))))
+
       ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
       ;; Routed FIRST (in service-util/route) so a real directory lists even when its extensionless name
       ;; classifies as "text" — otherwise the parser fs.readSyncs a directory fd → EISDIR.
@@ -966,6 +977,8 @@
     (open-remote-tree! wc path)
     (cond
       (archive-uri? path) nil
+      ;; a Commit Graph uri names no filesystem object — no tree (its repo is already a project)
+      (file-kind/git-graph-uri? path) nil
       ;; a piped-stdin document skips the sidebar tree like an archive does: its spill dir is not a
       ;; project, and adopting $XDG_RUNTIME_DIR as a synthetic root would be pure noise — EXCEPT a
       ;; piped DIFF, which adopts the git repository of its invoking cwd (ADR-0038 seam 1).
@@ -977,6 +990,9 @@
     (start-remote-live! path)
     ;; a stdin document is an immutable snapshot (drained to EOF before open) — there is nothing to watch.
     (doc-overrides/stdin-doc? path)
+    nil
+    ;; a Commit Graph uri has no file to watch; freshness arrives over vv:git-changed (ADR-0039's watcher)
+    (file-kind/git-graph-uri? path)
     nil
     :else
     (ensure-content-watcher! path)))

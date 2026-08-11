@@ -443,6 +443,34 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-combo-select-meta { color: var(--vv-fg-dim); font-size: 10px; margin-left: auto; }
 .vv-combo-select-check { color: var(--vv-accent); }
 
+/* ── the Commit Graph document (ADR-0040) ────────────────────────────────────────────────────── */
+.vv-gg { min-height: 100%; outline: none; display: flex; flex-direction: column; }
+.vv-gg-header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--vv-bg1); border-bottom: 1px solid var(--vv-border); }
+.vv-gg-repo { font-weight: 600; }
+.vv-gg-count, .vv-gg-loading { color: var(--vv-fg-dim); font-size: 12px; }
+.vv-gg-body { flex: 1 1 auto; }
+.vv-gg-row { display: grid; align-items: center; height: 24px; cursor: default; padding-right: 8px; }
+.vv-gg-row:hover { background: var(--vv-bg2); }
+.vv-gg-row-sel { background: var(--vv-highlight); }
+.vv-gg-row-cur { box-shadow: inset 2px 0 0 var(--vv-accent); }
+.vv-gg-rail { display: block; }
+.vv-gg-rail path { fill: none; stroke-width: 2; }
+.vv-gg-dot { fill: currentColor; stroke: none; }
+.vv-gg-subject-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.vv-gg-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-gg-overflow { color: var(--vv-fg-dim); }
+.vv-gg-refs { display: inline-flex; gap: 3px; flex: none; max-width: 40%; overflow: hidden; }
+.vv-gg-ref { border: 1px solid var(--vv-border); border-radius: 8px; padding: 0 6px; font-size: 10px;
+  color: var(--vv-fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vv-gg-ref-head { color: var(--vv-fg-strong); border-color: var(--vv-accent); }
+.vv-gg-ref-tag { color: var(--vv-head4); }
+.vv-gg-ref-remote { opacity: .8; }
+.vv-gg-author, .vv-gg-date { color: var(--vv-fg-dim); font-size: 12px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.vv-gg-error { color: var(--vv-error); padding: 12px; }
+.vv-gg-empty { color: var(--vv-fg-dim); padding: 12px; }
+
 /* ── the git blame gutter (ADR-0040) ─────────────────────────────────────────────────────────── */
 .vv-blame-gutter { max-width: 24ch; }
 .vv-blame-chip { color: var(--vv-fg-dim); padding: 0 .75ch 0 .25ch; overflow: hidden;

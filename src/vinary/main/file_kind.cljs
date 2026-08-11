@@ -26,6 +26,12 @@
 (defn archive-uri? [uri]
   (str/starts-with? (str uri) "vv-archive://"))
 
+(defn git-graph-uri?
+  "A Commit Graph virtual document (ADR-0040): vv-git-graph://<abs-repo-root>. Names no filesystem
+   object — no tree, no watcher, no stat."
+  [uri]
+  (str/starts-with? (str uri) "vv-git-graph://"))
+
 (defn remote-uri?
   "True for an ssh:// or sftp:// remote URI — served by the async remote reader (SFTP over ssh2), not the
    local filesystem path. Mirrors vinary.app.uri/remote? on the main side so service.cljs can short-circuit

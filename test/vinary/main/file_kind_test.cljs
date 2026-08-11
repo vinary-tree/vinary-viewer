@@ -38,6 +38,11 @@
     (is (= "source" (fk/kind-of always-source "/a/main.rs")))
     (is (= "image" (fk/kind-of never-source "/a/pic.svg")))))
 
+(deftest git-graph-uris
+  (is (true? (fk/git-graph-uri? "vv-git-graph:///home/u/repo")))
+  (is (false? (fk/git-graph-uri? "/home/u/repo")))
+  (is (false? (fk/git-graph-uri? "vv-archive:///a.zip"))))
+
 (deftest kind-of-rocq
   (testing ".v defers to the grammar-driven source? predicate (rocq is bundled; .v left plain-source-exts)"
     (is (= "source" (fk/kind-of always-source "/proofs/Theory.v")))

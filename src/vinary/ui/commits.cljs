@@ -97,9 +97,12 @@
                                               (rf/dispatch [:commits/activate root hash]))))
       :on-context-menu (fn [^js e]
                          (.preventDefault e)
-                         (rf/dispatch [:context-menu/show
-                                       {:x (.-clientX e) :y (.-clientY e)
-                                        :target {:kind :commit :root root :hash hash :subject subject}}]))}
+                         (let [pair (let [s (vec (:selected selection))] (when (= 2 (count s)) s))]
+                           (rf/dispatch [:context-menu/show
+                                         {:x (.-clientX e) :y (.-clientY e)
+                                          :target (cond-> {:kind :commit :root root
+                                                           :hash hash :subject subject}
+                                                    pair (assoc :pair pair))}])))}
      [rail-cell prev-row row rail-w]
      [:div.vv-commits-main
       [:div.vv-commits-subject-line
@@ -127,7 +130,9 @@
 (defn- basename-of [root]
   (last (remove str/blank? (str/split (projects/normalized-path root) #"/"))))
 
-(defn- branch-groups [branches]
+(defn branch-groups
+  "Shared with the Commit Graph document's toolbar — see the private helpers around it."
+  [branches]
   (let [by-kind (group-by :kind (:branches branches))]
     (into []
           (keep (fn [[label kind]]
@@ -163,6 +168,10 @@
         {:title    (str "Diff " (subs (first pair) 0 7) " → " (subs (second pair) 0 7))
          :on-click #(rf/dispatch [:commits/diff-selected root])}
         "Diff selected"])
+     [:button.vv-commits-pill.vv-commits-graph-btn
+      {:title    "Open the full-pane commit graph (ADR-0040)"
+       :on-click #(rf/dispatch [:git-graph/open root])}
+      "Graph"]
      (when range-error [:div.vv-commits-error range-error])]))
 
 ;; ── the list + panel ────────────────────────────────────────────────────────────────────────────

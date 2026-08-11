@@ -352,7 +352,10 @@
     (.addEventListener js/window "blur"    (fn [_] (commit false)))))
 
 (defn- editable-target? [^js el]
-  (boolean (and el (.-closest el) (.closest el "input, textarea, select, [contenteditable], .cm-editor"))))
+  ;; [data-vv-keynav] marks panes with their OWN keyboard model (the Commit Graph, ADR-0040): the
+  ;; window-capture scroller must not swallow their arrows/PgUp/PgDn/Home/End before they see them.
+  (boolean (and el (.-closest el)
+                (.closest el "input, textarea, select, [contenteditable], .cm-editor, [data-vv-keynav]"))))
 
 (defn- overlay-open-now? []
   (let [ui (:ui @rfdb/app-db)]
