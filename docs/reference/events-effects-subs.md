@@ -287,6 +287,39 @@ The state/items/save-prompt/result pushes from main land as `[:passwords/*-recei
 | `:view/devtools` | — | Toggle renderer devtools. |
 | `:app/quit` | — | Quit the application. |
 
+### 1.23 Commits surfaces (ADR-0039)
+
+Per-repo state lives at `[:ui :commits :repos <root>]` (the
+[state-schema reference](../architecture/04-state-schema-reference.md) documents the shape). The
+lane fold (`:graph`) is stored **incrementally** on every received page, so the sidebar rail and
+the forthcoming Commit Graph document read one source of truth; stale async replies are dropped by
+a per-repo generation (`:gen`), the `:find` pattern. Hash-keyed UI state (selection, expanded
+rows, rendered bodies) survives a page-0 refresh via `commits/keep-surviving`. See
+[ADR-0039](../design-decisions/0039-commits-sidebar-and-git-data-layer.md).
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:commits/shown` | fx | `root` | — | `[:ui :commits :last-root]` ← root | `[:vv/git-watch [root]]` (acquire this window's `.git` watcher ownership), `[:dispatch [:commits/ensure root]]` — the panel's mount hook (nil root → no-op) |
+| `:commits/hidden` | fx | — | — | — | `[:vv/git-watch []]` — panel unmount releases this window's watcher ownership (last owner out closes the repo's watcher) |
+| `:commits/set-root` | fx | `root` | — | `[:ui :commits :root]` ← root (the explicit **pin** — a non-nil pin IS "stop following the active doc") | `[:vv/git-watch [root]]`, `[:dispatch [:commits/ensure root]]` — the header repo switcher |
+| `:commits/ensure` | fx | `root` | the repo's `:branches` / `:commits` / `:loading?` | ensure `[:repos root]` exists | **idempotent**: `:vv/git-branches` only when branches are missing; `[:commits/load root {:skip 0}]` only when no commits are loaded and no load is in flight |
+| `:commits/load` | fx | `root {:skip}` | the repo's `:ref`, `:gen` | `:loading?` ← true; `:gen`++ | `:vv/git-log {root skip limit 250 ref?}` → on-done `[:commits/log-received root gen page0?]` / on-error `[:commits/log-error root]` |
+| `:commits/load-more` | fx | `root` | `:loading?`, `:exhausted?`, `:commits` | — | `[:commits/load root {:skip (count commits)}]` — unless already loading or exhausted (the footer button) |
+| `:commits/log-received` | db | `root gen page0? {:commits :exhausted :empty :error}` | the repo's `:gen`, `:graph` | stale `gen` → **reply dropped**; error → `:error`; else page 0 replaces / later pages append `:commits`, and the page folds through `graph/assign` into the **stored** `:graph {:rows :state :max-lane}` (R2 — the one fold site); page 0 additionally prunes `:selection`/`:expanded`/`:bodies` to surviving hashes (`commits/keep-surviving`) | — |
+| `:commits/log-error` | db | `root msg` | — | `:loading?` ← false; `:error` ← msg (e.g. "git is not available on PATH", "git output too large (>64 MiB)") | — |
+| `:commits/branches-received` | db | `root payload` | the repo's `:ref` | error → `:error`; else `:branches` ← `{:head :detached? :branches}`; a viewed `:ref` no longer among the branch names → nil (branch deleted — fall back to HEAD, D8) | — |
+| `:commits/set-ref` | fx | `root ref` | — | `:ref` ← ref | `[:commits/load root {:skip 0}]` — the branch combo's pick |
+| `:commits/activate` | fx | `root hash` | — | — | `:vv/git-open-diff {root :to hash :parent? true}` — diff vs the FIRST parent; main resolves `hash^`, empty tree for a root commit (R4) |
+| `:commits/select` | db | `root hash mode` | the loaded hash order | `:selection` ← `commits/select` (R3: `:single` / `:toggle` (Ctrl) / `:range` (Shift, anchor-to-hash; falls back to `:single` when an end left the window)) | — |
+| `:commits/clear-selection` | db | `root` | — | `:selection` ← `{:cursor nil :anchor nil :selected #{}}` | — |
+| `:commits/diff-selected` | fx | `root` | `:selection`, the loaded hash order | — | when **exactly two** commits are selected: `:vv/git-open-diff {root :from older :to newer}` (`commits/diff-pair` orders by log index — the "Diff selected" pill) |
+| `:commits/toggle-expand` | fx | `root hash` | `:expanded`, `:bodies`, the commit's `:body` | toggle hash in `:expanded` | first expansion of a non-blank, not-yet-cached body: `[:commits/render-body {root hash body}]` — lazy GFM (D3) |
+| `:commits/body-rendered` | db | `root hash html` | — | `[:bodies hash]` ← sanitized html string, or `false` on render failure (the view shows a plain `<pre>`) | — |
+| `:commits/range-input` | db | `root s` | — | `:range-input` ← s; `:range-error` ← nil | — |
+| `:commits/range-submit` | fx | `root` | `:range-input` | unparsable non-blank input → `:range-error` "unrecognized range" | parsed (`commits/parse-range`: `A..B` / `A...B` / single-rev-vs-parent): `:vv/git-open-diff` with `{:from? :to :dots? :parent?}` + `:root` — main rev-parse-verifies every side |
+| `:commits/open-diff-error` | db | `root msg` | — | `:range-error` ← msg (e.g. main's "unknown revision: …") — surfaced inline under the range input | — |
+| `:commits/git-changed` | fx | `{:root}` | is `[:repos root]` loaded? | — | loaded repos only (D8's **conservative refresh**): `:vv/git-branches` + `[:dispatch [:commits/load root {:skip 0}]]` — the `:gen` bump strands in-flight page replies; `keep-surviving` preserves selection |
+
 ---
 
 ## 2. Effects
@@ -315,6 +348,11 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |
 | `:vv/sync-retained-files` | `paths` | `window.vv.syncRetainedFiles(paths)` → `vv:retained-files` IPC | — |
 | `:vv/sync-tree-roots` | root vector | `window.vv.syncTreeRoots(roots)` → `vv:tree-roots` IPC | — |
+| `:vv/git-log` | `{:root :ref? :skip :limit :file? :follow? :on-done :on-error}` | `window.vv.gitLog(req)` ⮐ → `vv:git-log` — one async, main-parsed page of history (ADR-0039). A missing preload fn (stale daemon) degrades to the on-error path — the panel shows a sentence instead of hanging | `(conj on-done reply)` / `(conj on-error msg)` |
+| `:vv/git-branches` | `{:root :on-done :on-error}` | `window.vv.gitBranches(req)` ⮐ → `vv:git-branches` — refs for the branch combo (same stale-preload degradation) | `(conj on-done reply)` / `(conj on-error msg)` |
+| `:vv/git-open-diff` | `{:root :from? :to :parent? :dots? :on-error}` | `window.vv.gitOpenDiff(req)` ⮐ → `vv:git-open-diff` — main verifies both revs, runs `git diff`, spills + registers the document (ADR-0039 D4) | reply `{path}` → **`[:tab/navigate path]`** (navigation is renderer-owned — history, retention, facets; main only returns the path); `{error}` / reject → `(conj on-error msg)` |
+| `:vv/git-watch` | root vector | `window.vv.gitWatch(roots)` → `vv:git-watch` — replace this window's watched-repo set (`[]` releases; the Commits panel syncs on mount/root-change/unmount) | — (main pushes `vv:git-changed` → `[:commits/git-changed]`) |
+| `:commits/render-body` | `{:root :hash :body}` | `md/render-ir body root` — ONE commit message body through the **single** sanitizing markdown pipeline, base-dir = the repo root so relative links resolve like a README's (lazy, on first row expand — never eagerly for a page; ADR-0039 D3) | `[:commits/body-rendered root hash html]`; render failure → `[:commits/body-rendered root hash false]` (plain-text fallback) |
 | `:vv/sync-tree-expanded` | `[{root, path}]` | `window.vv.syncTreeExpanded(scopes)` → `vv:tree-expanded` IPC | — |
 | `:vv/refresh-tree` | `{root path on-success on-failure}` | invoke `window.vv.refreshTree`; convert the listing/error at the edge | configured success/failure event |
 | `:vv/refresh-all-trees` | `{on-success on-failure}` | invoke `window.vv.refreshAllTrees` | configured success/failure event |
@@ -418,7 +456,11 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/settings` | `app-db` | the persisted settings map (`settings.edn`) |
 | `:ui/projects` | `app-db` | the git-rooted file trees |
 | `:ui/tree-open` / `:ui/tree-expanding` / `:ui/tree-restoring?` | `app-db` | persistent disclosure scopes / refresh-before-open pending scopes / Files-remount refresh gate |
-| `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents`) and its width |
+| `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents` / `:tabs` / `:commits`) and its width |
+| `:commits/state` | `app-db` | the whole `[:ui :commits]` slice — panel targeting (`:root` pin, `:last-root`) + the per-repo cache (`:repos`), ADR-0039 |
+| `:commits/panel-root` | `:<- [:commits/state]` `:<- [:ui/projects]` `:<- [:ui/active-path]` | the repo the Commits panel shows: pin > deepest git project containing the active doc > last shown > first (`commits/derive-root`); nil ⇔ no git project open |
+| `:commits/for-root` | `:<- [:commits/state]` | one repo's state map (`[:repos root]` — commits, graph fold, selection, expansion, bodies, range input, flags) |
+| `:commits/repos` | `:<- [:ui/projects]` | the non-synthetic (git) projects the header's repo switcher can offer — a synthetic root can never serve git data |
 | `:ui/menu-focus` / `:ui/menu-submenu` / `:ui/menu-submenu-focus` | `app-db` | menu-bar keyboard traversal state |
 | `:ui/access-keys-active?` | `app-db` | bool — the Alt-held access-key underlines are showing |
 | `:ui/hints` | `app-db` | link-hint state `{:active? :targets :typed}` |

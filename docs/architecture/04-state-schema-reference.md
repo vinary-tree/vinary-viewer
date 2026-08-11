@@ -95,7 +95,14 @@ Current default shape:
                   :items [] :busy? false :error nil
                   :result nil :save-prompt nil}
       :palette {:open? false :source :command :prefix "" :query ""
-                :items [] :selected 0}}}
+                :items [] :selected 0}
+      :commits {:root nil                 ; explicit repo pin (nil = follow the active document)
+                :last-root nil            ; repo last shown (anti-thrash fallback, ADR-0039)
+                :repos {}}}}              ; per-repo cache: root → {:ref :branches :commits
+                                          ;   :graph {:rows :state :max-lane} :exhausted? :empty?
+                                          ;   :loading? :error :gen
+                                          ;   :selection {:cursor :anchor :selected}
+                                          ;   :expanded :bodies :range-input :range-error}
 ```
 
 Important slices:
@@ -116,6 +123,7 @@ Important slices:
 | `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
 | `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic? :extras?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. An optional `:extras` vector attaches documents adopted into the project (ADR-0038: a diff pinned inside the repository it describes — `[{:path :name :kind :transient?}]`; `:transient?` extras are pruned when document retention drops their path). Merge rules live in `vinary.app.projects`. |
+| `[:ui :commits]` | The Commits surfaces (ADR-0039): panel targeting plus a per-repo cache shared by the sidebar tab and the forthcoming Commit Graph document. Top level: `:root` (the explicit pin; nil = follow the active document — a non-nil pin IS the "stop following" state), `:last-root` (the repo last shown — the panel must not thrash while browsing non-repo files), `:repos {root → …}`. Each repo map: `:ref` (viewed branch/tag; nil = HEAD), `:branches` (`{:head :detached? :branches [{name kind current?}]}`), `:commits` (the loaded pages, newest first), `:graph {:rows :state :max-lane}` — the **stored incremental lane fold** (`vinary.git.graph`; one fold site, appended per page), `:exhausted?` / `:empty?` / `:loading?` / `:error`, `:gen` (staleness guard for async replies), `:selection {:cursor :anchor :selected #{hash}}` (hash-keyed, so it survives refresh), `:expanded #{hash}`, `:bodies {hash → html\|false}` (the lazy GFM message cache; `false` = plain-text fallback), `:range-input` / `:range-error` (the free-form ref-range input). Pure reducers live in `vinary.app.commits`. |
 | `[:ui :tree-open]` | Persistent disclosure intent as `[project-root absolute-directory]` scopes. Effective expansion additionally requires every ancestor and a mounted/visible Files tree. |
 | `[:ui :tree-expanding]` | Scopes whose explicit expansion is awaiting a main-process listing; they remain rendered closed. |
 | `[:ui :tree-restoring?]` | Returning from a hidden/unmounted Files view is refreshing remembered open roots before the tree remounts. |

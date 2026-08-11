@@ -1,0 +1,98 @@
+@startuml seq-git-open-diff
+'' ============================================================================
+'' vinary-viewer — Sequence: a commit diff, from row click to rev-aware Split
+'' (ADR-0039 D4/D6). PlantUML over Mermaid because the DISTINGUISHING moves are
+'' seam crossings: main verifies and spills but only returns a PATH; the
+'' renderer owns navigation; and the ordinary diff pipeline then re-crosses the
+'' seam for blob-exact enrichment — three round trips one flowchart would blur.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Commit diff — verify → git diff → spill → navigate → rev-aware enrichment
+
+autonumber "0:"
+
+actor User #white
+participant "ui.commits row /\npill / range input" as Panel RENDERER_TINT
+participant "re-frame\nevents / fx" as RF REFRAME_TINT
+participant "renderer\n(diff view)" as Rend RENDERER_TINT
+participant "preload `window.vv`" as Vv IPC_TINT
+participant "main.service\n(open! / diff sources)" as Svc MAIN_TINT
+participant "main.git\n(handle-open-diff)" as Git MAIN_TINT
+participant "git CLI" as CLI FS_TINT
+participant "spill + doc-overrides\n($XDG_RUNTIME_DIR/…/git-diff)" as Spill FS_TINT
+
+== choose the pair ==
+alt row click (diff vs FIRST parent)
+  User -> Panel : click a commit row
+  Panel -> RF : `[:commits/select … :single]`\n+ `[:commits/activate root hash]`
+  RF -> Vv : `gitOpenDiff {root, to hash,\nparent? true}` **vv:git-open-diff**
+else two selected → "Diff selected"
+  User -> Panel : Ctrl+click ×2 → pill
+  Panel -> RF : `[:commits/diff-selected root]`\n(`diff-pair` orders older→newer)
+  RF -> Vv : `gitOpenDiff {root, from, to}`
+else free-form range
+  User -> Panel : type `HEAD~3..HEAD` ⏎
+  Panel -> RF : `[:commits/range-submit]` →\n`parse-range` (`A..B` / `A...B` /\nsingle-rev-vs-parent)
+  RF -> Vv : `gitOpenDiff {root, from, to, dots?}`
+end
+
+== verify + diff + spill (main) ==
+Vv -> Git : `handle-open-diff`
+Git -> CLI : `rev-parse --verify --quiet\n--end-of-options <to>^{commit}`
+CLI --> Git : full sha (else the inline error\n"unknown revision: …")
+alt from given (pill / range)
+  Git -> CLI : verify `<from>` the same way\n(a typo is the user's input)
+else parent-of-to
+  Git -> CLI : verify `<to-sha>^`
+  CLI --> Git : sha — or FAILS for a **root commit**
+  Git -> Git : from ← the **empty tree**\n`4b825dc…904` (R4: one plain\n`git diff`, no `git show` arm)
+end
+alt [root from to] already spilled (dedupe hit)
+  Git --> Vv : {path existing, title}
+else fresh pair
+  Git -> CLI : `git diff --no-color\n**--no-ext-diff** --end-of-options\n<from> <to>`\n(repo config must never pick\nan external diff *program*)
+  CLI --> Git : diff text (≤ 64 MiB)
+  Git -> Spill : write `<uuid>/<shortA..shortB>.diff`\n(dir 0700, file 0600)
+  Git -> Spill : doc-overrides `register!`\n{kind "diff", **stdin? true**, cwd root,\n**git {root from to}**}
+  Git --> Vv : {path, title}
+end
+Vv --> RF : reply — a PATH, never a tab:\nnavigation is renderer-owned
+
+== the ordinary diff pipeline (feature 28, unchanged) ==
+RF -> RF : `[:tab/navigate path]`\n(history, retention, facets)
+RF -> Vv : **vv:open** path
+Vv -> Svc : `open!` — effective kind "diff"\n(:stdin? → MRU-excluded, unwatched;\n:git → **no** tree adoption, ADR-0038 R7)
+Svc --> Vv : **vv:content** {kind "diff",\nbaseDir = repo root}
+Vv --> RF : `[:content/received]` → `:diff/render`
+RF -> Rend : unified render; Split on demand
+Rend -> Vv : **vv:load-diff-sources**\n{diffPath, files, includePaths,\nincludeContent?}
+Vv -> Svc : handler: `doc-overrides/git-info`\npresent → the **rev-aware** arm (R8)
+Svc -> Git : `load-rev-sources {root to} rels`
+Git -> CLI : `cat-file blob <to>:<rel>` per file\n(plumbing: no textconv, no filters)
+CLI --> Git : blob content **as of <to>** —\nexact Split alignment even when\nthe working tree has drifted
+Git -> Svc : targets still resolve against the\n**working tree** (a header click\nmeans "open this file NOW")
+Svc --> Vv : {rel → {path?, content?}}
+Vv --> Rend : enriched sources
+Rend --> User : unified + blob-exact Split;\nmissing blob → hunk-window fallback
+
+== release ==
+User -> RF : close the tab
+RF -> Vv : retention sync\n(**vv:retained-files**)
+Vv -> Svc : `unwatch-file!` → unlink the spill\n+ `git/forget-spill!` (dedupe entry)
+note right of Spill #FFF6D6
+  Crashed sessions: a boot-time
+  `git/sweep-stale!` (10-min age gate,
+  the stdin sweep's twin) clears
+  abandoned spill dirs.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events / fx |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN (service + vinary.main.git) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| git CLI / spill files |
+endlegend
+@enduml

@@ -1,0 +1,98 @@
+@startuml seq-commits-log
+'' ============================================================================
+'' vinary-viewer — Sequence: the Commits sidebar tab's log delivery (ADR-0039).
+''
+'' PlantUML over Mermaid because one set of lifelines has to carry a mount
+'' phase, two parallel async requests, a generation-guarded reply, a stored
+'' incremental fold, and a debounced watcher push — `== phase ==` dividers and
+'' `alt` keep every leg on the same seam-colored lanes.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title Commits tab — mount, paged log, stored lane fold, live refresh
+
+autonumber "0:"
+
+actor User #white
+participant "ui.commits\ncommits-panel" as Panel RENDERER_TINT
+participant "re-frame\nevents / fx" as RF REFRAME_TINT
+participant "app-db\n[:ui :commits :repos <root>]" as Db APPDB_TINT
+participant "preload `window.vv`" as Vv IPC_TINT
+participant "main.git\n(async run-git)" as Git MAIN_TINT
+participant "git CLI" as CLI FS_TINT
+participant "Chokidar\n(.git watcher)" as Watch FS_TINT
+
+== panel mount (root = pin > deepest containing project > last shown > first) ==
+User -> Panel : open the **Commits** sidebar tab
+Panel -> RF : `[:commits/shown root]`\n(component-did-mount; panel keyed by root)
+RF -> Db : `:last-root` ← root
+RF -> Vv : `gitWatch([root])`\n**vv:git-watch**
+Vv -> Git : `sync-owner-roots!`\n(tree-watcher-twin ownership)
+Git -> CLI : `rev-parse --absolute-git-dir`\n+ `--git-common-dir`\n(worktree-safe: HEAD and refs\ncan live in different dirs)
+CLI --> Git : the two directories
+Git -> Watch : watch [git-dir/**HEAD**,\ncommon-dir/**packed-refs**,\ncommon-dir/**refs**]\n{ignoreInitial, depth 4}
+RF -> RF : `[:commits/ensure root]`\n(idempotent: branches if missing,\npage 0 if empty)
+
+== branches (the combo's data) ==
+RF -> Vv : `gitBranches {root}`\n**vv:git-branches**
+Vv -> Git : `handle-branches`
+Git -> CLI : `for-each-ref\n--format=%(refname)%1f\n%(refname:short)%1f%(HEAD)`\n+ `rev-parse --abbrev-ref HEAD`
+CLI --> Git : ref rows + head name\n(detached → short hash)
+Git --> Vv : {head, detached?, branches\n[{name, kind, current?}]}
+Vv --> RF : `[:commits/branches-received]`
+RF -> Db : `:branches` ← payload\n(a vanished viewed ref → nil,\nfall back to HEAD)
+
+== page 0 (and every "Load more") ==
+RF -> Db : `:loading?` ← true; **:gen++**\n(stale-reply guard)
+RF -> Vv : `gitLog {root, skip, limit 250, ref?}`\n**vv:git-log**
+Vv -> Git : `handle-log`
+Git -> CLI : `rev-parse --verify --quiet\n--end-of-options <ref>^{commit}`\n(only when a ref was given)
+Git -> CLI : `git log **--date-order**\n--max-count=250 --skip=N\n--pretty=<9-field %x1f/%x00>\n--end-of-options <ref>`
+CLI --> Git : NUL-terminated records\n(children strictly before parents —\nthe lane precondition)
+Git -> Git : `glog/parse-log`\n(9 fields + 40-hex validated;\nhostile records dropped)
+Git --> Vv : {commits, exhausted, empty?}\n— structured, never raw text
+Vv --> RF : `[:commits/log-received\nroot gen page0?]`
+
+alt gen is current
+  RF -> Db : append `:commits`;\n**stored incremental fold** (R2):\n`graph/assign` state ⟶\n`:graph {:rows :state :max-lane}`\n(one fold site — rail now,\nCommit Graph document later)
+  Db -> Panel : `:commits/for-root` fires
+  Panel -> Panel : per row: self-contained SVG **rail cell**\n(prev row's edge targets = top-half ink,\nown edges = dot + through ink);\nGFM body only on expand
+  Panel --> User : list + lane rail\n(+ "Load more (N shown)")
+else superseded request
+  RF -> RF : reply dropped
+end
+
+== live refresh (vv:git-changed) ==
+User -> CLI : commit / fetch / tag /\nbranch switch — any terminal
+CLI -> Watch : HEAD / refs / packed-refs change
+Watch -> Git : fs events
+Git -> Git : **debounce 300 ms per root**\n(a fetch touches many refs —\nthe panel needs ONE refresh)
+Git -> Vv : push **vv:git-changed** {root}\n(to owning windows only)
+Vv -> RF : `[:commits/git-changed]`
+RF -> RF : loaded repos only:\nbranches + **page-0 replace**\n(:gen++ strands in-flight replies)
+RF -> Db : page 0 refolds from `init-state`;\n`keep-surviving` prunes selection /\nexpanded / bodies **by hash**
+Db -> Panel : re-render ≤ ~1 s after the change,\nselection intact
+Panel --> User : fresh history, place kept
+
+== unmount ==
+Panel -> RF : `[:commits/hidden]`\n(sidebar collapsed / tab switched)
+RF -> Vv : `gitWatch([])`\n**vv:git-watch**
+Vv -> Git : release this window's ownership
+Git -> Watch : close the repo's watcher\nwhen the last owner leaves
+
+note over Git, CLI
+  Strictly READ-ONLY: `log`, `for-each-ref`, `rev-parse` —
+  argv arrays, no shell; every user-supplied ref sits behind
+  `--end-of-options` AND rev-parse pre-validation.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| Renderer / UI (ui.commits) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events / fx |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db ([:ui :commits]) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| MAIN (vinary.main.git) |
+  |<#9F8766>&#160;&#160;&#160;&#160;| git CLI / Chokidar |
+endlegend
+@enduml

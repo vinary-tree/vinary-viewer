@@ -14,6 +14,31 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Commits sidebar tab (ADR-0039): a fourth sidebar tab shows the active
+      document's repository history -- a paged git log (250 per page, "Load
+      more") with a mini lane-graph rail that draws branches forking and
+      merging, subject lines with ref chips, author/age/hash meta lines, and
+      commit messages rendered as GFM when a row is expanded (lazily, through
+      the app's single sanitizing markdown pipeline, relative links resolving
+      against the repo root). Click a commit to open its diff against its
+      first parent as an ordinary diff tab -- unified AND side-by-side, with
+      rev-exact Split alignment (sources read from the commit's own blobs, so
+      rows line up even after the working tree moves on); a root commit diffs
+      against the empty tree. Ctrl+click selects two commits and a "Diff
+      selected" pill diffs them; a free-form range input accepts A..B, A...B,
+      a tag, HEAD~3, or any single rev (diffed against its parent), with
+      typos and unknown revisions reported inline. A filterable branch/tag
+      combo (type to filter, arrows + Enter; Local/Remote/Tags groups,
+      current branch first) switches the viewed ref, and a repository
+      switcher appears when several repos are open (the panel otherwise
+      follows the active document, pinning on demand). The panel
+      live-refreshes within about a second of a commit, fetch, tag, or
+      branch switch made from any terminal -- worktree-safe -- preserving
+      selection, expanded rows, and rendered messages by hash. All git
+      access is strictly read-only and injection-hardened (argv arrays,
+      --end-of-options, rev pre-validation, --no-ext-diff, cat-file
+      plumbing). See docs/features/32-commits-tab.md and
+      docs/design-decisions/0039-commits-sidebar-and-git-data-layer.md.
     - Diff documents adopt the project they describe (ADR-0038): opening a diff
       now puts the repository it was generated in into the sidebar Files tree,
       with the diff itself listed inside it as an ordinary-looking row. `git diff
