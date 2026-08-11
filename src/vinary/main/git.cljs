@@ -205,10 +205,12 @@
                            (fn [{from-sha :ok error :error}]
                              (if-not from-sha
                                {:error error}
-                               (let [key   [top from-sha to-sha]
+                               ;; the dedupe key carries EVERY argv-shaping input: the same endpoints
+                               ;; asked two-dot vs three-dot (or path-scoped) are different diffs
+                               (let [key   [top from-sha to-sha (or dots "..") (vec (or paths []))]
                                      label (if (= from-sha empty-tree-hash)
                                              (short-sha to-sha)
-                                             (str (short-sha from-sha) ".." (short-sha to-sha)))
+                                             (str (short-sha from-sha) (or dots "..") (short-sha to-sha)))
                                      known (get @diff-spills key)]
                                  (if (and known (try (.existsSync fs known) (catch :default _ false)))
                                    {:path known :title (str label ".diff")}
