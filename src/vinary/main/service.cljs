@@ -1096,10 +1096,18 @@
              (let [{:keys [diffPath files includePaths includeContent]}
                    (js->clj req :keywordize-keys true)
                    opts {:include-paths? includePaths :include-content? includeContent}]
-               (if (file-kind/remote-uri? diffPath)
+               (cond
+                 (file-kind/remote-uri? diffPath)
                  (.loadRemoteDiffSources content-service diffPath (clj->js files)
                                          #js {:includePaths (boolean includePaths)
                                               :includeContent (boolean includeContent)})
+
+                 ;; ADR-0039 R8: a git-produced commit diff enriches from its own blobs (rev-aware —
+                 ;; the working tree may have drifted) and never adopts into the Files tree.
+                 (doc-overrides/git-info diffPath)
+                 (git/load-rev-sources (doc-overrides/git-info diffPath) files opts)
+
+                 :else
                  (let [resolved (load-diff-sources diffPath files opts)]
                    ;; ADR-0038 seam 2: the resolved targets prove which repository the diff describes.
                    (when includePaths (adopt-diff-project! (.-sender e) diffPath resolved))

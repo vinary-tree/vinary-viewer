@@ -154,6 +154,11 @@ function main() {
     assert.ok(['gitLog', 'gitBranches', 'gitOpenDiff', 'gitWatch', 'onGitChanged']
       .every((k) => PRELOAD.includes(k)),
       'preload.js must expose the five git bridge functions');
+    assert.ok(/doc-overrides\/git-info\s+diffPath/.test(SERVICE)
+      && SERVICE.includes('git/load-rev-sources'),
+      'vv:load-diff-sources must branch to rev-aware enrichment for commit diffs (R8)');
+    assert.ok(/"cat-file"\s+"blob"/.test(MAIN_GIT),
+      'load-rev-sources must read blob content with cat-file plumbing (no textconv/filters)');
 
     console.log('git log/data-layer smoke OK');
   } finally {

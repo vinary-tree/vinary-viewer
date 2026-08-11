@@ -23,6 +23,7 @@
             ["chokidar" :refer [watch]]
             [clojure.string :as str]
             [vinary.git.log :as glog]
+            [vinary.main.diff-source :as diff-source]
             [vinary.main.doc-overrides :as doc-overrides]))
 
 (def empty-tree-hash
@@ -224,6 +225,50 @@
                                               (swap! diff-spills assoc key p)
                                               {:path p :title (str label ".diff")})))))))))))))))))))
       (.then clj->js)))
+
+(defn load-rev-sources
+  "R8: vv:load-diff-sources for a git-produced commit diff (doc-overrides :git = {:root :from :to}).
+   CONTENT comes from `git cat-file blob <to>:<rel>` — the diff was computed FROM those blobs, so
+   split-view row alignment is exact even when the working tree has drifted since (strictly more
+   correct than the on-disk read the working-tree path performs). TARGETS still resolve against the
+   working tree (a header click means \"open this file NOW\"; a path that no longer exists correctly
+   stays inert), and a deleted-since file still enriches from its blob alone. Returns a Promise of
+   the same wire shapes load-diff-sources produces synchronously: the legacy `{rel → content}` map,
+   or the structured `{rel → {:path abs? :content utf8?}}` map."
+  [{:keys [root to]} rels {:keys [include-paths? include-content?]}]
+  (let [rels   (vec (or rels []))
+        blobs! (fn []
+                 (-> (js/Promise.all
+                      (into-array
+                       (map (fn [rel]
+                              (-> (run-git ["cat-file" "blob" (str to ":" rel)] root)
+                                  (.then (fn [{:keys [ok]}] [rel ok]))))
+                            rels)))
+                     ;; a missing blob (a rename's old path, a binary, a bad rel) contributes nothing —
+                     ;; the renderer's hunk-window fallback covers that file, exactly as on disk
+                     (.then (fn [pairs] (into {} (filter (comp some? second)) (vec pairs))))))]
+    (cond
+      (and include-paths? include-content?)
+      (let [targets (diff-source/load-local root rels {:include-paths? true :include-content? false})]
+        (-> (blobs!)
+            (.then (fn [contents]
+                     (clj->js
+                      (reduce (fn [m rel]
+                                (let [t (get targets rel)
+                                      c (get contents rel)]
+                                  (cond
+                                    (and t c) (assoc m rel (assoc t :content c))
+                                    t         (assoc m rel t)
+                                    c         (assoc m rel {:content c})
+                                    :else     m)))
+                              {} rels))))))
+
+      include-paths?
+      (js/Promise.resolve
+       (clj->js (diff-source/load-local root rels {:include-paths? true :include-content? false})))
+
+      :else
+      (-> (blobs!) (.then clj->js)))))
 
 (defn sweep-stale!
   "Delete git-diff spill dirs older than max-age-ms (crashed sessions) — the boot-time twin of

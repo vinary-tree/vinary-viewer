@@ -55,3 +55,17 @@
   (is (nil? (ov/for-path "/gone")))
   (is (not (ov/stdin-doc? "/gone")))
   (is (= "text" (ov/effective-kind classify-text "/gone"))))
+
+(deftest git-info-facts
+  (testing "a commit-diff spill's :git facts read back (rev-aware enrichment + adoption opt-out)"
+    (ov/register! "/run/u/git-diff/id/abc1234..def5678.diff"
+                  {:kind "diff" :stdin? true :cwd "/repo"
+                   :git {:root "/repo" :from "a" :to "b"}})
+    (is (= {:root "/repo" :from "a" :to "b"}
+           (ov/git-info "/run/u/git-diff/id/abc1234..def5678.diff")))
+    (is (nil? (ov/git-info "/elsewhere")) "absent entry → nil")
+    (ov/register! "/plain-stdin" {:kind "diff" :stdin? true :cwd "/w"})
+    (is (nil? (ov/git-info "/plain-stdin")) "a user-piped diff carries no :git — it DOES adopt")
+    (ov/clear! "/run/u/git-diff/id/abc1234..def5678.diff")
+    (is (nil? (ov/git-info "/run/u/git-diff/id/abc1234..def5678.diff"))
+        "the :git facts share the retention lifetime of the entry")))
