@@ -82,6 +82,7 @@
           (for [r refs] ^{:key r} [:span.vv-commits-ref {:title r} r]))))
 
 (defn- commit-row [root rail-w prev-row row commit selection expanded bodies]
+  ;; NB: `hash` here shadows cljs.core/hash — value-only by contract; never call it
   (let [{:keys [hash subject refs body]} commit
         author    (:author-name commit)
         date      (:author-date commit)
@@ -187,13 +188,16 @@
 
 ;; ── the list + panel ────────────────────────────────────────────────────────────────────────────
 (defn- commits-list [root repo]
-  (let [{:keys [commits graph loading? exhausted? empty? error selection expanded bodies]} repo
+  ;; :empty? binds as empty-repo? — a destructured `empty?` would shadow cljs.core/empty?, and the
+  ;; (empty? commits) call below would then invoke nil/false: the blank-window crash this fixes.
+  (let [{:keys [commits graph loading? exhausted? error selection expanded bodies]
+         empty-repo? :empty?} repo
         rows   (vec (:rows graph))
         rail-w (* lane-w (min lane-cap (inc (long (or (:max-lane graph) 0)))))]
     [:div.vv-commits-list
      (when error [:div.vv-commits-error error])
      (cond
-       empty?
+       empty-repo?
        [:div.vv-sidebar-empty "No commits yet"]
 
        (and (empty? commits) loading?)

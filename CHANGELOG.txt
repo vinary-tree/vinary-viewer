@@ -387,6 +387,19 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Clicking the Commits sidebar tab blanked the entire window: the panel's list
+      destructured :empty? from its repo map into a local `empty?` -- shadowing
+      cljs.core/empty? -- and then invoked it (nil on the panel's very first render,
+      false once the store was primed), and with no React error boundary anywhere the
+      uncaught TypeError unmounted the whole root. The binding is renamed (here and in
+      the Commit Graph view's value-position twin, with never-call comments on the
+      remaining value-only `hash` shadows), and the sidebar body now sits inside a
+      small reusable error boundary (vinary.ui.error-boundary) so any future panel
+      render crash degrades to a visible in-sidebar error strip instead of a blank
+      application. The electron smoke gains three regression arms that actually CLICK
+      the Commits tab -- no-projects empty state, first mount on a freshly seeded
+      repository, and a pre-primed store -- asserting zero window errors and a live
+      React root; that click was the coverage gap that let the crash ship.
     - Plain text is never delimiter-sniffed into a column-aligned table any more: prose
       whose lines share a stable comma/tab/pipe count (notes, pasted CSV fragments in a
       .txt, ASCII layouts) used to open as a delimited TABLE in the GUI (the CLI/TUI

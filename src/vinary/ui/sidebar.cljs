@@ -5,6 +5,7 @@
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
             [vinary.ui.commits :as commits]
+            [vinary.ui.error-boundary :as eb]
             [vinary.ui.icons :as icons]
             [vinary.ui.tree :as tree]
             [vinary.ui.tabs :as tabs-ui]))
@@ -112,23 +113,31 @@
       [:div.vv-sidebar {:style {:width (str (or width 280) "px")}}
        [:div.vv-sidebar-tabs
         [:div.vv-sidebar-tab {:class           (when (= tab :files) "vv-sidebar-tab-active")
+                              :data-vv-rail    "files"
                               :on-click        #(rf/dispatch [:sidebar/tab :files])
                               :on-context-menu files-context!}
          (icons/icon :section-files) "Files"]
         [:div.vv-sidebar-tab {:class    (when (= tab :contents) "vv-sidebar-tab-active")
+                              :data-vv-rail "contents"
                               :on-click #(rf/dispatch [:sidebar/tab :contents])} (icons/icon :section-contents) "Contents"]
         [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
+                              :data-vv-rail "tabs"
                               :on-click #(rf/dispatch [:sidebar/tab :tabs])} (icons/icon :section-tabs) "Tabs"]
         [:div.vv-sidebar-tab {:class    (when (= tab :commits) "vv-sidebar-tab-active")
+                              :data-vv-rail "commits"
                               :on-click #(rf/dispatch [:sidebar/tab :commits])} (icons/icon :section-commits) "Commits"]
         [:div.vv-sidebar-tabs-spacer]
         [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :collapse)]]
        [:div.vv-sidebar-body
-        (case tab
-          :contents [contents-panel]
-          :tabs     [tabs-panel]
-          :commits  [commits/commits-panel]
-          (if restoring?
-            [:div.vv-sidebar-empty "Refreshing files…"]
-            [tree/file-tree]))]
+        ;; keyed by tab: a panel crash paints a labeled strip instead of unmounting the React root
+        ;; (the blank-window failure mode), and switching tabs mounts a fresh boundary — recovery.
+        ^{:key tab}
+        [eb/boundary "Sidebar panel"
+         (case tab
+           :contents [contents-panel]
+           :tabs     [tabs-panel]
+           :commits  [commits/commits-panel]
+           (if restoring?
+             [:div.vv-sidebar-empty "Refreshing files…"]
+             [tree/file-tree]))]]
        [resize-handle]])))

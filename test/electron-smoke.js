@@ -2781,6 +2781,102 @@ async function main() {
     console.log('[ok] Commit Graph: rows + badges render, keyboard cursor + Enter drive the diff seam (ADR-0040)');
   }
 
+  // ---- Commits sidebar tab: regression arms for the shadowed-empty? blank-window crash -------------
+  // A destructured `empty?` shadowed cljs.core/empty? and was INVOKED — nil on the panel's first
+  // render, false once the store was primed — and with no error boundary the React root unmounted
+  // (a blank window). No harness ever CLICKED this tab before; these arms close that gap. Selectors
+  // use [data-vv-rail=…], the stable anchors that survive the icon-rail migration.
+  {
+    await evalIn(win, `window.__vvWinErrors = window.__vvWinErrors || [];
+      if (!window.__vvWinErrorsWired) { window.__vvWinErrorsWired = true;
+        window.addEventListener('error', (e) => window.__vvWinErrors.push(String(e.message))); }
+      true`);
+    const winErrors = () => evalIn(win, `window.__vvWinErrors`);
+    const clearErrors = () => evalIn(win, `window.__vvWinErrors.length = 0; true`);
+    const appAlive = async (tag) => {
+      assert.deepStrictEqual(await winErrors(), [], `${tag}: no window-level errors recorded`);
+      assert.ok(await evalIn(win, `document.getElementById('app').children.length > 0`),
+        `${tag}: the React root is still mounted`);
+    };
+    const railClick = (name) =>
+      evalIn(win, `document.querySelector('[data-vv-rail=${JSON.stringify(name)}]').click(); true`);
+
+    // Arm C — no git project open: the empty message, no crash
+    await clearErrors();
+    assert.strictEqual(await evalIn(win, `(window.__vvdb().ui.projects || []).length`), 0,
+      'precondition: no projects are seeded at this point in the run');
+    await railClick('commits');
+    await waitFor(() => evalIn(win,
+      `(document.querySelector('.vv-sidebar-empty') || {}).textContent === 'No git repository open'`),
+      'the Commits panel shows its empty state with no git project', 8000);
+    await appAlive('arm C');
+
+    // Arm A — a git project appears (the real vv:tree seam) while Commits is the active tab: the
+    // root-keyed panel (re)mounts — the exact first render that used to invoke nil
+    const CP_ROOT = '/fixture/commits-panel-repo';
+    win.webContents.send('vv:tree', { root: CP_ROOT, files: ['README.md'], 'synthetic?': false });
+    await waitFor(() => evalIn(win,
+      `(window.__vvdb().ui.projects || []).some((p) => p.root === ${JSON.stringify(CP_ROOT)})`),
+      'the fixture project lands in app-db', 8000);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-commits'))`),
+      'the Commits panel mounts for the seeded repo', 8000);
+    await waitFor(() => evalIn(win,
+      `document.querySelectorAll('.vv-commits-row').length >= 3
+        && document.querySelector('.vv-commits-row').dataset.hash === ${JSON.stringify(state.ggHashes[0])}`),
+      'the seeded repo lists the mocked page, newest first', 8000);
+    await appAlive('arm A');
+    console.log('[ok] Commits tab: empty state + first-mount both render (shadowed-empty? regression)');
+
+    // Arm A′ — leave and return: the primed-store first render (the false-invoking variant)
+    await railClick('files');
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits')`),
+      'switching to Files unmounts the Commits panel', 8000);
+    await railClick('commits');
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-commits-row').length >= 3`),
+      'returning to Commits re-renders the primed rows', 8000);
+    await appAlive('arm A′');
+    console.log('[ok] Commits tab: primed-store remount renders (false-variant regression)');
+
+    // Arm B (dev-only, like every dispatch_sync block) — a store primed BEFORE the panel ever
+    // mounts: page-0 injected directly, then the repo pinned, then the first mount happens primed
+    if (!releaseBuild) {
+      const CP_ROOT_B = '/fixture/commits-panel-repo-b';
+      const BH = ['a'.repeat(40), 'b'.repeat(40)];
+      win.webContents.send('vv:tree', { root: CP_ROOT_B, files: ['README.md'], 'synthetic?': false });
+      await waitFor(() => evalIn(win,
+        `(window.__vvdb().ui.projects || []).some((p) => p.root === ${JSON.stringify(CP_ROOT_B)})`),
+        'the second fixture project lands', 8000);
+      const payloadJson = JSON.stringify({ commits: [
+        { hash: BH[0], parents: [BH[1]], 'author-name': 'Pri', 'author-email': 'p@x',
+          'author-date': '2026-08-11T12:00:00+02:00', 'committer-date': '2026-08-11T12:00:00+02:00',
+          refs: [], subject: 'primed newest', body: '' },
+        { hash: BH[1], parents: [], 'author-name': 'Pri', 'author-email': 'p@x',
+          'author-date': '2026-08-11T11:00:00+02:00', 'committer-date': '2026-08-11T11:00:00+02:00',
+          refs: [], subject: 'primed root', body: '' }], exhausted: true });
+      await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(
+        cljs.core.keyword("commits","log-received"), ${JSON.stringify(CP_ROOT_B)}, null, true,
+        cljs.core.js__GT_clj(JSON.parse(${JSON.stringify(payloadJson)}),
+                             cljs.core.keyword("keywordize-keys"), true))); true`);
+      await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(
+        cljs.core.keyword("commits","set-root"), ${JSON.stringify(CP_ROOT_B)})); true`);
+      await railClick('files');
+      await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits')`),
+        'arm B: the panel unmounts before the primed first mount', 8000);
+      await railClick('commits');
+      await waitFor(() => evalIn(win,
+        `(document.querySelector('.vv-commits-row') || { dataset: {} }).dataset.hash === ${JSON.stringify(BH[0])}`),
+        'the pre-primed store renders its own newest hash on first mount', 8000);
+      await appAlive('arm B');
+      await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(
+        cljs.core.keyword("commits","set-root"), null)); true`);
+      console.log('[ok] Commits tab: pre-primed store first-mount renders (arm B, dev)');
+    }
+    // restore the pre-section sidebar state for the later sections
+    await railClick('files');
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits')`),
+      'the regression section restores the Files panel', 8000);
+  }
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();

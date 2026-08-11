@@ -45,6 +45,7 @@
    (:name b)])
 
 (defn- graph-row [root max-lane prev-row row commit selection]
+  ;; NB: `hash` here shadows cljs.core/hash — value-only by contract; never call it
   (let [{:keys [hash subject refs]} commit
         ;; a HISTORY listing carries no lane rows — the rail degrades to a lane-0 dot
         row       (or row {:lane 0 :edges [] :active 1})
@@ -137,7 +138,10 @@
       :reagent-render
       (fn [_path root]
         (let [repo (or @(rf/subscribe [:commits/for-root root]) {})
-              {:keys [commits graph selection error empty?]} repo
+              ;; :empty? binds as empty-repo? — never shadow cljs.core/empty? (the Commits-panel
+              ;; blank-window bug was exactly that shadow invoked as a function)
+              {:keys [commits graph selection error]
+               empty-repo? :empty?} repo
               rows     (vec (:rows graph))
               n        (count commits)
               max-lane (long (or (:max-lane graph) 0))
@@ -153,8 +157,8 @@
                        :on-key-down (key-handler root vis-rows)}
            [header-bar root repo]
            (cond
-             error  [:div.vv-gg-error error]
-             empty? [:div.vv-gg-empty "No commits yet"]
+             error       [:div.vv-gg-error error]
+             empty-repo? [:div.vv-gg-empty "No commits yet"]
              :else
              [:div.vv-gg-body
               [:div {:style {:height (* lo ggeo/row-h)}}]
