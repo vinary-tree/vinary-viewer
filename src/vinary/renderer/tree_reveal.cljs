@@ -20,10 +20,18 @@
 
 (defn schedule!
   "Schedule one reveal after Reagent's queued render commits. Repeated active/tree events in the same frame
-   share the pending callback; this is event follow-up scheduling, not polling or request retry."
+   share the pending callback; this is event follow-up scheduling, not polling or request retry.
+
+   The reveal re-asserts once web fonts settle: a late font swap can shift the accumulated row metrics
+   above the target by a pixel or two AFTER the one-shot scroll, leaving the row clipped at the
+   scrollport edge. `scrollIntoView` with `:block \"nearest\"` is a no-op for a fully-visible row, so the
+   re-assert never fights manual scrolling — and `document.fonts.ready` resolves immediately once fonts
+   are already loaded, so steady-state reveals pay nothing."
   []
   (when (compare-and-set! scheduled? false true)
     (r/after-render
      (fn []
        (reset! scheduled? false)
-       (reveal-active!)))))
+       (reveal-active!)
+       (when-let [^js fonts (.-fonts js/document)]
+         (.then (.-ready fonts) (fn [] (reveal-active!))))))))
