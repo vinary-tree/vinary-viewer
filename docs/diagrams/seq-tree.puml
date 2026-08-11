@@ -96,6 +96,34 @@ Svc --> Vv : payload(s) through Promise reply
 Vv --> RF : `[:tree/refresh-*-ready]`
 RF -> Db : scoped/full replacement;\nremoved projects stay removed
 
+== diff adoption (ADR-0038) ==
+User -> Svc : `git diff | vv -t diff`\n(stdin spilled + typed, ADR-0036)
+Svc -> Svc : open! → stdin doc →\n`send-stdin-diff-tree!`\n(effective kind = "diff";\ncommit diffs (`git-info`) skipped)
+Svc -> Git : `rev-parse --show-toplevel`\n(cwd = the INVOKING dir,\n`doc-overrides/stdin-base-dir`)
+Git --> Svc : repo root — else the\nADR-0036 skip stands (no tree)
+Svc -> Vv : **vv:tree** {root, files, extras:\n[{path, name "**(piped diff)**",\nkind "diff", transient? **true**}]}
+Vv -> RF : `[:tree/received]`
+
+User -> Tree : open an on-disk `.patch`\n(stored outside its repo)
+Tree -> RF : `:diff/render` resolves\nnavigable headers
+RF -> Vv : invoke `vv:load-diff-sources`\n{diffPath, files, includePaths}
+Vv -> Svc : resolve targets\n(diff's dir + ancestor walk)
+Svc -> Git : `rev-parse --show-toplevel`\nper distinct target dir\n(short-circuit under found roots)
+Git --> Svc : toplevels
+Svc -> Svc : `dominant-root` (majority,\nfirst-seen tie-break) →\n`adopt-diff-project!` (guarded:\n`adopted-diff-roots`, repeat-free)
+Svc -> Vv : **vv:tree** {root, files, extras:\n[{path, name = basename,\nkind "diff", transient? **false**}]}
+Vv -> RF : `[:tree/received]`
+RF -> Db : `merge-project` — extras **UNION**\n(dedupe by path, incoming wins;\nan extras-less refresh never wipes them)
+Db -> Tree : extra pinned above the folders\n(italic `a.vv-file-extra`, opens like a file;\na diff INSIDE the root gets **no** extra row)
+Tree --> User : the described repository is in Files\nwith the diff attached
+
+note over Svc, RF
+  Transient extras die with retention: `retention-fx`
+  dispatches `[:tree/prune-extras]` at the same edge
+  where main unlinks the stdin spill. On-disk extras
+  persist — *Remove from Files* takes the project away.
+end note
+
 note over Svc, Walk
   Every local open sends a tree — a git root when there is one,
   else the containing directory as a **synthetic** root. Archive

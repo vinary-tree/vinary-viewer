@@ -174,6 +174,68 @@
         (cond-> {:root root :files (prefix-files scope files) :synthetic? false}
           (not (str/blank? scope)) (assoc :scope scope))))))
 
+;; ── ADR-0038: diff documents adopt the project they describe ────────────────────────────────────────
+;; A diff (an on-disk .patch, or `git diff | vv -t diff`) belongs to the repository it was generated
+;; in. Two seams push that repository's tree with the diff attached as an :extras member: open! for
+;; stdin diffs (the invoking cwd names the repo immediately), and the vv:load-diff-sources handler for
+;; every local diff (the resolved targets prove membership). Both skip git-produced commit diffs
+;; (doc-overrides/git-info) — transient synthetics that die with their tab.
+
+(defonce ^:private adopted-diff-roots (atom {}))   ; wc-id -> {diff-path root} — repeat-adoption guard
+
+(defn- with-diff-extra
+  "Attach the ADR-0038 :extras entry for diff-path to a tree entry. A diff INSIDE the root gets no
+   extra — ls-files --others already lists it, and a second row would be a double listing."
+  [entry diff-path]
+  (if-let [extra (service-util/diff-extra
+                  {:path         diff-path
+                   :basename     (.basename path diff-path)
+                   :inside-root? (some? (relative-scope (:root entry) diff-path))
+                   :stdin?       (doc-overrides/stdin-doc? diff-path)})]
+    (assoc entry :extras [extra])
+    entry))
+
+(defn- record-adoption! [wc-id diff-path root]
+  (swap! adopted-diff-roots assoc-in [wc-id diff-path] root))
+
+(defn- send-stdin-diff-tree!
+  "Seam 1 (open!): a piped-stdin DIFF adopts the git repository of its invoking cwd, so
+   `git diff | vv -t diff` shows the repo in Files with the diff listed like an ordinary member.
+   Non-diff stdin docs keep the ADR-0036 skip (a spill dir is not a project), and only a git repo is
+   ever adopted — a synthetic root of an arbitrary shell cwd ($HOME from `curl | vv -t diff`) would
+   be pure noise."
+  [^js wc spill-path]
+  (when (and (= "diff" (doc-overrides/effective-kind kind-of spill-path))
+             (nil? (doc-overrides/git-info spill-path)))
+    (when-let [cwd (doc-overrides/stdin-base-dir spill-path)]
+      (when-let [entry (repo-tree cwd)]
+        (record-adoption! (.-id wc) spill-path (:root entry))
+        (send-tree-entry! wc (with-diff-extra entry spill-path))))))
+
+(defn- adopt-diff-project!
+  "Seam 2 (vv:load-diff-sources): after a local diff's referenced paths resolve, adopt the git
+   repository that owns most of the resolved targets — an on-disk .patch stored OUTSIDE the repo it
+   describes gets that repo into Files too. Cost is bounded: one rev-parse per distinct target
+   directory not already under a found root, one ls-files per adoption, and the per-window guard
+   makes Split rebuilds and re-renders free."
+  [^js wc diff-path resolved]
+  (when (and wc (nil? (doc-overrides/git-info diff-path)))
+    (let [targets (into [] (keep (fn [[_ v]] (when (map? v) (:path v)))) resolved)
+          dirs    (into [] (distinct) (map #(.dirname path %) targets))
+          roots   (loop [ds dirs, known [], out []]
+                    (if-let [d (first ds)]
+                      (if-let [r (some (fn [k] (when (some? (relative-scope k d)) k)) known)]
+                        (recur (rest ds) known (conj out r))
+                        (let [r (git ["rev-parse" "--show-toplevel"] d)]
+                          (recur (rest ds) (cond-> known (some? r) (conj r)) (conj out r))))
+                      out))
+          root    (service-util/dominant-root roots)]
+      (when (and root
+                 (not= root (get-in @adopted-diff-roots [(.-id wc) diff-path])))
+        (when-let [entry (repo-tree root)]
+          (record-adoption! (.-id wc) diff-path (:root entry))
+          (send-tree-entry! wc (with-diff-extra entry diff-path)))))))
+
 (defn- entry->map
   "One directory child as plain data for the renderer's directory view. Symlinks are flagged and
    resolved through to report the target's dir?/size/mtime."
@@ -588,6 +650,7 @@
         remote-owners (merge pending-owners (remote-offers-by-owner id))]
     (swap! window-owners retention/drop-owner id)
     (release-tree-owner! id)
+    (swap! adopted-diff-roots dissoc id)
     (swap! remote-tree-pending
            (fn [pending] (into {} (remove (fn [[[owner-id _] _]] (= id owner-id))) pending)))
     (doseq [[remote-owner-id {:keys [uri]}] remote-owners]
@@ -874,6 +937,8 @@
     (try (.rmdirSync fs (path/dirname path)) (catch :default _ nil)))
   ;; type overrides live exactly as long as retention: close the tab, reopen the file → extension deduction.
   (doc-overrides/clear! path)
+  ;; the ADR-0038 adoption guard shares that lifetime — reopening the same diff re-adopts cleanly.
+  (swap! adopted-diff-roots (fn [m] (into {} (map (fn [[id sub]] [id (dissoc sub path)])) m)))
   (release-doc-assets! path))
 
 (defn sync-retained!
@@ -895,9 +960,13 @@
   (send-content! wc path)
   (if (file-kind/remote-uri? path)
     (open-remote-tree! wc path)
-    ;; a piped-stdin document skips the sidebar tree like an archive does: its spill dir is not a project,
-    ;; and adopting $XDG_RUNTIME_DIR as a synthetic root would be pure noise.
-    (when-not (or (archive-uri? path) (doc-overrides/stdin-doc? path)) (send-tree! wc path)))
+    (cond
+      (archive-uri? path) nil
+      ;; a piped-stdin document skips the sidebar tree like an archive does: its spill dir is not a
+      ;; project, and adopting $XDG_RUNTIME_DIR as a synthetic root would be pure noise — EXCEPT a
+      ;; piped DIFF, which adopts the git repository of its invoking cwd (ADR-0038 seam 1).
+      (doc-overrides/stdin-doc? path) (send-stdin-diff-tree! wc path)
+      :else (send-tree! wc path)))
   (cond
     ;; remote (ssh://sftp://): prefer the authenticated target daemon event channel; polling stays opt-in fallback.
     (file-kind/remote-uri? path)
@@ -1019,7 +1088,7 @@
   ;; resolve a diff's referenced files (relative to the diff, walking up ancestors) → {rel → content}, for the
   ;; side-by-side view's full-file enrichment. Renderer-driven (it has no fs). Remote diffs resolve over SFTP.
   (.handle ipcMain "vv:load-diff-sources"
-           (fn [_e req]
+           (fn [^js e req]
              (let [{:keys [diffPath files includePaths includeContent]}
                    (js->clj req :keywordize-keys true)
                    opts {:include-paths? includePaths :include-content? includeContent}]
@@ -1027,7 +1096,10 @@
                  (.loadRemoteDiffSources content-service diffPath (clj->js files)
                                          #js {:includePaths (boolean includePaths)
                                               :includeContent (boolean includeContent)})
-                 (clj->js (load-diff-sources diffPath files opts))))))
+                 (let [resolved (load-diff-sources diffPath files opts)]
+                   ;; ADR-0038 seam 2: the resolved targets prove which repository the diff describes.
+                   (when includePaths (adopt-diff-project! (.-sender e) diffPath resolved))
+                   (clj->js resolved))))))
   ;; fetch a remote asset's bytes → a data: URL, so a remote Markdown/Office doc's relative images render (the
   ;; renderer can't reach the host, and file:// cannot either). `relativeTo` is the remote doc's URI.
   (.handle ipcMain "vv:load-remote-asset"

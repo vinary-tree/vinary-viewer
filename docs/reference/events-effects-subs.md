@@ -67,7 +67,8 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:tree/received` | fx | `{:root :files :synthetic? :scope?}` | `:ui :projects`, tree-open scopes | full project merge or exact scoped-subtree replacement; prune stale scopes | sync visible roots, dispatch declarative active reveal |
+| `:tree/received` | fx | `{:root :files :synthetic? :scope? :extras?}` | `:ui :projects`, tree-open scopes | full project merge or exact scoped-subtree replacement; prune stale scopes; an in-place full refresh **unions** `:extras` (`projects/merge-extras` — an extras-less re-send never wipes attached diffs, ADR-0038); scoped payloads never touch extras | sync visible roots, dispatch declarative active reveal |
+| `:tree/prune-extras` | db | `retained` (the retained document-identity set) | `:ui :projects` | drop `:transient?` extras whose `:path` is not in the retained set (`projects/prune-extras`; emptied `:extras` keys removed — persistent extras stay) | — (dispatched conditionally from `retention-fx`, only when some project carries extras — the same retention edge at which main unlinks a stdin spill) |
 | `:tree/expand` → `:tree/expand-ready` / `-failed` | fx | `root directory` / scope + reply | projects, open/pending scopes | mark pending; on success commit subtree + open scope atomically; failure leaves closed | `:vv/refresh-tree` |
 | `:tree/collapse` | db | `root directory` | tree-open scopes | remove the persistent open scope (effective descendants close too) | Files lifecycle later syncs the reduced watcher set |
 | `:tree/refresh` / `:tree/refresh-all` | fx | `{root path}` / — | visible projects | apply one scoped/full reply or every visible-root reply | `:vv/refresh-tree` / `:vv/refresh-all-trees` |
@@ -441,7 +442,7 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | Sub | Inputs | Output |
 | --- | --- | --- |
 | `:tabs` | `:<- [:ui/tabs]` | app-db tab vector |
-| `:tree/filtered` | `:<- [:ui/projects]` `:<- [:ui/tree-filter]` `:<- [:ui/settings]` | `[{:root :files :nodes :filtered?}]` — each project narrowed by the filter and already folded into its nested shape. **Layered**: folding every path of every project inside the view's render function is what let a re-render land between two keystrokes (ADR-0033) |
+| `:tree/filtered` | `:<- [:ui/projects]` `:<- [:ui/tree-filter]` `:<- [:ui/settings]` | `[{:root :files :nodes :filtered? :extras?}]` — each project narrowed by the filter and already folded into its nested shape; ADR-0038 `:extras` (attached diffs) filter by their display `:name` — they have no root-relative path — and keep the project alive on their own. **Layered**: folding every path of every project inside the view's render function is what let a re-render land between two keystrokes (ADR-0033) |
 | `:palette/candidates` | `:<- [:palette/state]` `:<- [:ui/projects]` `:<- [:ui/settings]` `:<- [::palette-ctx]` | `[{:item :score :spans}]`, empty while the palette is closed. Ranks raw strings and materialises an item only for survivors, so the cap bounds allocation rather than only the display |
 | `:facet/active` | `:<- [::facet-inputs]` `:<- [:doc/group]` | the active tab's effective facet `{:path :type}`. **Layered** — as a plain db-sub it ran a `d/q` plus a 22-attribute `d/pull` on every app-db write, and it is permanently subscribed |
 | `:view/switch` | `:<- [::facet-inputs]` `:<- [:doc/group]` | the `[Preview ▾ \| Source ▾]` toolbar model. Layered for the same reason as `:facet/active` |

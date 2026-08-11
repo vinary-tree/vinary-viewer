@@ -81,3 +81,32 @@
   (let [root (if directory? path parent)]
     (when (and root (not (str/blank? root)) (not (filesystem-root? root)))
       root)))
+
+(defn diff-extra
+  "The Files-tree :extras entry for a diff document adopted into a project (ADR-0038), or nil when the
+   diff lies INSIDE the adopted root — `git ls-files --others` already lists it there, and a second row
+   would be a double listing. `inside-root?` and `basename` are precomputed by the caller (node path)
+   so this stays pure. A piped-stdin diff displays as \"(piped diff)\" (its spill basename is the
+   cryptic \"stdin\") and is :transient? — the renderer prunes it when document retention drops the
+   spill, matching the service unlinking the temp file."
+  [{:keys [path basename inside-root? stdin?]}]
+  (when-not inside-root?
+    {:path       path
+     :name       (if stdin? "(piped diff)" basename)
+     :kind       "diff"
+     :transient? (boolean stdin?)}))
+
+(defn dominant-root
+  "The most frequent non-nil root among `roots`, first-seen winning ties; nil when every root is nil.
+   A diff whose targets resolve into several repositories adopts the one that owns most of them
+   (ADR-0038 D10). The strictly-greater comparison over the first-seen-ordered seq is what makes the
+   tie-break deterministic — a CLJS hash map would not preserve insertion order."
+  [roots]
+  (let [rs     (filterv some? roots)
+        counts (frequencies rs)]
+    (reduce (fn [best r]
+              (if (or (nil? best) (> (get counts r) (get counts best)))
+                r
+                best))
+            nil
+            rs)))

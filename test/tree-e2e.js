@@ -38,6 +38,7 @@ const ROOT = path.resolve(__dirname, '..');
 // /private/var/…, which would otherwise make every root comparison a false negative).
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-')));
 const GIT_SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-git-e2e-')));
+const DIFF_BASE = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-adopt-e2e-')));
 const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-tree-e2e-config-')));
 process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(CONFIG_HOME, 'daemon-events.json');
 const CLI_DOC = path.join(ROOT, 'src', 'vinary', 'ui', 'tree.cljs');
@@ -70,6 +71,38 @@ function writeFixture() {
   execFileSync('git', ['add', 'open.md', 'tracked-rename.md', 'tracked-delete.md'], {
     cwd: GIT_SCRATCH, stdio: ['ignore', 'ignore', 'ignore']
   });
+
+  // ADR-0038 fixture: a repo at DIFF_BASE/repo, and a patch stored OUTSIDE it at DIFF_BASE/patches/
+  // whose recorded paths ("repo/src/lib.rs") resolve through diff-source's ancestor walk from the
+  // patch's own directory — the on-disk shape that makes seam 2 adopt the described repository.
+  const diffRepo = path.join(DIFF_BASE, 'repo');
+  fs.mkdirSync(path.join(diffRepo, 'src'), { recursive: true });
+  execFileSync('git', ['-c', 'init.defaultBranch=main', 'init', '-q'], {
+    cwd: diffRepo, stdio: ['ignore', 'ignore', 'ignore']
+  });
+  fs.writeFileSync(path.join(diffRepo, 'src', 'lib.rs'), 'pub fn answer() -> i32 {\n    42\n}\n');
+  execFileSync('git', ['add', 'src/lib.rs'], { cwd: diffRepo, stdio: ['ignore', 'ignore', 'ignore'] });
+  fs.mkdirSync(path.join(DIFF_BASE, 'patches'), { recursive: true });
+  fs.writeFileSync(path.join(DIFF_BASE, 'patches', 'fix.patch'),
+    ['diff --git a/repo/src/lib.rs b/repo/src/lib.rs',
+     '--- a/repo/src/lib.rs',
+     '+++ b/repo/src/lib.rs',
+     '@@ -1,3 +1,3 @@',
+     ' pub fn answer() -> i32 {',
+     '-    42',
+     '+    43',
+     ' }',
+     ''].join('\n'));
+  fs.writeFileSync(path.join(diffRepo, 'local.patch'),
+    ['diff --git a/src/lib.rs b/src/lib.rs',
+     '--- a/src/lib.rs',
+     '+++ b/src/lib.rs',
+     '@@ -1,3 +1,3 @@',
+     ' pub fn answer() -> i32 {',
+     '-    42',
+     '+    44',
+     ' }',
+     ''].join('\n'));
 }
 
 // The headless runner invokes `electron --no-sandbox <app>`, leaving the Chromium switch in argv[1]. Production is
@@ -586,6 +619,70 @@ async function run() {
     assert.ok(byRoot(ps, GIT_SCRATCH).files.includes('open.md'));
   });
 
+  // ---- ADR-0038: a diff adopts the project it describes --------------------------------------------
+  const DIFF_REPO = path.join(DIFF_BASE, 'repo');
+  const FIX_PATCH = path.join(DIFF_BASE, 'patches', 'fix.patch');
+  await open(wc, FIX_PATCH);
+  ps = await until(wc, PROJECTS,
+                   (p) => { const r = byRoot(p, DIFF_REPO);
+                     return Boolean(r && (r.extras || []).some((x) => x.path === FIX_PATCH)); },
+                   'the described repository to join Files with the patch attached');
+  check('an on-disk patch stored outside its repo adopts that repo with an attached extra', () => {
+    const r = byRoot(ps, DIFF_REPO);
+    assert.strictEqual(Boolean(r['synthetic?']), false, 'the adopted root is a git fact');
+    const extra = r.extras.find((x) => x.path === FIX_PATCH);
+    assert.strictEqual(extra.name, 'fix.patch');
+    assert.strictEqual(extra.kind, 'diff');
+    assert.strictEqual(Boolean(extra['transient?']), false, 'an on-disk patch is a persistent extra');
+    assert.ok(r.files.includes('src/lib.rs'), 'the adopted repo lists its own files');
+  });
+
+  const adoptedProjSelector = `details.vv-project[data-root=${JSON.stringify(DIFF_REPO)}]`;
+  const extraDom = await until(
+    wc,
+    `(() => {
+       const proj = document.querySelector(${JSON.stringify(adoptedProjSelector)});
+       if (!proj) return null;
+       const a = proj.querySelector('a.vv-file-extra');
+       return a && { path: a.getAttribute('data-path'), text: a.textContent,
+                     active: a.classList.contains('vv-file-active'), open: proj.open };
+     })()`,
+    (v) => Boolean(v && v.path === FIX_PATCH),
+    'the sidebar to render the attached patch row inside the adopted project');
+  check('the extra renders inside the (revealed) adopted project as the active row', () => {
+    assert.ok(extraDom.text.includes('fix.patch'));
+    assert.strictEqual(extraDom.active, true, 'the open patch row carries vv-file-active');
+    assert.strictEqual(extraDom.open, true, 'adopting reveals the project (active-scopes extras arm)');
+  });
+
+  // A full extras-less refresh must UNION, not replace: re-opening a repo file re-sends the complete
+  // entry with no extras — the branch that would silently wipe attachments without merge-extras.
+  await open(wc, path.join(DIFF_REPO, 'src', 'lib.rs'));
+  await sleep(1200);
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('a full extras-less refresh (re-open) keeps the attached patch (union, not replace)', () => {
+    const r = byRoot(ps, DIFF_REPO);
+    assert.ok((r.extras || []).some((x) => x.path === FIX_PATCH),
+              `extras after refresh = ${JSON.stringify(r.extras)}`);
+  });
+
+  // The inside-root guard: a patch stored IN the repo is already an ls-files row; a second (extra)
+  // listing would be a double.
+  const LOCAL_PATCH = path.join(DIFF_REPO, 'local.patch');
+  await open(wc, LOCAL_PATCH);
+  ps = await until(wc, PROJECTS,
+                   (p) => (byRoot(p, DIFF_REPO)?.files || []).includes('local.patch'),
+                   'the in-repo patch to appear as an ordinary untracked row');
+  await sleep(900);   // give seam 2 time to (wrongly) attach an extra if the guard ever broke
+  ps = await wc.executeJavaScript(PROJECTS);
+  check('a patch INSIDE the repo is a single ordinary row — never a second (extra) listing', () => {
+    const r = byRoot(ps, DIFF_REPO);
+    assert.ok(!(r.extras || []).some((x) => x.path === LOCAL_PATCH),
+              `extras = ${JSON.stringify(r.extras)}`);
+    assert.ok((r.extras || []).some((x) => x.path === FIX_PATCH),
+              'the earlier outside-repo extra still survives these refreshes');
+  });
+
   console.log(`\ntree-e2e: ${passed.length} checks passed`);
 }
 
@@ -594,6 +691,7 @@ app.whenReady().then(() =>
     .then(() => {
       fs.rmSync(SCRATCH, { recursive: true, force: true });
       fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
+      fs.rmSync(DIFF_BASE, { recursive: true, force: true });
       fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(0);
     })
@@ -601,6 +699,7 @@ app.whenReady().then(() =>
       console.error('\ntree-e2e FAILED:\n', err && err.stack ? err.stack : err);
       fs.rmSync(SCRATCH, { recursive: true, force: true });
       fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
+      fs.rmSync(DIFF_BASE, { recursive: true, force: true });
       fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(1);
     }));

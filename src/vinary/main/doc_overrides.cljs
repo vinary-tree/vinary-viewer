@@ -54,6 +54,13 @@
   (let [{:keys [stdin? cwd]} (get @overrides path)]
     (when stdin? cwd)))
 
+(defn git-info
+  "The commit-diff facts registered for path ({:root :from :to}, a git-produced diff document), or nil.
+   ADR-0038's Files-tree adoption skips docs that carry this — a commit diff is a transient synthetic
+   that dies with its tab, not a project member."
+  [path]
+  (:git (get @overrides path)))
+
 (defn effective-kind
   "The kind send-content! must serve for path: the explicit override when one is registered, else the
    classifier's answer. `classify` is injected (the service's grammar-aware kind-of) so this namespace

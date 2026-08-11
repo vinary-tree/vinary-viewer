@@ -50,6 +50,23 @@
         (is (= #{"src"} (set (keys nodes))))
         (is (= #{"ui"} (set (keys (get-in nodes ["src" :children])))))))))
 
+(deftest filtering-extras
+  (let [projects [{:root "/repo" :files ["src/a.md"]
+                   :extras [{:path "/tmp/s" :name "(piped diff)" :kind "diff" :transient? true}]}]]
+    (testing "a blank query carries extras through"
+      (is (= ["(piped diff)"] (mapv :name (:extras (first (tm/filtered projects "" opts)))))))
+    (testing "a query matching only an extra's name keeps the project alive with zero files"
+      (let [[p :as shown] (tm/filtered projects "piped" opts)]
+        (is (= 1 (count shown)))
+        (is (empty? (:files p)))
+        (is (= ["(piped diff)"] (mapv :name (:extras p))))))
+    (testing "a query matching neither files nor extras drops the project"
+      (is (empty? (tm/filtered projects "zzz" opts))))
+    (testing "a query matching only files drops the extras key"
+      (let [[p] (tm/filtered projects "src" opts)]
+        (is (= ["src/a.md"] (:files p)))
+        (is (nil? (:extras p)))))))
+
 (deftest filtering-honours-the-configured-mode
   (let [projects [{:root "/p" :files ["src/ui/views.cljs"]}]]
     (testing "the default (substring) does not match a scattered query"

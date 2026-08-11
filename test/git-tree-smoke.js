@@ -132,6 +132,18 @@ function main() {
     assert.ok(/\(or\s+\(repo-tree\s+file-path\)\s+\(dir-walk\/dir-tree\s+file-path/.test(src),
       'service.cljs send-tree! must fall back to dir-walk/dir-tree when there is no repo');
 
+    // ADR-0038: diff documents adopt the project they describe. The seams' behavior is covered by the
+    // node :test build (projects/tree-model/tree-state/service-util suites) and tree-e2e; what only this
+    // file can check is that main still WIRES them — both are silent no-ops when unplugged.
+    assert.ok(/\(doc-overrides\/stdin-doc\?\s+path\)\s+\(send-stdin-diff-tree!\s+wc\s+path\)/.test(src),
+      'service.cljs open! must route stdin docs through send-stdin-diff-tree! (ADR-0038 seam 1)');
+    assert.ok(/=\s*"diff"\s*\(doc-overrides\/effective-kind\s+kind-of\s+spill-path\)/.test(src),
+      'send-stdin-diff-tree! must gate on the doc-overrides effective kind being "diff"');
+    assert.ok(/\(repo-tree\s+cwd\)/.test(src),
+      'send-stdin-diff-tree! must adopt the repo of the invoking cwd (doc-overrides stdin-base-dir)');
+    assert.ok(/\(when\s+includePaths\s+\(adopt-diff-project!\s+\(\.-sender\s+e\)\s+diffPath\s+resolved\)\)/.test(src),
+      'the vv:load-diff-sources handler must adopt the described project once targets resolve (ADR-0038 seam 2)');
+
     console.log('git file-tree smoke OK');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

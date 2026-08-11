@@ -32,6 +32,13 @@ menu, a Contents outline, and — for free — a colored **terminal** rendering 
 `Makefile`, `LICENSE`, `.gitignore`, git config — now classify correctly too (see
 *Standard repository filetypes* below), a defect the diff work surfaced.
 
+A local diff also **adopts the project it describes** into the sidebar Files tree: the same resolved
+targets that make its file names navigable prove which repository it belongs to (and a piped
+`git diff | vv -t diff` proves it via the invoking cwd), so that repository appears in Files with the
+diff pinned inside it as an ordinary-looking row. See
+[feature 31 — Diff project adoption](31-diff-project-adoption.md) and
+[ADR-0038](../design-decisions/0038-diff-documents-adopt-described-project.md).
+
 ## How it works
 
 A diff travels through **one pure parser** and then diverges into exactly the two renderers it needs, adding no

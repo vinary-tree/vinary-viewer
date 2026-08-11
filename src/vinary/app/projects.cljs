@@ -69,16 +69,34 @@
         kept   (filterv #(not (str/starts-with? % prefix)) (:files parent))]
     (assoc parent :files (into kept (map #(str prefix %)) (:files entry)))))
 
+(defn- merge-extras
+  "Union two :extras vectors (ADR-0038 attached documents — a diff adopted into the project), deduped
+   by :path with `incoming` winning (a re-send may relabel), keeping first-seen order. Returns nil when
+   the union is empty so callers can keep the key absent. Extras are attachments, not listed files, so
+   refreshes that carry none must never wipe them."
+  [existing incoming]
+  (let [merged (reduce (fn [acc e]
+                         (let [i (first (keep-indexed #(when (same-path? (:path %2) (:path e)) %1) acc))]
+                           (if i (assoc acc i e) (conj acc e))))
+                       (vec (or existing []))
+                       (or incoming []))]
+    (when (seq merged) merged)))
+
 (defn merge-project
-  "Fold one incoming {:root :files :synthetic?} into the projects vector:
+  "Fold one incoming {:root :files :synthetic? :extras?} into the projects vector:
      • a root already present is replaced IN PLACE — re-opening a file refreshes its tree without
-       reordering the sidebar;
+       reordering the sidebar; its :extras are UNIONED with the incoming entry's, because a root-level
+       Refresh / re-open sends a full entry with no extras and must not lose the attached diffs;
      • a synthetic root covered by a known SYNTHETIC root does not become a second tree; instead its
-       freshly walked subtree is merged into that root, so the file just opened is always visible;
+       freshly walked subtree is merged into that root, so the file just opened is always visible
+       (incoming extras are unioned onto the parent — defensive: extras never ride synthetic entries
+       today, ADR-0038 adopts git roots only);
      • a synthetic root covered by a GIT root is dropped outright — the git root is authoritative and its
-       incoming payload is already a complete repository listing;
+       incoming payload is already a complete repository listing (a covered synthetic never carries
+       extras, so nothing is lost);
      • otherwise it is appended, and any SYNTHETIC root it now covers is absorbed (the broader view wins,
-       so /notes/sub followed by /notes leaves one tree rather than two overlapping ones).
+       so /notes/sub followed by /notes leaves one tree rather than two overlapping ones); extras of the
+       absorbed roots fold into the new entry (defensive, same reason as above).
    Containment only ever removes synthetic roots: a git repository nested inside a browsed directory is a
    project in its own right and must survive."
   [projects {:keys [root synthetic?] :as entry}]
@@ -93,19 +111,42 @@
                          first))]
     (cond
       idx
-      (assoc projects idx entry)
+      (let [merged (merge-extras (:extras (nth projects idx)) (:extras entry))]
+        (assoc projects idx (cond-> (dissoc entry :extras) merged (assoc :extras merged))))
 
       (and cover-idx (:synthetic? (nth projects cover-idx)))
-      (update projects cover-idx merge-subtree entry)
+      (update projects cover-idx
+              (fn [parent]
+                (let [merged (merge-extras (:extras parent) (:extras entry))]
+                  (cond-> (merge-subtree parent entry)
+                    merged (assoc :extras merged)))))
 
       cover-idx                                        ; covered by a git root — it refreshes itself
       projects
 
       :else
-      (conj (if synthetic?
-              (filterv #(not (and (:synthetic? %) (under? (:root %) root))) projects)
-              projects)
-            entry))))
+      (let [absorbed  (when synthetic?
+                        (filterv #(and (:synthetic? %) (under? (:root %) root)) projects))
+            projects' (if synthetic?
+                        (filterv #(not (and (:synthetic? %) (under? (:root %) root))) projects)
+                        projects)
+            inherited (reduce (fn [acc p] (merge-extras acc (:extras p))) nil absorbed)
+            merged    (merge-extras inherited (:extras entry))]
+        (conj projects' (cond-> (dissoc entry :extras) merged (assoc :extras merged)))))))
+
+(defn prune-extras
+  "Drop :transient? extras whose :path is no longer in the `retained` document set — their spilled
+   backing file is being unlinked main-side at the same retention edge. Persistent (on-disk) extras
+   stay until their project is removed, like any tree row. An emptied :extras key is removed entirely."
+  [projects retained]
+  (mapv (fn [p]
+          (if-let [extras (:extras p)]
+            (let [kept (filterv #(or (not (:transient? %))
+                                     (contains? retained (:path %)))
+                                extras)]
+              (if (seq kept) (assoc p :extras kept) (dissoc p :extras)))
+            p))
+        (vec projects)))
 
 (defn apply-tree-update
   "Apply a main-process tree payload. A payload without :scope is a full project entry and follows

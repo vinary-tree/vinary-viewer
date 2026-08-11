@@ -23,6 +23,12 @@ tab. A project is one of two things:
   roots overlap (§4). Scratch notes in `/tmp`, a downloaded PDF, a standalone `.org` file — all are
   navigable.
 
+A **diff document** can add a project by a third route: the repository it *describes*. Opening
+`git diff | vv -t diff` or an on-disk patch stored outside its checkout puts that checkout into
+Files with the diff attached as a pinned italic row that opens like any file — transient for piped
+diffs, persistent for on-disk ones. See [feature 31](31-diff-project-adoption.md) and
+[ADR-0038](../design-decisions/0038-diff-documents-adopt-described-project.md).
+
 Several projects can be open at once: the sidebar keeps **one collapsible tree per project**, rooted at
 the project directory's name. Folders are collapsible (native HTML `<details>`), files are clickable to
 open in a tab, and a **filter box** at the top narrows **across all projects** to files whose path

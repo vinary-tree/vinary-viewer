@@ -34,18 +34,26 @@
                    (range 1 (inc (count parts)))))))))
 
 (defn active-scopes
-  "Scopes that must be open to reveal `active-path`. The deepest containing project wins."
+  "Scopes that must be open to reveal `active-path`. The deepest containing project wins. A path
+   contained by NO project but attached as an ADR-0038 extra (a diff adopted into a project it does
+   not live under) reveals its adopting project's root — extras render at root level, so the root
+   scope is the only one needed."
   [projects active-path]
   (when (and active-path (seq projects))
-    (when-let [{:keys [root]}
-               (->> projects
-                    (filter #(projects/under? active-path (:root %)))
-                    (sort-by (comp - count :root))
-                    first)]
+    (if-let [{:keys [root]}
+             (->> projects
+                  (filter #(projects/under? active-path (:root %)))
+                  (sort-by (comp - count :root))
+                  first)]
       (let [rel       (projects/relative-path active-path root)
             parent-i  (.lastIndexOf rel "/")
             directory (if (neg? parent-i) root (projects/join-path root (subs rel 0 parent-i)))]
-        (set (ancestor-scopes root directory))))))
+        (set (ancestor-scopes root directory)))
+      (when-let [{:keys [root]}
+                 (first (filter (fn [p]
+                                  (some #(projects/same-path? (:path %) active-path) (:extras p)))
+                                projects))]
+        #{[root root]}))))
 
 (defn prune-scopes
   "Drop expansion/pending scopes that no longer exist in the file-derived project trees."

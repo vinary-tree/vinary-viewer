@@ -376,6 +376,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .vv-file:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
 .vv-file-active { background: var(--vv-highlight); color: var(--vv-fg-strong); font-weight: 600; }
+/* ADR-0038: an attached document (a diff adopted into the project) — part of the tree, visibly not a git-listed row */
+.vv-file-extra { font-style: italic; }
 
 /* Contents (TOC) outline (Contents tab; scroll-spy highlights the active heading) */
 .vv-toc-list { padding: 6px 0; font-size: 12px; }

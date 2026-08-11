@@ -14,6 +14,23 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Diff documents adopt the project they describe (ADR-0038): opening a diff
+      now puts the repository it was generated in into the sidebar Files tree,
+      with the diff itself listed inside it as an ordinary-looking row. `git diff
+      | vv -t diff` shows the invoking repo with an italic "(piped diff)" row
+      pinned above the folders (click / Ctrl+click / right-click like any file);
+      the row is transient -- it vanishes when the tab closes, exactly when the
+      spilled snapshot is unlinked. Opening an on-disk .patch stored OUTSIDE its
+      checkout adds that checkout with the patch attached persistently (survives
+      refreshes and watcher updates; Remove from Files takes the project away).
+      A patch INSIDE its repo stays a single ordinary row (ls-files already
+      lists it -- no double listing). Adoption is git-repositories-only, picks
+      the dominant repository for multi-repo diffs, and leaves remote (ssh://)
+      diffs untouched; the Files filter matches attached rows by display name
+      and keeps their project alive on such a match, and keyboard tree
+      navigation walks them in visual (pinned-first) order. See
+      docs/features/31-diff-project-adoption.md and
+      docs/design-decisions/0038-diff-documents-adopt-described-project.md.
     - Rocq syntax highlighting: .v proof files light up everywhere source renders
       (GUI source view, diff per-file previews, --cli/--tui, ```coq fences, org
       #+begin_src coq) via a newly bundled tree-sitter grammar

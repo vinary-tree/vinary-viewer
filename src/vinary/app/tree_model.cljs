@@ -38,8 +38,14 @@
   (let [blank? (str/blank? q)
         m      (when-not blank? (match/matcher q match-opts))]
     (into []
-          (keep (fn [{:keys [root files]}]
-                  (let [shown (if blank? (vec files) (filterv #(some? (m %)) files))]
-                    (when (seq shown)
-                      {:root root :files shown :nodes (build-tree shown) :filtered? (not blank?)}))))
+          (keep (fn [{:keys [root files extras]}]
+                  ;; ADR-0038 extras (attached diffs) filter by their display :name — they have no
+                  ;; root-relative path — and can keep a project alive on their own.
+                  (let [shown        (if blank? (vec files) (filterv #(some? (m %)) files))
+                        shown-extras (if blank?
+                                       (vec (or extras []))
+                                       (filterv #(some? (m (str (:name %)))) (or extras [])))]
+                    (when (or (seq shown) (seq shown-extras))
+                      (cond-> {:root root :files shown :nodes (build-tree shown) :filtered? (not blank?)}
+                        (seq shown-extras) (assoc :extras shown-extras))))))
           projects)))

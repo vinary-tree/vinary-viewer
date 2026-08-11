@@ -77,7 +77,8 @@ Current default shape:
       :active-tab nil
       :next-tab-id 0
       :tab-drop nil                 ; {:over <tab-id> :after? bool} tab-drag drop indicator, or nil
-      :projects []                  ; [{:root :files :synthetic?} …] one file tree per open project
+      :projects []                  ; [{:root :files :synthetic? :extras?} …] one file tree per open
+                                    ; project (:extras = attached diffs adopted per ADR-0038)
       :menu nil
       :settings {}
       :recent {:trail {} :recent-files []}  ; persisted (recent.edn): dir→last-child trail + MRU
@@ -114,7 +115,7 @@ Important slices:
 | `[:ui :adblock]` | Ad-block prefs `{:enabled? :lists :last-updated}` (persisted in `extensions.edn`). |
 | `[:ui :passwords]` | Native password-manager bridge UI state. It stores provider status, form presence, sanitized item metadata, result messages, and save tokens; it never stores revealed passwords. |
 | `[:ui :extensions-open?]` | Whether the Settings ▸ Extensions dialog is open (an overlay for `:ui/overlay-open?`). |
-| `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. Merge rules live in `vinary.app.projects`. |
+| `[:ui :projects]` | Files-tab project trees, `[{:root :files :synthetic? :extras?} …]` — one per open project. A root is a git repository, or (`:synthetic? true`) the containing directory of a file that belongs to none. An optional `:extras` vector attaches documents adopted into the project (ADR-0038: a diff pinned inside the repository it describes — `[{:path :name :kind :transient?}]`; `:transient?` extras are pruned when document retention drops their path). Merge rules live in `vinary.app.projects`. |
 | `[:ui :tree-open]` | Persistent disclosure intent as `[project-root absolute-directory]` scopes. Effective expansion additionally requires every ancestor and a mounted/visible Files tree. |
 | `[:ui :tree-expanding]` | Scopes whose explicit expansion is awaiting a main-process listing; they remain rendered closed. |
 | `[:ui :tree-restoring?]` | Returning from a hidden/unmounted Files view is refreshing remembered open roots before the tree remounts. |

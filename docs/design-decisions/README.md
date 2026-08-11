@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0038**.
+The next free number is **0039**.
 
 ---
 
@@ -95,6 +95,7 @@ The next free number is **0038**.
 | [0035](0035-authenticated-remote-daemon-events.md) | Authenticate SSH-forwarded daemon events for remote files and trees | Accepted |
 | [0036](0036-stdin-documents-and-explicit-file-types.md) | Piped-stdin documents (spilled temp file) + explicit `-t/--type` file types (one shared resolver, a main-side override registry, Settings ▸ File Type); plain text is never delimiter-sniffed | Accepted |
 | [0037](0037-collapsible-diff-file-previews.md) | Collapsible per-file diff previews: a controlled `<details>` wrapper in the shared IR (byte-neutral ANSI, meta-id TUI anchors), per-tab `:diff-collapsed` state re-projected after every innerHTML rebuild, hintable banners, View ▸ Collapse All Files, vim `z M`/`z R`; the `[Unified \| Split]` seg control folded into the Preview combo | Accepted |
+| [0038](0038-diff-documents-adopt-described-project.md) | Diff documents adopt the project they describe: a piped diff's invoking cwd (seam 1, `open!`) or an on-disk diff's resolved targets (seam 2, `vv:load-diff-sources`) prove a git repository, pushed as a normal `vv:tree` entry with the diff attached via `:extras` — "(piped diff)" transient with retention, on-disk persistent; git-repos-only, in-root suppression, dominant root for multi-repo diffs, commit-diff `:git` opt-out | Accepted |
 
 ---
 

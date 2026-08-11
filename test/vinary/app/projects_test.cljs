@@ -111,6 +111,54 @@
           after  (projects/merge-project before (git "/notes/repo" "a.md"))]
       (is (= ["/notes" "/notes/repo"] (roots after))))))
 
+(defn- extra [path & {:keys [name kind transient?]
+                      :or   {name "fix.patch" kind "diff" transient? false}}]
+  {:path path :name name :kind kind :transient? transient?})
+
+(deftest extras-union-on-in-place-replace
+  (testing "a root-level Refresh / re-open sends a full entry WITHOUT extras — the union keeps them"
+    (let [e  (extra "/patches/fix.patch")
+          p0 (projects/merge-project [] (assoc (git "/repo" "a.md") :extras [e]))
+          p1 (projects/merge-project p0 (git "/repo" "a.md" "b.md"))]
+      (is (= ["a.md" "b.md"] (:files (first p1))))
+      (is (= [e] (:extras (first p1))))))
+  (testing "incoming wins the dedupe by :path (a re-send may relabel)"
+    (let [p0 (projects/merge-project [] (assoc (git "/repo" "a.md")
+                                               :extras [(extra "/p/x.diff" :name "old")]))
+          p1 (projects/merge-project p0 (assoc (git "/repo" "a.md")
+                                               :extras [(extra "/p/x.diff" :name "new")]))]
+      (is (= ["new"] (mapv :name (:extras (first p1)))))))
+  (testing "distinct paths accumulate in first-seen order"
+    (let [p0 (projects/merge-project [] (assoc (git "/repo" "a.md") :extras [(extra "/p/1.diff" :name "1")]))
+          p1 (projects/merge-project p0 (assoc (git "/repo" "a.md") :extras [(extra "/p/2.diff" :name "2")]))]
+      (is (= ["1" "2"] (mapv :name (:extras (first p1))))))))
+
+(deftest extras-untouched-by-scoped-updates
+  (let [e  (extra "/patches/fix.patch")
+        p0 (projects/merge-project [] (assoc (git "/repo" "src/a.md" "src/b.md") :extras [e]))
+        p1 (projects/apply-tree-update p0 {:root "/repo" :scope "src" :files ["src/c.md"]})]
+    (is (= ["src/c.md"] (:files (first p1))))
+    (is (= [e] (:extras (first p1))) "a watcher-scoped replacement never touches extras")))
+
+(deftest extras-prune-by-retention
+  (let [t  (extra "/run/stdin/1/stdin" :name "(piped diff)" :transient? true)
+        d  (extra "/patches/fix.patch")
+        ps [(assoc (git "/repo" "a.md") :extras [t d])]]
+    (testing "a transient extra dies when retention drops its path"
+      (is (= [d] (:extras (first (projects/prune-extras ps #{"/repo/a.md"}))))))
+    (testing "a retained transient extra stays"
+      (is (= [t d] (:extras (first (projects/prune-extras ps #{"/run/stdin/1/stdin"}))))))
+    (testing "an emptied :extras key is removed entirely"
+      (is (nil? (:extras (first (projects/prune-extras [(assoc (git "/r" "a") :extras [t])] #{}))))))))
+
+(deftest extras-fold-through-absorption
+  (testing "a broader synthetic root inherits the extras of the roots it absorbs (defensive carry)"
+    (let [e  (extra "/patches/fix.patch")
+          p0 (projects/merge-project [] (assoc (syn "/notes/sub" "c.md") :extras [e]))
+          p1 (projects/merge-project p0 (syn "/notes" "a.md"))]
+      (is (= ["/notes"] (roots p1)))
+      (is (= [e] (:extras (first p1)))))))
+
 (deftest remove-project-drops-exactly-one-root
   (testing "only the named root leaves; the rest keep their order"
     (let [before [(git "/one") (syn "/two") (git "/three")]]

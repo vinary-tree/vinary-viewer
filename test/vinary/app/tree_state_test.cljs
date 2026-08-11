@@ -44,6 +44,16 @@
            (tree-state/effective-expanded projects filtered #{} #{["/repo" "/repo/sub"]})))
     (is (= #{} (tree-state/effective-expanded projects [] #{["/repo" "/repo"]} #{})))))
 
+(deftest active-scopes-for-extras
+  (let [ps [{:root "/repo" :files ["top.md"]
+             :extras [{:path "/tmp/vv/stdin" :name "(piped diff)" :kind "diff" :transient? true}]}]]
+    (testing "an extra's path (outside every root) reveals the adopting project's root scope"
+      (is (= #{["/repo" "/repo"]} (tree-state/active-scopes ps "/tmp/vv/stdin"))))
+    (testing "containment still wins when a project contains the path"
+      (is (= #{["/repo" "/repo"]} (tree-state/active-scopes ps "/repo/top.md"))))
+    (testing "a path in no project and no extras reveals nothing"
+      (is (nil? (tree-state/active-scopes ps "/elsewhere/x.md"))))))
+
 (deftest reveal-and-prune-scopes
   (is (= #{["/repo" "/repo"] ["/repo" "/repo/sub"] ["/repo" "/repo/sub/deep"]}
          (tree-state/active-scopes projects "/repo/sub/deep/b.md")))

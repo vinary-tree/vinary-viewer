@@ -37,6 +37,33 @@
     (try (js/decodeURIComponent name) (catch :default _ name))
     name))
 
+(defn- file-attrs
+  "Shared <a.vv-file> attrs: open (single click on Linux, double on Windows/macOS); Ctrl+click → new
+   tab; right-click → the :file menu. `full` is the absolute open target — a root-relative tree row's
+   reconstituted path, or an ADR-0038 extra's own absolute path."
+  [root full active]
+  {:class            (when (projects/same-path? full active) "vv-file-active")
+   :data-path        full
+   :title            full
+   :on-click         (fn [^js e]
+                       (when (or (.-ctrlKey e) (platform/single-click-open?))
+                         (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
+   :on-double-click  (fn [^js e]
+                       (when-not (platform/single-click-open?)
+                         (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
+   :on-context-menu  (ctx! :file root full)})
+
+(defn- extra-row
+  "One ADR-0038 attached document (a diff adopted into this project): pinned above the folders and
+   opening like any file row. The icon lookup falls back to \".<kind>\" when the display name carries
+   no extension — \"(piped diff)\" still gets the code glyph."
+  [{:keys [path kind] :as extra} root active]
+  (let [label (str (:name extra))]
+    [:a.vv-file.vv-file-extra
+     (file-attrs root path active)
+     (icons/file-icon (if (str/includes? label ".") label (str "x." kind)))
+     label]))
+
 (defn- nodes->hiccup [children root active expanded expanding dir-prefix]
   (into [:<>]
         (for [[k v] (sort-by (fn [[k v]] [(if (:children v) 0 1)
@@ -58,22 +85,12 @@
                 (icons/folder-icon) (display-name root k)]
                (nodes->hiccup (:children v) root active expanded expanding dpath)])
             (let [full (projects/join-path root (:file v))]
-              ;; open (single click on Linux, double on Windows/macOS); Ctrl+click → new tab; right-click → menu
-              [:a.vv-file {:class            (when (projects/same-path? full active) "vv-file-active")
-                           :data-path        full
-                           :title            full
-                           :on-click         (fn [^js e]
-                                               (when (or (.-ctrlKey e) (platform/single-click-open?))
-                                                 (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
-                           :on-double-click  (fn [^js e]
-                                               (when-not (platform/single-click-open?)
-                                                 (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
-                           :on-context-menu  (ctx! :file root full)}
+              [:a.vv-file (file-attrs root full active)
                (icons/file-icon k) (display-name root k)])))))
 
 ;; `nodes` and `filtered?` arrive already computed from the :tree/filtered subscription — folding paths
 ;; into a tree is a model question, and doing it here meant redoing it on every keystroke (ADR-0033).
-(defn- project-tree [{:keys [root nodes]} active expanded expanding]
+(defn- project-tree [{:keys [root nodes extras]} active expanded expanding]
   (let [scope    [root root]
         open?    (contains? expanded scope)
         pending? (contains? expanding scope)]
@@ -87,6 +104,13 @@
       (icons/folder-icon) (display-name root
                                        (last (remove str/blank?
                                                      (str/split (projects/normalized-path root) #"/"))))]
+     ;; ADR-0038 attached documents render pinned above the folders — visibly part of the project,
+     ;; visibly not a git-listed row (.vv-file-extra italicises them).
+     (when (seq extras)
+       (into [:<>]
+             (for [e (sort-by (comp str :name) extras)]
+               ^{:key (str "extra:" (:path e))}
+               [extra-row e root active])))
      (nodes->hiccup nodes root active expanded expanding root)]))
 
 (defn- file-tree-view [_shown _active _projects _filter _open _expanding _expanded]

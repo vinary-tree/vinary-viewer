@@ -49,10 +49,19 @@
       (seq tx) (conj [:ds/transact tx])
       true     (conj [:vv/sync-retained-files retained])
       true     (conj [:pdf/evict retained])       ; evict cached PDF bytes for retired docs
-      true     (conj [:render-cache/retain-only retained]))))
+      true     (conj [:render-cache/retain-only retained])
+      ;; ADR-0038: transient Files-tree extras (adopted stdin diffs) die with retention, exactly when
+      ;; main unlinks their spill. Conditional so the common no-extras case dispatches nothing.
+      (some (comp seq :extras) (get-in db [:ui :projects]))
+      (conj [:dispatch [:tree/prune-extras retained]]))))
 
 (defn- with-retention [result db]
   (update result :fx #(into (vec (or % [])) (retention-fx db))))
+
+(rf/reg-event-db
+ :tree/prune-extras
+ (fn [db [_ retained]]
+   (update-in db [:ui :projects] projects/prune-extras (set retained))))
 
 ;; ---- recent navigation memory (persisted to recent.edn): dir→child trail + recent-files MRU ----
 (def ^:private max-recent-files 10)
@@ -1488,10 +1497,17 @@
 (defn- visible-tree-paths [db]
   (let [projects (get-in db [:ui :projects])
         q        (some-> (get-in db [:ui :tree-filter]) str/trim str/lower-case not-empty)]
-    (vec (mapcat (fn [{:keys [root files]}]
-                   (->> files
-                        (filter #(or (nil? q) (str/includes? (str/lower-case %) q)))
-                        (map #(str root "/" %))))
+    (vec (mapcat (fn [{:keys [root files extras]}]
+                   (concat
+                    ;; ADR-0038 extras render pinned first, so keyboard order matches visual order;
+                    ;; they filter by display name (they have no root-relative path)
+                    (->> extras
+                         (filter #(or (nil? q) (str/includes? (str/lower-case (str (:name %))) q)))
+                         (sort-by (comp str :name))
+                         (map :path))
+                    (->> files
+                         (filter #(or (nil? q) (str/includes? (str/lower-case %) q)))
+                         (map #(str root "/" %)))))
                  projects))))
 
 (rf/reg-event-db

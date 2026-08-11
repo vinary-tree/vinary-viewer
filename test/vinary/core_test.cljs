@@ -65,6 +65,26 @@
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "source"})))
     (is (= :text  (service-util/route {:directory? false :archive? false :kind "markdown"})))))
 
+(deftest diff-extra-entries
+  (testing "a diff inside the adopted root gets NO extra (ls-files --others already lists it)"
+    (is (nil? (service-util/diff-extra {:path "/repo/fix.patch" :basename "fix.patch"
+                                        :inside-root? true :stdin? false}))))
+  (testing "an on-disk diff outside the root lists under its basename, persistent"
+    (is (= {:path "/patches/fix.patch" :name "fix.patch" :kind "diff" :transient? false}
+           (service-util/diff-extra {:path "/patches/fix.patch" :basename "fix.patch"
+                                     :inside-root? false :stdin? false}))))
+  (testing "a piped-stdin diff displays as \"(piped diff)\" and is transient"
+    (is (= {:path "/run/u/stdin" :name "(piped diff)" :kind "diff" :transient? true}
+           (service-util/diff-extra {:path "/run/u/stdin" :basename "stdin"
+                                     :inside-root? false :stdin? true})))))
+
+(deftest dominant-root-selection
+  (is (= "/a" (service-util/dominant-root ["/a" "/b" "/a" nil])) "majority wins")
+  (is (= "/a" (service-util/dominant-root ["/a" "/b"])) "first-seen wins a tie")
+  (is (= "/b" (service-util/dominant-root [nil "/b" nil])) "nils never count")
+  (is (nil? (service-util/dominant-root [nil nil])) "all-nil → nil")
+  (is (nil? (service-util/dominant-root [])) "empty → nil"))
+
 (deftest synthetic-root-walk-policy
   (testing "hidden directories are skipped wholesale — .git/.venv/.cache/.next/.tox in one rule"
     (is (true? (service-util/skip-dir? ".git")))
