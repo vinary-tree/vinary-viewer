@@ -14,6 +14,8 @@
             [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
             [vinary.app.projects :as projects]
+            [vinary.app.commits :as commits]
+            [vinary.git.graph :as graph]
             [vinary.app.tree-state :as tree-state]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -62,6 +64,201 @@
  :tree/prune-extras
  (fn [db [_ retained]]
    (update-in db [:ui :projects] projects/prune-extras (set retained))))
+
+;; ══ the Commits surfaces (ADR-0039) ═════════════════════════════════════════════════════════════
+;; Per-repo state lives under [:ui :commits :repos <root>]. The lane fold (:graph) is stored
+;; INCREMENTALLY on every received page (R2) so the sidebar rail and the Commit Graph document read
+;; one source of truth; stale async replies are dropped by generation (:gen), the :find pattern.
+
+(def ^:private commits-page 250)
+
+(defn- commits-path [root & ks] (into [:ui :commits :repos root] ks))
+
+(rf/reg-event-fx
+ :commits/shown
+ (fn [{:keys [db]} [_ root]]
+   (when root
+     {:db (assoc-in db [:ui :commits :last-root] root)
+      :fx [[:vv/git-watch [root]]
+           [:dispatch [:commits/ensure root]]]})))
+
+(rf/reg-event-fx
+ :commits/hidden
+ (fn [_ _] {:fx [[:vv/git-watch []]]}))
+
+(rf/reg-event-fx
+ :commits/set-root
+ (fn [{:keys [db]} [_ root]]
+   {:db (-> db
+            (assoc-in [:ui :commits :root] root)
+            (assoc-in [:ui :commits :follow-active?] false))
+    :fx [[:vv/git-watch [root]]
+         [:dispatch [:commits/ensure root]]]}))
+
+(rf/reg-event-fx
+ :commits/ensure
+ (fn [{:keys [db]} [_ root]]
+   (when root
+     (let [repo (get-in db (commits-path root))]
+       {:db (update-in db (commits-path root) #(or % {}))
+        :fx (cond-> []
+              (nil? (:branches repo))
+              (conj [:vv/git-branches {:root root
+                                       :on-done  [:commits/branches-received root]
+                                       :on-error [:commits/log-error root]}])
+              (and (empty? (:commits repo)) (not (:loading? repo)))
+              (conj [:dispatch [:commits/load root {:skip 0}]]))}))))
+
+(rf/reg-event-fx
+ :commits/load
+ (fn [{:keys [db]} [_ root {:keys [skip]}]]
+   (let [repo (get-in db (commits-path root))
+         gen  (inc (long (or (:gen repo) 0)))]
+     {:db (-> db
+              (assoc-in (commits-path root :loading?) true)
+              (assoc-in (commits-path root :gen) gen))
+      :fx [[:vv/git-log (cond-> {:root root :skip (long (or skip 0)) :limit commits-page
+                                 :on-done  [:commits/log-received root gen (zero? (long (or skip 0)))]
+                                 :on-error [:commits/log-error root]}
+                          (:ref repo) (assoc :ref (:ref repo)))]]})))
+
+(rf/reg-event-fx
+ :commits/load-more
+ (fn [{:keys [db]} [_ root]]
+   (let [{:keys [loading? exhausted? commits]} (get-in db (commits-path root))]
+     (when-not (or loading? exhausted?)
+       {:fx [[:dispatch [:commits/load root {:skip (count commits)}]]]}))))
+
+(rf/reg-event-db
+ :commits/log-received
+ (fn [db [_ root gen page0? {:keys [commits exhausted empty error]}]]
+   (if (not= gen (get-in db (commits-path root :gen)))
+     db                                                    ; superseded request → drop the reply
+     (if error
+       (update-in db (commits-path root) merge {:loading? false :error error})
+       (let [prev  (get-in db (commits-path root))
+             all   (if page0? (vec commits) (into (vec (:commits prev)) commits))
+             state (if page0? (graph/init-state) (get-in prev [:graph :state] (graph/init-state)))
+             fold  (graph/assign state (if page0? all (vec commits)))
+             rows  (if page0? (:rows fold) (into (get-in prev [:graph :rows] []) (:rows fold)))
+             kept  (when page0?
+                     ;; a refresh replaced the pages — hash-keyed UI state survives by hash
+                     (select-keys (commits/keep-surviving prev (map :hash all))
+                                  [:selection :expanded :bodies]))]
+         (update-in db (commits-path root) merge kept
+                    {:commits all :loading? false :error nil
+                     :exhausted? (boolean exhausted) :empty? (boolean empty)
+                     :graph {:rows rows :state (:state fold)
+                             :max-lane (if page0?
+                                         (graph/max-lane rows)
+                                         (max (long (get-in prev [:graph :max-lane] 0))
+                                              (graph/max-lane (:rows fold))))}}))))))
+
+(rf/reg-event-db
+ :commits/log-error
+ (fn [db [_ root msg]]
+   (update-in db (commits-path root) merge {:loading? false :error (str msg)})))
+
+(rf/reg-event-db
+ :commits/branches-received
+ (fn [db [_ root {:keys [error] :as payload}]]
+   (if error
+     (update-in db (commits-path root) merge {:error error})
+     (let [names (into #{} (map :name) (:branches payload))
+           db    (assoc-in db (commits-path root :branches) payload)
+           ref   (get-in db (commits-path root :ref))]
+       (cond-> db
+         ;; the viewed ref vanished (branch deleted) → fall back to HEAD (D8)
+         (and ref (not (contains? names ref)))
+         (assoc-in (commits-path root :ref) nil))))))
+
+(rf/reg-event-fx
+ :commits/set-ref
+ (fn [{:keys [db]} [_ root ref]]
+   {:db (assoc-in db (commits-path root :ref) ref)
+    :fx [[:dispatch [:commits/load root {:skip 0}]]]}))
+
+(rf/reg-event-fx
+ :commits/activate
+ (fn [_ [_ root hash]]
+   ;; diff against the first parent — main resolves <hash>^, empty tree for a root commit (R4)
+   {:fx [[:vv/git-open-diff {:root root :to hash :parent? true
+                             :on-error [:commits/open-diff-error root]}]]}))
+
+(rf/reg-event-db
+ :commits/select
+ (fn [db [_ root hash mode]]
+   (let [order (mapv :hash (get-in db (commits-path root :commits)))]
+     (update-in db (commits-path root :selection)
+                (fn [sel] (commits/select (or sel {}) order hash mode))))))
+
+(rf/reg-event-db
+ :commits/clear-selection
+ (fn [db [_ root]]
+   (assoc-in db (commits-path root :selection) {:cursor nil :anchor nil :selected #{}})))
+
+(rf/reg-event-fx
+ :commits/diff-selected
+ (fn [{:keys [db]} [_ root]]
+   (let [order (mapv :hash (get-in db (commits-path root :commits)))]
+     (when-let [[older newer] (commits/diff-pair (get-in db (commits-path root :selection)) order)]
+       {:fx [[:vv/git-open-diff {:root root :from older :to newer
+                                 :on-error [:commits/open-diff-error root]}]]}))))
+
+(rf/reg-event-fx
+ :commits/toggle-expand
+ (fn [{:keys [db]} [_ root hash]]
+   (let [expanded? (contains? (get-in db (commits-path root :expanded) #{}) hash)
+         body      (some #(when (= (:hash %) hash) (:body %))
+                         (get-in db (commits-path root :commits)))
+         db'       (update-in db (commits-path root :expanded)
+                              (fn [s] (let [s (or s #{})]
+                                        (if expanded? (disj s hash) (conj s hash)))))]
+     (cond-> {:db db'}
+       ;; first expansion renders the GFM body lazily (D3); cached until the next page-0 refresh
+       (and (not expanded?)
+            (not (str/blank? body))
+            (not (contains? (get-in db (commits-path root :bodies) {}) hash)))
+       (assoc :fx [[:commits/render-body {:root root :hash hash :body body}]])))))
+
+(rf/reg-event-db
+ :commits/body-rendered
+ (fn [db [_ root hash html]]
+   (assoc-in db (commits-path root :bodies hash) html)))
+
+(rf/reg-event-db
+ :commits/range-input
+ (fn [db [_ root s]]
+   (-> db
+       (assoc-in (commits-path root :range-input) s)
+       (assoc-in (commits-path root :range-error) nil))))
+
+(rf/reg-event-fx
+ :commits/range-submit
+ (fn [{:keys [db]} [_ root]]
+   (let [raw    (get-in db (commits-path root :range-input))
+         parsed (commits/parse-range raw)]
+     (if (nil? parsed)
+       (when-not (str/blank? (str raw))
+         {:db (assoc-in db (commits-path root :range-error) "unrecognized range")})
+       {:fx [[:vv/git-open-diff (assoc parsed :root root
+                                       :on-error [:commits/open-diff-error root])]]}))))
+
+(rf/reg-event-db
+ :commits/open-diff-error
+ (fn [db [_ root msg]]
+   (assoc-in db (commits-path root :range-error) (str msg))))
+
+(rf/reg-event-fx
+ :commits/git-changed
+ (fn [{:keys [db]} [_ {:keys [root]}]]
+   ;; conservative refresh (D8): branches + page 0 only, for repos the panel actually loaded;
+   ;; the :gen bump makes any in-flight page reply stale, and keep-surviving preserves selection
+   (when (get-in db (commits-path root))
+     {:fx [[:vv/git-branches {:root root
+                              :on-done  [:commits/branches-received root]
+                              :on-error [:commits/log-error root]}]
+           [:dispatch [:commits/load root {:skip 0}]]]})))
 
 ;; ---- recent navigation memory (persisted to recent.edn): dir→child trail + recent-files MRU ----
 (def ^:private max-recent-files 10)

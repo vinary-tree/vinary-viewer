@@ -330,6 +330,48 @@
            (fn [roots]
              (when-let [^js vv (.-vv js/window)]
                (when (.-syncTreeRoots vv) (.syncTreeRoots vv (clj->js (or roots [])))))))
+;; ── the Commits surfaces (ADR-0039): async git bridge + lazy GFM bodies ─────────────────────────
+;; Each invoke conj's its reply onto the caller-supplied event vector; a missing preload fn (stale
+;; daemon) degrades to the on-error path so the panel shows a sentence instead of hanging.
+(rf/reg-fx :vv/git-log
+           (fn [{:keys [on-done on-error] :as req}]
+             (if-let [^js vv (and (.-vv js/window) (.-gitLog (.-vv js/window)) (.-vv js/window))]
+               (-> (.gitLog vv (clj->js (dissoc req :on-done :on-error)))
+                   (.then  (fn [reply] (rf/dispatch (conj on-done (js->clj reply :keywordize-keys true)))))
+                   (.catch (fn [e] (rf/dispatch (conj on-error (str (or (some-> e .-message) e)))))))
+               (rf/dispatch (conj on-error "git bridge unavailable (restart the viewer daemon)")))))
+(rf/reg-fx :vv/git-branches
+           (fn [{:keys [on-done on-error] :as req}]
+             (if-let [^js vv (and (.-vv js/window) (.-gitBranches (.-vv js/window)) (.-vv js/window))]
+               (-> (.gitBranches vv (clj->js (dissoc req :on-done :on-error)))
+                   (.then  (fn [reply] (rf/dispatch (conj on-done (js->clj reply :keywordize-keys true)))))
+                   (.catch (fn [e] (rf/dispatch (conj on-error (str (or (some-> e .-message) e)))))))
+               (rf/dispatch (conj on-error "git bridge unavailable (restart the viewer daemon)")))))
+;; the reply's :path is a spilled diff DOCUMENT — navigation must originate renderer-side (history,
+;; retention, facets), which is why main only returns the path (ADR-0039 D4).
+(rf/reg-fx :vv/git-open-diff
+           (fn [{:keys [on-error] :as req}]
+             (if-let [^js vv (and (.-vv js/window) (.-gitOpenDiff (.-vv js/window)) (.-vv js/window))]
+               (-> (.gitOpenDiff vv (clj->js (dissoc req :on-error)))
+                   (.then (fn [reply]
+                            (let [{:keys [path error]} (js->clj reply :keywordize-keys true)]
+                              (if path
+                                (rf/dispatch [:tab/navigate path])
+                                (rf/dispatch (conj on-error (or error "diff failed")))))))
+                   (.catch (fn [e] (rf/dispatch (conj on-error (str (or (some-> e .-message) e)))))))
+               (rf/dispatch (conj on-error "git bridge unavailable (restart the viewer daemon)")))))
+(rf/reg-fx :vv/git-watch
+           (fn [roots]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-gitWatch vv) (.gitWatch vv (clj->js (or roots [])))))))
+;; one commit MESSAGE body → sanitized HTML, lazily on row expand (never eagerly for a page); the
+;; base-dir is the repo root so relative links resolve like a README's. Render failure falls back to
+;; plain text (the event stores false → the view shows a <pre>).
+(rf/reg-fx :commits/render-body
+           (fn [{:keys [root hash body]}]
+             (-> (md/render-ir body root)
+                 (.then  (fn [{:keys [html]}] (rf/dispatch [:commits/body-rendered root hash html])))
+                 (.catch (fn [_] (rf/dispatch [:commits/body-rendered root hash false]))))))
 (rf/reg-fx :vv/sync-tree-expanded
            (fn [scopes]
              (when-let [^js vv (.-vv js/window)]

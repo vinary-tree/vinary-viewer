@@ -379,6 +379,70 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 /* ADR-0038: an attached document (a diff adopted into the project) — part of the tree, visibly not a git-listed row */
 .vv-file-extra { font-style: italic; }
 
+/* ── the Commits sidebar tab + the shared filterable combo-select (ADR-0039) ─────────────────── */
+.vv-commits { display: flex; flex-direction: column; min-height: 0; }
+.vv-commits-header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px;
+  border-bottom: 1px solid var(--vv-border); }
+.vv-commits-range { flex: 1 1 90px; min-width: 70px; background: var(--vv-bg1); color: var(--vv-fg);
+  border: 1px solid var(--vv-border); border-radius: 4px; padding: 2px 6px; font-size: 12px; }
+.vv-commits-pill { border: 1px solid var(--vv-accent); color: var(--vv-accent); background: transparent;
+  border-radius: 10px; padding: 1px 8px; font-size: 11px; cursor: pointer; }
+.vv-commits-error { flex-basis: 100%; color: var(--vv-error); font-size: 11px; padding: 2px 4px; }
+.vv-commits-list { min-height: 0; }
+.vv-commits-row { display: flex; align-items: stretch; cursor: pointer;
+  content-visibility: auto; contain-intrinsic-size: auto 40px; }
+.vv-commits-row:hover { background: var(--vv-bg2); }
+.vv-commits-row-sel { background: var(--vv-highlight); }
+.vv-commits-row-cur { box-shadow: inset 2px 0 0 var(--vv-accent); }
+.vv-commits-rail { flex: none; }
+.vv-commits-rail path { fill: none; stroke-width: 2; }
+.vv-commits-dot { fill: currentColor; stroke: none; }
+.vv-commits-main { flex: 1 1 auto; min-width: 0; padding: 4px 6px 4px 0; }
+.vv-commits-subject-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.vv-commits-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-commits-expander { border: none; background: none; color: var(--vv-fg-dim); cursor: pointer;
+  padding: 0 2px; font-size: 11px; }
+.vv-commits-refs { display: inline-flex; gap: 3px; flex: none; max-width: 45%; overflow: hidden; }
+.vv-commits-ref { border: 1px solid var(--vv-border); border-radius: 8px; padding: 0 5px;
+  font-size: 10px; color: var(--vv-fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vv-commits-meta { color: var(--vv-fg-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.vv-commits-hash { font-family: monospace; }
+.vv-commits-body { font-size: 12px; padding: 4px 2px; }
+.vv-commits-body-plain { font-size: 11px; white-space: pre-wrap; color: var(--vv-fg-dim); }
+.vv-commits-body-loading { color: var(--vv-fg-dim); font-size: 11px; }
+.vv-commits-footer { display: block; width: 100%; padding: 6px; color: var(--vv-fg-dim);
+  font-size: 11px; text-align: center; }
+.vv-commits-more { background: none; border: none; cursor: pointer; }
+.vv-commits-more:hover { color: var(--vv-fg); }
+/* lane palette hooks: color feeds the dot's currentColor fill, stroke feeds the rail paths */
+.vv-lane-0 { color: var(--vv-lane-0); stroke: var(--vv-lane-0); }
+.vv-lane-1 { color: var(--vv-lane-1); stroke: var(--vv-lane-1); }
+.vv-lane-2 { color: var(--vv-lane-2); stroke: var(--vv-lane-2); }
+.vv-lane-3 { color: var(--vv-lane-3); stroke: var(--vv-lane-3); }
+.vv-lane-4 { color: var(--vv-lane-4); stroke: var(--vv-lane-4); }
+.vv-lane-5 { color: var(--vv-lane-5); stroke: var(--vv-lane-5); }
+.vv-lane-6 { color: var(--vv-lane-6); stroke: var(--vv-lane-6); }
+.vv-lane-7 { color: var(--vv-lane-7); stroke: var(--vv-lane-7); }
+/* the shared filterable dropdown */
+.vv-combo-select { position: relative; display: inline-flex; max-width: 100%; }
+.vv-combo-select-panel { position: absolute; top: 100%; left: 0; z-index: 30; min-width: 180px;
+  max-width: 260px; background: var(--vv-bg1); border: 1px solid var(--vv-border); border-radius: 4px;
+  box-shadow: var(--vv-shadow-menu); padding: 4px; }
+.vv-combo-select-filter { width: 100%; box-sizing: border-box; margin-bottom: 4px; background: var(--vv-bg2);
+  color: var(--vv-fg); border: 1px solid var(--vv-border); border-radius: 3px; padding: 2px 6px;
+  font-size: 12px; }
+.vv-combo-select-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.vv-combo-select-hdr { color: var(--vv-fg-dim); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .05em; padding: 4px 6px 2px; }
+.vv-combo-select-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 3px;
+  cursor: pointer; font-size: 12px; white-space: nowrap; }
+.vv-combo-select-row:hover, .vv-combo-select-cur { background: var(--vv-highlight); }
+.vv-combo-select-current .vv-combo-select-name { font-weight: 600; }
+.vv-combo-select-name { overflow: hidden; text-overflow: ellipsis; }
+.vv-combo-select-meta { color: var(--vv-fg-dim); font-size: 10px; margin-left: auto; }
+.vv-combo-select-check { color: var(--vv-accent); }
+
 /* Contents (TOC) outline (Contents tab; scroll-spy highlights the active heading) */
 .vv-toc-list { padding: 6px 0; font-size: 12px; }
 .vv-toc-item { display: block; padding: 2px 12px; color: var(--vv-fg-dim); text-decoration: none;

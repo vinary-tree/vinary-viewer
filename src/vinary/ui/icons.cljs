@@ -26,6 +26,7 @@
    :section-files    "fa-solid fa-folder-tree"
    :section-contents "fa-solid fa-list-ul"
    :section-tabs     "fa-solid fa-window-restore"
+   :section-commits  "fa-solid fa-code-commit"
    :backspace        "fa-solid fa-delete-left"
    :keyboard         "fa-solid fa-keyboard"
    :key              "fa-solid fa-key"

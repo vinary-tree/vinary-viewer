@@ -54,6 +54,14 @@
               :sep
               {:label "Remove from Files"    :event [:tree/remove-project path]}]
     :files-tab [{:label "Refresh All" :event [:tree/refresh-all]}]
+    ;; a commit row in the Commits surfaces (ADR-0039) — strictly read-only actions
+    :commit (let [{:keys [hash subject pair]} target]
+              [{:label "Diff vs Parent" :event [:commits/activate root hash]}
+               (when pair {:label "Diff Selected (2)" :event [:commits/diff-selected root]})
+               :sep
+               {:label "Copy hash"       :event [:clipboard/copy hash]}
+               {:label "Copy short hash" :event [:clipboard/copy (subs (str hash) 0 7)]}
+               {:label "Copy subject"    :event [:clipboard/copy subject]}])
     :http [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
            {:label "Open in system browser" :event [:shell/open-external path]}

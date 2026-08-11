@@ -67,6 +67,8 @@
     (.onContent vv (fn [payload] (profile/mark! "received") (rf/dispatch [:content/received (js->clj payload :keywordize-keys true)])))
     (.onError   vv (fn [payload] (rf/dispatch [:content/error   (js->clj payload :keywordize-keys true)])))
     (.onTree    vv (fn [payload] (rf/dispatch [:tree/received    (js->clj payload :keywordize-keys true)])))
+    (when (.-onGitChanged vv)   ; guard: an older preload may predate the git data layer (ADR-0039)
+      (.onGitChanged vv (fn [payload] (rf/dispatch [:commits/git-changed (js->clj payload :keywordize-keys true)]))))
     (when (.-onKeymap vv)   ; guard: an older preload may not expose the keymap channel
       (.onKeymap vv (fn [payload] (rf/dispatch [:keymap/config-received (js->clj payload :keywordize-keys true)])))
       (when (.-requestKeymap vv) (.requestKeymap vv)))   ; pull in case main pushed before we subscribed

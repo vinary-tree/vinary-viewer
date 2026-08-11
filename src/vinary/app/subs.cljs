@@ -6,6 +6,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
             [vinary.app.commands :as commands]
+            [vinary.app.commits :as commits]
             [vinary.app.nav :as nav]
             [vinary.app.palette :as palette]
             [vinary.app.tree-model :as tree-model]
@@ -285,3 +286,24 @@
 ;; SSH: the pending auth-prompt request (non-secret) and the last connection error
 (rf/reg-sub :ui/ssh-prompt (fn [db _] (get-in db [:ui :ssh-prompt])))
 (rf/reg-sub :ui/ssh-error  (fn [db _] (get-in db [:ui :ssh-error])))
+
+;; ---- the Commits surfaces (ADR-0039) ----
+(rf/reg-sub :commits/state (fn [db _] (get-in db [:ui :commits])))
+
+;; the repo the panel shows: pin > deepest git project containing the active doc > last shown > first
+(rf/reg-sub
+ :commits/panel-root
+ :<- [:commits/state] :<- [:ui/projects] :<- [:ui/active-path]
+ (fn [[{:keys [root last-root]} projects active] _]
+   (commits/derive-root {:pinned root :last-root last-root} projects active)))
+
+(rf/reg-sub
+ :commits/for-root
+ :<- [:commits/state]
+ (fn [state [_ root]] (get-in state [:repos root])))
+
+;; the git projects a repo switcher can offer (synthetic roots can never serve git data)
+(rf/reg-sub
+ :commits/repos
+ :<- [:ui/projects]
+ (fn [projects _] (commits/git-projects projects)))

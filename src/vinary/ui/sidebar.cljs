@@ -4,6 +4,7 @@
    live in app-db (persisted via settings in Phase 5)."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
+            [vinary.ui.commits :as commits]
             [vinary.ui.icons :as icons]
             [vinary.ui.tree :as tree]
             [vinary.ui.tabs :as tabs-ui]))
@@ -118,12 +119,15 @@
                               :on-click #(rf/dispatch [:sidebar/tab :contents])} (icons/icon :section-contents) "Contents"]
         [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
                               :on-click #(rf/dispatch [:sidebar/tab :tabs])} (icons/icon :section-tabs) "Tabs"]
+        [:div.vv-sidebar-tab {:class    (when (= tab :commits) "vv-sidebar-tab-active")
+                              :on-click #(rf/dispatch [:sidebar/tab :commits])} (icons/icon :section-commits) "Commits"]
         [:div.vv-sidebar-tabs-spacer]
         [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :collapse)]]
        [:div.vv-sidebar-body
         (case tab
           :contents [contents-panel]
           :tabs     [tabs-panel]
+          :commits  [commits/commits-panel]
           (if restoring?
             [:div.vv-sidebar-empty "Refreshing files…"]
             [tree/file-tree]))]

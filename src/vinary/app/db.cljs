@@ -77,4 +77,8 @@
         :passwords {:open? false :providers [] :forms {:count 0} :items [] :busy? false
                     :error nil :result nil :save-prompt nil}
         ;; command palette / fuzzy finder
-        :palette {:open? false :source :command :prefix "" :query "" :items [] :selected 0}}})
+        :palette {:open? false :source :command :prefix "" :query "" :items [] :selected 0}
+        ;; Commits sidebar tab + Commit Graph document (ADR-0039): panel targeting + per-repo state
+        ;; (:repos "/abs/root" → {:ref :branches :commits :graph :exhausted? :empty? :loading? :error
+        ;;                        :gen :selection :expanded :bodies :range-input :range-error})
+        :commits {:root nil :follow-active? true :last-root nil :repos {}}}})

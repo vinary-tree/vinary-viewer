@@ -32,7 +32,10 @@
    ;; command palette: subsequence matching over command titles and file names
    :palette {:mode :subsequence :fold :simple :ranked? false}
    ;; address bar: completes the last path segment, so only a prefix makes sense
-   :uri     {:mode :prefix :fold :simple :ranked? false}})
+   :uri     {:mode :prefix :fold :simple :ranked? false}
+   ;; branch combo (Commits surfaces): substring over ref names; git's ref order is meaningful, so
+   ;; no ranking by default (user-overridable like every surface)
+   :branch-combo {:mode :substring :fold :simple :ranked? false}})
 
 (defn mode-for
   "The options for `surface`, with any user override from app-db applied.

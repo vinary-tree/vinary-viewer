@@ -10,6 +10,9 @@
   --vv-bg-code: #2f2b33;        /* inline code background; hover (cblk-bg) */
   --vv-bg-quote: #293235;       /* blockquote background (head2-bg) */
   --vv-figure-bg: #fafafa;      /* readable backdrop behind diagrams/figures so transparent-SVG ink stays legible */
+  /* commit-graph lane palette (ADR-0039): a stable 8-hue cycle drawn from the spacemacs accent set */
+  --vv-lane-0: #4f97d7; --vv-lane-1: #2d9574; --vv-lane-2: #67b11d; --vv-lane-3: #b1951d;
+  --vv-lane-4: #ce537a; --vv-lane-5: #a45bad; --vv-lane-6: #dc752f; --vv-lane-7: #2aa1ae;
 
   /* text */
   --vv-fg: #b2b2b2;             /* base foreground */
