@@ -170,7 +170,7 @@ Reagent view components and their pure view-helpers.
 |-----------|----------------|
 | `vinary.ui.views` | Main shell, content strategy (per-kind view selection), Markdown body lifecycle, toolbar, status/modeline; hosts the in-pane directory browser (`:doc/kind = "directory"`) and the Ctrl-hover breadcrumb URI bar. |
 | `vinary.ui.tabs` | The tab strip + the shared tab-item used by the horizontal strip and the sidebar's vertical Tabs list. |
-| `vinary.ui.sidebar` | The left sidebar shell: a tabbed pane hosting the multi-project Files tree, the Contents (TOC) outline, open Tabs, and the Commits panel. |
+| `vinary.ui.sidebar` | The left sidebar shell: a vertical icon rail (ADR-0041) beside one full-height panel — the multi-project Files tree, the Contents (TOC) outline, open Tabs, or the Commits panel. Collapsed, the rail alone remains; clicking the active icon collapses, any icon expands into its panel. |
 | `vinary.ui.tree` | The Files tree view: controlled refresh-before-open `<details>`, automatic watcher-scope sync, and file navigation. Narrowing/folding and expansion arithmetic live in pure app models (ADRs 0033/0034). |
 | `vinary.ui.commits` | The Commits sidebar tab (ADR-0039): paged list + mini lane rail (self-contained per-row SVG cells), branch combo, ref-range input, selection, lazy GFM bodies. Reducers live in `vinary.app.commits`; lanes in `vinary.git.graph`. |
 | `vinary.ui.combo-select` | The reusable filterable dropdown (combo-button shell + ADR-0033 async-input + `search.match` under the `:branch-combo` surface): grouped keyboard-navigable rows, current-pick check, row cap with a type-to-filter hint. |

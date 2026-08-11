@@ -228,15 +228,23 @@ async function hoverItem(win, text) {
 }
 
 async function ensureSidebar(win) {
-  // expand the sidebar if collapsed to a rail
-  await evalIn(win, `(() => { const r = document.querySelector('.vv-sidebar-rail'); if (r) r.click(); return true; })()`);
-  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-sidebar'))`), 'sidebar visible');
+  // expand the panel column if the sidebar is collapsed to the icon rail (ADR-0041)
+  await evalIn(win, `(() => {
+    if (!document.querySelector('.vv-sidebar-body'))
+      document.querySelector('[data-vv-rail="files"]').click();
+    return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-sidebar-body'))`), 'sidebar visible');
 }
 
 async function clickSidebarTab(win, label) {
   await ensureSidebar(win);
-  await clickByText(win, '.vv-sidebar-tab', label);
-  await waitFor(() => evalIn(win, `document.querySelector('.vv-sidebar-tab-active')?.textContent.includes(${JSON.stringify(label)})`), 'sidebar tab ' + label);
+  // guarded rail navigation: clicking the ACTIVE icon collapses, so only click on a miss
+  const name = label.toLowerCase();
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== ${JSON.stringify(name)})
+      document.querySelector('[data-vv-rail=${JSON.stringify(name)}]').click();
+    return true; })()`);
+  await waitFor(() => evalIn(win, `document.querySelector('[data-vv-rail=${JSON.stringify(name)}]').classList.contains('vv-rail-btn-active')`), 'sidebar tab ' + label);
 }
 
 // open a doc through the normal flow: seed the mocked content, then send vv:open-files.

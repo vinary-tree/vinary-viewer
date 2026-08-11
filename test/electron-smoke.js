@@ -1606,7 +1606,10 @@ async function main() {
     path: outlinePdfPath, kind: 'pdf', bytes: new Uint8Array(makeOutlinePdf()), stamp: Date.now()
   });
   win.webContents.send('vv:open-files', { paths: [outlinePdfPath] });
-  await evalIn(win, `(() => { const t = Array.from(document.querySelectorAll('.vv-sidebar-tab')).find((n) => n.textContent.trim() === 'Contents'); if (t) t.click(); return true; })()`);
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'contents')
+      document.querySelector('[data-vv-rail="contents"]').click();
+    return true; })()`);
   await delay(1500);   // let the pdf-view remount + first render settle before probing (avoids tight polling mid-remount)
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length === 3`,
     'the PDF outline fills the Contents (Section One, Subsection A, Section Two)');
@@ -2307,14 +2310,12 @@ async function main() {
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body img'))`),
     'scroll-jank markdown document'
   );
-  await evalIn(win, `(() => {
-    const tab = Array.from(document.querySelectorAll('.vv-sidebar-tab'))
-      .find((node) => node.textContent.trim() === 'Contents');
-    tab?.click();
-    return true;
-  })()`);
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'contents')
+      document.querySelector('[data-vv-rail="contents"]').click();
+    return true; })()`);
   await waitFor(
-    () => evalIn(win, `document.querySelector('.vv-sidebar-tab-active')?.textContent.trim() === 'Contents'`),
+    () => evalIn(win, `document.querySelector('[data-vv-rail="contents"]').classList.contains('vv-rail-btn-active')`),
     'Contents sidebar selected'
   );
   await waitFor(
@@ -3390,7 +3391,10 @@ async function main() {
 
   // Contents populates from the ERROR records (grows via :stream/toc-append) AND is navigable — clicking an
   // entry scrolls to that record (its stable anchor id is a real element id in the streamed DOM).
-  await evalIn(win, `(() => { const t = Array.from(document.querySelectorAll('.vv-sidebar-tab')).find((n) => n.textContent.trim() === 'Contents'); if (t) t.click(); return true; })()`);
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'contents')
+      document.querySelector('[data-vv-rail="contents"]').click();
+    return true; })()`);
   await waitCalm(win, `document.querySelectorAll('.vv-toc-item').length >= 35`, 'the streamed log Contents lists the error records', 10000);
   const tocInfo = await evalIn(win, `(() => { const items = Array.from(document.querySelectorAll('.vv-toc-item'));
     return { n: items.length, anyError: items.some((i) => /ERROR/.test(i.textContent)) }; })()`);
@@ -3747,9 +3751,13 @@ async function main() {
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-stream-progress'))`),
     'large Markdown returns to streamed Preview', 12000);
   const warmAfterPreview = await evalIn(win, `window.__vvwarmcache ? window.__vvwarmcache() : null`);
-  assert.ok(warmBeforeSource && warmAfterPreview && warmAfterPreview.hits > warmBeforeSource.hits,
-    `returning to Preview reuses its prepared artifact (${JSON.stringify(warmBeforeSource)} → ${JSON.stringify(warmAfterPreview)})`);
-  console.log('[ok] large Markdown Source overrides streaming; returning to Preview hits the bounded warm cache');
+  if (!releaseBuild) {
+    // the hit-counter probe is goog.DEBUG-only (window.__vvwarmcache lives in the dev-hook block);
+    // the FLIP BEHAVIOR above ran in both builds — only the cache-counter assertion is dev-scoped
+    assert.ok(warmBeforeSource && warmAfterPreview && warmAfterPreview.hits > warmBeforeSource.hits,
+      `returning to Preview reuses its prepared artifact (${JSON.stringify(warmBeforeSource)} → ${JSON.stringify(warmAfterPreview)})`);
+  }
+  console.log(`[ok] large Markdown Source overrides streaming; returning to Preview ${releaseBuild ? 'renders (warm-cache counters are a dev-only probe)' : 'hits the bounded warm cache'}`);
 
   // Regression: activating a tab used to synchronously rebuild its large document before Chromium could paint
   // the newly active chrome, making Ctrl+PageUp/PageDown appear frozen for ~2 seconds. Add a tiny tab to guarantee
@@ -3795,7 +3803,9 @@ async function main() {
     && document.querySelector('.vv-uri-input')?.value === ${JSON.stringify(tabPair.rightDisplay)}`),
     'the large tab actual right neighbor becomes active before timing', 10000);
   const maxTabSwitchMs = 1000;
-  const cacheBeforeTabReturn = await evalIn(win, `window.__vvwarmcache()`);
+  // the hit counters (window.__vvwarmcache) are goog.DEBUG-only; the PAINT-BUDGET assert below is
+  // the behavioral guarantee and runs in both builds
+  const cacheBeforeTabReturn = await evalIn(win, `window.__vvwarmcache ? window.__vvwarmcache() : null`);
   const largeSwitchStarted = Date.now();
   await dispatchWindowKey(win, 'PageUp', { ctrlKey: true });
   await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${tabPair.large}
@@ -3804,9 +3814,11 @@ async function main() {
     && Boolean(document.querySelector('.vv-content .markdown-body h1'))`),
     'Ctrl+PageUp paints the warmed large streamed tab', maxTabSwitchMs);
   const largeSwitchMs = Date.now() - largeSwitchStarted;
-  const cacheAfterTabReturn = await evalIn(win, `window.__vvwarmcache()`);
-  assert.ok(cacheAfterTabReturn.hits > cacheBeforeTabReturn.hits,
-    `large tab return must hit the warm cache (${JSON.stringify(cacheBeforeTabReturn)} → ${JSON.stringify(cacheAfterTabReturn)})`);
+  const cacheAfterTabReturn = await evalIn(win, `window.__vvwarmcache ? window.__vvwarmcache() : null`);
+  if (!releaseBuild) {
+    assert.ok(cacheAfterTabReturn.hits > cacheBeforeTabReturn.hits,
+      `large tab return must hit the warm cache (${JSON.stringify(cacheBeforeTabReturn)} → ${JSON.stringify(cacheAfterTabReturn)})`);
+  }
   assert.ok(largeSwitchMs < maxTabSwitchMs,
     `Ctrl+PageUp took ${largeSwitchMs} ms to paint the warmed large tab (budget ${maxTabSwitchMs} ms)`);
 
@@ -4176,7 +4188,10 @@ async function main() {
   // the Contents panel FOLLOWS the source view's active section on scroll (line-based scroll-spy). Reveal Contents,
   // then click a deep section: the editor scrolls there AND the section is highlighted — previously navigation
   // worked but nothing highlighted (the DOM/pixel preview spy can't see the CodeMirror scroller or L<line> ids).
-  await evalIn(win, `(() => { const r=document.querySelector('.vv-sidebar-rail'); if(r) r.click(); const t=[...document.querySelectorAll('.vv-sidebar-tab')].find(x=>x.textContent.includes('Contents')); if(t) t.click(); return true; })()`);
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'contents')
+      document.querySelector('[data-vv-rail="contents"]').click();
+    return true; })()`);
   // wait until the SOURCE Contents (L<line> ids) has replaced the preview toc AND the spy has highlighted its
   // first section — i.e. parse-outline finished and the initial spy ran (otherwise a click hits a preview slug id)
   await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-toc-item').length >= 3 && Boolean(document.querySelector('.vv-toc-item.vv-toc-active'))`), 'the .tex Source Contents + active section (spy running)', 10000);
@@ -4208,11 +4223,12 @@ async function main() {
   // render therefore has no matching row; :tree/received must schedule one post-render reveal when the row
   // appears instead of leaving every ancestor <details> closed. Keep the Files panel mounted across both
   // deliveries so this exercises that exact lifecycle ordering.
-  await evalIn(win, `(() => { const r=document.querySelector('.vv-sidebar-rail'); if(r) r.click(); return true; })()`);
-  await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-sidebar-tab').length > 0`),
+  await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'files')
+      document.querySelector('[data-vv-rail="files"]').click();
+    return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-sidebar-body'))`),
     'sidebar is visible for the delayed command-line tree regression');
-  await evalIn(win, `(() => { const t=[...document.querySelectorAll('.vv-sidebar-tab')]
-    .find(x=>x.textContent.trim()==='Files'); if(t) t.click(); return Boolean(t); })()`);
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-tree'))`),
     'Files tree is mounted before the command-line document activates');
 

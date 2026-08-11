@@ -26,8 +26,9 @@ arrays, `--end-of-options`, rev pre-validation, `--no-ext-diff`; see the
 
 ## 2 · How to use it
 
-1. **Open the tab.** Click **Commits** in the sidebar tab strip (Files · Contents · Tabs ·
-   Commits). The panel shows the repository of the **active document** — the deepest git project
+1. **Open the panel.** Click the **Commits** icon in the sidebar's vertical rail (Files ·
+   Contents · Tabs · Commits — [ADR-0041](../design-decisions/0041-sidebar-vertical-icon-rail.md)).
+   The panel shows the repository of the **active document** — the deepest git project
    in Files containing it. With no git project open it says "No git repository open"; while
    browsing non-repo files it keeps showing the last repository rather than thrashing.
 2. **Pin a repository.** With more than one git project open, a **Repository** combo appears in

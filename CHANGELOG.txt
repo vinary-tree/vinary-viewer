@@ -258,6 +258,18 @@ Added
       Markdown and Org too.
 
 Changed
+    - The sidebar's horizontal tab strip is replaced by a 36px vertical icon rail
+      (ADR-0041): one icon per panel (Files / Contents / Tabs / Commits) with
+      tooltips and an active indicator. Four labeled tabs needed ~355-380px against
+      the 280px default width and overflowed with no recovery; the rail never
+      overflows as panels are added and frees the strip's row for the panels' own
+      headers. The rail unifies with collapse -- collapsed, the rail alone remains
+      and clicking any icon expands straight into that panel; clicking the active
+      icon collapses (the old in-strip chevron and the separate thin re-open strip
+      are both subsumed). The sidebar width is the total including the rail; its
+      resize floor rises 140 -> 180px so the panel keeps its room (older persisted
+      values self-heal). Right-clicking the Files icon still offers Refresh All.
+      See docs/design-decisions/0041-sidebar-vertical-icon-rail.md.
     - The diff layout choice (Unified / Split) moved INTO the Preview combo's caret
       menu (ADR-0037): a lone diff's Preview menu is exactly [Unified, Split]
       (check-marked by the effective layout); a diff in a collocated group lists its

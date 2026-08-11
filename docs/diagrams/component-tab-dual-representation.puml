@@ -11,7 +11,7 @@ rectangle "app-db [:ui :tabs]\nORDERED vector of tabs\n(the single source of tru
 rectangle "vinary.ui.tabs/tab-item\nshared component\n(click · × close · right-click menu · draggable)" as ITEM RENDERER_TINT
 
 rectangle "horizontal tab strip\n(above the content pane)\nleft → right" as STRIP RENDERER_TINT
-rectangle "vertical Tabs sidebar panel\n(Files · Contents · Tabs)\ntop → bottom" as PANEL RENDERER_TINT
+rectangle "vertical Tabs sidebar panel\n(rail: Files · Contents · Tabs · Commits)\ntop → bottom" as PANEL RENDERER_TINT
 
 rectangle ":tab/reorder\n(reg-event-db → nav/reorder)\nvector splice" as REORDER REFRAME_TINT
 rectangle ":context-menu/show {:kind :tab}\nClose · Close Others ·\nClose to the Right · View Source" as CTX REFRAME_TINT

@@ -1,7 +1,9 @@
 (ns vinary.ui.sidebar
-  "The left sidebar: a tabbed pane hosting the multi-project Files tree and the Contents (TOC) outline.
-   Collapsible (to maximize the preview) and resizable (drag the right edge). Width + collapsed state
-   live in app-db (persisted via settings in Phase 5)."
+  "The left sidebar: a vertical icon rail (ADR-0041) beside one full-height panel — the multi-project
+   Files tree, the Contents (TOC) outline, the vertical Tabs list, or the Commits panel. The rail
+   never overflows as panels are added and unifies with collapse: collapsed, the rail alone remains
+   and any icon expands straight into its panel; clicking the active icon collapses. Resizable (drag
+   the right edge; the width is the TOTAL including the 36px rail). State lives in app-db."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
             [vinary.ui.commits :as commits]
@@ -102,32 +104,46 @@
   (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
                                     :target {:kind :files-tab}}]))
 
+(def ^:private rail-sections
+  [[:files    "Files"    :section-files]
+   [:contents "Contents" :section-contents]
+   [:tabs     "Tabs"     :section-tabs]
+   [:commits  "Commits"  :section-commits]])
+
+(defn- rail-bar
+  "The vertical icon rail (ADR-0041): one button per panel, ALWAYS rendered — collapsed, the rail
+   IS the sidebar. Click wiring (VS Code semantics, unifying panel switching with the old chevron
+   and thin re-open strip): collapsed → show that panel; another panel → switch; the ACTIVE panel →
+   collapse to the rail. The Files button keeps the :files-tab context menu (Refresh All)."
+  [visible? tab]
+  (into [:div.vv-sidebar-railbar {:role "toolbar" :aria-orientation "vertical"}]
+        (for [[k label icon] rail-sections
+              :let [active? (and visible? (= tab k))]]
+          ^{:key k}
+          [:button.vv-rail-btn
+           (cond-> {:class        (when active? "vv-rail-btn-active")
+                    :data-vv-rail (name k)
+                    :title        (if active? (str label " — hide sidebar") label)
+                    :aria-label   label
+                    :aria-pressed (str (boolean active?))
+                    :on-click     (fn [_]
+                                    (cond
+                                      (not visible?) (rf/dispatch [:sidebar/show k])
+                                      (= tab k)      (rf/dispatch [:sidebar/toggle])
+                                      :else          (rf/dispatch [:sidebar/tab k])))}
+             (= k :files) (assoc :on-context-menu files-context!))
+           (icons/icon icon)])))
+
 (defn sidebar []
-  (let [visible? @(rf/subscribe [:ui/sidebar-visible?])
-        width    @(rf/subscribe [:ui/sidebar-width])
-        tab      @(rf/subscribe [:ui/sidebar-tab])
+  (let [visible?   @(rf/subscribe [:ui/sidebar-visible?])
+        width      @(rf/subscribe [:ui/sidebar-width])
+        tab        @(rf/subscribe [:ui/sidebar-tab])
         restoring? @(rf/subscribe [:ui/tree-restoring?])]
     (if-not visible?
-      ;; collapsed → a thin rail with a re-open affordance
-      [:div.vv-sidebar-rail {:title "Show sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :expand)]
+      ;; collapsed → the rail alone (≈37px); every icon expands straight into its panel
+      [:div.vv-sidebar.vv-sidebar-collapsed [rail-bar false tab]]
       [:div.vv-sidebar {:style {:width (str (or width 280) "px")}}
-       [:div.vv-sidebar-tabs
-        [:div.vv-sidebar-tab {:class           (when (= tab :files) "vv-sidebar-tab-active")
-                              :data-vv-rail    "files"
-                              :on-click        #(rf/dispatch [:sidebar/tab :files])
-                              :on-context-menu files-context!}
-         (icons/icon :section-files) "Files"]
-        [:div.vv-sidebar-tab {:class    (when (= tab :contents) "vv-sidebar-tab-active")
-                              :data-vv-rail "contents"
-                              :on-click #(rf/dispatch [:sidebar/tab :contents])} (icons/icon :section-contents) "Contents"]
-        [:div.vv-sidebar-tab {:class    (when (= tab :tabs) "vv-sidebar-tab-active")
-                              :data-vv-rail "tabs"
-                              :on-click #(rf/dispatch [:sidebar/tab :tabs])} (icons/icon :section-tabs) "Tabs"]
-        [:div.vv-sidebar-tab {:class    (when (= tab :commits) "vv-sidebar-tab-active")
-                              :data-vv-rail "commits"
-                              :on-click #(rf/dispatch [:sidebar/tab :commits])} (icons/icon :section-commits) "Commits"]
-        [:div.vv-sidebar-tabs-spacer]
-        [:div.vv-sidebar-collapse {:title "Hide sidebar" :on-click #(rf/dispatch [:sidebar/toggle])} (icons/icon :collapse)]]
+       [rail-bar true tab]
        [:div.vv-sidebar-body
         ;; keyed by tab: a panel crash paints a labeled strip instead of unmounting the React root
         ;; (the blank-window failure mode), and switching tabs mounts a fresh boundary — recovery.

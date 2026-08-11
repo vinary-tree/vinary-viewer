@@ -108,7 +108,7 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:sidebar/toggle` | db | — | `:ui :sidebar-visible?` | `:ui :sidebar-visible?` ← not | — |
+| `:sidebar/toggle` | db | — | `:ui :sidebar-visible?` | `:ui :sidebar-visible?` ← not — the PANEL column's visibility; the icon rail (ADR-0041) always renders, and clicking the active rail icon dispatches this | — |
 | `:nav/focus` | fx | `target` (`:tree`/`:content`/`:toggle`) | — | — | `[:dom/focus target]` |
 | `:nav/scroll` | fx | `opts` (`{:dy …}` / `{:dx …}` / `{:to …}`) | — | — | `[:dom/scroll opts]` |
 
@@ -271,7 +271,7 @@ The state/items/save-prompt/result pushes from main land as `[:passwords/*-recei
 | `:hints/backspace` / `:hints/cancel` | — | Edit / abort the typed hint label. |
 | `:uri-complete/set` | completion data | Address-bar path/history completion state (ghost + dropdown). |
 | `:uri-complete/clear` / `:uri-complete/clear-error` | — | Dismiss the completion popup / clear its error flag. |
-| `:sidebar/show` | bool | Show/hide the sidebar. |
+| `:sidebar/show` | tab keyword (`:files`/`:contents`/`:tabs`/`:commits`) | Show the panel column opened to that panel (`:files` routes through the tree-restore flow); a collapsed rail icon dispatches this to expand straight into its panel. |
 | `:sidebar/tab` | `:files` \| `:contents` | Select the sidebar panel. |
 | `:sidebar/reveal` | path | Reveal (and select) a path in the Files tree. |
 
@@ -518,7 +518,7 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/settings` | `app-db` | the persisted settings map (`settings.edn`) |
 | `:ui/projects` | `app-db` | the git-rooted file trees |
 | `:ui/tree-open` / `:ui/tree-expanding` / `:ui/tree-restoring?` | `app-db` | persistent disclosure scopes / refresh-before-open pending scopes / Files-remount refresh gate |
-| `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents` / `:tabs` / `:commits`) and its width |
+| `:ui/sidebar-tab` / `:ui/sidebar-width` | `app-db` | the active sidebar panel (`:files` / `:contents` / `:tabs` / `:commits`) and the sidebar's TOTAL width including the 36px icon rail (clamped 180–720, ADR-0041) |
 | `:commits/state` | `app-db` | the whole `[:ui :commits]` slice — panel targeting (`:root` pin, `:last-root`) + the per-repo cache (`:repos`), ADR-0039 |
 | `:commits/panel-root` | `:<- [:commits/state]` `:<- [:ui/projects]` `:<- [:ui/active-path]` | the repo the Commits panel shows: pin > deepest git project containing the active doc > last shown > first (`commits/derive-root`); nil ⇔ no git project open |
 | `:commits/for-root` | `:<- [:commits/state]` | one repo's state map (`[:repos root]` — commits, graph fold, selection, expansion, bodies, range input, flags) |

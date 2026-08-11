@@ -1513,7 +1513,9 @@
 (rf/reg-event-fx
  :sidebar/width
  (fn [{:keys [db]} [_ w]]
-   (let [w        (-> w (max 140) (min 720))
+   ;; min 180: the TOTAL sidebar width includes the 36px icon rail (ADR-0041) — the panel column
+   ;; keeps ≥ ~143px beside it. An old persisted 140-179 self-heals via the CSS min-width.
+   (let [w        (-> w (max 180) (min 720))
          settings (assoc (get-in db [:ui :settings]) :sidebar-width w)]
      {:db (-> db (assoc-in [:ui :sidebar-width] w) (assoc-in [:ui :settings] settings))
       :fx [[:vv/save-settings (pr-str settings)]]})))

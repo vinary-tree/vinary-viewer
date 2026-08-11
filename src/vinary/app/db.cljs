@@ -7,9 +7,9 @@
   {:ds/rev 0
    :ui {:theme "spacemacs-dark"
         :active-heading nil
-        :sidebar-visible? true
-        :sidebar-width 280          ; px; the resizable sidebar splitter writes this
-        :sidebar-tab :files         ; :files | :contents (the tabbed sidebar)
+        :sidebar-visible? true      ; the PANEL column; the icon rail always renders (ADR-0041)
+        :sidebar-width 280          ; px, TOTAL incl. the 36px rail; the resize splitter writes this (clamped 180-720)
+        :sidebar-tab :files         ; :files | :contents | :tabs | :commits (the rail's active panel)
         :tree-selected nil
         :tree-open #{}               ; #{[project-root absolute-directory]} — controlled Files disclosures
         :tree-expanding #{}          ; scopes waiting for refresh-before-open

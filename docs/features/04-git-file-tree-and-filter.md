@@ -56,7 +56,8 @@ invented. See [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-ev
 5. **Filter:** type in the *Filter files…* box. The tree shrinks to matching files across every open
    project, and every folder on the path to a match is expanded so you can see them.
 6. **Refresh explicitly:** right-click a directory or project header → **Refresh**. Right-click the
-   **Files** tab itself → **Refresh All** to re-list every project tree currently in Files.
+   **Files** icon in the sidebar rail → **Refresh All** to re-list every project tree currently in
+   Files.
 7. **Remove a project:** right-click a project header → **Remove from Files**. It returns if you open a
    file under it again.
 
@@ -376,7 +377,7 @@ Containment is compared on **segment boundaries**, so `/a/bc` is *not* under `/a
   blocks the main process only briefly — the same synchronous-`execFileSync` trade-off noted below.
 - **Why walk the directory at all, rather than showing nothing?** Because the failure was silent and
   ambiguous: the sidebar read "No files open" while a document was plainly open. Reusing the same
-  sidebar for non-repo directories means the Files tab behaves the same way whether or not a folder
+  sidebar for non-repo directories means the Files panel behaves the same way whether or not a folder
   happens to be a checkout. See [ADR-0030](../design-decisions/0030-fallback-project-roots.md) for the
   alternatives weighed (list only the opened file; immediate children only; exact-root dedup only).
 - **Why controlled `<details>`/`<summary>`?** Native semantics and accessibility are retained, while

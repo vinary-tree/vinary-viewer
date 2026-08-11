@@ -261,11 +261,13 @@ async function run() {
   });
 
   // ---- the sidebar actually RENDERS the synthetic project ------------------------------------------
+  // guarded rail navigation (ADR-0041): clicking the ACTIVE icon collapses, so only click on a miss
   await wc.executeJavaScript(
-    "(function(){ var r = document.querySelector('.vv-sidebar-rail'); if (r) r.click(); return true; })()");
+    `(function(){ var ui = window.__vvdb().ui;
+       if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'files')
+         document.querySelector('[data-vv-rail="files"]').click();
+       return true; })()`);
   await sleep(400);
-  await wc.executeJavaScript(
-    "(function(){ var t = document.querySelectorAll('.vv-sidebar-tab'); if (t.length) t[0].click(); return true; })()");
   const scratchName = path.basename(SCRATCH);
   const headers = await until(wc, HEADERS, (hs) => Array.isArray(hs) && hs.some((h) => h.includes(scratchName)),
                               'the sidebar to render the synthetic project header');
@@ -529,8 +531,10 @@ async function run() {
 
   // The Files component unmounts on another sidebar tab, which sends an empty effective-expansion set. Returning
   // to Files refreshes remembered open project roots while the body shows its small restoration placeholder.
-  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-sidebar-tab')]
-    .find(x=>x.textContent.trim()==='Contents')).click(); true`);
+  await wc.executeJavaScript(`(function(){ var ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'contents')
+      document.querySelector('[data-vv-rail="contents"]').click();
+    return true; })()`);
   await until(wc, "!document.querySelector('.vv-tree')", (v) => v === true,
               'the Files tree to unmount on the Contents tab');
   await sleep(350);
@@ -540,8 +544,10 @@ async function run() {
   check('another sidebar tab suspends automatic Files-tree refresh', () => {
     assert.ok(!byRoot(ps, SCRATCH).files.includes('while-files-hidden.md'));
   });
-  await wc.executeJavaScript(`([...document.querySelectorAll('.vv-sidebar-tab')]
-    .find(x=>x.textContent.trim()==='Files')).click(); true`);
+  await wc.executeJavaScript(`(function(){ var ui = window.__vvdb().ui;
+    if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'files')
+      document.querySelector('[data-vv-rail="files"]').click();
+    return true; })()`);
   ps = await until(wc, PROJECTS,
                    (p) => byRoot(p, SCRATCH)?.files.includes('while-files-hidden.md'),
                    'remembered project roots to refresh when Files returns');
@@ -591,7 +597,7 @@ async function run() {
     assert.ok(!byRoot(ps, SCRATCH).files.includes('sibling/stale.md'));
   });
 
-  const filesTab = "[...document.querySelectorAll('.vv-sidebar-tab')].find(x=>x.textContent.trim()==='Files')";
+  const filesTab = "document.querySelector('[data-vv-rail=\"files\"]')";
   await wc.executeJavaScript(`(${filesTab}).dispatchEvent(
     new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:40})); true`);
   const filesLabels = await until(
