@@ -47,4 +47,5 @@
 {:id "proto" :language "proto" :extensions [".proto"] :wasm-url "grammars/proto/grammar.wasm" :scm-url "grammars/proto/highlights.scm" :source-kind "git" :source "https://github.com/coder3101/tree-sitter-proto"}
 {:id "make" :language "make" :extensions [".mk" ".make" ".mak"] :wasm-url "grammars/make/grammar.wasm" :scm-url "grammars/make/highlights.scm" :source-kind "git" :source "https://github.com/tree-sitter-grammars/tree-sitter-make"}
 {:id "gitignore" :language "gitignore" :extensions [".gitignore"] :wasm-url "grammars/gitignore/grammar.wasm" :scm-url "grammars/gitignore/highlights.scm" :source-kind "git" :source "https://github.com/shunsambongi/tree-sitter-gitignore"}
+{:id "rocq" :language "rocq" :extensions [".v"] :wasm-url "grammars/rocq/grammar.wasm" :scm-url "grammars/rocq/highlights.scm" :source-kind "git" :source "https://github.com/aruzdh/tree-sitter-rocq"}
 ]

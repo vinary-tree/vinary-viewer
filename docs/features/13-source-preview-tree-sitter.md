@@ -32,6 +32,11 @@ with the latest file contents after main re-sends `vv:content`.
 Files without a matching tree-sitter grammar still open in the read-only source
 view, but without grammar-aware syntax decorations.
 
+The bundled catalog is pinned by `scripts/grammars.lock.json` and synced at
+install time. It includes **Rocq**: `.v` proof files highlight through
+`aruzdh/tree-sitter-rocq`, and the `coq` language alias makes ```` ```coq ````
+fences, Org `#+begin_src coq` blocks, and `-t coq` resolve to the same grammar.
+
 Selections copy through the application clipboard path. `Ctrl+C` and
 `Ctrl+Shift+C` copy selected text from the source view, and the right-click menu
 offers `Copy`, `Copy source location`, `Copy file path`, and `Copy file name`.

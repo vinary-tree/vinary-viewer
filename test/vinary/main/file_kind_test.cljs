@@ -38,6 +38,12 @@
     (is (= "source" (fk/kind-of always-source "/a/main.rs")))
     (is (= "image" (fk/kind-of never-source "/a/pic.svg")))))
 
+(deftest kind-of-rocq
+  (testing ".v defers to the grammar-driven source? predicate (rocq is bundled; .v left plain-source-exts)"
+    (is (= "source" (fk/kind-of always-source "/proofs/Theory.v")))
+    (is (= "text"   (fk/kind-of never-source "/proofs/Theory.v"))
+        "kind-of has no hardcoded .v arm — classification rides the source? predicate")))
+
 (deftest group-candidate-paths-computation
   (testing "same-directory, same-stem candidates for a document GROUP — the file itself first, one per group ext"
     (let [cands (fk/group-candidate-paths "/a/paper.tex")

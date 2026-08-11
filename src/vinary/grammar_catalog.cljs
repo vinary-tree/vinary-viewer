@@ -30,6 +30,7 @@
    "py" "python" "rb" "ruby" "rs" "rust"
    "emacs-lisp" "elisp" "el" "elisp"   ; Org #+begin_src emacs-lisp/el → the bundled elisp grammar
    "tex" "latex" "math" "latex"        ; ```math fences + `#+BEGIN_EXPORT latex` → the bundled latex grammar
+   "coq" "rocq"                        ; ```coq fences / #+begin_src coq / -t coq → the bundled rocq grammar
    "yml" "yaml" "jsonc" "json"})
 
 (def built-in-filetypes

@@ -14,6 +14,12 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Rocq syntax highlighting: .v proof files light up everywhere source renders
+      (GUI source view, diff per-file previews, --cli/--tui, ```coq fences, org
+      #+begin_src coq) via a newly bundled tree-sitter grammar
+      (aruzdh/tree-sitter-rocq, pinned in scripts/grammars.lock.json; MIT per its
+      package.json, provenance recorded in the committed source.json + NOTICE).
+      `-t coq` / `-t rocq` work as explicit --type values.
     - Collapsible per-file diff previews (ADR-0037), in BOTH layouts: click a file's
       banner to toggle that file (the banner is a <summary> now; each file is a
       controlled <details class="vv-diff-file"> wrapper emitted by the shared IR --

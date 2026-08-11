@@ -14,8 +14,10 @@
 
 (def ^:private plain-source-exts
   "Known source extensions whose tree-sitter grammar is not bundled yet. These still use the
-   read-only source view, but without syntax decorations until a grammar entry is enabled."
-  #{".sql" ".vim" ".v"})
+   read-only source view, but without syntax decorations until a grammar entry is enabled.
+   .v left this set when the rocq grammar was bundled (grammars.lock.json) — source? now hits
+   it through grammar-for-path."
+  #{".sql" ".vim"})
 
 (defonce ^:private user-grammars (atom []))   ; [{:language :extensions :wasm-url :scm-url} …]
 (defonce ^:private user-filetypes (atom {}))  ; {:filenames {...} :patterns [...]}

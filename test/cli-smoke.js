@@ -272,6 +272,18 @@ if (fs.existsSync(pdf)) {
   const typedPy = run(['--color', '-t', 'py', noExt]);
   ok(typedPy.includes(ESC + '[') && typedPy.includes('return'), '-t py highlights an extensionless file as python source');
 
+  // rocq: a .v proof highlights through the newly-bundled grammar, and -t coq aliases to it
+  const rocqSrc = path.join(tmp, 'proof.v');
+  fs.writeFileSync(rocqSrc,
+    '(* commutativity *)\nTheorem add_comm : forall a b : nat, a + b = b + a.\nProof.\n  intros a b.\nQed.\n');
+  const rocqOut = run(['--color', rocqSrc]);
+  ok(rocqOut.includes(ESC + '[') && rocqOut.includes('add_comm'), '.v renders as tree-sitter-highlighted rocq source');
+  ok(!run(['--plain', rocqSrc]).includes(ESC), '--plain .v contains ZERO escape bytes');
+  const noExtRocq = path.join(tmp, 'proof-no-ext');
+  fs.writeFileSync(noExtRocq, '(* trivial *)\nTheorem t : True.\nProof. exact I. Qed.\n');
+  const typedCoq = run(['--color', '-t', 'coq', noExtRocq]);
+  ok(typedCoq.includes(ESC + '[') && typedCoq.includes('Theorem'), '-t coq highlights an extensionless file via the rocq grammar');
+
   // piped CSV with -t csv parses as a delimited table (box-drawing), never sniffed
   const typedCsv = runPiped(['--no-color', '-t', 'csv'], 'a,b\n1,2\n3,4\n');
   ok(typedCsv.code === 0 && typedCsv.out.includes('┌') && typedCsv.out.includes('│'),

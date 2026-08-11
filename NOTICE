@@ -20,10 +20,17 @@ Attribution & third-party components (v0.2 — the standalone application)
    read-only source view adapts the tree-sitter highlighting approach from
    LightningBug's lib/editor/syntax.cljs.
 
-3. Bundled tree-sitter grammar  (Rholang)
+3. Bundled tree-sitter grammars  (Rholang, Rocq)
    The bundled Rholang grammar (resources/public/grammars/rholang/grammar.wasm)
    is @f1r3fly-io/tree-sitter-rholang-js-with-comments; its highlights query
    (highlights.scm) is taken from LightningBug. Used under their respective licenses.
+   The bundled Rocq grammar is aruzdh/tree-sitter-rocq
+   (https://github.com/aruzdh/tree-sitter-rocq), MIT per its package.json; the
+   upstream repository ships no LICENSE file yet, so the pinned provenance
+   (sourceRev + license note) is recorded in
+   resources/public/grammars/rocq/source.json. Other synced grammars carry their
+   upstream LICENSE files beside their compiled artifacts under
+   resources/public/grammars/<id>/.
 
 4. Spacemacs color palette  (inspiration)
    The bundled themes reproduce the color *values* of the Spacemacs theme

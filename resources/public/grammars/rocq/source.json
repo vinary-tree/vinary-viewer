@@ -1,0 +1,13 @@
+{
+  "id": "rocq",
+  "language": "rocq",
+  "extensions": [
+    ".v"
+  ],
+  "source": {
+    "type": "git",
+    "url": "https://github.com/aruzdh/tree-sitter-rocq",
+    "licenseNote": "MIT per upstream package.json; the repo ships no LICENSE file (upstream issue requested) — recorded here so the committed source.json carries the provenance"
+  },
+  "sourceRev": "300fe33fc299c30f736fd56d8ef8a28b08acd4e6"
+}

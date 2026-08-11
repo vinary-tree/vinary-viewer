@@ -64,7 +64,7 @@
    "toml" code "yaml" code "yml" code "ini" code "cfg" code "conf" code "properties" code
    "sql" code "graphql" code "gql" code "proto" code "dockerfile" code "make" code "mk" code
    "ex" code "exs" code "erl" code "hrl" code "hs" code "ml" code "mli" code "fs" code "fsx" code
-   "vue" code "svelte" code "astro" code "tf" code "nix" code "vim" code
+   "vue" code "svelte" code "astro" code "tf" code "nix" code "vim" code "v" code
    ;; images (svg rendered as image in this app's preview)
    "png" image "jpg" image "jpeg" image "gif" image "webp" image "bmp" image
    "ico" image "tiff" image "tif" image "avif" image "svg" image

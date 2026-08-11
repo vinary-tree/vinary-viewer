@@ -46,3 +46,13 @@
     (is (= "python" (lang-id "py")))
     (is (= "elisp"  (lang-id "emacs-lisp")) "org #+begin_src emacs-lisp")
     (is (= "elisp"  (lang-id "el")))))
+
+(deftest rocq-grammar
+  (testing "Rocq proofs (.v) resolve to the bundled rocq grammar — colour is catalog-driven"
+    (is (some? (gc/by-id "rocq")))
+    (is (= "rocq" (gid "/proofs/Theory.v")))
+    (is (= "rocq" (gid "/proofs/THEORY.V")) "extension match is case-insensitive"))
+  (testing "the coq alias covers ```coq fences, org #+begin_src coq, and -t coq"
+    (is (= "rocq" (lang-id "rocq")))
+    (is (= "rocq" (lang-id "coq")))
+    (is (= "rocq" (lang-id "Coq")) "alias resolution is case-insensitive")))
