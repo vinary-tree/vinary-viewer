@@ -20,7 +20,7 @@ const jsFiles = [
   'resources/public/js/pdf-loader.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js', 'test/watch-e2e.js',
-  'test/git-tree-smoke.js', 'test/git-log-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
+  'test/git-tree-smoke.js', 'test/git-log-smoke.js', 'test/git-blame-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
   'test/tui-smoke.js', 'test/daemon-smoke.js', 'test/daemon-events-smoke.js',
   'test/headless-window.js', 'test/headless-runner-smoke.mjs',
   'test/remote-daemon-events-e2e-runner.js', 'test/remote-daemon-events-e2e.js',

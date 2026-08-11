@@ -9,8 +9,9 @@
    (renderer.cm) passes through is re-exported via `exports` (string keys, ^:export) at the end. Adapted from
    LightningBug's lib/editor/syntax.cljs."
   (:require [clojure.string :as str]
-            ["@codemirror/state" :refer [EditorState Compartment StateField]]
-            ["@codemirror/view" :refer [EditorView Decoration lineNumbers]]
+            ["@codemirror/state" :refer [EditorState Compartment StateField RangeSetBuilder]]
+            ["@codemirror/view" :refer [EditorView Decoration lineNumbers gutter GutterMarker]]
+            [vinary.git.blame :as blame]
             [vinary.renderer.syntax :as syntax]))
 
 ;; the currently-mounted source EditorView, so a source Contents-outline click can scroll it to a line
@@ -128,20 +129,120 @@
   []
   (when-let [^js view @current-view] (viewport-top-line view)))
 
+;; ── git blame gutter (ADR-0040): a second gutter behind its own Compartment ─────────────────────
+;; The blame Compartment mirrors the grammar-highlight one: the view mounts with it EMPTY, and
+;; asynchronously-arriving hunks reconfigure it (set-blame!) without touching any other extension.
+;; A remount (live refresh, facet flip) starts empty again — [:blame/ensure] re-applies from its
+;; cache, which is also what keeps the gutter honest across document edits (new stamp → re-blame).
+
+(defonce ^:private blame-comp (atom nil))   ; the MOUNTED view's blame Compartment (current-view pattern)
+
+(defn- blame-marker
+  "One line's GutterMarker. Prototype-derived rather than `class …extends` — GutterMarker's own
+   constructor is empty, so bypassing `new` is safe, and plain interop keeps us clear of
+   class-extension machinery under :simple. `eq` compares the info map so CodeMirror can reuse DOM."
+  [{:keys [text title cls] :as info}]
+  (let [m (js/Object.create (.-prototype GutterMarker))]
+    (set! (.-vvInfo m) info)
+    (set! (.-eq m) (fn [other] (= info (.-vvInfo ^js other))))
+    (set! (.-toDOM m)
+          (fn []
+            (let [el (js/document.createElement "div")]
+              (set! (.-className el) (str "vv-blame-chip" (when cls (str " " cls))))
+              (set! (.-textContent el) text)
+              (set! (.-title el) title)
+              el)))
+    m))
+
+(defn- blame-marker-set
+  "hunks → a RangeSet of per-line markers. A hunk's FIRST line carries the author · age chip; its
+   continuation lines carry an empty marker that keeps the gutter's border column continuous."
+  [^js state hunks now]
+  (let [b   (RangeSetBuilder.)
+        doc (.-doc state)
+        n   (.-lines doc)]
+    (loop [i 1]
+      (when (<= i n)
+        (when-let [h (blame/hunk-for-line hunks i)]
+          (let [from  (.-from (.line doc i))
+                head? (= i (:final-line h))
+                info  (if head?
+                        {:text  (if (:uncommitted h)
+                                  "Uncommitted"
+                                  (str (:author-name h) " · " (blame/rel-date (:author-date h) now)))
+                         :title (if (:uncommitted h)
+                                  "Not yet committed"
+                                  (str (subs (:hash h) 0 8) " " (:summary h) "\n"
+                                       (:author-name h) " <" (:author-email h) ">"))
+                         :cls   (cond (:uncommitted h) "vv-blame-uncommitted"
+                                      (:boundary h)    "vv-blame-boundary"
+                                      :else            nil)}
+                        {:text "" :title "" :cls "vv-blame-cont"})]
+            (.add b from from (blame-marker info))))
+        (recur (inc i))))
+    (.finish b)))
+
+(defn- blame-extension
+  "The gutter extension for one hunk set. The doc is immutable (read-only view), so the marker set
+   builds once and is reused; a gutter click reports the 1-based line to `on-line-click`."
+  [hunks on-line-click]
+  (let [markers (atom nil)]
+    (gutter #js {:class   "vv-blame-gutter"
+                 :markers (fn [^js view]
+                            (or @markers
+                                (reset! markers (blame-marker-set (.-state view) hunks (js/Date.now)))))
+                 :domEventHandlers
+                 #js {:mousedown (fn [^js view ^js line _e]
+                                   (on-line-click
+                                    (.-number (.lineAt (.. view -state -doc) (.-from line))))
+                                   true)}})))
+
+(defn set-blame!
+  "Show blame hunks in the mounted source view. No-op when none is mounted — or when the registered
+   view was destroyed by a facet flip (its DOM is disconnected; current-view keeps the last view by
+   design, exactly like scroll-source-to-line!'s contract)."
+  [hunks on-line-click]
+  (when-let [^js v @current-view]
+    (when (.-isConnected (.-dom v))
+      (when-let [^js c @blame-comp]
+        (.dispatch v #js {:effects (.reconfigure c (blame-extension hunks on-line-click))})))))
+
+(defn clear-blame!
+  "Remove the blame gutter from the mounted source view (same destroyed-view guard as set-blame!)."
+  []
+  (when-let [^js v @current-view]
+    (when (.-isConnected (.-dom v))
+      (when-let [^js c @blame-comp]
+        (.dispatch v #js {:effects (.reconfigure c #js [])})))))
+
+(defn selection-lines
+  "1-based [start end] of the mounted source view's primary selection (the cursor line twice when
+   the selection is empty), or nil with no mounted view — the line-range-history seam."
+  []
+  (when-let [^js v @current-view]
+    (let [st   (.-state v)
+          main (.. st -selection -main)
+          doc  (.-doc st)]
+      [(.-number (.lineAt doc (.-from main)))
+       (.-number (.lineAt doc (.-to main)))])))
+
 (defn create-source-view
   "Mount a read-only CodeMirror view of text in parent. If grammar (a {:wasm-url :scm-url}) is given,
    asynchronously load the tree-sitter grammar (via renderer.syntax) and reconfigure with highlighting. Returns
    the view."
   [^js parent text grammar prepared-spans]
   (let [hl   (Compartment.)
+        bl   (Compartment.)
         exts #js [(.of (.-readOnly EditorState) true)
                   (.of (.-editable EditorView) false)
                   (lineNumbers)
+                  (.of bl #js [])                    ; blame gutter (ADR-0040), empty until ensured
                   (.-lineWrapping EditorView)        ; a pre-built Extension, not a Facet (no .of)
                   (.of hl #js [])]
         state (.create EditorState #js {:doc text :extensions exts})
         view  (EditorView. #js {:state state :parent parent})]
     (reset! current-view view)          ; register for source-outline line-scroll
+    (reset! blame-comp bl)              ; the blame reconfigure target for THIS mount
     (when-let [l @pending-source-line]  ; consume a pending preview→source jump (deferred across the remount)
       (reset! pending-source-line nil)
       (scroll-source-to-line! l))
@@ -169,4 +270,7 @@
        "selected-text"          selected-text
        "selection-start"        selection-start
        "pos-at-coords"          pos-at-coords
-       "line-info-at"           line-info-at})
+       "line-info-at"           line-info-at
+       "set-blame!"             set-blame!
+       "clear-blame!"           clear-blame!
+       "selection-lines"        selection-lines})

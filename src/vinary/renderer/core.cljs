@@ -425,6 +425,7 @@
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (set! (.-__vvopen js/window) (fn [p] (rf/dispatch [:doc/open p])))   ; DEV/test: open a path in the active tab
   (set! (.-__vvsource js/window) (fn [] (rf/dispatch [:tab/toggle-source])))   ; DEV/test: flip the active tab's facet to source
+  (set! (.-__vvblame js/window) (fn [] (rf/dispatch [:blame/toggle])))   ; DEV/test: toggle the blame gutter (ADR-0040)
   (set! (.-__vvfindtoggle js/window) (fn [] (rf/dispatch [:find/toggle])))   ; DEV/test: open/close the find bar
   ;; DEV/test: what find actually matched — the matched TEXT, each match's geometry, whether it is on
   ;; screen, and how many Ranges are painted. The counter alone cannot tell "found 7 matches" apart from

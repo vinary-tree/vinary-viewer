@@ -723,7 +723,10 @@
                 (let [outline (:toc prepared)]
                   (rf/dispatch [:toc/set path outline])
                   (reset! toc* outline)
-                  (spy!))))
+                  (spy!))
+                ;; ADR-0040: one hook covers every way a source view (re)mounts — toggle-while-shown,
+                ;; facet flips, tab switches, and live refresh (a new stamp re-blames when the mode is on)
+                (rf/dispatch [:blame/source-mounted {:file path :stamp (second @cur*)}])))
             (build! [this]
               (let [[_ text path stamp language] (r/argv this)
                     token   (swap! build* inc)

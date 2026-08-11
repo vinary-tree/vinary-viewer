@@ -57,6 +57,11 @@
 (defn current-source-line    []         (when (ready?) ((gobj/get @sv-module "current-source-line"))))
 (defn current-viewport-line  []         (when (ready?) ((gobj/get @sv-module "current-viewport-line"))))
 (defn scroll-source-to-line! [line]     (when (ready?) ((gobj/get @sv-module "scroll-source-to-line!") line)))
+;; blame (ADR-0040): guarded — a palette toggle or an async blame reply can fire with no source view
+;; (hence possibly no chunk) mounted, and each must be the usual silent no-op then.
+(defn set-blame!      [hunks on-line-click] (when (ready?) ((gobj/get @sv-module "set-blame!") hunks on-line-click)))
+(defn clear-blame!    []                    (when (ready?) ((gobj/get @sv-module "clear-blame!"))))
+(defn selection-lines []                    (when (ready?) ((gobj/get @sv-module "selection-lines"))))
 
 (defn want-source-line!
   "Stash a preview→source jump line. If the chunk is loaded, hand it straight to the source-view; otherwise buffer

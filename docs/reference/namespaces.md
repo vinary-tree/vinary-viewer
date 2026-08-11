@@ -314,6 +314,7 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 | `vinary.diff` | Pure unified/git diff model + the side-by-side (split) renderer — DOM-free and fs-free, so it is fully unit-testable (ADR-0026). |
 | `vinary.git.log` | Pure git-log plumbing (ADR-0039): the exact argv builders (`log`/`for-each-ref`/`rev-parse --verify`/`diff`) and the `%x1f`/`%x00` record parsers. Electron/fs-free; `vinary.main.git` executes what this builds. |
 | `vinary.git.graph` | Deterministic, incremental lane assignment for commit graphs — the single shared row shape (`{:hash :lane :edges :active}`) behind the sidebar mini-rail and the Commit Graph document. |
+| `vinary.git.blame` | Pure `git blame --line-porcelain` parsing (ADR-0040): per-line records coalesced into hunks with cached per-commit metadata, the binary-search line lookup, and the gutter's relative-date buckets. |
 | `vinary.grammar-catalog` | Compile-time catalog of bundled tree-sitter grammars. |
 
 ---

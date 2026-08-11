@@ -601,6 +601,20 @@ function installIpc(state) {
   // SSH remote files: capture the (secret) prompt reply for assertions; serve remote assets from the fixture.
   ipcMain.on('vv:ssh-prompt-reply', (_event, payload) => { state.sshReply = payload; });
   ipcMain.handle('vv:load-remote-asset', (_event, req) => contentService.loadRemoteAsset(req.uri, req.relativeTo));
+  // ADR-0040: fixture hunks for the blame-gutter arm (the real main is exercised by git-blame-smoke.js;
+  // here the seam is mocked exactly like vv:open, so the arm proves the renderer's gutter pipeline)
+  ipcMain.handle('vv:git-blame', (_event, req) => {
+    state.gitBlameRequests.push(req);
+    return {
+      root: '/fixture/repo',
+      hunks: [
+        { hash: 'a'.repeat(40), 'orig-line': 1, 'final-line': 1, count: 3,
+          'author-name': 'Ada', 'author-email': 'ada@x.io', 'author-date': 1700000000000,
+          summary: 'feat: first', uncommitted: false },
+        { hash: '0'.repeat(40), 'orig-line': 4, 'final-line': 4, count: 1, uncommitted: true },
+      ],
+    };
+  });
   ipcMain.handle('vv:complete-path', (_event, input) => ({
     input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
   }));
@@ -627,6 +641,7 @@ async function main() {
     openDialogs: 0,
     lastOpenSeed: null,   // ordered candidate folder paths the renderer passed with the last vv:open-dialog
     zoomRequests: 0,   // vv:zoom-request boot-pull calls (Bug-1 restart-% regression)
+    gitBlameRequests: [],   // ADR-0040: vv:git-blame invocations (the blame-gutter arm asserts the seam fired)
     pdfShow: null,
     pdfBounds: null,
     pdfHidden: false,
@@ -2654,6 +2669,41 @@ async function main() {
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .markdown-body')) && !document.querySelector('.vv-source')`),
       'keyboard "Go to preview" command switches to preview', 8000);
     console.log('[ok] keyboard Go to source / Go to preview commands self-gate and jump');
+  }
+
+  // ---- ADR-0040: the blame gutter (window.__vvblame DEV seam; vv:git-blame is mocked above) ----------
+  {
+    const inSource = await evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor'))`);
+    if (!inSource) {
+      await evalIn(win, `window.__vvsource()`);
+      await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-source .cm-editor'))`),
+        'blame precondition: the source view mounts', 8000);
+    }
+    await evalIn(win, `window.__vvblame()`);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-blame-gutter .vv-blame-chip').length > 0`),
+      'toggling blame renders gutter chips from the (mocked) hunks', 8000);
+    const chip = await evalIn(win, `(() => {
+      const chips = Array.from(document.querySelectorAll('.vv-blame-gutter .vv-blame-chip'));
+      const head = chips.find((c) => c.textContent.includes('Ada'));
+      const dirty = chips.find((c) => c.textContent === 'Uncommitted');
+      return { count: chips.length,
+               headTitle: head ? head.title : null,
+               hasDirty: Boolean(dirty) };
+    })()`);
+    assert.ok(chip.count > 0, 'blame chips rendered');
+    assert.ok(chip.headTitle && chip.headTitle.includes('aaaaaaaa'),
+      `a hunk-head chip's tooltip carries the short hash (got ${JSON.stringify(chip.headTitle)})`);
+    assert.ok(chip.hasDirty, 'the zero-hash hunk renders as an "Uncommitted" chip');
+    assert.ok(state.gitBlameRequests.length > 0, 'the renderer actually asked main over vv:git-blame');
+    await evalIn(win, `window.__vvblame()`);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-blame-gutter .vv-blame-chip').length === 0`),
+      'toggling blame off clears the gutter', 8000);
+    console.log('[ok] blame gutter: toggle on renders author/uncommitted chips, toggle off clears (ADR-0040)');
+    if (!inSource) {
+      await evalIn(win, `window.__vvsource()`);
+      await waitFor(() => evalIn(win, `!document.querySelector('.vv-source .cm-editor')`),
+        'blame arm restores the preview facet', 8000);
+    }
   }
 
   await evalIn(win, `(() => {

@@ -22,6 +22,7 @@
             ["path" :as path]
             ["chokidar" :refer [watch]]
             [clojure.string :as str]
+            [vinary.git.blame :as blame]
             [vinary.git.log :as glog]
             [vinary.main.diff-source :as diff-source]
             [vinary.main.doc-overrides :as doc-overrides]))
@@ -224,6 +225,26 @@
                                                   :git {:root top :from from-sha :to to-sha}})
                                               (swap! diff-spills assoc key p)
                                               {:path p :title (str label ".diff")})))))))))))))))))))
+      (.then clj->js)))
+
+;; ── vv:git-blame ────────────────────────────────────────────────────────────────────────────────
+
+(defn handle-blame
+  "{root? file} → Promise of {root hunks}|{error}. The renderer's root is advisory — main re-derives
+   the repository from the FILE's own directory (the blamed file may belong to a different repo than
+   the Commits panel shows). Blames the WORKING TREE — exactly what the source view displays — so
+   uncommitted lines arrive as the zero hash. No -M/-C/-w: literal line attribution."
+  [{:keys [root file]}]
+  (-> (toplevel (.dirname path file))
+      (.then (fn [{:keys [ok error]}]
+               (let [top (or ok root)]
+                 (if-not top
+                   (js/Promise.resolve {:error (or error "not in a git repository")})
+                   (-> (run-git ["blame" "--line-porcelain" "--" file] top)
+                       (.then (fn [{:keys [ok error]}]
+                                (if ok
+                                  {:root top :hunks (:hunks (blame/parse-line-porcelain ok))}
+                                  {:error error}))))))))
       (.then clj->js)))
 
 (defn load-rev-sources

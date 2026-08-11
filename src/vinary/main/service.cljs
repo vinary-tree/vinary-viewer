@@ -1122,6 +1122,8 @@
            (fn [_e req] (git/handle-open-diff (js->clj req :keywordize-keys true))))
   (.on ipcMain "vv:git-watch"
        (fn [^js e roots] (git/sync-owner-roots! (.-sender e) (js->clj roots))))
+  (.handle ipcMain "vv:git-blame"
+           (fn [_e req] (git/handle-blame (js->clj req :keywordize-keys true))))
   ;; fetch a remote asset's bytes → a data: URL, so a remote Markdown/Office doc's relative images render (the
   ;; renderer can't reach the host, and file:// cannot either). `relativeTo` is the remote doc's URI.
   (.handle ipcMain "vv:load-remote-asset"

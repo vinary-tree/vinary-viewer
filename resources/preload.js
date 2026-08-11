@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('vv', {
   gitLog: (req) => ipcRenderer.invoke('vv:git-log', req),
   gitBranches: (req) => ipcRenderer.invoke('vv:git-branches', req),
   gitOpenDiff: (req) => ipcRenderer.invoke('vv:git-open-diff', req),
+  gitBlame: (req) => ipcRenderer.invoke('vv:git-blame', req),
   gitWatch: (roots) => ipcRenderer.send('vv:git-watch', roots),
   // bounded-memory document streaming (session pull-cursor)
   streamOpen: (req) => ipcRenderer.invoke('vv:stream-open', req),

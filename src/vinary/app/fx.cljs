@@ -12,6 +12,7 @@
             [vinary.renderer.diff-view :as diff-view]
             [vinary.renderer.hints :as hints]
             [vinary.renderer.cm :as cm]
+            [vinary.git.blame :as blame]
             [vinary.renderer.figures :as figures]
             [vinary.renderer.mermaid :as mermaid]
             [vinary.renderer.source-nav :as source-nav]
@@ -367,6 +368,23 @@
 ;; one commit MESSAGE body → sanitized HTML, lazily on row expand (never eagerly for a page); the
 ;; base-dir is the repo root so relative links resolve like a README's. Render failure falls back to
 ;; plain text (the event stores false → the view shows a <pre>).
+;; blame (ADR-0040): fetch hunks for the mounted source file; apply/clear the CM6 gutter
+(rf/reg-fx :vv/git-blame
+           (fn [{:keys [file stamp]}]
+             (if-let [^js vv (and (.-vv js/window) (.-gitBlame (.-vv js/window)) (.-vv js/window))]
+               (-> (.gitBlame vv (clj->js {:file file}))
+                   (.then  (fn [reply] (rf/dispatch [:blame/received file stamp
+                                                     (js->clj reply :keywordize-keys true)])))
+                   (.catch (fn [e] (rf/dispatch [:blame/received file stamp
+                                                 {:error (str (or (some-> e .-message) e))}]))))
+               (rf/dispatch [:blame/received file stamp
+                             {:error "git bridge unavailable (restart the viewer daemon)"}]))))
+(rf/reg-fx :blame/apply-view
+           (fn [hunks]
+             (cm/set-blame! hunks
+                            (fn [line]
+                              (rf/dispatch [:blame/line-click (blame/hunk-for-line hunks line)])))))
+(rf/reg-fx :blame/clear-view (fn [_] (cm/clear-blame!)))
 (rf/reg-fx :commits/render-body
            (fn [{:keys [root hash body]}]
              (-> (md/render-ir body root)

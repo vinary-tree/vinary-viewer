@@ -443,6 +443,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-combo-select-meta { color: var(--vv-fg-dim); font-size: 10px; margin-left: auto; }
 .vv-combo-select-check { color: var(--vv-accent); }
 
+/* ── the git blame gutter (ADR-0040) ─────────────────────────────────────────────────────────── */
+.vv-blame-gutter { max-width: 24ch; }
+.vv-blame-chip { color: var(--vv-fg-dim); padding: 0 .75ch 0 .25ch; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  border-right: 1px solid var(--vv-border); font-size: 11px; }
+.vv-blame-chip:hover { color: var(--vv-fg); }
+.vv-blame-uncommitted { font-style: italic; }
+.vv-blame-boundary { opacity: .7; }
+.vv-blame-cont { border-right: 1px solid var(--vv-border); }
+
 /* Contents (TOC) outline (Contents tab; scroll-spy highlights the active heading) */
 .vv-toc-list { padding: 6px 0; font-size: 12px; }
 .vv-toc-item { display: block; padding: 2px 12px; color: var(--vv-fg-dim); text-decoration: none;

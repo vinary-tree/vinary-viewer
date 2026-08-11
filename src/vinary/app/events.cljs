@@ -260,6 +260,97 @@
                               :on-error [:commits/log-error root]}]
            [:dispatch [:commits/load root {:skip 0}]]]})))
 
+;; ══ git blame (ADR-0040) ════════════════════════════════════════════════════════════════════════
+;; One GLOBAL mode flag: whenever a source view mounts while blame is on, the gutter is (re)ensured
+;; for that file — facet flips, tab switches, and live refreshes all fall out of the single
+;; :blame/source-mounted hook. One `git blame` per (file, stamp); the reply is stamp-gated so a
+;; live-refresh race can never paint a stale gutter.
+
+(defn- blameable?
+  "Blame serves LOCAL plain-path files only (no remote URIs, no virtual schemes). A local file
+   outside any repository — a /tmp scratch note, a stdin spill — still passes here and simply gets
+   main's honest \"not in a git repository\" reply in the gutterless error slot."
+  [file]
+  (boolean (and (string? file)
+                (not (uri/remote? file))
+                (some? (uri/file-path file)))))
+
+(rf/reg-event-fx
+ :blame/source-mounted
+ (fn [{:keys [db]} [_ {:keys [file stamp]}]]
+   (let [db' (-> db
+                 (assoc-in [:ui :blame :file] file)
+                 (assoc-in [:ui :blame :stamp] stamp))]
+     (cond-> {:db db'}
+       (get-in db [:ui :blame :on?])
+       (assoc :fx [[:dispatch [:blame/ensure]]])))))
+
+(rf/reg-event-fx
+ :blame/toggle
+ (fn [{:keys [db]} _]
+   (let [{:keys [on? file]} (get-in db [:ui :blame])]
+     (cond
+       on?
+       {:db (assoc-in db [:ui :blame :on?] false)
+        :fx [[:blame/clear-view nil]]}
+
+       ;; self-gating (the palette pattern): no mounted local source target → a silent no-op
+       (blameable? file)
+       {:db (assoc-in db [:ui :blame :on?] true)
+        :fx [[:dispatch [:blame/ensure]]]}
+
+       :else nil))))
+
+(rf/reg-event-fx
+ :blame/ensure
+ (fn [{:keys [db]} _]
+   (let [{:keys [on? file stamp hunks] :as blame} (get-in db [:ui :blame])]
+     (when (and on? (blameable? file))
+       (if (and hunks (= [file stamp] [(:hunks-file blame) (:hunks-stamp blame)]))
+         {:fx [[:blame/apply-view hunks]]}
+         {:db (-> db
+                  (assoc-in [:ui :blame :loading?] true)
+                  (assoc-in [:ui :blame :error] nil))
+          :fx [[:vv/git-blame {:file file :stamp stamp}]]})))))
+
+(rf/reg-event-fx
+ :blame/received
+ (fn [{:keys [db]} [_ file stamp {:keys [root hunks error]}]]
+   (when (= [file stamp] [(get-in db [:ui :blame :file]) (get-in db [:ui :blame :stamp])])
+     (if error
+       {:db (-> db
+                (assoc-in [:ui :blame :loading?] false)
+                (assoc-in [:ui :blame :error] (str error)))}
+       {:db (update-in db [:ui :blame] merge
+                       {:loading? false :error nil :root root :hunks hunks
+                        :hunks-file file :hunks-stamp stamp})
+        :fx (when (get-in db [:ui :blame :on?])
+              [[:blame/apply-view hunks]])}))))
+
+(rf/reg-event-db
+ :blame/error
+ (fn [db [_ msg]]
+   (-> db
+       (assoc-in [:ui :blame :loading?] false)
+       (assoc-in [:ui :blame :error] (str msg)))))
+
+(rf/reg-event-fx
+ :blame/line-click
+ (fn [{:keys [db]} [_ hunk]]
+   ;; the gutter hands back the resolved hunk; an uncommitted (zero-hash) line has no diff to open
+   (let [{:keys [root]} (get-in db [:ui :blame])]
+     (when (and root hunk (not (:uncommitted hunk)))
+       {:fx [[:dispatch [:git/open-commit-diff root {:to (:hash hunk)}]]]}))))
+
+(rf/reg-event-fx
+ :git/open-commit-diff
+ (fn [_ [_ root {:keys [from to]}]]
+   ;; the shared open-a-commit-diff entry (blame click, graph activation): a nil FROM asks main for
+   ;; <to>'s first parent, with the empty tree closing the root-commit case (R4)
+   {:fx [[:vv/git-open-diff (cond-> {:root root :to to :on-error [:blame/error]}
+                              from       (assoc :from from)
+                              (nil? from) (assoc :parent? true))]]}))
+
 ;; ---- recent navigation memory (persisted to recent.edn): dir→child trail + recent-files MRU ----
 (def ^:private max-recent-files 10)
 (def ^:private max-trail 200)

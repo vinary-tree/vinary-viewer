@@ -45,7 +45,7 @@
     "bench:input": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs --width=1400 --height=1000 electron --no-sandbox scripts/bench-input-latency.cjs",
     "screenshots": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && node scripts/run-electron-headless.mjs --width=1280 --height=1024 electron --no-sandbox scripts/screenshots.cjs",
     "screenshots:display": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && electron --no-sandbox scripts/screenshots.cjs",
-    "test": "shadow-cljs compile test && node dist/test/test.js && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js && node test/daemon-events-smoke.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && node test/git-log-smoke.js && node test/headless-runner-smoke.mjs && npm run test:cli && npm run test:tui",
+    "test": "shadow-cljs compile test && node dist/test/test.js && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js && node test/daemon-events-smoke.js && node test/content-service-smoke.js && node test/git-tree-smoke.js && node test/git-log-smoke.js && node test/git-blame-smoke.js && node test/headless-runner-smoke.mjs && npm run test:cli && npm run test:tui",
     "test:cli": "npm run compile:cli:test && node test/cli-smoke.js && node test/graphics-smoke.js",
     "test:tui": "npm run compile:tui:test && node test/tui-smoke.js",
     "test:electron": "node scripts/run-electron-headless.mjs electron --no-sandbox test/electron-smoke.js",
