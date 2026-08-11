@@ -19,6 +19,7 @@
             [vinary.main.dir-walk :as dir-walk]
             [vinary.main.doc-overrides :as doc-overrides]
             [vinary.main.diff-source :as diff-source]
+            [vinary.main.git :as git]
             [vinary.main.file-kind :as file-kind]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
@@ -651,6 +652,7 @@
     (swap! window-owners retention/drop-owner id)
     (release-tree-owner! id)
     (swap! adopted-diff-roots dissoc id)
+    (git/release-owner! id)
     (swap! remote-tree-pending
            (fn [pending] (into {} (remove (fn [[[owner-id _] _]] (= id owner-id))) pending)))
     (doseq [[remote-owner-id {:keys [uri]}] remote-owners]
@@ -939,6 +941,8 @@
   (doc-overrides/clear! path)
   ;; the ADR-0038 adoption guard shares that lifetime — reopening the same diff re-adopts cleanly.
   (swap! adopted-diff-roots (fn [m] (into {} (map (fn [[id sub]] [id (dissoc sub path)])) m)))
+  ;; a released commit-diff spill also leaves the ADR-0039 re-activation dedupe map.
+  (git/forget-spill! path)
   (release-doc-assets! path))
 
 (defn sync-retained!
@@ -1100,6 +1104,16 @@
                    ;; ADR-0038 seam 2: the resolved targets prove which repository the diff describes.
                    (when includePaths (adopt-diff-project! (.-sender e) diffPath resolved))
                    (clj->js resolved))))))
+  ;; the async git data layer (ADR-0039): history pages, refs, commit diffs, and the ownership-scoped
+  ;; .git watcher. All logic lives in vinary.main.git (Electron-free); these lines only bind channels.
+  (.handle ipcMain "vv:git-log"
+           (fn [_e req] (git/handle-log (js->clj req :keywordize-keys true))))
+  (.handle ipcMain "vv:git-branches"
+           (fn [_e req] (git/handle-branches (js->clj req :keywordize-keys true))))
+  (.handle ipcMain "vv:git-open-diff"
+           (fn [_e req] (git/handle-open-diff (js->clj req :keywordize-keys true))))
+  (.on ipcMain "vv:git-watch"
+       (fn [^js e roots] (git/sync-owner-roots! (.-sender e) (js->clj roots))))
   ;; fetch a remote asset's bytes → a data: URL, so a remote Markdown/Office doc's relative images render (the
   ;; renderer can't reach the host, and file:// cannot either). `relativeTo` is the remote doc's URI.
   (.handle ipcMain "vv:load-remote-asset"

@@ -145,6 +145,31 @@ or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of
 > One auditable, JSON-only boundary is far easier to reason about than ad-hoc `ipcRenderer` calls
 > scattered through the UI.
 
+### The git data layer (ADR-0039)
+
+The Commits surfaces add a family of read-only `vv:git-*` channels backed by `vinary.main.git`.
+The **repository itself is the untrusted input** — its config, refs, and messages — and the layer
+is built so nothing it contains gains execution or option-injection power:
+
+- **argv arrays, never a shell.** Ref names, paths, and ranges are single argv entries; every
+  user-supplied ref sits behind `--end-of-options` AND must first pass
+  `rev-parse --verify --quiet … ^{commit}`, so an option-shaped ref (`--all`, `--output=…`) is
+  rejected before any consuming argv could see it (pinned by `test/git-log-smoke.js`).
+- **`--no-ext-diff` on every diff** — repository config must never select an external diff driver
+  (a program) for content the viewer asked git to print. Blob content for split-view enrichment is
+  read with `cat-file blob` (plumbing: no textconv, no smudge filters).
+- **Commit messages, author strings, and ref names are untrusted text.** Subjects render as escaped
+  text nodes; message bodies reach HTML only through the single sanitizing markdown pipeline (§5);
+  ref decorations render as text chips.
+- **Watch targets are derived, not concatenated**: `rev-parse --absolute-git-dir` /
+  `--git-common-dir` name what to watch (worktree-safe), and the watcher is ownership-scoped and
+  bounded (`depth 4` over `HEAD`/`refs`/`packed-refs`), released with its windows.
+- **Spilled commit diffs are private files** (`0700` dir / `0600` file under the user runtime dir),
+  registered as stdin-style documents: excluded from the MRU, unlinked with retention, swept by the
+  age-gated boot sweep.
+- **Everything is a query** — `log`, `for-each-ref`, `rev-parse`, `diff`, `cat-file`. No mutating
+  git subcommand exists in the namespace.
+
 ---
 
 ## 4. Filesystem exposure

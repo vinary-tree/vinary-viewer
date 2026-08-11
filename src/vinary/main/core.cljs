@@ -11,6 +11,7 @@
             [vinary.main.daemon :as daemon]
             [vinary.main.doc-overrides :as doc-overrides]
             [vinary.terminal.stdin :as stdin]
+            [vinary.main.git :as git]
             [vinary.main.profile :as profile]
             [vinary.main.config :as config]
             [vinary.main.settings :as settings]
@@ -467,6 +468,8 @@
                                 ;; age gate covers the one legitimate race: vv-open.mjs spills BEFORE
                                 ;; spawning the daemon that runs this sweep (spill→send is sub-second).
                                 (stdin/sweep-stale! (* 10 60 1000))
+                                ;; …and of commit-diff spills (ADR-0039), same gate, same rationale.
+                                (git/sweep-stale! (* 10 60 1000))
                                 ;; Authenticated SSH/SFTP live events: advertise a loopback-only endpoint in the
                                 ;; target user's private runtime descriptor. A source reaches it through SSH
                                 ;; direct-tcpip and proves possession of the descriptor's rotating secret.

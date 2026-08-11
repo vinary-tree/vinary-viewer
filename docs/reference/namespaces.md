@@ -44,6 +44,7 @@ window/view work. Renderer code never imports these namespaces.
 | `vinary.main.connections` | Persisted **non-secret** SSH connection metadata (`connections.edn`): host entries for URI/host hints. Secrets never land here (see `ssh.cljs`). |
 | `vinary.main.window` | Persisted main-window geometry (`window.edn`): position, size, maximized state, clamped to a visible display. Main-only. |
 | `vinary.main.grammars` | Grammar registry (main side): decides which files are `source` (→ the read-only CodeMirror view) and pushes the user grammar + filetype registry. |
+| `vinary.main.git` | Async, strictly read-only git data layer (ADR-0039): the `vv:git-log`/`vv:git-branches`/`vv:git-open-diff` handlers, the ownership-scoped `.git` watcher behind `vv:git-watch` → `vv:git-changed`, commit-diff spills (stdin-style lifecycle + dedupe), and the boot sweep. Electron-free — the service binds its channels; argv/parsing live lower in `vinary.git.log`. |
 | `vinary.main.shell` | Menu-bar shell actions: the multi-file Open dialog, clipboard writes, reveal/open-path, open-external, app-info, quit, devtools, and app-window zoom. |
 | `vinary.main.startup` | Pure, electron-free startup configuration (so the node `:test` build can assert it). |
 | `vinary.main.web` | In-app HTTP browsing: a main-owned `WebContentsView` (http/https) with bounds, navigation relay, page zoom, snapshot cache, TOC bridge, and the page-key/scroll relay to the web preload. |

@@ -43,6 +43,11 @@ contextBridge.exposeInMainWorld('vv', {
   completePath: (input) => ipcRenderer.invoke('vv:complete-path', input),
   contentPage: (request) => ipcRenderer.invoke('vv:content-page', request),
   loadDiffSources: (req) => ipcRenderer.invoke('vv:load-diff-sources', req),
+  // the async git data layer (ADR-0039): history pages, refs, commit diffs, watcher ownership
+  gitLog: (req) => ipcRenderer.invoke('vv:git-log', req),
+  gitBranches: (req) => ipcRenderer.invoke('vv:git-branches', req),
+  gitOpenDiff: (req) => ipcRenderer.invoke('vv:git-open-diff', req),
+  gitWatch: (roots) => ipcRenderer.send('vv:git-watch', roots),
   // bounded-memory document streaming (session pull-cursor)
   streamOpen: (req) => ipcRenderer.invoke('vv:stream-open', req),
   streamPull: (req) => ipcRenderer.invoke('vv:stream-pull', req),
@@ -97,6 +102,11 @@ contextBridge.exposeInMainWorld('vv', {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:tree', h);
     return () => ipcRenderer.removeListener('vv:tree', h);
+  },
+  onGitChanged: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:git-changed', h);
+    return () => ipcRenderer.removeListener('vv:git-changed', h);
   },
   onKeymap: (cb) => {
     const h = (_e, payload) => cb(payload);
