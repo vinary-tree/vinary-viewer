@@ -14,6 +14,7 @@
             [re-frame.core :as rf]
             [vinary.app.commits :as commits]
             [vinary.app.projects :as projects]
+            [vinary.git.graph-geometry :as ggeo]
             [vinary.ui.combo-select :refer [combo-select]]
             [vinary.ui.text-input :as text-input]))
 
@@ -49,14 +50,16 @@
               (or edges [])))))
 
 (defn- rail-cell [prev-row row rail-w]
-  [:svg.vv-commits-rail {:width rail-w :height row-h
-                         :viewBox (str "0 0 " rail-w " " row-h)
-                         :aria-hidden "true"}
-   (into [:g]
-         (map-indexed (fn [i [cls d]] ^{:key i} [:path {:class cls :d d}])
-                      (edge-paths (:edges prev-row) (:edges row) (:lane row))))
-   [:circle.vv-commits-dot {:class (str "vv-lane-" (mod (long (:lane row 0)) lane-cap))
-                            :cx (lx (:lane row 0)) :cy (/ row-h 2) :r 3.5}]])
+  ;; a HISTORY listing (non-contiguous) carries no lane rows — the cell degrades to a lane-0 dot
+  (let [row (or row {:lane 0 :edges [] :active 1})]
+    [:svg.vv-commits-rail {:width rail-w :height row-h
+                           :viewBox (str "0 0 " rail-w " " row-h)
+                           :aria-hidden "true"}
+     (into [:g]
+           (map-indexed (fn [i [cls d]] ^{:key i} [:path {:class cls :d d}])
+                        (edge-paths (:edges prev-row) (:edges row) (:lane row))))
+     [:circle.vv-commits-dot {:class (str "vv-lane-" (mod (long (:lane row 0)) lane-cap))
+                              :cx (lx (:lane row 0)) :cy (/ row-h 2) :r 3.5}]]))
 
 ;; ── rows ────────────────────────────────────────────────────────────────────────────────────────
 (defn- rel-date
@@ -143,8 +146,9 @@
           [["Local" "local"] ["Remote" "remote"] ["Tags" "tag"]])))
 
 (defn- header [root repo repos]
-  (let [{:keys [branches ref range-input range-error selection commits]} repo
-        pair (commits/diff-pair selection (mapv :hash commits))]
+  (let [{:keys [branches ref range-input range-error selection commits mode history-target]} repo
+        pair     (commits/diff-pair selection (mapv :hash commits))
+        history? (contains? #{:file-history :line-history} mode)]
     [:div.vv-commits-header
      (when (> (count repos) 1)
        [combo-select {:value   (basename-of root)
@@ -157,7 +161,14 @@
                     :title   "Branch / tag"
                     :groups  (branch-groups branches)
                     :on-pick #(rf/dispatch [:commits/set-ref root %])
+                    :disabled? history?
+                    :disabled-title "History follows HEAD"
                     :class   "vv-commits-branch"}]
+     (when-let [label (ggeo/history-chip-label {:mode mode :target history-target})]
+       [:span.vv-commits-chip {:title (:file history-target)}
+        label
+        [:button.vv-commits-chip-x {:title    "Back to the branch log"
+                                    :on-click #(rf/dispatch [:git/history-exit root])} "×"]])
      [text-input/async-input
       {:value     (or range-input "")
        :on-change #(rf/dispatch [:commits/range-input root %])

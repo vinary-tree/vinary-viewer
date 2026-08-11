@@ -83,6 +83,8 @@
    :view/devtools   {:id :view/devtools :title "Developer tools" :category "View" :dispatch [:view/devtools]}
    :git/blame-toggle {:id :git/blame-toggle :title "Toggle git blame" :category "Git" :dispatch [:blame/toggle]}
    :git/open-graph {:id :git/open-graph :title "Open commit graph" :category "Git" :dispatch [:git-graph/open]}
+   :git/file-history {:id :git/file-history :title "File history" :category "Git" :dispatch [:git/file-history {}]}
+   :git/line-history {:id :git/line-history :title "Line range history" :category "Git" :dispatch [:git/line-history-from-selection]}
    :view/re-frame-10x {:id :view/re-frame-10x :title "re-frame-10x" :category "View" :dispatch [:view/re-frame-10x]}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}

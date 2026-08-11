@@ -130,10 +130,14 @@
      {:db (-> db
               (assoc-in (commits-path root :loading?) true)
               (assoc-in (commits-path root :gen) gen))
-      :fx [[:vv/git-log (cond-> {:root root :skip (long (or skip 0)) :limit commits-page
-                                 :on-done  [:commits/log-received root gen (zero? (long (or skip 0)))]
-                                 :on-error [:commits/log-error root]}
-                          (:ref repo) (assoc :ref (:ref repo)))]]})))
+      :fx [[:vv/git-log (let [hist (commits/history-args {:mode   (:mode repo)
+                                                          :target (:history-target repo)})]
+                          (cond-> {:root root :skip (long (or skip 0)) :limit commits-page
+                                   :on-done  [:commits/log-received root gen (zero? (long (or skip 0)))]
+                                   :on-error [:commits/log-error root]}
+                            hist (merge hist)
+                            ;; a ref applies only to the plain branch log — history follows HEAD
+                            (and (nil? hist) (:ref repo)) (assoc :ref (:ref repo))))]]})))
 
 (rf/reg-event-fx
  :commits/load-more
@@ -152,7 +156,11 @@
        (let [prev  (get-in db (commits-path root))
              all   (if page0? (vec commits) (into (vec (:commits prev)) commits))
              state (if page0? (graph/init-state) (get-in prev [:graph :state] (graph/init-state)))
-             fold  (graph/assign state (if page0? all (vec commits)))
+             ;; a HISTORY listing is non-contiguous — lanes would lie, so the fold stays empty and
+             ;; both surfaces draw dots-only rows for it
+             fold  (if (contains? #{:file-history :line-history} (:mode prev))
+                     {:rows [] :state (graph/init-state)}
+                     (graph/assign state (if page0? all (vec commits))))
              rows  (if page0? (:rows fold) (into (get-in prev [:graph :rows] []) (:rows fold)))
              kept  (when page0?
                      ;; a refresh replaced the pages — hash-keyed UI state survives by hash
@@ -285,6 +293,60 @@
                               :on-done  [:commits/branches-received root]
                               :on-error [:commits/log-error root]}]
            [:dispatch [:commits/load root {:skip 0}]]]})))
+
+;; ── history modes: file history (--follow) + line-range history (-L) — ADR-0040 ────────────────
+;; A history listing REPLACES the repo's log in the shared store, so the sidebar list and the
+;; Commit Graph both show it; a dismissible chip in each header exits back to the branch log.
+
+(defn- enter-history
+  "Reset a repo's listing into `mode` for `target`, pin the panel to that repo (the results must be
+   LOOKED AT — a pin elsewhere would hide them), and reveal the Commits tab."
+  [db root mode target]
+  (-> db
+      (assoc-in [:ui :commits :root] root)
+      (update-in (commits-path root) merge
+                 {:mode mode :history-target target
+                  :commits [] :graph nil :selection nil :expanded #{} :bodies {}
+                  :exhausted? false :empty? false :error nil})))
+
+(rf/reg-event-fx
+ :git/file-history
+ (fn [{:keys [db]} [_ {:keys [file]}]]
+   (let [file (or file (nav/active-path db))
+         root (when file (commits/derive-root {} (get-in db [:ui :projects]) file))]
+     (when root
+       {:db (enter-history db root :file-history {:file file})
+        :fx [[:dispatch [:commits/load root {:skip 0}]]
+             [:dispatch [:sidebar/show]]
+             [:dispatch [:sidebar/tab :commits]]]}))))
+
+(rf/reg-event-fx
+ :git/line-history
+ (fn [{:keys [db]} [_ {:keys [file start end]}]]
+   (let [root (when file (commits/derive-root {} (get-in db [:ui :projects]) file))
+         [start end] (if (> (long start) (long end)) [end start] [start end])]
+     (when root
+       {:db (enter-history db root :line-history {:file file :start start :end end})
+        :fx [[:dispatch [:commits/load root {:skip 0}]]
+             [:dispatch [:sidebar/show]]
+             [:dispatch [:sidebar/tab :commits]]]}))))
+
+(rf/reg-event-fx
+ :git/line-history-from-selection
+ (fn [{:keys [db]} _]
+   ;; the palette/menu entry with no explicit range: the mounted source view's selection (or its
+   ;; cursor line, twice) names the lines — read through an fx, the DOM's business
+   (when-let [file (nav/active-path db)]
+     {:fx [[:git/selection-line-history file]]})))
+
+(rf/reg-event-fx
+ :git/history-exit
+ (fn [{:keys [db]} [_ root]]
+   {:db (update-in db (commits-path root) merge
+                   {:mode :log :history-target nil
+                    :commits [] :graph nil :selection nil :expanded #{} :bodies {}
+                    :exhausted? false :empty? false :error nil})
+    :fx [[:dispatch [:commits/load root {:skip 0}]]]}))
 
 ;; ── the Commit Graph document (ADR-0040) ────────────────────────────────────────────────────────
 

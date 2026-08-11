@@ -25,6 +25,7 @@
    :sep
    {:label (source-label view-source?) :event [:tab/toggle-source id]}
    (when path :sep)
+   (when path {:label "File History" :event [:git/file-history {:file path}]})
    (when path {:label "Copy file path" :event [:clipboard/copy path]})
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
@@ -33,6 +34,8 @@
   (case kind
     :file [{:label "Open"                 :event [:doc/open path]}
            {:label "Open in new tab"      :event [:doc/open-new path]}
+           ;; the file's commit history (--follow) — ADR-0040; self-gates on a repo
+           {:label "File History"         :event [:git/file-history {:file path}]}
            :sep
            {:label "Copy file path"       :event [:clipboard/copy path]}
            {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]
@@ -95,6 +98,8 @@
      ;; jump to the rendered object for this source line — only when the doc has a preview (markdown/org)
      (when (and source-line previewable?)
        {:label "Go to preview"      :event [:preview/goto-line source-line]})
+     ;; the selected lines' (or the cursor line's) commit history — ADR-0040; self-gates on a repo
+     {:label "Line Range History"   :event [:git/line-history-from-selection]}
      :sep
      {:label "Copy file path"       :event [:clipboard/copy path]}
      {:label "Copy file name"       :event [:clipboard/copy (basename path)]}]

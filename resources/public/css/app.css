@@ -415,6 +415,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   font-size: 11px; text-align: center; }
 .vv-commits-more { background: none; border: none; cursor: pointer; }
 .vv-commits-more:hover { color: var(--vv-fg); }
+/* the dismissible history-mode chip (shared by the Commits panel and the Commit Graph header) */
+.vv-commits-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--vv-accent);
+  border-radius: 10px; padding: 1px 4px 1px 8px; font-size: 11px; color: var(--vv-accent);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vv-commits-chip-x { border: none; background: none; color: var(--vv-accent); cursor: pointer;
+  padding: 0 2px; font-size: 12px; }
+.vv-commits-chip-x:hover { color: var(--vv-fg-strong); }
 /* lane palette hooks: color feeds the dot's currentColor fill, stroke feeds the rail paths */
 .vv-lane-0 { color: var(--vv-lane-0); stroke: var(--vv-lane-0); }
 .vv-lane-1 { color: var(--vv-lane-1); stroke: var(--vv-lane-1); }

@@ -1156,7 +1156,7 @@
 (deftest context-menu-items-for
   (let [labels (fn [items] (->> items (remove #{:sep}) (keep :label) set))]
     (testing "each target kind yields its expected items"
-      (is (= #{"Open" "Open in new tab" "Copy file path" "Copy file name"}
+      (is (= #{"Open" "Open in new tab" "File History" "Copy file path" "Copy file name"}
              (labels (context-menu/items-for {:kind :file :path "/x/a.md"} false false))))
       (is (contains? (labels (context-menu/items-for {:kind :dir :root "/x" :path "/x/d"} false false))
                      "Open in file manager"))

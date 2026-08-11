@@ -75,6 +75,52 @@
 (defn- split-refs [s]
   (into [] (comp (map str/trim) (remove str/blank?)) (str/split (or s "") #", ")))
 
+(def ^:private record-start "\u001e")
+
+(def line-log-format
+  "The LINE-HISTORY format (R1's second discipline): %x1e OPENS each record — `git log -L` forces
+   patch output on pre-2.42 gits even under --no-patch, and a record-start marker (unlike a
+   terminator) lets the parser discard whatever trails the last field. No %b: a body could swallow
+   bleed silently; the eight fields end at the single-line subject."
+  "format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cI%x1f%D%x1f%s")
+
+(defn line-log-args
+  "`git log -L<start>,<end>:<rel>` — line-range history. No pathspec and no --follow (line-log does
+   its own content tracing across renames), no ref (history follows HEAD: a branch pick would
+   contradict working-file lineage), and a single-shot -n bound (line-log paginates poorly; the
+   caller marks the reply exhausted)."
+  [{:keys [rel start end limit]}]
+  ["log" (str "-L" (long start) "," (long end) ":" rel)
+   "--no-patch" "-n" (str (long (or limit 500)))
+   (str "--pretty=" line-log-format)])
+
+(defn parse-line-log
+  "Line-history text → {:commits […] :count n}, records split on the %x1e START marker. The subject
+   (the last field) truncates at its first newline and anything after it — the patch text a
+   pre-2.42 git bleeds despite --no-patch — is discarded, which makes both git behaviors parse
+   identically. Fields beyond the eighth (a %x1f inside bleed) are ignored the same way."
+  [text]
+  (let [commits
+        (into []
+              (comp
+               (map #(str/replace % #"^\n+" ""))
+               (remove str/blank?)
+               (keep (fn [record]
+                       (let [fields (str/split record field-sep -1)]
+                         (when (and (>= (count fields) 8)
+                                    (re-matches hash-re (nth fields 0)))
+                           {:hash           (nth fields 0)
+                            :parents        (split-parents (nth fields 1))
+                            :author-name    (nth fields 2)
+                            :author-email   (nth fields 3)
+                            :author-date    (nth fields 4)
+                            :committer-date (nth fields 5)
+                            :refs           (split-refs (nth fields 6))
+                            :subject        (first (str/split-lines (nth fields 7)))
+                            :body           ""})))))
+              (str/split (str text) record-start))]
+    {:commits commits :count (count commits)}))
+
 (defn parse-log
   "Pretty-format text → {:commits [{:hash :parents :author-name :author-email :author-date
    :committer-date :refs :subject :body}] :count n}. Records are %x00-terminated; the newline git

@@ -79,6 +79,19 @@
         (when (and ia ib)
           (if (> ia ib) [a b] [b a]))))))
 
+(defn history-args
+  "The vv:git-log request additions for a repo's panel MODE: file history follows renames, line
+   history rides the lineRange key, plain :log adds nothing (nil). History always walks HEAD — a
+   branch pick would contradict working-file lineage — so callers must add :ref only when this
+   returns nil."
+  [{:keys [mode target]}]
+  (case mode
+    :file-history {:file (:file target) :follow true}
+    :line-history {:lineRange {:file  (:file target)
+                               :start (:start target)
+                               :end   (:end target)}}
+    nil))
+
 (defn keep-surviving
   "After a page-0 refresh replaces :commits (vv:git-changed), prune hash-keyed UI state to hashes
    that still exist: selection members, the expanded set, and the rendered-body cache. cursor and

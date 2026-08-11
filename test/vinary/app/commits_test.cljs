@@ -71,6 +71,18 @@
     (is (nil? (commits/diff-pair {:selected #{"h1" "h2" "h3"}} order)))
     (is (nil? (commits/diff-pair {:selected #{"h1" "gone"}} order)))))
 
+(deftest history-mode-request-args
+  (testing "file history follows renames; the ref stays out (history walks HEAD)"
+    (is (= {:file "/repo/src/a.cljs" :follow true}
+           (commits/history-args {:mode :file-history :target {:file "/repo/src/a.cljs"}}))))
+  (testing "line history rides the lineRange key"
+    (is (= {:lineRange {:file "/repo/src/a.cljs" :start 10 :end 42}}
+           (commits/history-args {:mode :line-history
+                                  :target {:file "/repo/src/a.cljs" :start 10 :end 42}}))))
+  (testing "the plain branch log adds nothing"
+    (is (nil? (commits/history-args {:mode :log})))
+    (is (nil? (commits/history-args {})))))
+
 (deftest refresh-survival
   (let [state {:selection {:cursor "h2" :anchor "h9" :selected #{"h2" "h9"}}
                :expanded #{"h2" "h9"}

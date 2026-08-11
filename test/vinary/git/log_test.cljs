@@ -89,6 +89,43 @@
   (testing "empty input parses to zero commits"
     (is (= {:commits [] :count 0} (glog/parse-log "")))))
 
+(def ^:private RS "\u001e")
+
+(defn- lrec
+  "One 8-field line-history record: %x1e-opened, no body field."
+  [& fields]
+  (str RS (str/join SEP fields)))
+
+(deftest line-log-argv-and-records
+  (testing "the -L argv: no pathspec, no ref, --no-patch, single-shot bound"
+    (is (= ["log" "-L10,42:src/a.cljs" "--no-patch" "-n" "500"
+            (str "--pretty=" glog/line-log-format)]
+           (glog/line-log-args {:rel "src/a.cljs" :start 10 :end 42 :limit 500}))))
+  (testing "clean records (git ≥ 2.42) parse field-for-field with an empty body"
+    (let [{:keys [commits count]}
+          (glog/parse-line-log
+           (str (lrec H1 H2 "Ada" "a@x" "2026-08-11T10:00:00+02:00" "2026-08-11T10:00:00+02:00"
+                      "HEAD -> main" "touch lines")
+                "\n" (lrec H2 "" "Bob" "b@x" "d" "d" "" "origin")))]
+      (is (= 2 count))
+      (is (= {:hash H1 :parents [H2] :subject "touch lines" :body ""
+              :refs ["HEAD -> main"]}
+             (select-keys (first commits) [:hash :parents :subject :body :refs])))))
+  (testing "pre-2.42 patch bleed after the subject is discarded (the %x1e START marker's whole point)"
+    (let [bleed (str "\ndiff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n")
+          {:keys [commits]}
+          (glog/parse-line-log
+           (str (lrec H1 "" "Ada" "a@x" "d" "d" "" (str "subject" bleed))
+                (lrec H2 "" "Bob" "b@x" "d" "d" "" "clean")))]
+      (is (= ["subject" "clean"] (mapv :subject commits))
+          "the subject truncates at its first newline; the bleed never leaks")))
+  (testing "a stray %x1f inside bleed only widens the field count — the record survives"
+    (let [{:keys [commits]}
+          (glog/parse-line-log
+           (lrec H1 "" "Ada" "a@x" "d" "d" "" (str "subject\npatch " SEP " garbage")))]
+      (is (= ["subject"] (mapv :subject commits)))))
+  (is (= {:commits [] :count 0} (glog/parse-line-log ""))))
+
 (deftest parse-branches-records
   (let [text (str "refs/heads/main" SEP "main" SEP "*" "\n"
                   "refs/heads/dev" SEP "dev" SEP " " "\n"

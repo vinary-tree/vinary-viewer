@@ -90,29 +90,42 @@
    is an explicit error, and the schema is already carved out."
   [{:keys [root ref skip limit file follow lineRange]}]
   (let [limit (long (or limit page-limit))]
-    (if lineRange
-      (js/Promise.resolve (clj->js {:error "lineRange unsupported"}))
-      (-> (toplevel root)
-          (.then (fn [{:keys [ok error]}]
-                   (if-not ok
-                     {:error error}
-                     (let [top ok
-                           run (fn [verified-ref]
-                                 (-> (run-git (glog/log-args {:ref verified-ref :skip skip
-                                                              :limit limit :file file
-                                                              :follow? follow})
-                                              top)
-                                     (.then (fn [{:keys [ok error]}]
-                                              (cond
-                                                ok (let [{:keys [commits count]} (glog/parse-log ok)]
-                                                     {:commits commits :exhausted (< count limit)})
-                                                (empty-repo-error? error) {:commits [] :exhausted true :empty true}
-                                                :else {:error error})))))]
-                       (if ref
-                         (-> (verify-rev top ref)
-                             (.then (fn [{:keys [ok error]}] (if ok (run ref) {:error error}))))
-                         (run nil))))))
-          (.then clj->js)))))
+    (-> (toplevel root)
+        (.then
+         (fn [{:keys [ok error]}]
+           (if-not ok
+             {:error error}
+             (let [top ok]
+               (if lineRange
+                 ;; line-range history (R1's second discipline): -L is single-shot (it paginates
+                 ;; poorly), always from HEAD, over the file's repo-relative path
+                 (let [{:keys [file start end]} lineRange
+                       rel (str/replace (.relative path top (str file)) #"\\" "/")]
+                   (if (or (str/blank? rel) (str/starts-with? rel ".."))
+                     {:error "file is outside the repository"}
+                     (-> (run-git (glog/line-log-args {:rel rel :start start :end end :limit 500}) top)
+                         (.then (fn [{:keys [ok error]}]
+                                  (cond
+                                    ok (let [{:keys [commits]} (glog/parse-line-log ok)]
+                                         {:commits commits :exhausted true})
+                                    (empty-repo-error? error) {:commits [] :exhausted true :empty true}
+                                    :else {:error error}))))))
+                 (let [run (fn [verified-ref]
+                             (-> (run-git (glog/log-args {:ref verified-ref :skip skip
+                                                          :limit limit :file file
+                                                          :follow? follow})
+                                          top)
+                                 (.then (fn [{:keys [ok error]}]
+                                          (cond
+                                            ok (let [{:keys [commits count]} (glog/parse-log ok)]
+                                                 {:commits commits :exhausted (< count limit)})
+                                            (empty-repo-error? error) {:commits [] :exhausted true :empty true}
+                                            :else {:error error})))))]
+                   (if ref
+                     (-> (verify-rev top ref)
+                         (.then (fn [{:keys [ok error]}] (if ok (run ref) {:error error}))))
+                     (run nil))))))))
+        (.then clj->js))))
 
 ;; ── vv:git-branches ─────────────────────────────────────────────────────────────────────────────
 

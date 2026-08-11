@@ -46,6 +46,8 @@
 
 (defn- graph-row [root max-lane prev-row row commit selection]
   (let [{:keys [hash subject refs]} commit
+        ;; a HISTORY listing carries no lane rows — the rail degrades to a lane-0 dot
+        row       (or row {:lane 0 :edges [] :active 1})
         geo       (ggeo/row-geometry row (:edges prev-row) max-lane)
         selected? (contains? (:selected selection) hash)
         cursor?   (= (:cursor selection) hash)
@@ -84,7 +86,8 @@
      [:span.vv-gg-date (ggeo/fmt-date (:author-date commit))]]))
 
 (defn- header-bar [root repo]
-  (let [{:keys [branches ref commits exhausted? loading?]} repo]
+  (let [{:keys [branches ref commits exhausted? loading? mode history-target]} repo
+        history? (contains? #{:file-history :line-history} mode)]
     [:div.vv-gg-header
      [:span.vv-gg-repo (last (remove str/blank? (str/split (projects/normalized-path root) #"/")))]
      [:span.vv-gg-count (str (count commits) (if exhausted? "" "+") " commits")]
@@ -92,7 +95,14 @@
                     :title   "Branch / tag"
                     :groups  (commits-ui/branch-groups branches)
                     :on-pick #(rf/dispatch [:commits/set-ref root %])
+                    :disabled? history?
+                    :disabled-title "History follows HEAD"
                     :class   "vv-gg-branch"}]
+     (when-let [label (ggeo/history-chip-label {:mode mode :target history-target})]
+       [:span.vv-commits-chip {:title (:file history-target)}
+        label
+        [:button.vv-commits-chip-x {:title    "Back to the branch log"
+                                    :on-click #(rf/dispatch [:git/history-exit root])} "×"]])
      (when loading? [:span.vv-gg-loading "…"])]))
 
 (defn graph-view [_path _git-root]

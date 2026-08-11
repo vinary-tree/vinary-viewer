@@ -386,6 +386,12 @@
                             (fn [line]
                               (rf/dispatch [:blame/line-click (blame/hunk-for-line hunks line)])))))
 (rf/reg-fx :blame/clear-view (fn [_] (cm/clear-blame!)))
+;; line-range history's line source: the mounted source view's primary selection (cursor line
+;; twice when empty); silently nothing without a mounted source view — the palette pattern
+(rf/reg-fx :git/selection-line-history
+           (fn [file]
+             (when-let [[start end] (cm/selection-lines)]
+               (rf/dispatch [:git/line-history {:file file :start start :end end}]))))
 ;; keep the graph's keyboard cursor visible: clamp the confined .vv-content scroller so the fixed-
 ;; height row at `idx` is inside the viewport (native scroll writes only — the single scroll owner)
 (rf/reg-fx :git-graph/reveal-row
