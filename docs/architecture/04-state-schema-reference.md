@@ -47,6 +47,7 @@ are scalar cardinality-one fields.
 | `:doc/pdf-sibling` | string | Path of a collocated same-stem `.pdf` a document can switch to (Document↔PDF switch, [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)/[0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md)). |
 | `:doc/diff-split-html` | string | The GUI-only, on-disk-enriched side-by-side (split) rendering of a diff. |
 | `:doc/git-root` | string | The validated repository root of a **Commit Graph** virtual document (`:doc/kind = "git-graph"`, `vv-git-graph://` — [ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)). The entity is deliberately tiny: the commit data lives in `[:ui :commits]`, not DataScript. Added to the `active-doc` pull list per the rule below. |
+| `:doc/git` | map | A **commit diff**'s facts `{:root :from :to :range?}` ([ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) — present only on kind-`diff` docs whose `vv:content` payload carried the doc-overrides `git` field (git-produced spills), retracted when a re-send no longer carries it or the doc is re-typed. `:range?` = "highlight both endpoint rows" (true only for an explicit user-chosen FROM; a parent diff — incl. the empty-tree root-commit case — claims only `:to`). Feeds the derived `:commits/open-set` highlight; also on the pull list per the rule below. |
 | `:doc/streaming?` / `:doc/stream-progress` / `:doc/stream-note` | boolean / number / string | Whether the doc renders incrementally, its progress in `[0,1]`, and a user-facing status note. |
 | `:doc/error` | string | Read/render error message. |
 | `:doc/stamp` | number | Content timestamp used to ignore stale async render results. |
@@ -98,11 +99,14 @@ Current default shape:
       :palette {:open? false :source :command :prefix "" :query ""
                 :items [] :selected 0}
       :commits {:root nil                 ; explicit repo pin (nil = follow the active document)
-                :last-root nil            ; repo last shown (anti-thrash fallback, ADR-0039)
+                :last-root nil            ; repo last shown (anti-thrash fallback, ADR-0039;
+                                          ;   also written by :git-graph/shown — ADR-0042)
                 :repos {}}                ; per-repo cache: root → {:ref :branches :commits
                                           ;   :graph {:rows :state :max-lane} :exhausted? :empty?
                                           ;   :loading? :error :gen
                                           ;   :selection {:cursor :anchor :selected}
+                                          ;     (Ctrl/Shift MULTI-select marking only — the
+                                          ;      opened-commit highlight is DERIVED, ADR-0042)
                                           ;   :expanded :bodies :range-input :range-error
                                           ;   :mode :history-target}          (ADR-0040 history modes)
                                           ; runtime top-level key (ADR-0040):

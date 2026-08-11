@@ -1,6 +1,7 @@
 (ns vinary.app.commits-test
-  "The Commits panel's pure model (ADR-0039): repo derivation, the ref-range grammar, the R3
-   selection reducers shared with the Commit Graph document, and refresh-survival pruning."
+  "The Commits panel's pure model (ADR-0039/0042): repo derivation, the ref-range grammar, the R3
+   MULTI-select reducers shared with the Commit Graph document, the derived open-commit set, and
+   refresh-survival pruning."
   (:require [cljs.test :refer [deftest is testing]]
             [vinary.app.commits :as commits]))
 
@@ -40,9 +41,8 @@
 (def ^:private order ["h4" "h3" "h2" "h1"])   ; newest-first, like a loaded log page
 
 (deftest selection-reducers
-  (testing ":single collapses to one hash"
-    (is (= {:cursor "h3" :anchor "h3" :selected #{"h3"}}
-           (commits/select {:cursor "h1" :anchor "h1" :selected #{"h1" "h2"}} order "h3" :single))))
+  ;; :single was removed with ADR-0042 — plain interactions never write the stored selection any
+  ;; more (the opened commit's highlight derives from the active document via open-set below)
   (testing ":toggle flips membership and moves cursor+anchor"
     (let [s (commits/select {:cursor "h4" :anchor "h4" :selected #{"h4"}} order "h2" :toggle)]
       (is (= #{"h4" "h2"} (:selected s)))
@@ -57,9 +57,26 @@
         "anchor inversion selects the same span")
     (is (= "h3" (:anchor (commits/select {:anchor "h3"} order "h1" :range)))
         "the anchor survives a range extension"))
-  (testing ":range falls back to :single when an end left the loaded window"
+  (testing ":range falls back to a self-anchored single-row range when an end left the loaded window"
     (is (= {:cursor "h2" :anchor "h2" :selected #{"h2"}}
            (commits/select {:anchor "gone"} order "h2" :range)))))
+
+(def ^:private empty-tree "4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+
+(deftest open-set-derivation
+  (testing "no commit-diff facts (the active doc is not a commit diff) → nothing is open"
+    (is (= #{} (commits/open-set nil "/repo")))
+    (is (= #{} (commits/open-set nil nil))))
+  (testing "a parent diff claims only :to"
+    (is (= #{"T"} (commits/open-set {:root "/repo" :from "F" :to "T" :range? false} "/repo"))))
+  (testing "a root-commit parent diff (empty-tree FROM) still claims only :to — the empty tree is
+            a tree object no log row can carry, so no row could match it anyway"
+    (is (= #{"T"} (commits/open-set {:root "/repo" :from empty-tree :to "T" :range? false} "/repo"))))
+  (testing "an explicit pair/range diff claims both endpoints"
+    (is (= #{"F" "T"} (commits/open-set {:root "/repo" :from "F" :to "T" :range? true} "/repo"))))
+  (testing "another repo's diff marks nothing in this panel"
+    (is (= #{} (commits/open-set {:root "/repo" :from "F" :to "T" :range? true} "/other")))
+    (is (= #{} (commits/open-set {:root "/repo" :from "F" :to "T" :range? false} nil)))))
 
 (deftest diff-pair-ordering
   (testing "exactly two selected → [older newer] (higher index = older in a newest-first list)"

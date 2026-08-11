@@ -20,7 +20,7 @@ package "Electron MAIN (Node)" MAIN_FILL {
   component "vinary.main.service\nsync `git` helper (tiny interactive calls:\nrepo trees; Commit Graph root validation\n-> vv:content {kind git-graph, git {root}})" as Svc MAIN_TINT
   component "vinary.main.git\nasync run-git (execFile, argv arrays, 64 MiB)\nhandle-log (+ --follow / -L lineRange)\nhandle-branches / handle-open-diff\nhandle-blame / load-rev-sources" as MGit MAIN_TINT
   component "`.git` watcher\nchokidar: HEAD + refs + packed-refs\n(worktree-safe dirs; owner-scoped;\n300 ms debounce per root)" as Watcher MAIN_TINT
-  component "doc-overrides registry\ncommit diff = {:kind diff :stdin? true\n:cwd root :git {:root :from :to}}\n(MRU exclusion, unlink-on-release,\nADR-0038 adoption opt-out)" as Overrides MAIN_TINT
+  component "doc-overrides registry\ncommit diff = {:kind diff :stdin? true\n:cwd root :git {:root :from :to :range?}}\n(MRU exclusion, unlink-on-release,\nADR-0038 adoption opt-out)" as Overrides MAIN_TINT
   database "commit-diff spills\n$XDG_RUNTIME_DIR/vinary-viewer/\ngit-diff/<uuid>/<range>.diff\n(0700/0600; dedupe keyed by\nroot+shas+dots+paths; boot sweep)" as Spills FS_TINT
   cloud "git CLI (read-only)\nlog / for-each-ref / rev-parse\ndiff / cat-file / blame" as CLI FS_TINT
 }

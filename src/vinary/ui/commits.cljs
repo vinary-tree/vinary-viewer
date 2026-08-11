@@ -81,24 +81,30 @@
     (into [:span.vv-commits-refs]
           (for [r refs] ^{:key r} [:span.vv-commits-ref {:title r} r]))))
 
-(defn- commit-row [root rail-w prev-row row commit selection expanded bodies]
+(defn- commit-row [root rail-w prev-row row commit selection open-set expanded bodies]
   ;; NB: `hash` here shadows cljs.core/hash — value-only by contract; never call it
   (let [{:keys [hash subject refs body]} commit
         author    (:author-name commit)
         date      (:author-date commit)
+        ;; open? derives from the ACTIVE DOCUMENT (ADR-0042) — never from stored click-state,
+        ;; so history back / tab switches / closing the diff retarget the highlight for free
+        open?     (contains? open-set hash)
         selected? (contains? (:selected selection) hash)
         cursor?   (= (:cursor selection) hash)
         expanded? (contains? expanded hash)]
     [:div.vv-commits-row
-     {:class           (str (when selected? "vv-commits-row-sel ") (when cursor? "vv-commits-row-cur"))
+     {:class           (str (when open? "vv-commits-row-open ")
+                            (when selected? "vv-commits-row-sel ")
+                            (when cursor? "vv-commits-row-cur"))
       :data-hash       hash
-      ;; plain click = diff vs parent (D4); Ctrl = toggle-select; Shift = range-extend (R3)
+      ;; plain click = diff vs parent (D4) — activation only, no selection write; Ctrl = toggle
+      ;; multi-select; Shift = range-extend (R3/ADR-0042: :selected is Ctrl/Shift marking only,
+      ;; the opened row's highlight derives from the resulting active document)
       :on-click        (fn [^js e]
                          (cond
                            (.-ctrlKey e)  (rf/dispatch [:commits/select root hash :toggle])
                            (.-shiftKey e) (rf/dispatch [:commits/select root hash :range])
-                           :else          (do (rf/dispatch [:commits/select root hash :single])
-                                              (rf/dispatch [:commits/activate root hash]))))
+                           :else          (rf/dispatch [:commits/activate root hash])))
       :on-context-menu (fn [^js e]
                          (.preventDefault e)
                          (let [pair (let [s (vec (:selected selection))] (when (= 2 (count s)) s))]
@@ -187,7 +193,7 @@
      (when range-error [:div.vv-commits-error range-error])]))
 
 ;; ── the list + panel ────────────────────────────────────────────────────────────────────────────
-(defn- commits-list [root repo]
+(defn- commits-list [root repo open-set]
   ;; :empty? binds as empty-repo? — a destructured `empty?` would shadow cljs.core/empty?, and the
   ;; (empty? commits) call below would then invoke nil/false: the blank-window crash this fixes.
   (let [{:keys [commits graph loading? exhausted? error selection expanded bodies]
@@ -210,7 +216,7 @@
                (fn [i commit]
                  ^{:key (:hash commit)}
                  [commit-row root rail-w (get rows (dec i)) (get rows i) commit
-                  (or selection {}) (or expanded #{}) (or bodies {})])
+                  (or selection {}) open-set (or expanded #{}) (or bodies {})])
                commits)
               (cond
                 loading?
@@ -233,11 +239,14 @@
     :component-will-unmount (fn [_] (rf/dispatch [:commits/hidden]))
     :reagent-render
     (fn [root]
-      (let [repo  @(rf/subscribe [:commits/for-root root])
-            repos @(rf/subscribe [:commits/repos])]
+      (let [repo     @(rf/subscribe [:commits/for-root root])
+            repos    @(rf/subscribe [:commits/repos])
+            ;; the derived opened-commit rows (ADR-0042) — #{} unless the active doc IS a
+            ;; commit diff of this repo
+            open-set @(rf/subscribe [:commits/open-set root])]
         [:div.vv-commits
          [header root (or repo {}) repos]
-         [commits-list root (or repo {})]]))}))
+         [commits-list root (or repo {}) open-set]]))}))
 
 (defn commits-panel
   "The sidebar Commits tab. Keyed by the derived repo root, so a root change (active doc moved to

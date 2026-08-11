@@ -89,6 +89,12 @@ All git access remains **strictly read-only** — the one new subprocess (`git b
   `:commits/log-received`), and the **hash-keyed selection** (R3). Clicks and keys dispatch the
   *existing* `:commits/select` / `:commits/activate` events, so selecting in the graph highlights
   the panel and vice versa, and "Diff Selected (2)" means the same two commits everywhere.
+
+  > **Amended 2026-08-11 by [ADR-0042](0042-derived-open-commit-highlight.md):** still one store,
+  > one selection — but `:selected` is Ctrl/Shift marking only now: the graph's plain click became
+  > cursor-only (`:commits/cursor-set`), Escape clears the marks (cursor kept), the `:move-only?`
+  > cursor option disappeared (plain movement is always cursor-only), and the opened-commit `-open`
+  > highlight derives from the active document rather than this store.
   `vinary.git.graph-geometry` is the only new model code — pure numbers (row height 24, lane
   width 12, per-kind SVG path strings, lane cap 12 with an `»` overflow chip, ref-badge
   normalization, keyboard cursor math, date formatting), every `d` string pinned by

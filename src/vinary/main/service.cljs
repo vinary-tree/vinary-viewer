@@ -291,13 +291,21 @@
 
 (defn- decorate-js-payload!
   "Attach the override-carried presentation keys to an outgoing JS vv:content payload: :language (the
-   renderer's source-grammar pick), :stdin (tab labeled from a pipe — excluded from Open Recent), and
-   :baseDir (the invoking cwd a piped document's relative assets resolve against)."
+   renderer's source-grammar pick), :stdin (tab labeled from a pipe — excluded from Open Recent),
+   :baseDir (the invoking cwd a piped document's relative assets resolve against), and :git (a
+   commit-diff spill's {root from to range} facts — the renderer derives the Commits-panel
+   \"open commit\" highlight from them, ADR-0042; wire key `range` drops the ? per the
+   sourceable/paged precedent)."
   [^js payload ov]
   (when ov
     (when (:language ov) (set! (.-language payload) (:language ov)))
     (when (:stdin? ov)   (set! (.-stdin payload) true))
-    (when (and (:stdin? ov) (:cwd ov)) (set! (.-baseDir payload) (:cwd ov))))
+    (when (and (:stdin? ov) (:cwd ov)) (set! (.-baseDir payload) (:cwd ov)))
+    (when-let [g (:git ov)]
+      (set! (.-git payload) (clj->js {:root  (:root g)
+                                      :from  (:from g)
+                                      :to    (:to g)
+                                      :range (boolean (:range? g))}))))
   payload)
 
 (defn- decorate-payload
@@ -306,7 +314,12 @@
   (cond-> m
     (:language ov)               (assoc :language (:language ov))
     (:stdin? ov)                 (assoc :stdin true)
-    (and (:stdin? ov) (:cwd ov)) (assoc :baseDir (:cwd ov))))
+    (and (:stdin? ov) (:cwd ov)) (assoc :baseDir (:cwd ov))
+    (:git ov)                    (assoc :git (let [g (:git ov)]
+                                               {:root  (:root g)
+                                                :from  (:from g)
+                                                :to    (:to g)
+                                                :range (boolean (:range? g))}))))
 
 (defn- send-parsed-content! [^js wc path kind ov]
   ;; `kind` is passed to openUri ONLY when an override exists — for openLocal/openArchiveUri, presence of

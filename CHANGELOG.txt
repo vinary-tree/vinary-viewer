@@ -258,6 +258,19 @@ Added
       Markdown and Org too.
 
 Changed
+    - The Commits panel's and Commit Graph's opened-commit highlight now DERIVES
+      from the active document (ADR-0042): a row is strongly highlighted exactly
+      while its commit's diff is the active tab's document -- navigating Back,
+      switching tabs, or closing the diff retargets or clears it by itself (the
+      stale-highlight-after-Back bug is gone). A range/pair diff highlights BOTH
+      endpoint rows. Selection semantics narrowed with it: the stored selection
+      is Ctrl/Shift multi-select marking only (a dashed accent ring feeding
+      "Diff selected"), a plain panel click just opens the diff, a plain graph
+      click just moves the keyboard cursor, plain/Ctrl arrows are cursor-only,
+      and Escape in the graph clears the marks while keeping the cursor. The
+      commit-diff facts ride the vv:content payload as git {root, from, to,
+      range} -> :doc/git. See docs/design-decisions/0042-derived-open-commit
+      -highlight.md.
     - The sidebar's horizontal tab strip is replaced by a 36px vertical icon rail
       (ADR-0041): one icon per panel (Files / Contents / Tabs / Commits) with
       tooltips and an active indicator. Four labeled tabs needed ~355-380px against

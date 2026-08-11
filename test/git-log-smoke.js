@@ -140,8 +140,8 @@ function main() {
     assert.ok(MAIN_GIT.includes(EMPTY_TREE), 'vinary.main.git must keep the R4 empty-tree fallback');
     assert.ok(MAIN_GIT.includes('does not have any commits'),
       'vinary.main.git must detect the empty-repo phrasing');
-    assert.ok(/:git\s+\{:root\s+top\s+:from\s+from-sha\s+:to\s+to-sha\}/.test(MAIN_GIT),
-      'vinary.main.git must register the :git override that drives rev-aware enrichment + adoption opt-out');
+    assert.ok(/:git\s+\{:root\s+top\s+:from\s+from-sha\s+:to\s+to-sha\s+:range\?\s+\(boolean\s+\(and\s+from\s+\(not\s+parent\?\)\)\)\}/.test(MAIN_GIT),
+      'vinary.main.git must register the :git override — incl. the ADR-0042 :range? endpoint-highlight flag — that drives rev-aware enrichment + adoption opt-out');
     assert.ok(MAIN_GIT.includes('"vv:git-changed"') && MAIN_GIT.includes(':depth 4'),
       'vinary.main.git must push vv:git-changed from the bounded refs watcher');
     assert.ok(/"vv:git-log"[\s\S]{0,80}git\/handle-log/.test(SERVICE)

@@ -224,6 +224,12 @@ with the forthcoming graph/history surfaces), kept because the shipped code cite
   registered once; the Commit Graph document will drive the *same* events rather than growing its
   own selection.
 
+  > **Amended 2026-08-11 by [ADR-0042](0042-derived-open-commit-highlight.md):** the shape and
+  > hash-keying stand, but `:selected` narrowed to **Ctrl/Shift multi-select marking only** and
+  > the `:single` mode was removed — a plain click activates (panel) or moves the cursor (graph)
+  > without writing the selection, and the *opened-commit* highlight is now derived from the
+  > active document's `:doc/git`, never stored here.
+
 - **D9 — the mini rail: self-contained SVG cells under `content-visibility`.** Each row carries
   its own small `<svg>` (10 px lanes × 40 px rows, dot radius 3.5): a cell is a pure function of
   *(previous row's edges, this row's edges, this row's lane)* — the previous row's edge **targets**

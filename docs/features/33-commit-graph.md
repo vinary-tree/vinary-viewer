@@ -48,17 +48,19 @@ cursor, and refreshes live when the repository changes — while never appearing
 
    | Key | Action |
    | --- | --- |
-   | `↓` / `↑` | Move the cursor and select that commit (the first press lands on the newest commit) |
+   | `↓` / `↑` (with or without `Ctrl`) | Move the **cursor only** (the first press lands on the newest commit) — plain movement never touches the selection marks ([ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) |
    | `Shift` + `↓`/`↑`/paging keys | Extend the selection as a range from the anchor |
-   | `Ctrl` + `↓`/`↑`/paging keys | Move the **cursor only** — the selection stands |
    | `PgDn` / `PgUp` | Move by one viewport of rows |
    | `Home` / `End` | Jump to the newest / oldest **loaded** commit |
    | `Space` | Toggle the cursor commit in the selection |
    | `Enter` | Open the cursor commit's diff against its first parent |
+   | `Escape` | Clear the Ctrl/Shift selection marks (the cursor stays; only consumed while marks exist) |
 
    The cursor row is marked with an accent bar and always scrolled into view.
-5. **Drive it with the mouse.** Click selects a commit; **Ctrl+click** toggles it into the
-   selection; **Shift+click** extends a range; **double-click** opens its diff vs parent.
+5. **Drive it with the mouse.** Click moves the cursor (it selects nothing — ADR-0042);
+   **Ctrl+click** toggles a commit into the selection; **Shift+click** extends a range;
+   **double-click** opens its diff vs parent — the sidebar panel's row for that commit then
+   carries the derived open highlight while the diff is the active document.
    Right-click for **Diff vs Parent**, **Diff Selected (2)** (exactly when two commits are
    selected — in either surface, since the selection is shared), **Copy hash**,
    **Copy short hash**, and **Copy subject**.

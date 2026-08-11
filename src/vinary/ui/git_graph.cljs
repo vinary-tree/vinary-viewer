@@ -1,9 +1,11 @@
 (ns vinary.ui.git-graph
   "The Commit Graph document (ADR-0040): a full-pane, GitLens-style view over the SAME
    [:ui :commits :repos <root>] store the sidebar panel feeds — lanes + refs + author/date columns,
-   keyboard navigation, and the shared selection (R3), windowed over the pane's own `.vv-content`
-   scroller with fixed-height rows (vinary.git.graph-geometry owns every number). The document
-   entity is tiny (kind + :doc/git-root); freshness flows through vv:git-changed → the store."
+   keyboard navigation, and the shared selection (R3: Ctrl/Shift multi-select; the opened-commit
+   highlight is DERIVED from the active document via :commits/open-set, ADR-0042), windowed over the
+   pane's own `.vv-content` scroller with fixed-height rows (vinary.git.graph-geometry owns every
+   number). The document entity is tiny (kind + :doc/git-root); freshness flows through
+   vv:git-changed → the store."
   (:require [clojure.string :as str]
             [reagent.core :as r]
             [re-frame.core :as rf]
@@ -14,7 +16,7 @@
 
 (def ^:private overscan 10)
 
-(defn- key-handler [root vis-rows]
+(defn- key-handler [root vis-rows has-sel?]
   (fn [^js e]
     (let [k   (.-key e)
           nav (case k
@@ -23,11 +25,12 @@
                 "Home"      :home "End"     :end
                 nil)]
       (cond
+        ;; plain arrows move the cursor only; Shift extends the Ctrl/Shift marking as a range
+        ;; (:selected never changes on unmodified movement — ADR-0042)
         nav
         (do (.preventDefault e) (.stopPropagation e)
-            (rf/dispatch [:git-graph/cursor-move root nav {:extend?    (.-shiftKey e)
-                                                           :move-only? (.-ctrlKey e)
-                                                           :vis-rows   vis-rows}]))
+            (rf/dispatch [:git-graph/cursor-move root nav {:extend?  (.-shiftKey e)
+                                                           :vis-rows vis-rows}]))
         (= k " ")
         (do (.preventDefault e) (.stopPropagation e)
             (rf/dispatch [:git-graph/toggle-at-cursor root]))
@@ -35,6 +38,13 @@
         (= k "Enter")
         (do (.preventDefault e) (.stopPropagation e)
             (rf/dispatch [:git-graph/activate-cursor root]))
+
+        ;; consume Escape ONLY while marks exist (clear them, keep the cursor); otherwise let it
+        ;; propagate so the window-level Escape behavior is untouched
+        (= k "Escape")
+        (when has-sel?
+          (.preventDefault e) (.stopPropagation e)
+          (rf/dispatch [:commits/clear-selection root]))
 
         :else nil))))
 
@@ -44,24 +54,30 @@
                     :title (:name b)}
    (:name b)])
 
-(defn- graph-row [root max-lane prev-row row commit selection]
+(defn- graph-row [root max-lane prev-row row commit selection open-set]
   ;; NB: `hash` here shadows cljs.core/hash — value-only by contract; never call it
   (let [{:keys [hash subject refs]} commit
         ;; a HISTORY listing carries no lane rows — the rail degrades to a lane-0 dot
         row       (or row {:lane 0 :edges [] :active 1})
         geo       (ggeo/row-geometry row (:edges prev-row) max-lane)
+        ;; open? derives from the ACTIVE DOCUMENT (ADR-0042) — never from stored click-state
+        open?     (contains? open-set hash)
         selected? (contains? (:selected selection) hash)
         cursor?   (= (:cursor selection) hash)
         pair      (let [s (vec (:selected selection))] (when (= 2 (count s)) s))]
     [:div.vv-gg-row
-     {:class           (str (when selected? "vv-gg-row-sel ") (when cursor? "vv-gg-row-cur"))
+     {:class           (str (when open? "vv-gg-row-open ")
+                            (when selected? "vv-gg-row-sel ")
+                            (when cursor? "vv-gg-row-cur"))
       :style           {:grid-template-columns (str (:width geo) "px minmax(0,1fr) 12ch 16ch")}
       :data-hash       hash
       :on-click        (fn [^js e]
                          (cond
                            (.-ctrlKey e)  (rf/dispatch [:commits/select root hash :toggle])
                            (.-shiftKey e) (rf/dispatch [:commits/select root hash :range])
-                           :else          (rf/dispatch [:commits/select root hash :single])))
+                           ;; plain click = keyboard-cursor move only; opening stays on
+                           ;; double-click/Enter, and no selection is written (ADR-0042)
+                           :else          (rf/dispatch [:commits/cursor-set root hash])))
       :on-double-click #(rf/dispatch [:commits/activate root hash])
       :on-context-menu (fn [^js e]
                          (.preventDefault e)
@@ -150,11 +166,12 @@
               lo       (max 0 (- (quot body-top ggeo/row-h) overscan))
               hi       (min n (+ (quot (+ body-top (long (or vh 600))) ggeo/row-h) overscan))
               sel      (or selection {})
+              open-set @(rf/subscribe [:commits/open-set root])
               vis-rows (max 1 (quot (long (or vh 600)) ggeo/row-h))]
           [:div.vv-gg {:tab-index 0
                        :data-vv-keynav ""
                        :ref #(when % (reset! node* %))
-                       :on-key-down (key-handler root vis-rows)}
+                       :on-key-down (key-handler root vis-rows (boolean (seq (:selected sel))))}
            [header-bar root repo]
            (cond
              error       [:div.vv-gg-error error]
@@ -167,5 +184,5 @@
                           :let [commit (get commits i)]
                           :when commit]
                       ^{:key (:hash commit)}
-                      [graph-row root max-lane (get rows (dec i)) (get rows i) commit sel]))
+                      [graph-row root max-lane (get rows (dec i)) (get rows i) commit sel open-set]))
               [:div {:style {:height (* (max 0 (- n hi)) ggeo/row-h)}}]])]))})))

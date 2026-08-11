@@ -55,9 +55,11 @@
     (when stdin? cwd)))
 
 (defn git-info
-  "The commit-diff facts registered for path ({:root :from :to}, a git-produced diff document), or nil.
-   ADR-0038's Files-tree adoption skips docs that carry this — a commit diff is a transient synthetic
-   that dies with its tab, not a project member."
+  "The commit-diff facts registered for path ({:root :from :to :range?}, a git-produced diff document),
+   or nil. ADR-0038's Files-tree adoption skips docs that carry this — a commit diff is a transient
+   synthetic that dies with its tab, not a project member. :range? marks an explicit user-chosen FROM
+   (pair/range diff): the renderer's derived open-commit highlight claims both endpoint rows for those,
+   only :to for a parent diff (ADR-0042)."
   [path]
   (:git (get @overrides path)))
 

@@ -628,6 +628,16 @@ function installIpc(state) {
   }));
   ipcMain.handle('vv:git-open-diff', (_event, req) => {
     state.gitOpenDiffRequests.push(req);
+    // ADR-0042: when a section registers spill fixtures, answer like the real main does — {path} —
+    // so the renderer's :tab/navigate runs the REAL vv:open → vv:content pipeline and the derived
+    // open-highlight arms exercise the whole chain. Sections that never set gitDiffSpills keep the
+    // inert error reply (the Commit Graph keyboard arm asserts the request shape and must stay on
+    // the graph document).
+    const spills = state.gitDiffSpills;
+    if (spills) {
+      if (req && req['parent?'] && spills.parent) return { path: spills.parent, title: 'parent.diff' };
+      if (req && req.from && spills.range) return { path: spills.range, title: 'range.diff' };
+    }
     return { error: 'mocked: this harness opens no diff documents' };
   });
   ipcMain.handle('vv:git-blame', (_event, req) => {
@@ -2876,6 +2886,171 @@ async function main() {
     await railClick('files');
     await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits')`),
       'the regression section restores the Files panel', 8000);
+  }
+
+  // ---- ADR-0042: the opened-commit highlight DERIVES from the active document ----------------------
+  // The strongly highlighted row must be the commit whose diff IS the active tab's document —
+  // history Back, tab switches, and pair diffs retarget it live, and plain clicks no longer write
+  // the stored (now Ctrl/Shift-only) multi-select. Release-safe: DOM clicks, real chords, and the
+  // unconditional __vvopen/__vvdb hooks only.
+  {
+    const railClick = (name) =>
+      evalIn(win, `document.querySelector('[data-vv-rail=${JSON.stringify(name)}]').click(); true`);
+    const F1_ROOT = '/fixture/f1-open-repo';
+    const H = state.ggHashes;   // the vv:git-log mock serves this 3-commit page for ANY root
+    // a real project member: while it is ACTIVE, derive-root picks F1_ROOT (no pin, release-safe)
+    const memberPath = `${F1_ROOT}/README.md`;
+    state.contentByPath.set(memberPath, { path: memberPath, kind: 'text', text: 'f1 member file' });
+    win.webContents.send('vv:tree', { root: F1_ROOT, files: ['README.md'], 'synthetic?': false });
+    await waitFor(() => evalIn(win,
+      `(window.__vvdb().ui.projects || []).some((p) => p.root === ${JSON.stringify(F1_ROOT)})`),
+      'the ADR-0042 fixture project lands in app-db', 8000);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(memberPath)})`);
+    await waitFor(() => evalIn(win, `document.body.textContent.includes('f1 member file')`),
+      'the member document is active (the panel derives F1_ROOT from it)', 8000);
+
+    // two spill fixtures carrying the {root from to range} facts the real main registers
+    const spillDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-git-spill-'));
+    tempDirs.push(spillDir);
+    const DIFF_TEXT = 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n';
+    const parentSpill = path.join(spillDir, `${H[0].slice(0, 7)}.diff`);
+    const rangeSpill = path.join(spillDir, `${H[2].slice(0, 7)}..${H[1].slice(0, 7)}.diff`);
+    fs.writeFileSync(parentSpill, DIFF_TEXT);
+    fs.writeFileSync(rangeSpill, DIFF_TEXT);
+    state.contentByPath.set(parentSpill, { path: parentSpill, kind: 'diff', text: DIFF_TEXT,
+      stdin: true, git: { root: F1_ROOT, from: H[1], to: H[0], range: false } });
+    state.contentByPath.set(rangeSpill, { path: rangeSpill, kind: 'diff', text: DIFF_TEXT,
+      stdin: true, git: { root: F1_ROOT, from: H[2], to: H[1], range: true } });
+    state.gitDiffSpills = { parent: parentSpill, range: rangeSpill };
+
+    await railClick('commits');
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-commits-row').length >= 3`),
+      'the Commits panel lists the fixture page for the derived root', 8000);
+
+    // 1 — a plain click opens the parent diff; -open DERIVES from the now-active doc; NO stored
+    //     selection is written
+    await evalIn(win,
+      `document.querySelector('.vv-commits-row[data-hash=${JSON.stringify(H[0])}]').click(); true`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-commits-row-open[data-hash=${JSON.stringify(H[0])}]'))`),
+      'the clicked commit row carries -open once its diff is the active document', 8000);
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-commits-row-sel').length`), 0,
+      'a plain click writes no stored selection (ADR-0042)');
+    const f1sel = await evalIn(win,
+      `(((window.__vvdb().ui.commits.repos || {})[${JSON.stringify(F1_ROOT)}] || {}).selection || {})`);
+    assert.ok(!f1sel.selected || f1sel.selected.length === 0,
+      `:selected stays empty on a plain click (got ${JSON.stringify(f1sel.selected)})`);
+
+    // 2 — the highlight minds the active TAB: a blank tab clears it, returning restores it
+    await sendChord(win, 'T', ['control']);
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits-row-open')`),
+      'a blank tab holds no commit diff → no row is -open', 8000);
+    await sendChord(win, 'W', ['control']);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-commits-row-open[data-hash=${JSON.stringify(H[0])}]'))`),
+      'closing the blank tab re-activates the diff → its row is -open again', 8000);
+
+    // 3 — Ctrl-click marking is STORED state; "Diff selected" opens the PAIR diff whose -open
+    //     claims BOTH endpoint rows (range true)
+    const ctrlClickRow = (h) => evalIn(win, `(() => {
+      const row = document.querySelector('.vv-commits-row[data-hash=${JSON.stringify(h)}]');
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+      return true; })()`);
+    await ctrlClickRow(H[1]);
+    await ctrlClickRow(H[2]);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-commits-row-sel').length === 2`),
+      'Ctrl-clicks mark two rows with the multi-select ring', 8000);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-commits-pill:not(.vv-commits-graph-btn)'))`),
+      'exactly two marks surface the "Diff selected" pill', 8000);
+    await evalIn(win,
+      `document.querySelector('.vv-commits-pill:not(.vv-commits-graph-btn)').click(); true`);
+    await waitFor(() => evalIn(win, `(() => {
+      const open = Array.from(document.querySelectorAll('.vv-commits-row-open'))
+        .map((r) => r.dataset.hash).sort();
+      return JSON.stringify(open) ===
+        JSON.stringify([${JSON.stringify(H[1])}, ${JSON.stringify(H[2])}].sort());
+    })()`), 'the pair diff -open claims BOTH endpoint rows (range? true)', 8000);
+    assert.ok(await evalIn(win,
+      `!document.querySelector('.vv-commits-row-open[data-hash=${JSON.stringify(H[0])}]')`),
+      'the previously opened parent commit no longer carries -open');
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-commits-row-sel').length`), 2,
+      'the Ctrl/Shift marking is stored state and survives the pair-diff navigation');
+
+    // 4 — history Back retargets the highlight step by step (the reported stale-highlight bug)
+    await sendChord(win, 'Left', ['alt']);   // rangeSpill → parentSpill
+    await waitFor(() => evalIn(win, `(() => {
+      const open = Array.from(document.querySelectorAll('.vv-commits-row-open')).map((r) => r.dataset.hash);
+      return open.length === 1 && open[0] === ${JSON.stringify(H[0])}; })()`),
+      'Back to the parent diff retargets -open to its single commit', 8000);
+    await sendChord(win, 'Left', ['alt']);   // parentSpill → memberPath
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits-row-open')`),
+      'Back to the member document clears every -open (the highlight minds the URI)', 8000);
+
+    // 5 — the Commit Graph document: plain click = cursor only; Escape clears the marks (cursor
+    //     kept); double-click opens the diff (the sidebar panel derives its -open); Back leaves
+    //     NO sticky highlight on the graph rows
+    const ggUri = `vv-git-graph://${F1_ROOT}`;
+    state.contentByPath.set(ggUri, { path: ggUri, kind: 'git-graph', git: { root: F1_ROOT } });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(ggUri)})`);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row').length >= 3`),
+      'the graph document renders for the fixture root', 8000);
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-gg-row-open').length`), 0,
+      'the graph document itself is not a commit diff → no graph row is -open');
+    // the PANEL-made Ctrl-marks (arm 3) render here too: one stored selection per repo, both
+    // surfaces (R3) — and a plain click must neither extend nor clear it
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length`), 2,
+      'the panel-made marks render in the graph too (one stored selection per repo, R3)');
+    await evalIn(win,
+      `document.querySelector('.vv-gg-row[data-hash=${JSON.stringify(H[0])}]').click(); true`);
+    await waitFor(() => evalIn(win,
+      `(((window.__vvdb().ui.commits.repos || {})[${JSON.stringify(F1_ROOT)}] || {}).selection || {}).cursor === ${JSON.stringify(H[0])}`),
+      'a plain graph click moves the keyboard cursor', 8000);
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length`), 2,
+      'a plain graph click neither writes nor clears the stored marking (ADR-0042)');
+    const escapeGg = () => evalIn(win, `(() => { const gg = document.querySelector('.vv-gg'); gg.focus();
+      gg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      return true; })()`);
+    await escapeGg();
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length === 0`),
+      'Escape clears the multi-select marks', 8000);
+    assert.strictEqual(await evalIn(win,
+      `(((window.__vvdb().ui.commits.repos || {})[${JSON.stringify(F1_ROOT)}] || {}).selection || {}).cursor`),
+      H[0], 'Escape keeps the keyboard cursor (clearing marks must not teleport focus)');
+    const ctrlClickGg = (h) => evalIn(win, `(() => {
+      const row = document.querySelector('.vv-gg-row[data-hash=${JSON.stringify(h)}]');
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+      return true; })()`);
+    await ctrlClickGg(H[0]);
+    await ctrlClickGg(H[1]);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length === 2`),
+      'the graph’s own Ctrl-clicks mark rows', 8000);
+    await escapeGg();
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length === 0`),
+      'Escape clears the graph-made marks too', 8000);
+    await evalIn(win, `(() => {
+      const row = document.querySelector('.vv-gg-row[data-hash=${JSON.stringify(H[0])}]');
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      return true; })()`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-commits-row-open[data-hash=${JSON.stringify(H[0])}]'))`),
+      'a graph double-click opens the diff and the sidebar panel derives its -open row', 8000);
+    await sendChord(win, 'Left', ['alt']);   // parentSpill → the graph document
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-gg-row').length >= 3`),
+      'Back returns to the graph document', 8000);
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits-row-open')`),
+      'with the graph active no commit diff is open → no panel row keeps a stale highlight', 8000);
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-gg-row-sel').length`), 0,
+      'no sticky selection lingers on the activated graph row (the old :single write is gone)');
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-gg-row-open').length`), 0,
+      'no graph row claims -open while the graph itself is the active document');
+
+    // cleanup: release the spill fixtures and restore the Files panel for the later sections
+    state.gitDiffSpills = null;
+    await railClick('files');
+    await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits')`),
+      'the ADR-0042 section restores the Files panel', 8000);
+    console.log('[ok] derived open-commit highlight: click/open, tab-away, pair endpoints, Back retargeting, graph semantics (ADR-0042)');
   }
 
   await evalIn(win, `(() => {

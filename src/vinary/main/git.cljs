@@ -237,7 +237,12 @@
                                             (let [p (spill-diff! label ok)]
                                               (doc-overrides/register!
                                                p {:kind "diff" :stdin? true :cwd top
-                                                  :git {:root top :from from-sha :to to-sha}})
+                                                  ;; :range? = "an explicit user-chosen FROM" (pair/range diff) — the
+                                                  ;; renderer highlights BOTH endpoint rows for those, only :to for a
+                                                  ;; parent diff (incl. the empty-tree root-commit case). Recorded here
+                                                  ;; because only this branch knows which arm resolved from-sha.
+                                                  :git {:root top :from from-sha :to to-sha
+                                                        :range? (boolean (and from (not parent?)))}})
                                               (swap! diff-spills assoc key p)
                                               {:path p :title (str label ".diff")})))))))))))))))))))
       (.then clj->js)))

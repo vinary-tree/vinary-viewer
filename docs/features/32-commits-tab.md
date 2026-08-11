@@ -45,10 +45,17 @@ arrays, `--end-of-options`, rev pre-validation, `--no-ext-diff`; see the
    bottom to page in the next 250 commits.
 5. **Diff a commit.** **Click a row** → its diff against its **first parent** opens in a tab
    (a root commit diffs against the empty tree, i.e. shows its full addition). Re-activating the
-   same commit navigates to the same diff document rather than producing a second copy.
-6. **Diff two commits.** **Ctrl+click** toggles commits into the selection; **Shift+click**
-   extends a range from the last anchor. With **exactly two** selected, a **Diff selected** pill
-   appears in the header — it diffs them older→newer regardless of click order.
+   same commit navigates to the same diff document rather than producing a second copy. While
+   that diff **is the active document**, its commit's row carries the strong highlight — and the
+   highlight is *derived from the active document*
+   ([ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)): navigate Back, switch
+   tabs, or close the diff and it retargets or clears by itself. A range diff highlights **both**
+   endpoint rows; a plain click never touches the Ctrl/Shift selection below.
+6. **Diff two commits.** **Ctrl+click** toggles commits into the selection (a dashed accent
+   ring, visually distinct from the open-commit highlight); **Shift+click** extends a range from
+   the last anchor. With **exactly two** selected, a **Diff selected** pill appears in the
+   header — it diffs them older→newer regardless of click order, and while that pair diff is the
+   active document both endpoint rows carry the open highlight.
 7. **Diff a range.** Type into the range input (placeholder `A..B, tag, HEAD~3`) and press
    Enter:
    - `HEAD~3..HEAD` — what the last three commits changed;

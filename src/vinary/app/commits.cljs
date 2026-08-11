@@ -45,13 +45,14 @@
         {:to s :parent? true}))))
 
 (defn select
-  "R3 selection reducer over {:cursor :anchor :selected #{hash}}. `order` is the loaded hash vector
-   (newest-first). :single → cursor=anchor=hash, selected #{hash}; :toggle → flip membership,
-   cursor=anchor=hash; :range → selected = every hash between anchor and hash inclusive (falls back
-   to :single when either end left the loaded window)."
+  "R3 MULTI-select reducer over {:cursor :anchor :selected #{hash}} — Ctrl/Shift marking for the
+   \"Diff selected\" pair gate; the single opened-commit highlight is DERIVED from the active doc
+   (open-set, ADR-0042), never stored here. `order` is the loaded hash vector (newest-first).
+   :toggle → flip membership, cursor=anchor=hash; :range → selected = every hash between anchor
+   and hash inclusive (falls back to a self-anchored single-row range when either end left the
+   loaded window)."
   [selection order hash mode]
   (case mode
-    :single {:cursor hash :anchor hash :selected #{hash}}
     :toggle (let [sel (set (:selected selection))
                   sel (if (contains? sel hash) (disj sel hash) (conj sel hash))]
               {:cursor hash :anchor hash :selected sel})
@@ -78,6 +79,19 @@
             ib    (idx b)]
         (when (and ia ib)
           (if (> ia ib) [a b] [b a]))))))
+
+(defn open-set
+  "The commits of repo `root` whose diff IS the active document: `git` is the active doc's :doc/git
+   ({:root :from :to :range?}; nil for anything that isn't a commit diff). A parent diff — including
+   the empty-tree root-commit case, whose :from names a tree object no log row can carry — claims
+   only :to; an explicit pair/range diff (:range? true) claims both endpoints. #{} whenever the
+   active doc is not a commit diff of THIS repo. The derived \"open\" highlight (ADR-0042): computed
+   from the active document every render, never stored, so back-navigation and tab switches retarget
+   it for free."
+  [git root]
+  (if (and git root (= root (:root git)))
+    (if (:range? git) #{(:from git) (:to git)} #{(:to git)})
+    #{}))
 
 (defn history-args
   "The vv:git-log request additions for a repo's panel MODE: file history follows renames, line

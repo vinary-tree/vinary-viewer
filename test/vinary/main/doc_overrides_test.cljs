@@ -57,12 +57,14 @@
   (is (= "text" (ov/effective-kind classify-text "/gone"))))
 
 (deftest git-info-facts
-  (testing "a commit-diff spill's :git facts read back (rev-aware enrichment + adoption opt-out)"
+  (testing "a commit-diff spill's :git facts read back (rev-aware enrichment + adoption opt-out +
+            the ADR-0042 :range? endpoint-highlight flag)"
     (ov/register! "/run/u/git-diff/id/abc1234..def5678.diff"
                   {:kind "diff" :stdin? true :cwd "/repo"
-                   :git {:root "/repo" :from "a" :to "b"}})
-    (is (= {:root "/repo" :from "a" :to "b"}
-           (ov/git-info "/run/u/git-diff/id/abc1234..def5678.diff")))
+                   :git {:root "/repo" :from "a" :to "b" :range? true}})
+    (is (= {:root "/repo" :from "a" :to "b" :range? true}
+           (ov/git-info "/run/u/git-diff/id/abc1234..def5678.diff"))
+        "the renderer-bound shape round-trips whole — incl. :range?")
     (is (nil? (ov/git-info "/elsewhere")) "absent entry → nil")
     (ov/register! "/plain-stdin" {:kind "diff" :stdin? true :cwd "/w"})
     (is (nil? (ov/git-info "/plain-stdin")) "a user-piped diff carries no :git — it DOES adopt")

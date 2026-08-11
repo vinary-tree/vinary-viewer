@@ -390,7 +390,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-commits-row { display: flex; align-items: stretch; cursor: pointer;
   content-visibility: auto; contain-intrinsic-size: auto 40px; }
 .vv-commits-row:hover { background: var(--vv-bg2); }
-.vv-commits-row-sel { background: var(--vv-highlight); }
+/* -sel = the Ctrl/Shift MULTI-select marking (feeds "Diff selected"): a dashed accent ring over a
+   subtle fill — visually distinct from -open, and no longer the text-selection colour (ADR-0042) */
+.vv-commits-row-sel { background: var(--vv-bg2); outline: 1px dashed var(--vv-accent); outline-offset: -1px; }
+/* -open = the commit whose diff IS the active document (derived from :doc/git, ADR-0042) — the
+   .vv-file-active family look; declared AFTER -sel so a multi-selected endpoint keeps the strong
+   fill underneath its dashed ring */
+.vv-commits-row-open { background: var(--vv-highlight); }
+.vv-commits-row-open .vv-commits-subject { color: var(--vv-fg-strong); font-weight: 600; }
 .vv-commits-row-cur { box-shadow: inset 2px 0 0 var(--vv-accent); }
 .vv-commits-rail { flex: none; }
 .vv-commits-rail path { fill: none; stroke-width: 2; }
@@ -457,7 +464,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-gg-body { flex: 1 1 auto; }
 .vv-gg-row { display: grid; align-items: center; height: 24px; cursor: default; padding-right: 8px; }
 .vv-gg-row:hover { background: var(--vv-bg2); }
-.vv-gg-row-sel { background: var(--vv-highlight); }
+/* -sel / -open mirror the sidebar rows: dashed-ring multi-select vs strong derived "open" (ADR-0042) */
+.vv-gg-row-sel { background: var(--vv-bg2); outline: 1px dashed var(--vv-accent); outline-offset: -1px; }
+.vv-gg-row-open { background: var(--vv-highlight); }
+.vv-gg-row-open .vv-gg-subject { color: var(--vv-fg-strong); font-weight: 600; }
 .vv-gg-row-cur { box-shadow: inset 2px 0 0 var(--vv-accent); }
 .vv-gg-rail { display: block; }
 .vv-gg-rail path { fill: none; stroke-width: 2; }

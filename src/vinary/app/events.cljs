@@ -215,21 +215,31 @@
 
 (rf/reg-event-fx
  :commits/cursor-to
- (fn [{:keys [db]} [_ root idx {:keys [extend? move-only?]}]]
+ (fn [{:keys [db]} [_ root idx {:keys [extend?]}]]
    (let [order (mapv :hash (get-in db (commits-path root :commits)))]
      (when-let [hash (get order idx)]
+       ;; plain movement is cursor-only — :selected is Ctrl/Shift marking exclusively, and the
+       ;; opened-commit highlight derives from the active document (ADR-0042)
        {:db (update-in db (commits-path root :selection)
                        (fn [sel]
-                         (cond
-                           move-only? (assoc (or sel {}) :cursor hash)
-                           extend?    (commits/select (or sel {}) order hash :range)
-                           :else      (commits/select (or sel {}) order hash :single))))
+                         (if extend?
+                           (commits/select (or sel {}) order hash :range)
+                           (assoc (or sel {}) :cursor hash))))
         :fx [[:git-graph/reveal-row idx]]}))))
 
+;; the graph's plain-click target: move the keyboard cursor without touching the stored
+;; multi-select (plain interactions never select under ADR-0042)
+(rf/reg-event-db
+ :commits/cursor-set
+ (fn [db [_ root hash]]
+   (update-in db (commits-path root :selection) #(assoc (or % {}) :cursor hash))))
+
+;; Escape in the Commit Graph: drop the Ctrl/Shift marks but KEEP the keyboard cursor —
+;; clearing the marking must not teleport keyboard focus (ADR-0042)
 (rf/reg-event-db
  :commits/clear-selection
  (fn [db [_ root]]
-   (assoc-in db (commits-path root :selection) {:cursor nil :anchor nil :selected #{}})))
+   (update-in db (commits-path root :selection) #(assoc (or % {}) :anchor nil :selected #{}))))
 
 (rf/reg-event-fx
  :commits/diff-selected
@@ -373,7 +383,12 @@
 (rf/reg-event-fx
  :git-graph/shown
  (fn [{:keys [db]} [_ root]]
-   {:db (assoc-in db [:ui :commits :watch-owners :graph] root)
+   ;; also record last-root: commits/derive-root falls back to it when the active doc is a spill
+   ;; (outside every project), so a diff activated from the graph still highlights in a Commits
+   ;; panel opened only AFTERWARDS (ADR-0042 — without this, a graph-only flow leaves it nil)
+   {:db (-> db
+            (assoc-in [:ui :commits :last-root] root)
+            (assoc-in [:ui :commits :watch-owners :graph] root))
     :fx [[:dispatch [:commits/sync-watch]]
          [:dispatch [:commits/ensure root]]]}))
 
@@ -394,7 +409,7 @@
 
 (rf/reg-event-fx
  :git-graph/cursor-move
- (fn [{:keys [db]} [_ root key {:keys [extend? move-only? vis-rows]}]]
+ (fn [{:keys [db]} [_ root key {:keys [extend? vis-rows]}]]
    (let [order (mapv :hash (get-in db (commits-path root :commits)))
          n     (count order)
          cur   (get-in db (commits-path root :selection :cursor))
@@ -403,7 +418,7 @@
                  (when (pos? n) 0)                       ; no cursor yet → the newest commit
                  (ggeo/next-cursor idx n key vis-rows))]
      (when (some? nidx)
-       {:fx [[:dispatch [:commits/cursor-to root nidx {:extend? extend? :move-only? move-only?}]]]}))))
+       {:fx [[:dispatch [:commits/cursor-to root nidx {:extend? extend?}]]]}))))
 
 (rf/reg-event-fx
  :git-graph/toggle-at-cursor
@@ -552,6 +567,10 @@
          ;; main-side, and the re-send then carries no :language — retract the stale attr (an upsert
          ;; only overwrites present keys) or the grammar pick would stay pinned to the old language.
          cur-lang (and eid (ds/doc-attr snap path :doc/language))
+         ;; :doc/git likewise must not linger: only a payload that carries the commit-diff facts keeps
+         ;; it (a doc re-typed away from "diff", or re-sent without its override, must drop the stale
+         ;; mapping or the derived open-commit highlight would mark the wrong rows; ADR-0042).
+         cur-git  (and eid (ds/doc-attr snap path :doc/git))
          stamp   (if (some? stamp) stamp (js/Date.now))
          ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
          ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
@@ -574,6 +593,13 @@
                    language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
                    baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
                    (= kind "git-graph")  (assoc :doc/git-root (:root git))   ; the Commit Graph's repo (ADR-0040)
+                   ;; a commit-diff spill's {root from to range} facts → the derived Commits-panel
+                   ;; "open commit" highlight (ADR-0042); wire `range` (no ?) becomes :range?
+                   (and (= kind "diff") git)
+                   (assoc :doc/git {:root   (:root git)
+                                    :from   (:from git)
+                                    :to     (:to git)
+                                    :range? (boolean (:range git))})
                    (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
                    ;; Resolution is stamp-scoped and asynchronous. Clear the previous diff's targets immediately
                    ;; so a live refresh cannot leave a now-missing header path clickable while main re-checks it.
@@ -587,7 +613,9 @@
          base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
          tx      (cond-> [base]
                    cur-err (conj [:db/retract eid :doc/error cur-err])
-                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang]))
+                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang])
+                   (and cur-git (or (not= kind "diff") (nil? git)))
+                   (conj [:db/retract eid :doc/git cur-git]))
          ;; the CLI/initial file arrives before any tab exists → it opens the first tab
          db'     (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
          ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a

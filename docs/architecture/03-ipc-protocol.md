@@ -146,7 +146,7 @@ Every `on*` API returns an unsubscribe function.
 
 | Channel | `window.vv` API | Payload | Renderer event |
 |---------|-----------------|---------|----------------|
-| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?}` | `[:content/received payload]` |
+| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?, git?}` | `[:content/received payload]` — `git` is `{root, from, to, range}` on a git-produced commit diff (the derived open-commit highlight, [ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) and `{root}` on a Commit Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)) |
 | `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
 | `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |

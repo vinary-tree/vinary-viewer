@@ -54,7 +54,7 @@ else fresh pair
   Git -> CLI : `git diff --no-color\n**--no-ext-diff** --end-of-options\n<from> <to>`\n(repo config must never pick\nan external diff *program*)
   CLI --> Git : diff text (≤ 64 MiB)
   Git -> Spill : write `<uuid>/<shortA..shortB>.diff`\n(dir 0700, file 0600)
-  Git -> Spill : doc-overrides `register!`\n{kind "diff", **stdin? true**, cwd root,\n**git {root from to}**}
+  Git -> Spill : doc-overrides `register!`\n{kind "diff", **stdin? true**, cwd root,\n**git {root from to range?}**}
   Git --> Vv : {path, title}
 end
 Vv --> RF : reply — a PATH, never a tab:\nnavigation is renderer-owned

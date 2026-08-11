@@ -227,6 +227,11 @@
 ;; the active document's kind ("markdown" / "org" / "latex" / "source" / "pdf" / …) — gates the "Go to preview" jump item
 (rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
 
+;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
+;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.
+(rf/reg-sub :doc/git :<- [:doc/active]
+            (fn [doc _] (when (= "diff" (:doc/kind doc)) (:doc/git doc))))
+
 ;; the active document's collocated GROUP [{:path :kind}…] (its :doc/siblings — authored sources + compiled PDF),
 ;; read off the PRIMARY (opened) doc so the toolbar stays stable regardless of the shown facet. nil for a
 ;; non-group doc (or one not yet loaded).
@@ -301,6 +306,14 @@
  :commits/for-root
  :<- [:commits/state]
  (fn [state [_ root]] (get-in state [:repos root])))
+
+;; the repo-`root` commits whose diff IS the active document — the derived "open" row highlight
+;; (ADR-0042; never stored). Layered on :doc/git for value-equality dedup: keystrokes and scrolls
+;; never reach the row components, only an active-doc identity/kind/git change does.
+(rf/reg-sub
+ :commits/open-set
+ :<- [:doc/git]
+ (fn [git [_ root]] (commits/open-set git root)))
 
 ;; the git projects a repo switcher can offer (synthetic roots can never serve git data)
 (rf/reg-sub
