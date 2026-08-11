@@ -84,6 +84,11 @@ combo mode is forced so the caret exists); a grouped diff lists files, a divider
 The `[Unified | Split]` segmented control (`seg-button` + `.vv-seg*` CSS) was **removed** — an
 explicit user-requested replacement, not a disable (zero other consumers, verified).
 
+> **Amended 2026-08-11 by [ADR-0043](0043-width-adaptive-split-default.md):** the layout rows'
+> check-mark reads the **effective** layout, which is now width-adaptive when the tab holds no
+> explicit choice — an unchosen wide diff shows *Split* checked with `:diff-view` still nil, and a
+> row pick (or `C-S-b`) writes the explicit, sticky choice from that state.
+
 ## Alternatives considered
 
 - **DOM-walking collapse without an IR wrapper** (hide sibling ranges after each banner). Rejected:

@@ -9,6 +9,9 @@
         :active-heading nil
         :sidebar-visible? true      ; the PANEL column; the icon rail always renders (ADR-0041)
         :sidebar-width 280          ; px, TOTAL incl. the 36px rail; the resize splitter writes this (clamped 180-720)
+        :content-width nil          ; CSS-px clientWidth of .vv-content, mirrored by ONE debounced
+                                    ; ResizeObserver (views/content-width-ref); nil until the first
+                                    ; measure — drives the width-adaptive diff default (ADR-0043)
         :sidebar-tab :files         ; :files | :contents | :tabs | :commits (the rail's active panel)
         :tree-selected nil
         :tree-open #{}               ; #{[project-root absolute-directory]} — controlled Files disclosures

@@ -3053,6 +3053,100 @@ async function main() {
     console.log('[ok] derived open-commit highlight: click/open, tab-away, pair endpoints, Back retargeting, graph semantics (ADR-0042)');
   }
 
+  // ---- ADR-0043: the width-adaptive Split default for diffs ----------------------------------------
+  // With no explicit per-tab choice, the diff layout follows the content-pane width LIVE (Split at
+  // ≥1000 CSS px of .vv-content clientWidth, Unified below); an explicit combo pick stays sticky.
+  // Window math: content width = window width − 280 (sidebar visible; total incl. the 36px rail) or
+  // − 36 (collapsed) — the suite's 1000px window keeps every other diff arm below the threshold.
+  // Release-safe: real chords, real resizes, DOM clicks.
+  {
+    const f2Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-autosplit-'));
+    tempDirs.push(f2Dir);
+    const f2Diff = path.join(f2Dir, 'auto.diff');
+    const F2_TEXT = 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-alpha\n+beta\n';
+    fs.writeFileSync(f2Diff, F2_TEXT);
+    state.contentByPath.set(f2Diff, { path: f2Diff, kind: 'diff', text: F2_TEXT });
+    const activeDiffView = () => evalIn(win, `(() => {
+      const ui = window.__vvdb().ui;
+      const t = (ui.tabs || []).find((tb) => tb.id === ui['active-tab']);
+      return (t && t['diff-view']) || null; })()`);
+    const unifiedShowing = `Boolean(document.querySelector('.vv-content .markdown-body .vv-diff-line')) && !document.querySelector('.vv-diff-splitview')`;
+    const splitShowing = `Boolean(document.querySelector('.vv-content .vv-diff-splitview .vv-diff-row'))`;
+    const pickLayout = async (label) => {
+      await evalIn(win, `document.querySelector('.vv-combo-caret').click()`);
+      await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-combo-menu'))`),
+        `the Preview caret menu opens to pick ${label}`, 8000);
+      // the combo rows act on mouse-down (the pickCombo idiom above), not click
+      const picked = await evalIn(win, `(() => {
+        const li = Array.from(document.querySelectorAll('.vv-combo-menu .vv-combo-opt'))
+          .find((el) => el.textContent.trim() === ${JSON.stringify(label)});
+        if (li) li.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return Boolean(li); })()`);
+      assert.strictEqual(picked, true, `the ${label} layout row exists and picks on mouse-down`);
+    };
+
+    // 1 — auto default NARROW: a fresh tab (no explicit choice) at the 1000px window (content ≈720)
+    await sendChord(win, 'T', ['control']);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(f2Diff)})`);
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'an unchosen diff in a narrow pane renders Unified', 8000);
+    assert.strictEqual(await activeDiffView(), null, 'the tab holds NO explicit :diff-view (auto)');
+
+    // 2 — REACTIVE flip wide: grow the window; the .vv-content ResizeObserver mirror re-checks and
+    //     the auto Split builds the side-by-side HTML by itself
+    win.setContentSize(1600, 700);
+    await waitFor(() => evalIn(win, splitShowing),
+      'crossing the threshold auto-builds and shows Split', 10000);
+    assert.strictEqual(await activeDiffView(), null, 'the auto Split wrote no explicit choice');
+
+    // 3 — REACTIVE fall back: shrink again; the built split HTML stays cached but the route returns
+    //     to Unified (no rebuild, no stickiness)
+    win.setContentSize(1000, 700);
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'narrowing returns the unchosen diff to Unified', 10000);
+
+    // 4 — the sidebar straddle: at 1120px the sidebar toggle alone crosses the threshold
+    win.setContentSize(1120, 700);
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'sidebar visible at 1120px (content ≈840) → Unified', 10000);
+    await sendChord(win, 'B', ['control']);   // collapse to the rail → content ≈1084 → wide
+    await waitFor(() => evalIn(win, splitShowing),
+      'collapsing the sidebar crosses into wide → Split', 10000);
+    await sendChord(win, 'B', ['control']);   // expand again → ≈840 → narrow
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'restoring the sidebar returns Unified', 10000);
+
+    // 5 — explicit picks are STICKY across width changes (both directions)
+    await pickLayout('Split');
+    await waitFor(() => evalIn(win, splitShowing),
+      'an explicit Split pick shows Split even in the narrow pane', 10000);
+    assert.strictEqual(await activeDiffView(), 'split', 'the Split pick is stored on the tab');
+    win.setContentSize(1600, 700);
+    await delay(400);
+    win.setContentSize(1120, 700);
+    await waitFor(() => evalIn(win, splitShowing),
+      'the explicit Split survives a wide→narrow round trip', 10000);
+    assert.strictEqual(await activeDiffView(), 'split', 'still the explicit choice after resizes');
+    win.setContentSize(1600, 700);
+    await pickLayout('Unified');
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'an explicit Unified pick shows Unified even in the wide pane', 10000);
+    assert.strictEqual(await activeDiffView(), 'unified', 'the Unified pick is stored on the tab');
+    win.setContentSize(1120, 700);
+    await delay(400);
+    win.setContentSize(1600, 700);
+    await waitFor(() => evalIn(win, unifiedShowing),
+      'the explicit Unified survives a narrow→wide round trip', 10000);
+
+    // 6 — restore the suite window and close the arm's tab
+    win.setContentSize(1000, 700);
+    await sendChord(win, 'W', ['control']);
+    await waitFor(() => evalIn(win,
+      `!document.querySelector('.vv-diff-splitview') && !document.querySelector('.vv-diff-line')`),
+      'the ADR-0043 arm closes its tab', 8000);
+    console.log('[ok] width-adaptive Split default: auto narrow/wide, live sidebar straddle, sticky explicit picks (ADR-0043)');
+  }
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();

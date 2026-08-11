@@ -1134,6 +1134,44 @@
                       ^{:key (:path entry)} [dir-entry entry (= (:path entry) selected)])))
              [:div.vv-fb-empty "Empty directory"])]))})))
 
+;; ── the content-pane width mirror (ADR-0043) ──────────────────────────────────────────────────────
+;; ONE debounced ResizeObserver on the identity-stable .vv-content node mirrors its CSS-px
+;; clientWidth into [:ui :content-width] — the width-adaptive diff default's input. defonce'd so a
+;; hot reload never leaks a second observer.
+(defonce ^:private content-width-obs (atom nil))
+
+(defn- measure-content-width! [^js el]
+  (rf/dispatch [:ui/content-width (js/Math.round (.-clientWidth el))]))
+
+(defn- content-width-ref
+  "Stable :ref fn for .vv-content. Top-level ON PURPOSE: an inline closure would change identity
+   every render and React would re-fire ref(nil)/ref(node) each time, churning the observer. The
+   first measure is immediate (no debounce blind spot for a document opened into a wide window);
+   subsequent reports coalesce through the shared scheduler at the pdf.cljs observe-resize! budget
+   (120 ms), and the :ui/content-width handler value-guards, so repeats are free."
+  [el]
+  (when-let [^js o @content-width-obs]
+    (.disconnect o)
+    (reset! content-width-obs nil))
+  (when (and el (exists? js/ResizeObserver))
+    (measure-content-width! el)
+    (let [obs (js/ResizeObserver.
+               (fn [_] (sched/debounce! ::content-width 120 #(measure-content-width! el))))]
+      (.observe obs el)
+      (reset! content-width-obs obs))))
+
+(defn- diff-unified-body
+  "markdown-body plus the ADR-0043 ensure hook: every path that MOUNTS the unified diff surface —
+   open, tab switch, history Back/Forward, focus-existing, close-reveal, live refresh (the
+   stamp-keyed remount), facet flip — funnels through one guarded [:diff/ensure-split]. If the
+   effective layout is :split (width-adaptive when unchosen) and the side-by-side HTML isn't built
+   yet, it builds now and the route flips to :diff-split when it lands."
+  [_html _text _path _targets]
+  (r/create-class
+   {:display-name "vv-diff-unified"
+    :component-did-mount (fn [_] (rf/dispatch [:diff/ensure-split]))
+    :reagent-render (fn [html text path targets] [markdown-body html text path targets])}))
+
 (defn content-view
   "Renderer registry (Strategy): the active tab's content is shown by its URI scheme (http → web view)
    or, for a local file, its :doc/kind."
@@ -1179,6 +1217,8 @@
       ;; the keyboard back to on close. -1 keeps it out of the Tab order. app.css suppresses the focus ring
       ;; (this is never focused by tabbing, only by an explicit hand-off). ADR-0032.
       :tab-index -1
+      ;; the ADR-0043 width mirror — a stable top-level ref fn (see content-width-ref)
+      :ref content-width-ref
       :on-scroll (fn [^js e] (toc/spy! (.-currentTarget e)))}
      (case route
        :watermark                  [watermark]
@@ -1234,7 +1274,7 @@
                                    [markdown-body (:doc/diff-split-html doc) (:doc/text doc) (:doc/path doc)
                                     (:doc/diff-targets doc)]
        :diff                       ^{:key (str "diff:" (:doc/path doc) ":" (:doc/stamp doc))}
-                                   [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc)
+                                   [diff-unified-body (:doc/html doc) (:doc/text doc) (:doc/path doc)
                                     (:doc/diff-targets doc)]
        :diff-rendering             [:div.vv-empty "Rendering…"]
        :diagram                    [:div.vv-diagram [markdown-body (:doc/html doc) (:doc/text doc) (:doc/path doc) nil]]

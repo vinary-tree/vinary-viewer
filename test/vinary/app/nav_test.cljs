@@ -1,6 +1,7 @@
 (ns vinary.app.nav-test
-  "Pure unit tests for the per-tab view-FACET helpers in vinary.app.nav (set-facet / facet / facet-mru) and for the
-   retention set, which must include each tab's shown + MRU facet paths so a just-loaded sibling isn't evicted."
+  "Pure unit tests for the per-tab view-FACET helpers in vinary.app.nav (set-facet / facet / facet-mru), for the
+   retention set (which must include each tab's shown + MRU facet paths so a just-loaded sibling isn't evicted),
+   and for the width-adaptive diff-layout default (ADR-0043: split-wide? / effective-diff-view)."
   (:require [cljs.test :refer [deftest is testing]]
             [vinary.app.nav :as nav]))
 
@@ -127,3 +128,27 @@
           ret (set (nav/retained-file-paths db2))]
       (is (contains? ret "/a/paper.tex") "the current facet + the history uri")
       (is (contains? ret "/a/paper.pdf") "the Back-reachable entry-1 facet file — the retention this feature adds"))))
+
+(deftest split-wide-threshold
+  (testing "nil (pre-measure) is NOT wide — the default stays Unified until the first observer report"
+    (is (false? (nav/split-wide? nil))))
+  (testing "the threshold is inclusive at exactly split-min-content-width"
+    (is (false? (nav/split-wide? (dec nav/split-min-content-width))))
+    (is (true?  (nav/split-wide? nav/split-min-content-width)))
+    (is (true?  (nav/split-wide? (inc nav/split-min-content-width)))))
+  (testing "the constant itself is pinned — changing it must show up in review, not slip through"
+    (is (= 1000 nav/split-min-content-width))))
+
+(deftest effective-diff-view-width-default
+  (testing "an explicit per-tab choice is sticky regardless of width"
+    (is (= :unified (nav/effective-diff-view :unified true)))
+    (is (= :unified (nav/effective-diff-view :unified false)))
+    (is (= :split   (nav/effective-diff-view :split true)))
+    (is (= :split   (nav/effective-diff-view :split false))))
+  (testing "no explicit choice follows the width (ADR-0043)"
+    (is (= :split   (nav/effective-diff-view nil true)))
+    (is (= :unified (nav/effective-diff-view nil false))))
+  (testing "composed end-to-end: nil tab-view + a measured width resolve through split-wide?"
+    (is (= :split   (nav/effective-diff-view nil (nav/split-wide? 1600))))
+    (is (= :unified (nav/effective-diff-view nil (nav/split-wide? 840))))
+    (is (= :unified (nav/effective-diff-view nil (nav/split-wide? nil))))))

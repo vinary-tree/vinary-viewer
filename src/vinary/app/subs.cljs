@@ -238,8 +238,18 @@
 (rf/reg-sub :doc/group :<- [:ds/rev] :<- [:ui/active-path]
             (fn [[_rev primary] _] (facet/group-of (ds/snapshot) primary)))
 
-;; the EFFECTIVE diff view of the active doc (:unified | :split); split is opt-in, so the default is :unified
-(rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] (fn [tab _] (nav/effective-diff-view (:diff-view tab))))
+;; the mirrored .vv-content clientWidth (CSS px; nil until the ResizeObserver's first report) and its
+;; boolean projection through nav/split-wide? — the boolean dedups per-pixel resize churn before it
+;; reaches content-view / view-switch (ADR-0043)
+(rf/reg-sub :ui/content-width (fn [db _] (get-in db [:ui :content-width])))
+(rf/reg-sub :ui/split-wide? :<- [:ui/content-width] (fn [w _] (nav/split-wide? w)))
+
+;; the EFFECTIVE diff view of the active doc (:unified | :split): the tab's explicit choice, else the
+;; width-adaptive default (ADR-0043). The combo caret's layout rows check-mark off this sub, so an
+;; unchosen wide diff shows Split checked with :diff-view still nil — the checkmark reflects what is
+;; actually shown.
+(rf/reg-sub :ui/active-diff-view :<- [:ui/active-tab] :<- [:ui/split-wide?]
+            (fn [[tab wide?] _] (nav/effective-diff-view (:diff-view tab) wide?)))
 
 ;; the active tab's collapsed diff-file ids (#{} = all expanded) — re-applied to the DOM by markdown-body
 ;; after every innerHTML rebuild and by the :diff/apply-collapsed fx on every state change (ADR-0037)

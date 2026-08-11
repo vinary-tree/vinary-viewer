@@ -69,6 +69,9 @@ Current default shape:
       :active-heading nil
       :sidebar-visible? true       ; the PANEL column; the icon rail always renders (ADR-0041)
       :sidebar-width 280           ; TOTAL px incl. the 36px rail; clamped 180-720
+      :content-width nil           ; CSS-px .vv-content clientWidth (ONE debounced ResizeObserver
+                                   ;   mirror; nil until first measure) — the width-adaptive diff
+                                   ;   default's input (ADR-0043)
       :sidebar-tab :files          ; :files | :contents | :tabs | :commits (the rail's active panel)
       :tree-selected nil
       :tree-open #{}               ; persistent #{[project-root absolute-directory]} disclosure intent

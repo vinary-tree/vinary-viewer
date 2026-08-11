@@ -258,6 +258,17 @@ Added
       Markdown and Org too.
 
 Changed
+    - Diffs with no explicit Unified/Split choice now default by WIDTH (ADR-0043):
+      Split when the content pane is at least 1000 CSS px wide (each side keeps
+      ~53 monospace columns), Unified below -- re-evaluated live, so widening the
+      window or collapsing the sidebar flips an unchosen diff to side-by-side and
+      narrowing returns it to Unified (zoom scales the measured width, falling
+      back naturally). An explicit pick from the Preview caret menu, the palette,
+      or Ctrl+Shift+B remains sticky for that tab; the toggle and the menu
+      checkmark work off the EFFECTIVE view, so every toggle writes a sticky
+      choice. This amends ADR-0026's split-is-opt-in invariant: opening a diff in
+      a wide pane now builds the side-by-side view (incl. its source enrichment)
+      by design. See docs/design-decisions/0043-width-adaptive-split-default.md.
     - The Commits panel's and Commit Graph's opened-commit highlight now DERIVES
       from the active document (ADR-0042): a row is strongly highlighted exactly
       while its commit's diff is the active tab's document -- navigating Back,

@@ -259,16 +259,36 @@
                      ts))))
 
 ;; ---- Diff unified⇄split view (per-tab; only meaningful for a .diff/.patch doc) ----
-;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the default (:unified —
-;; side-by-side is opt-in, so opening a diff never triggers the split view's on-disk source resolution).
+;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the
+;; WIDTH-ADAPTIVE default (ADR-0043, amending ADR-0026's unconditional :unified): Split when the
+;; content pane is at least `split-min-content-width` CSS px wide, Unified otherwise, re-evaluated
+;; live as the pane resizes. Consequence of the amendment: opening a diff in a wide pane now
+;; triggers the split build (incl. its on-disk/rev source resolution) by design.
 (defn diff-view [db] (:diff-view (active-tab db)))
 (defn set-diff-view
   ([db view]    (set-diff-view db (active-id db) view))
   ([db id view] (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (assoc % :diff-view view) %) ts)))))
+(def split-min-content-width
+  "The .vv-content clientWidth (CSS px) at/above which an UNCHOSEN diff defaults to Split
+   (ADR-0043). Derivation from the shipped styles: the pane's 45px side padding (×2 = 90) + the
+   split row's two 3em number gutters @13px (= 78) + grid borders (≈3) ≈ 171px of fixed chrome, so
+   1000 leaves ≈414px ≈ 53 monospace columns per side — just above the ~50-column floor where
+   pre-wrap sides stop wrapping typical ≤72-column diff lines. VS Code's equivalent breakpoint
+   (diffEditor.renderSideBySideInlineBreakpoint) is 900px of editor width; this pane carries
+   ~100px more chrome, so 1000 yields the same columns-per-side. clientWidth is measured in CSS
+   px, which webFrame zoom scales — zooming in narrows the measured width and falls back to
+   Unified naturally."
+  1000)
+(defn split-wide?
+  "Is `w` (the mirrored .vv-content clientWidth, nil before the first measure) wide enough for the
+   Split default? nil → false: the default stays Unified until the ResizeObserver's first report."
+  [w]
+  (boolean (and w (>= w split-min-content-width))))
 (defn effective-diff-view
-  "The diff view to show: the tab's explicit choice, else :unified. Pure so the sub + tests share it."
-  [tab-view]
-  (or tab-view :unified))
+  "The diff view to show: the tab's explicit choice, else the width-adaptive default (ADR-0043 —
+   `wide?` per split-wide?). Pure so the sub, the toggle event, and tests share it."
+  [tab-view wide?]
+  (or tab-view (if wide? :split :unified)))
 
 ;; ---- Diff per-file collapse (per-tab; only meaningful for a .diff/.patch doc — ADR-0037) ----
 ;; A tab's :diff-collapsed is the set of collapsed `vv-diff-file-N` ids (absent/#{} = all expanded). Same

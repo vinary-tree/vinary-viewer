@@ -130,6 +130,13 @@ standalone segmented control; the command (`:view/toggle-diff-split`) and self-g
 is opt-in, so opening a diff performs only the 2026-08-06 amendment's path-only target lookup, never a source
 content read.
 
+> **Amended 2026-08-11 by [ADR-0043](0043-width-adaptive-split-default.md):** the unconditional
+> `:unified` default — and with it the "opening a diff never reads source content" invariant — is
+> superseded. An **unchosen** tab (`:diff-view` nil) now resolves its layout from the live content-pane
+> width: Split at ≥ 1000 CSS px of `.vv-content` clientWidth, Unified below, re-evaluated as the pane
+> resizes — so opening a diff in a wide pane triggers the split build (including its on-disk/rev source
+> resolution) by design. An explicit pick behaves exactly as this section describes and stays sticky.
+
 ### 4. Standard repo filetypes — two decoupled layers
 
 Classification and highlighting are separated so a file is **correctly classified even when no grammar is

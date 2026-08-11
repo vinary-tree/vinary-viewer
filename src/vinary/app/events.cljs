@@ -972,13 +972,38 @@
                        (assoc :fx [[:diff/build-split {:path path :text text :stamp stamp}]])))))
 
 ;; flip the active diff's view (:unified ↔ :split) — the command-palette / keybinding entry. No-op unless the
-;; active doc is a diff. Delegates to :tab/set-diff-view (which builds the split HTML on demand).
+;; active doc is a diff. Flips off the EFFECTIVE view (which is width-aware for an unchosen tab, ADR-0043)
+;; and delegates to :tab/set-diff-view (which builds the split HTML on demand) — so the flip always writes
+;; an explicit, sticky choice.
 (rf/reg-event-fx :tab/toggle-diff-view
                  (fn [{:keys [db]} _]
                    (if (= "diff" (ds/doc-attr (ds/snapshot) (facet/active-content-path db) :doc/kind))
-                     (let [nxt (if (= (nav/effective-diff-view (nav/diff-view db)) :split) :unified :split)]
+                     (let [eff (nav/effective-diff-view (nav/diff-view db)
+                                                        (nav/split-wide? (get-in db [:ui :content-width])))
+                           nxt (if (= eff :split) :unified :split)]
                        {:fx [[:dispatch [:tab/set-diff-view nil nxt]]]})
                      {})))
+
+;; ONE idempotent gate for "the shown doc should be Split but the side-by-side HTML isn't built":
+;; dispatched from the unified diff view's MOUNT (views/diff-unified-body — covering every
+;; navigation path: open, tab switch, history Back/Forward, focus-existing, close-reveal, live
+;; refresh (the stamp-keyed remount), facet flip) and from :ui/content-width (the live width
+;; crossing while mounted). Guards: the shown facet is a diff ∧ the effective view is :split ∧
+;; text present ∧ split not built. The stamp rides to the stamp-gated :diff/split-ready, so a
+;; mid-build refresh drops stale HTML (ADR-0043).
+(rf/reg-event-fx :diff/ensure-split
+                 (fn [{:keys [db]} _]
+                   (let [path (facet/active-content-path db)
+                         snap (ds/snapshot)]
+                     (when (and (= "diff" (ds/doc-attr snap path :doc/kind))
+                                (= :split (nav/effective-diff-view
+                                           (nav/diff-view db)
+                                           (nav/split-wide? (get-in db [:ui :content-width]))))
+                                (nil? (ds/doc-attr snap path :doc/diff-split-html)))
+                       (when-let [text (ds/doc-attr snap path :doc/text)]
+                         {:fx [[:diff/build-split {:path  path
+                                                   :text  text
+                                                   :stamp (ds/doc-attr snap path :doc/stamp)}]]})))))
 
 ;; ── per-file diff collapse (ADR-0037). State = the active tab's :diff-collapsed id set; every write is
 ;; followed by :diff/apply-collapsed, which projects the set onto the mounted <details> wrappers (both
@@ -1547,6 +1572,16 @@
          settings (assoc (get-in db [:ui :settings]) :sidebar-width w)]
      {:db (-> db (assoc-in [:ui :sidebar-width] w) (assoc-in [:ui :settings] settings))
       :fx [[:vv/save-settings (pr-str settings)]]})))
+;; the .vv-content ResizeObserver mirror (views/content-width-ref, ADR-0043). Value-guarded so the
+;; debounced observer may dispatch freely (coalesced repeats are free); every real change re-checks
+;; the active diff's auto-split — crossing into "wide" with an unchosen diff builds its side-by-side
+;; HTML right then (window resize, the sidebar splitter/toggle, and zoom all funnel through here).
+(rf/reg-event-fx
+ :ui/content-width
+ (fn [{:keys [db]} [_ w]]
+   (when (not= w (get-in db [:ui :content-width]))
+     {:db (assoc-in db [:ui :content-width] w)
+      :fx [[:dispatch [:diff/ensure-split]]]})))
 ;; show the Files tab (used by "Reveal in tree" + the directory context menu); the active file's ancestors
 ;; are auto-expanded by file-tree's reveal-active!
 (rf/reg-event-fx :sidebar/reveal (fn [{:keys [db]} _] (files-restore-result db)))

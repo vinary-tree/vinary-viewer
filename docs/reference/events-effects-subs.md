@@ -204,11 +204,13 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | `:tab/toggle-representation` | — | Flip `:document` ↔ `:pdf` (toolbar segmented control / command palette). |
 | `:tab/open-representation-source` | — | From a PDF, navigate to its collocated **source** document, forcing `:representation :document`. |
 | `:tab/toggle-source` | — | Flip the tab's `:view-source?` — Preview ↔ Source (`Ctrl+Shift+D` / `Ctrl+Shift+S`). |
-| `:tab/set-diff-view` | `:unified` \| `:split` | Set a diff tab's `:diff-view` (picked from the Preview combo's caret layout rows — ADR-0037). |
+| `:tab/set-diff-view` | `:unified` \| `:split` | Set a diff tab's **explicit, sticky** `:diff-view` (picked from the Preview combo's caret layout rows — ADR-0037; an unset tab follows the width-adaptive default instead, [ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)). |
 | `:diff/toggle-file` | `file-id` | Flip one diff file's collapsed state (its `vv-diff-file-N` summary id) in the tab's `:diff-collapsed` set — the banner-click / hint-activation event; self-gated on the shown diff preview; fires `[:diff/apply-collapsed …]` (ADR-0037). |
 | `:diff/collapse-all` / `:diff/expand-all` | — | Collapse (ids from the diff's `:doc/toc` outline — never the DOM) / expand every file; self-gated; palette **Collapse/Expand all diff files**, vim `z M` / `z R`. |
 | `:diff/toggle-collapse-all` | — | The View-menu item's single static event: dispatches expand-all iff everything is collapsed (the same predicate flips the item's dynamic label). |
-| `:tab/toggle-diff-view` | — | Flip Unified ↔ Split; entering Split requests the on-disk pre/post sources over the `vv:load-diff-sources` IPC **invoke** (there is no `reg-fx` for it), whose result returns as `[:diff/split-ready …]`. |
+| `:tab/toggle-diff-view` | — | Flip Unified ↔ Split off the **effective** (width-aware when unchosen) view — every toggle writes an explicit, sticky choice (ADR-0043); entering Split requests the on-disk pre/post sources over the `vv:load-diff-sources` IPC **invoke** (there is no `reg-fx` for it), whose result returns as `[:diff/split-ready …]`. |
+| `:diff/ensure-split` | — | The ADR-0043 idempotent gate: shown facet is a diff ∧ the effective view is `:split` ∧ text present ∧ the side-by-side HTML not built → `[:diff/build-split …]`. Dispatched from the unified diff surface's mount (`views/diff-unified-body` — every navigation path) and from `:ui/content-width` (a live width crossing). |
+| `:ui/content-width` | px \| nil | The `.vv-content` ResizeObserver mirror (`views/content-width-ref`, ADR-0043): value-guarded write to `[:ui :content-width]`, then `[:diff/ensure-split]` — crossing into "wide" with an unchosen diff builds its split right then. |
 | `:diff/split-ready` | `{:path :html}` | The enriched side-by-side HTML arrived → stored as `:doc/diff-split-html`. |
 | `:pdf/sibling-ready` | `{:path :bytes}` | The sibling PDF's bytes arrived (over `vv:load-pdf-bytes`) → cached for the pdf view. |
 | `:tab/reload` | — | Re-open the active tab's URI (re-read + re-render). |
@@ -511,7 +513,8 @@ and list `:<- [:ds/rev]` so they recompute per transaction.
 | `:ui/active-tab` / `:ui/active-tab-id` | `app-db` | the active tab map / its id |
 | `:ui/active-uri` | `app-db` | the active tab's current URI — a local path **or** a virtual `ssh://` / `sftp://` / `vv-archive://` URI |
 | `:ui/active-view-source?` | `app-db` | bool — the active tab shows **Source** rather than **Preview** |
-| `:ui/active-diff-view` | `app-db` | `:unified` \| `:split` for the active diff tab |
+| `:ui/active-diff-view` | `:<- [:ui/active-tab]` `:<- [:ui/split-wide?]` | the EFFECTIVE `:unified` \| `:split` for the active diff tab: the explicit per-tab choice, else the width-adaptive default ([ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)); the combo caret's layout checkmarks read this |
+| `:ui/content-width` / `:ui/split-wide?` | `app-db` / `:<- [:ui/content-width]` | the mirrored `.vv-content` clientWidth (CSS px; nil pre-measure) and its boolean `nav/split-wide?` projection (≥ 1000) — the boolean dedups per-pixel resize churn (ADR-0043) |
 | `:ui/active-diff-collapsed` | `app-db` | the active tab's collapsed diff-file id set (`#{}` = all expanded) — re-projected onto the DOM after every rebuild (ADR-0037) |
 | `:view/diff-active?` | `app-db` + DataScript | is the shown facet a diff PREVIEW (kind `"diff"` ∧ not source)? Gates the diff-only View-menu item + the Preview combo's layout rows |
 | `:diff/all-collapsed?` | `app-db` + DataScript | are ALL of the shown diff's files collapsed? Flips the "Collapse All Files" ↔ "Expand All Files" menu label |

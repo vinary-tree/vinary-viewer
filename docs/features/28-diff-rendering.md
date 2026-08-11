@@ -208,9 +208,15 @@ paths without letting spaces, `#`, `?`, or Unicode filename bytes become URL syn
 
 ### The Unified ⇄ Split choice — the Preview combo's caret menu
 
-A per-tab `:diff-view` (`:unified` | `:split`, default `:unified` — split is opt-in so opening a diff never
-reads referenced file contents) mirrors LaTeX's per-tab `:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)).
-It surfaces the same three ways every view switch does:
+A per-tab `:diff-view` (`:unified` | `:split`; nil = no explicit choice) mirrors LaTeX's per-tab
+`:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)). An
+**unchosen** diff follows the **width-adaptive default**
+([ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)): **Split** when the content
+pane is at least 1000 CSS px wide (each side then keeps ~53 monospace columns), **Unified** below —
+re-evaluated *live*, so widening the window (or collapsing the sidebar) flips an unchosen diff to
+Split and narrowing returns it to Unified. The first paint of a fresh wide diff is Unified for the
+instant the side-by-side HTML takes to build, then the view flips. An explicit pick is sticky for
+that tab regardless of width. It surfaces the same three ways every view switch does:
 
 - the **`Preview ▾` combo's caret menu** ([ADR-0037](../design-decisions/0037-collapsible-diff-file-previews.md)):
   whenever the shown file is a diff — its rendered preview **or** its raw source view — the caret menu
@@ -223,8 +229,13 @@ It surfaces the same three ways every view switch does:
 - a command palette entry — **View ▸ Toggle unified / split diff** (`:view/toggle-diff-split`), and
 - a default keybinding, **`Ctrl+Shift+B`**, which self-gates (a no-op on a non-diff document).
 
+The caret menu's checkmark and the `Ctrl+Shift+B` flip both work off the **effective** layout: an
+unchosen wide diff shows **Split** checked (with the tab still holding no explicit choice), and
+toggling from that state writes the explicit opposite — every toggle produces a sticky choice.
+
 Because a diff is `:sourceable?`, it *also* offers **View Source** — the raw `.diff`, syntax-highlighted — so a
-diff tab has up to three surfaces: **Unified** (default), **Split**, and **Source**.
+diff tab has up to three surfaces: **Unified**, **Split** (whichever the width-adaptive default or an
+explicit pick shows), and **Source**.
 
 ### Collapsible file previews
 
