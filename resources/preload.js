@@ -130,6 +130,14 @@ contextBridge.exposeInMainWorld('vv', {
     ipcRenderer.on('vv:http-open-pdf', h);
     return () => ipcRenderer.removeListener('vv:http-open-pdf', h);
   },
+  // a link in the web view asked for a popup: main denied the native window and relays it here so the
+  // destination opens as an app tab — {url, mode} where mode is "background" (middle-/Ctrl-click) or
+  // "focused" (ADR-0044)
+  onWebOpenTab: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:web-open-tab', h);
+    return () => ipcRenderer.removeListener('vv:web-open-tab', h);
+  },
   onHttpSnapshotReady: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:http-snapshot-ready', h);

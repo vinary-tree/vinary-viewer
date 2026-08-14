@@ -84,6 +84,11 @@
     (when (.-onHttpOpenPdf vv)
       (.onHttpOpenPdf vv (fn [payload]
                            (rf/dispatch [:doc/open-new (:url (js->clj payload :keywordize-keys true))]))))
+    ;; a popup request from a web page (target=_blank / window.open / middle-/Ctrl-click): main denied the
+    ;; native window and relayed it → open it as an app tab, background or focused per the gesture (ADR-0044)
+    (when (.-onWebOpenTab vv)
+      (.onWebOpenTab vv (fn [payload]
+                          (rf/dispatch [:web/open-tab (js->clj payload :keywordize-keys true)]))))
     (when (.-onWebToc vv)
       (.onWebToc vv (fn [payload] (rf/dispatch [:web/toc (js->clj payload :keywordize-keys true)]))))
     (when (.-onWebActiveHeading vv)

@@ -39,7 +39,7 @@ old no-tree behavior rather than adopting `$HOME` as noise.
 3. **Open the diff from the tree:** click the pinned row (single click on Linux, double on
    Windows/macOS). It activates the diff's tab, exactly as clicking any file row does; the row
    carries the active highlight while the diff is the shown document.
-4. **Ctrl+click** opens it in a new tab; **right-click** opens the ordinary `:file` context menu.
+4. **Ctrl+click** or **middle-click** opens it in a background tab (`Ctrl+Shift+click` focuses one); **right-click** opens the ordinary `:file` context menu.
 5. **Filter:** the *Filter files…* box matches attached rows by their display name — typing
    `piped` keeps the project visible with just the **(piped diff)** row, even when no ordinary
    file matches. Keyboard tree navigation (`:tree/move`) walks the pinned rows first, matching

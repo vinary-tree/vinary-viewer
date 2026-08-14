@@ -258,6 +258,24 @@ Added
       Markdown and Org too.
 
 Changed
+    - Link gestures follow browser convention everywhere (ADR-0044): Ctrl+click and
+      middle-click open a link in a BACKGROUND tab -- it loads behind you while the
+      page you are reading stays on screen -- and Ctrl+Shift+click (or Shift+middle-
+      click) opens a focused one. The family now covers every link-like surface:
+      preview links, file-tree rows, directory-browser rows (including ".."), and the
+      address-bar breadcrumbs; the file tree, directory browser, and breadcrumbs had
+      no middle-click handling at all before. A Ctrl-/middle-clicked tree or directory
+      row always opens ANOTHER tab (the browser meaning of the gesture); Ctrl+Shift+
+      click keeps the previous focus-an-existing-tab behavior. Context-menu "Open in
+      new tab" items are unchanged, and a same-document anchor still just scrolls.
+    - Middle-clicking a tab closes it, in the horizontal strip and the vertical Tabs
+      panel alike.
+    - Links inside a browsed web page that ask for a popup (target=_blank,
+      window.open, middle-click) now open as ordinary APP TABS instead of a separate
+      native window -- background or focused according to the gesture. Non-http(s)
+      popup targets (about:, javascript:, data:, custom schemes) are refused outright.
+      See docs/design-decisions/0044-browser-link-gesture-family.md and the threat
+      model's web-view section.
     - Diffs with no explicit Unified/Split choice now default by WIDTH (ADR-0043):
       Split when the content pane is at least 1000 CSS px wide (each side keeps
       ~53 monospace columns), Unified below -- re-evaluated live, so widening the

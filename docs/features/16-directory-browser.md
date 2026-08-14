@@ -51,7 +51,8 @@ kind is `"directory"`.
 |--------------|---------|
 | Browse a folder | Open a directory path: `vv ~/docs`, type a folder path in the URI bar, click a folder in the git file-tree, or follow a directory link in a rendered document. |
 | Open an entry | **Single-click on Linux, double-click on Windows/macOS** (the OS convention); or highlight it and press `Enter` / `Alt+Down`. |
-| Open an entry in a new tab | `Ctrl+click` the entry (any OS). |
+| Open an entry in a background tab | `Ctrl+click` or middle-click the entry (any OS) — it loads behind the listing. |
+| Open an entry in a focused new tab | `Ctrl+Shift+click` the entry. |
 | Highlight an entry | Single-click it — the highlight is the `Enter` / `Alt+Down` target. |
 | Scroll the listing | `↑` / `↓` / `←` / `→` (bare arrow keys smoothly scroll the pane). |
 | Open the folder in the OS file manager | Right-click a folder → **Open in file manager**. |
@@ -160,7 +161,8 @@ both browsers feel native.
 |---------|-------|--------|
 | Single-click an entry | `[:dir/select path]` (+ `[:doc/open path]` on Linux) | Highlight it; on Linux this *also* opens it. |
 | Double-click an entry | `[:doc/open path]` (Windows/macOS) | Open it in the active tab (a folder descends; a file shows its preview). |
-| `Ctrl+click` an entry | `[:doc/open-new path]` | Open it in a **new** tab (any OS). |
+| `Ctrl+click` / middle-click an entry | `[:tab/open-background path]` | Open it in a **background** tab, always a new one (any OS; [ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). |
+| `Ctrl+Shift+click` an entry | `[:doc/open-new path]` | Open it **focused**, reusing an existing tab for that path. |
 | `Enter` (listing focused) | `[:nav/open-target]` | Open the highlighted entry. |
 | `Alt+Down` / Vim `J` | `[:nav/open-target]` | Open the highlighted entry (works app-wide, every keymap). |
 | `↑` `↓` `←` `→` | `[:nav/scroll …]` | Smoothly scroll the pane — they do **not** move the highlight. |

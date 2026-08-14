@@ -41,7 +41,8 @@ allows two useful properties:
 | Action | Behavior |
 |--------|----------|
 | Click a file in the Files panel | Opens or focuses that file in the active tab path. |
-| `Ctrl+click` a Markdown link | Opens the target in a new tab. |
+| `Ctrl+click` / middle-click a Markdown link | Opens the target in a **background** tab (you stay on the page); `Ctrl+Shift+click` opens it focused. |
+| Middle-click a tab | Closes it — in the strip and in the vertical Tabs panel alike. |
 | Drag a tab | Reorders `[:ui :tabs]`; the sidebar Tabs panel mirrors the same order. |
 | Right-click a tab | Opens tab actions such as Close, Close Others, Close to the Right, View Source, and copy actions. |
 | Toggle View Source | Shows a Markdown tab's cached raw source in the same pane. |

@@ -187,20 +187,21 @@
        :pos (+ line-from start)})))
 
 (defn- attach-content-interactions!
-  "Wire the shared preview interactions onto a content `node`: in-pane link navigation (click / middle-click /
-   Ctrl+click, always fail-closed so an unrecognized href can never navigate the privileged frame), the
-   status-bar link-hover indicator, and the themed right-click context menu (link target, else selection/term
-   plus any math). Shared by the batch `markdown-body` and the streaming `ir-stream-body` so a streamed
-   document behaves identically. `source*`/`path*` are atoms the caller keeps pointed at the current doc;
-   `last-link` is a scratch atom for hover de-duping. Returns a 0-arg detach fn."
+  "Wire the shared preview interactions onto a content `node`: in-pane link navigation (the ADR-0044 gesture
+   family — plain / Ctrl+click / Ctrl+Shift+click / middle-click, always fail-closed so an unrecognized href
+   can never navigate the privileged frame), the status-bar link-hover indicator, and the themed right-click
+   context menu (link target, else selection/term plus any math). Shared by the batch `markdown-body` and the
+   streaming `ir-stream-body` so a streamed document behaves identically. `source*`/`path*` are atoms the
+   caller keeps pointed at the current doc; `last-link` is a scratch atom for hover de-duping. Returns a
+   0-arg detach fn."
   [^js node source* path* last-link]
-  (letfn [(follow [^js a new-tab? ^js e]
+  (letfn [(follow [^js a mode ^js e]
             ;; Fail closed: prevent default navigation for EVERY in-content <a> click, so a link the app
             ;; doesn't recognize (or a javascript:/data: one the sanitizer somehow missed) can never navigate
             ;; the privileged app frame. Only recognized safe targets then dispatch an open event.
             (.preventDefault e)
             (when-let [target (link/classify (link/target-for-anchor a) (.-textContent a))]
-              (when-let [event (preview-nav/open-event target new-tab?)]
+              (when-let [event (preview-nav/open-event target mode)]
                 (rf/dispatch event))))]
     (let [on-click (fn [^js e]
                      ;; A resolved diff filename is an <a href> INSIDE the collapsible summary. Give the link
@@ -208,12 +209,15 @@
                      ;; summary keeps the state-owned ADR-0037 collapse behavior. Unresolved placeholders have
                      ;; no href and therefore remain ordinary banner text/toggle surface.
                      (if-let [^js a (.closest (.-target e) "a[href]")]
-                       (follow a (.-ctrlKey e) e)
+                       (follow a (preview-nav/click-mode (.-ctrlKey e) (.-shiftKey e)) e)
                        (when-let [^js h (.closest (.-target e) ".vv-diff-file-head")]
                          (.preventDefault e)
                          (rf/dispatch [:diff/toggle-file (.-id h)]))))
+          ;; middle-click = background new tab, Shift+middle = focused (browser parity, ADR-0044). Guarded on
+          ;; an actual link so a middle-click anywhere else in the content keeps its default behavior.
           on-aux   (fn [^js e] (when (= 1 (.-button e))
-                                 (when-let [^js a (.closest (.-target e) "a[href]")] (follow a true e))))
+                                 (when-let [^js a (.closest (.-target e) "a[href]")]
+                                   (follow a (if (.-shiftKey e) :new-focused :new-background) e))))
           on-over  (fn [^js e]
                      (let [^js a (.closest (.-target e) "a[href]")
                            href  (when a (link/target-for-anchor a))]
@@ -1045,12 +1049,20 @@
          :data-dir        (str (boolean dir?))
          :on-click        (fn [^js e]
                             (rf/dispatch [:dir/select path])           ; always highlight (Alt+Down target)
-                            (cond
-                              (.-ctrlKey e)                 (rf/dispatch [:doc/open-new path])
-                              (platform/single-click-open?) (rf/dispatch [:doc/open path])))
+                            (case (preview-nav/click-mode (.-ctrlKey e) (.-shiftKey e))
+                              :new-background (rf/dispatch [:tab/open-background path])
+                              :new-focused    (rf/dispatch [:doc/open-new path])
+                              (when (platform/single-click-open?) (rf/dispatch [:doc/open path]))))
+         ;; the modified gestures already acted on mouse-down's click; a Ctrl+double-click must not open a
+         ;; third time (ADR-0044)
          :on-double-click (fn [^js e]
-                            (when-not (platform/single-click-open?)
-                              (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) path])))
+                            (when (and (not (platform/single-click-open?)) (not (.-ctrlKey e)))
+                              (rf/dispatch [:doc/open path])))
+         :on-aux-click    (fn [^js e]
+                            (when (= 1 (.-button e))
+                              (.preventDefault e)
+                              (rf/dispatch [:dir/select path])
+                              (rf/dispatch [(if (.-shiftKey e) :doc/open-new :tab/open-background) path])))
          :on-context-menu (fn [^js e]
                             (.preventDefault e) (.stopPropagation e)
                             (rf/dispatch [:context-menu/show
@@ -1067,19 +1079,24 @@
    at every filesystem/remote/archive root. It is NOT one of the directory's entries, so it stays out of
    the sort and the keyboard-selection math (Alt+Up is its keyboard equivalent). Primary activation reuses
    :nav/parent, which also pre-highlights the directory you came from so Alt+Down/Enter returns to it;
-   Ctrl+click opens the parent in a new tab."
+   Ctrl+click / middle-click open the parent in a background tab, Ctrl+Shift+click focuses it (ADR-0044)."
   [parent]
   [:div.vv-fb-row.vv-fb-up
    {:title            (str "Up to " (uri/display parent))
     :data-path        parent
     :data-dir         "true"
     :on-click         (fn [^js e]
-                        (cond
-                          (.-ctrlKey e)                 (rf/dispatch [:doc/open-new parent])
-                          (platform/single-click-open?) (rf/dispatch [:nav/parent])))
+                        (case (preview-nav/click-mode (.-ctrlKey e) (.-shiftKey e))
+                          :new-background (rf/dispatch [:tab/open-background parent])
+                          :new-focused    (rf/dispatch [:doc/open-new parent])
+                          (when (platform/single-click-open?) (rf/dispatch [:nav/parent]))))
     :on-double-click  (fn [^js e]
-                        (when-not (platform/single-click-open?)
-                          (rf/dispatch (if (.-ctrlKey e) [:doc/open-new parent] [:nav/parent]))))
+                        (when (and (not (platform/single-click-open?)) (not (.-ctrlKey e)))
+                          (rf/dispatch [:nav/parent])))
+    :on-aux-click     (fn [^js e]
+                        (when (= 1 (.-button e))
+                          (.preventDefault e)
+                          (rf/dispatch [(if (.-shiftKey e) :doc/open-new :tab/open-background) parent])))
     :on-context-menu  (fn [^js e]
                         (.preventDefault e) (.stopPropagation e)
                         (rf/dispatch [:context-menu/show
@@ -1298,7 +1315,9 @@
 (defn- breadcrumb
   "The active local path rendered as clickable folder segments (root → leaf). Clicking a segment
    navigates the active tab there (a folder → the directory browser); hovering shows it in the status
-   bar. Replaces the address input while Ctrl is held and the cursor is over the URI bar."
+   bar. Replaces the address input while Ctrl is held and the cursor is over the URI bar — Ctrl is
+   therefore already down for every crumb click, so plain activation IS the Ctrl one; Shift+click adds
+   a focused new tab and middle-click a background one (ADR-0044)."
   [active-uri]
   (into [:div.vv-breadcrumb {:title "Click a folder to open it"}]
         (apply concat
@@ -1309,7 +1328,16 @@
                                {:href           "#"
                                 :on-mouse-enter #(rf/dispatch [:ui/hover-link path])
                                 :on-mouse-leave #(rf/dispatch [:ui/hover-link nil])
-                                :on-click       (fn [^js e] (.preventDefault e) (rf/dispatch [:tab/navigate path]))}
+                                :on-click       (fn [^js e]
+                                                  (.preventDefault e)
+                                                  (rf/dispatch [(if (.-shiftKey e) :tab/open :tab/navigate) path]))
+                                ;; the href="#" would otherwise ask Chromium for a popup window on
+                                ;; middle-click (denied, but noisy) — consume it and open a tab instead
+                                :on-aux-click   (fn [^js e]
+                                                  (when (= 1 (.-button e))
+                                                    (.preventDefault e)
+                                                    (rf/dispatch [(if (.-shiftKey e) :tab/open :tab/open-background)
+                                                                  path])))}
                                (if (= name "/") "/" name)]]
                     (if (zero? i)
                       [crumb]

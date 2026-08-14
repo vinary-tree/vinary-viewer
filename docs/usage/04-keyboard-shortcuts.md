@@ -153,6 +153,22 @@ Not every user relies on keys. The command surface is intentionally shared:
 | Command palette | Uses `vinary.app.commands` entries |
 | Keybinding resolver | Dispatches command registry entries |
 
+### Link gestures (mouse)
+
+One family across every link-like surface — preview links, file-tree rows, directory-browser rows
+(including `..`), and the address-bar breadcrumbs ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)):
+
+| Gesture | Effect |
+|---------|--------|
+| Click | Open in the current tab (the tree/browser follow their platform's single/double-click rule) |
+| `Ctrl+click` **or** middle-click | Open in a **background** tab — you stay on what you are reading |
+| `Ctrl+Shift+click` **or** `Shift`+middle-click | Open in a **focused** new tab |
+| Middle-click a tab | Close it (tab strip and vertical Tabs panel alike) |
+
+A middle-/Ctrl-clicked tree or directory row always opens *another* tab, even if that file is
+already open; `Ctrl+Shift+click` reuses an existing tab for it. Links inside a browsed web page
+follow the same rules and open app tabs — never a separate native window.
+
 ---
 
 *Next: [05-configuration.md](05-configuration.md).*

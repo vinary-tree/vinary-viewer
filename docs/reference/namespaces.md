@@ -48,6 +48,7 @@ window/view work. Renderer code never imports these namespaces.
 | `vinary.main.shell` | Menu-bar shell actions: the multi-file Open dialog, clipboard writes, reveal/open-path, open-external, app-info, quit, devtools, and app-window zoom. |
 | `vinary.main.startup` | Pure, electron-free startup configuration (so the node `:test` build can assert it). |
 | `vinary.main.web` | In-app HTTP browsing: a main-owned `WebContentsView` (http/https) with bounds, navigation relay, page zoom, snapshot cache, TOC bridge, and the page-key/scroll relay to the web preload. |
+| `vinary.main.web-policy` | Pure policy for web-view popup requests (ADR-0044): which targets become app tabs (`tab-worthy-url?` — http(s) only) and whether the tab opens in the background (`open-mode`, from Chromium's disposition). No Electron requires, so it is unit-tested in the node build. |
 | `vinary.main.pdf` | *RETIRED* — the native PDF `WebContentsView` superseded by the in-renderer pdf.js view (ADR-0013). `init!` is commented out in `core.cljs`, so the `vv:pdf-*` channels have **no live listener**; the namespace is kept for recoverability. |
 | `vinary.main.adblock` | Native ad/tracker blocking (`@ghostery/adblocker-electron`, MPL) on `persist:vinary-web`: engine build/enable/refresh/schedule + cache (ADR-0014). |
 | `vinary.main.extensions` | Scoped Chrome-extension runtime: Web-Store install/load/reconcile, manifest→toolbar model, popup open, state push (ADR-0015). |

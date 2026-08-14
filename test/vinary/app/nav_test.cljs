@@ -152,3 +152,38 @@
     (is (= :split   (nav/effective-diff-view nil (nav/split-wide? 1600))))
     (is (= :unified (nav/effective-diff-view nil (nav/split-wide? 840))))
     (is (= :unified (nav/effective-diff-view nil (nav/split-wide? nil))))))
+
+;; ── ADR-0044: the background open (middle-click / Ctrl+click) ─────────────────────────────────────
+(deftest add-tab-background-leaves-the-active-tab-alone
+  (testing "the new tab is APPENDED with a fresh single-entry history, exactly like add-tab…"
+    (let [db' (nav/add-tab-background db1 "file:///a/new.md")
+          ts  (get-in db' [:ui :tabs])
+          t   (last ts)]
+      (is (= 3 (count ts)) "appended after the existing tabs")
+      (is (= "file:///a/new.md" (:uri t)))
+      (is (= {:stack [{:uri "file:///a/new.md" :scroll 0 :facet nil}] :idx 0} (:hist t))
+          "same fresh-tab history shape add-tab produces")
+      (is (= (:id t) (get-in db1 [:ui :next-tab-id] 0)) "takes the next id")
+      (is (= (inc (:id t)) (get-in db' [:ui :next-tab-id])) "…and advances the counter")))
+  (testing "…but the ACTIVE tab is untouched — that is the whole point of a background open"
+    (let [db' (nav/add-tab-background db1 "file:///a/new.md")]
+      (is (= 1 (get-in db' [:ui :active-tab])))
+      (is (= "file:///a/paper.tex" (nav/active-uri db')) "the reader stays where they were")
+      (is (not= (nav/active-uri db') (:uri (last (get-in db' [:ui :tabs])))))))
+  (testing "add-tab (the focused variant) still activates — the two differ ONLY in focus"
+    (let [bg (nav/add-tab-background db1 "file:///a/new.md")
+          fg (nav/add-tab db1 "file:///a/new.md")]
+      (is (= (get-in bg [:ui :tabs]) (get-in fg [:ui :tabs])) "identical tab vectors")
+      (is (= (get-in bg [:ui :next-tab-id]) (get-in fg [:ui :next-tab-id])))
+      (is (not= (get-in bg [:ui :active-tab]) (get-in fg [:ui :active-tab])))))
+  (testing "a background tab's file is RETAINED (retention walks every tab, not just the active one) —
+            without this the content it just loaded would be evicted and its watcher released"
+    (let [ret (set (nav/retained-file-paths (nav/add-tab-background db1 "file:///a/new.md")))]
+      (is (contains? ret "/a/new.md"))
+      (is (contains? ret "/a/paper.tex") "the other tabs stay retained too")
+      (is (contains? ret "/a/notes.md"))))
+  (testing "appending to an empty db works (the EVENT decides that a focused open is the right call
+            when there is no tab to stay on — the transform itself just appends)"
+    (let [db' (nav/add-tab-background empty-db "file:///a/new.md")]
+      (is (= 1 (count (get-in db' [:ui :tabs]))))
+      (is (nil? (get-in db' [:ui :active-tab])) "still no active tab"))))

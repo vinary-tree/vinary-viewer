@@ -155,6 +155,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 | Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
 |---------|----------------------|---------|-----------------------|---------|
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url, tab}` | `[:http/navigated …]` | Record in-app HTTP navigation onto the **owner** tab's history (`tab` may not be the active tab — a slow page can finish after the user switches away). |
+| `vv:web-open-tab` | `onWebOpenTab(cb)` | `{url, mode}` | `[:web/open-tab …]` | A link inside the web view asked for a popup (`target=_blank`, `window.open`, middle-/Ctrl-click). Main **denies every native window** and relays http(s) targets here; `mode` is `"background"` for Chromium's `background-tab` disposition, else `"focused"` ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). |
 | `vv:http-snapshot-ready` | `onHttpSnapshotReady(cb)` | JPEG data-URL | `web-host` (`pre-snap`) | Push a fresh page raster (captured after load + on scroll-settle) so opening any overlay freezes the page instantly. |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc …]` | Deliver the heading outline from the HTTP web view (relayed from its preload). |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading …]` | Deliver the active HTTP heading (scroll-spy). |

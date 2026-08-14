@@ -55,7 +55,8 @@ truncates entries after `idx`, just like a web browser.
 | Open highlighted directory entry | `Alt+Down` (or Vim `J`) — open the highlighted child of the active directory listing. |
 | Jump to a folder in the path | Hold `Ctrl` over the URI bar and click a breadcrumb segment. |
 | Open link in same tab | Left-click. |
-| Open link in new tab | `Ctrl+click` or middle-click. |
+| Open link in a background tab | `Ctrl+click` or middle-click — the tab loads behind you and the page you are reading stays on screen ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). |
+| Open link in a focused new tab | `Ctrl+Shift+click` or `Shift`+middle-click. |
 
 Back/Forward are disabled when the active tab has no earlier/later entry. `Alt+Up`
 is a no-op for `http(s)` pages and at the filesystem root; `Alt+Down` is inert

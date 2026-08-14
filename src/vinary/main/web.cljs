@@ -7,6 +7,7 @@
    link clicks update the active tab's URI + history."
   (:require ["electron" :refer [ipcMain WebContentsView Menu clipboard session net BrowserWindow]]
             ["path" :as path]
+            [vinary.main.web-policy :as web-policy]
             [vinary.main.windows :as windows]
             ["./ssh_transport.js" :as ssh-transport]))
 
@@ -202,11 +203,25 @@
                (when (pdf-url? url)
                  (.preventDefault e)
                  (route-pdf! url (:owner-tab @state)))))
+        ;; EVERY popup request is denied (ADR-0044) — a page can never conjure a native window. A PDF routes
+        ;; to the app's viewer; any other http(s) target is relayed to the owner window's renderer, which
+        ;; opens it as an app tab honoring the gesture (Chromium's disposition: middle-/Ctrl-click reads as
+        ;; "background-tab"); anything else (about:blank, javascript:, custom schemes) is simply refused.
         (.setWindowOpenHandler wc
              (fn [^js details]
-               (if (pdf-url? (.-url details))
-                 (do (route-pdf! (.-url details) (:owner-tab @state)) #js {:action "deny"})
-                 #js {:action "allow"})))
+               (let [url (.-url details)]
+                 (cond
+                   (pdf-url? url)
+                   (do (route-pdf! url (:owner-tab @state)) #js {:action "deny"})
+
+                   (web-policy/tab-worthy-url? url)
+                   (do (when-let [^js awc (app-wc)]
+                         (.send awc "vv:web-open-tab"
+                                (clj->js {:url  url
+                                          :mode (name (web-policy/open-mode (.-disposition details)))})))
+                       #js {:action "deny"})
+
+                   :else #js {:action "deny"}))))
         (swap! state assoc :view v :win win)
         v)))
 

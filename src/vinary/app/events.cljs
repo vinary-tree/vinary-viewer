@@ -629,10 +629,21 @@
          ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
          ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
          ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
-         fresh-facet (when (and active? (seq siblings) (nil? (nav/facet db')))
+         ;; Scoped to the OWNING TABS rather than the active one (ADR-0044): a group doc opened into a
+         ;; BACKGROUND tab must get its default facet now, or activating it later would show a facet whose
+         ;; file was never loaded (nothing re-resolves it on mount).
+         facet-tab-ids (when (seq siblings)
+                         (into [] (keep (fn [t] (when (and (nil? (:facet t))
+                                                           (= path (uri/file-path (:uri t))))
+                                                  (:id t))))
+                               (nav/tabs db')))
+         fresh-facet (when (seq facet-tab-ids)
                        (facet/default-facet (vec siblings) path
                                             (get-in db' [:ui :settings :collocated-default] :pdf)))
-         db'     (cond-> db' fresh-facet (nav/set-facet (:path fresh-facet) (:type fresh-facet)))]
+         db'     (if fresh-facet
+                   (reduce (fn [d id] (nav/set-facet d id (:path fresh-facet) (:type fresh-facet)))
+                           db' facet-tab-ids)
+                   db')]
      (with-retention
        {:db db'
         :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
@@ -826,13 +837,33 @@
    (let [db' (if (nav/active-tab db) (nav/nav-active db uri view-pos) (nav/add-tab db uri))]
      (nav-result db' uri 0))))
 
-;; open uri in a NEW tab (Ctrl+click) — save the current tab's view position first
+;; open uri in a NEW, FOCUSED tab (Ctrl+Shift+click / Shift+middle-click / context menu) — save the
+;; current tab's view position first
 (rf/reg-event-fx
  :tab/open
  [(rf/inject-cofx :view-pos)]
  (fn [{:keys [db view-pos]} [_ uri]]
    (let [db' (nav/add-tab (nav/save-scroll db view-pos) uri)]
      (nav-result db' uri 0))))
+
+;; open uri in a NEW BACKGROUND tab (Ctrl+click / middle-click — ADR-0044). The active tab does not
+;; change, so there is no leaving view position to save and nothing to scroll: the fx are the content
+;; load alone (retention is added below). Content arrives through the ordinary vv:open → vv:content →
+;; :content/received path, which is keyed by :doc/path and has no active-tab dependency; when the tab
+;; is later activated, its position restore runs through :tab/activate like any other tab.
+;; With no tab to stay on (a fresh window, or every tab closed) "background" is meaningless — the open
+;; degenerates to the focused variant rather than leaving the window showing nothing.
+(rf/reg-event-fx
+ :tab/open-background
+ (fn [{:keys [db]} [_ uri]]
+   (if (nav/active-tab db)
+     (let [db' (record-web-history (nav/add-tab-background db uri) uri)]
+       (with-retention
+         {:db db'
+          :fx (cond-> (load-fx uri)
+                (and uri (uri/http? uri)) (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
+         db'))
+     {:fx [[:dispatch [:tab/open uri]]]})))
 
 (rf/reg-event-fx
  :tab/new-blank
@@ -1253,6 +1284,16 @@
        (let [db' (record-web-history (nav/nav-tab db tab url) url)]
          (with-retention {:db db' :fx [[:vv/save-recent (pr-str (get-in db' [:ui :recent]))]]} db'))
        {:db db}))))
+
+;; A link inside a web page asked for a popup (target=_blank, middle-click, Ctrl+click, window.open).
+;; Main DENIES the native window and relays it here (ADR-0044), so the destination lands in an ordinary
+;; app tab — background for a middle-/Ctrl-click gesture, focused otherwise (Chromium's disposition,
+;; mapped main-side by vinary.main.web-policy). Fail closed: only http(s) urls become tabs.
+(rf/reg-event-fx
+ :web/open-tab
+ (fn [_ [_ {:keys [url mode]}]]
+   (when (and url (uri/http? url))
+     {:fx [[:dispatch [(if (= mode "background") :tab/open-background :tab/open) url]]]})))
 
 ;; the web view's heading outline (for the Contents/TOC tab — HTML sections, like Markdown)
 (rf/reg-event-db :web/toc (fn [db [_ headings]] (assoc-in db [:ui :web-toc] (vec headings))))

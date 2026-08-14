@@ -76,6 +76,17 @@
         (assoc-in [:ui :active-tab] id)
         (assoc-in [:ui :next-tab-id] (inc id)))))
 
+(defn add-tab-background
+  "Append a new tab for uri WITHOUT activating it — the browser's middle-click / Ctrl+click open
+   (ADR-0044). Identical to add-tab except [:ui :active-tab] is left alone, so the reader stays where
+   they are while the new tab loads behind them (retention keeps its file: retained-file-paths walks
+   every tab, not just the active one)."
+  [db uri]
+  (let [id (get-in db [:ui :next-tab-id] 0)]
+    (-> db
+        (update-in [:ui :tabs] (fnil conj []) (mk-tab id uri))
+        (assoc-in [:ui :next-tab-id] (inc id)))))
+
 (defn duplicate-tab
   "Duplicate tab id immediately after itself and make the duplicate active."
   [db id]

@@ -38,12 +38,13 @@
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
 | `:doc/open` | fx | `uri/path` | current tab, content scroll | active tab/history | focus existing tab or navigate active tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync |
-| `:doc/open-new` | fx | `uri/path` | current tab, content scroll | tabs/history | focus existing tab or open a new tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync |
+| `:doc/open-new` | fx | `uri/path` | current tab, content scroll | tabs/history | focus existing tab or open a new tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync. Since ADR-0044 this is the **Ctrl+Shift+click** / context-menu semantics — plain Ctrl+click and middle-click use `:tab/open-background` (always-new) instead |
 | `:doc/open-in-tab` **[input]** | fx | `path new?` | — | — | dispatches `:doc/open-new` when `new?`, else `:doc/open` |
 | `:tab/navigate` | fx | `uri` | active tab, content scroll | active tab/history | local files → `[:vv/open path]`; also scroll restore and retained sync |
-| `:tab/open` | fx | `uri` | active tab, content scroll | tabs/history | add a new tab, load local files, restore top scroll, sync retained |
+| `:tab/open` | fx | `uri` | active tab, content scroll | tabs/history | add a new **focused** tab (Ctrl+Shift+click / Shift+middle-click / context menu), load local files, restore top scroll, sync retained |
+| `:tab/open-background` | fx | `uri` | active tab | tabs (appended, **active tab unchanged**) | the ADR-0044 background open (Ctrl+click / middle-click): `nav/add-tab-background` + `load-fx` only — no `:view-pos` cofx, no `[:scroll/restore]` (nothing is being left); records web history for http(s); with no active tab it degenerates to `[:tab/open uri]` |
 | `:tab/activate` | fx | `id` | content scroll | `:ui :active-tab`, saved leaving scroll | restore target scroll for local files and sync retained |
-| `:tab/close` | fx | `id` | tab list/history | tabs, active tab | sync retained files and evict no-longer-retained cached docs |
+| `:tab/close` | fx | `id` | tab list/history | tabs, active tab | sync retained files and evict no-longer-retained cached docs. Dispatched by the × button **and** by middle-clicking a tab in either representation (ADR-0044) |
 | `:tab/next` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate next tab id |
 | `:tab/prev` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate previous tab id |
 
@@ -281,6 +282,7 @@ The state/items/save-prompt/result pushes from main land as `[:passwords/*-recei
 
 | Event | Payload | Purpose |
 | --- | --- | --- |
+| `:web/open-tab` | `{:url :mode}` | A link in the web view asked for a popup; main denied the native window and relayed it ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). Dispatches `:tab/open-background` when `mode` is `"background"` (Chromium's `background-tab` disposition — a middle-/Ctrl-click), else `:tab/open`. Fail-closed: non-http(s) urls are ignored. |
 | `:web/toc` | heading vector | The in-app web view's heading outline (feeds the same Contents panel model). |
 | `:web/active-heading` | heading id \| nil | The web view's scroll-spy active heading. |
 | `:ui/hover-link` | href \| nil | The hovered link, shown in the status strip. |

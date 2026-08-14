@@ -3,8 +3,9 @@
    repository, or (:synthetic?) the containing directory of a file that belongs to none (ADR-0030). We keep
    one collapsible tree per project (rooted at the project-directory name) and fold each project's flat
    root-relative paths into a nested folder/file tree of native <details>. A filter narrows across all
-   projects. Left-click navigates the active tab; Ctrl+click opens a new tab. On every activation the
-   active file's ancestor folders auto-expand and it scrolls into view (reveal-active!, additive)."
+   projects. Left-click navigates the active tab; the ADR-0044 gesture family applies to file rows
+   (Ctrl+click / middle-click → a background tab, Ctrl+Shift+click → a focused one). On every activation
+   the active file's ancestor folders auto-expand and it scrolls into view (reveal-active!, additive)."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
             [clojure.string :as str]
@@ -12,6 +13,7 @@
             [vinary.app.tree-state :as tree-state]
             [vinary.ui.icons :as icons]
             [vinary.ui.platform :as platform]
+            [vinary.ui.preview-navigation :as preview-nav]
             [vinary.ui.text-input :as text-input]))
 
 (defn- ctx!
@@ -38,19 +40,28 @@
     name))
 
 (defn- file-attrs
-  "Shared <a.vv-file> attrs: open (single click on Linux, double on Windows/macOS); Ctrl+click → new
-   tab; right-click → the :file menu. `full` is the absolute open target — a root-relative tree row's
-   reconstituted path, or an ADR-0038 extra's own absolute path."
+  "Shared <a.vv-file> attrs: open (single click on Linux, double on Windows/macOS); the ADR-0044 gesture
+   family — Ctrl+click and middle-click open a BACKGROUND tab (always a new one, like a browser link),
+   Ctrl+Shift+click and Shift+middle-click open a focused tab reusing an existing one; right-click → the
+   :file menu. `full` is the absolute open target — a root-relative tree row's reconstituted path, or an
+   ADR-0038 extra's own absolute path."
   [root full active]
   {:class            (when (projects/same-path? full active) "vv-file-active")
    :data-path        full
    :title            full
    :on-click         (fn [^js e]
-                       (when (or (.-ctrlKey e) (platform/single-click-open?))
-                         (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
+                       (case (preview-nav/click-mode (.-ctrlKey e) (.-shiftKey e))
+                         :new-background (rf/dispatch [:tab/open-background full])
+                         :new-focused    (rf/dispatch [:doc/open-new full])
+                         (when (platform/single-click-open?) (rf/dispatch [:doc/open full]))))
+   ;; the modified gestures already opened on the first click — a Ctrl+double-click must not open again
    :on-double-click  (fn [^js e]
-                       (when-not (platform/single-click-open?)
-                         (rf/dispatch [(if (.-ctrlKey e) :doc/open-new :doc/open) full])))
+                       (when (and (not (platform/single-click-open?)) (not (.-ctrlKey e)))
+                         (rf/dispatch [:doc/open full])))
+   :on-aux-click     (fn [^js e]
+                       (when (= 1 (.-button e))
+                         (.preventDefault e)
+                         (rf/dispatch [(if (.-shiftKey e) :doc/open-new :tab/open-background) full])))
    :on-context-menu  (ctx! :file root full)})
 
 (defn- extra-row

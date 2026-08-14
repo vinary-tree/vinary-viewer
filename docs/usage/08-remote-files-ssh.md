@@ -37,7 +37,7 @@ You can open a remote URI four ways:
 |-------------|----------|
 | **Address bar** | Type or paste a remote URI and press Enter; it navigates the active tab. |
 | **Command line** | `vv ssh://host/notes.md` opens it in the GUI. Multiple arguments open one tab each (first focused), so `vv ssh://host/a.md ssh://host/b.md local.md` mixes remote and local freely. |
-| **Remote directory listing** | Opening a remote directory lists it in the pane; each entry carries a child `ssh://` URI, so clicking descends or previews, `Ctrl+click` opens a new tab, and the breadcrumb / `Alt+Up` parent navigation all work as they do locally. |
+| **Remote directory listing** | Opening a remote directory lists it in the pane; each entry carries a child `ssh://` URI, so clicking descends or previews, `Ctrl+click` / middle-click open a background tab (`Ctrl+Shift+click` a focused one), and the breadcrumb / `Alt+Up` parent navigation all work as they do locally. |
 | **File ▸ Open Recent** | Recently-opened remotes are surfaced in the recent list (see §5). |
 
 A remote **directory** browses in-pane just like a local folder — the listing

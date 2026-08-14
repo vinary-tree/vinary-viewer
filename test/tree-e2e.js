@@ -689,6 +689,154 @@ async function run() {
               'the earlier outside-repo extra still survives these refreshes');
   });
 
+
+  // ---- ADR-0044: the link-gesture family against the REAL open pipeline ---------------------------
+  // The smoke suite proves the renderer half against a mocked vv:open; here the background tab's
+  // content really travels main's open! → vv:content chain, and the web view's popup routing runs
+  // through the production setWindowOpenHandler.
+  const tabsState = `(() => { const ui = window.__vvdb().ui;
+    return { count: ui.tabs.length, active: ui['active-tab'],
+             activeUri: (ui.tabs.find(t => t.id === ui['active-tab']) || {}).uri,
+             uris: ui.tabs.map(t => t.uri) }; })()`;
+  const gestureOn = async (sel, type, init) => {
+    await until(wc, `Boolean(document.querySelector(${JSON.stringify(sel)}))`, (v) => v === true,
+                `${sel} to render before its ${type} gesture`);
+    await sleep(150);   // let a pending Reagent re-render finish: a detached node swallows the event
+    return wc.executeJavaScript(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.dispatchEvent(new MouseEvent(${JSON.stringify(type)},
+        Object.assign({ bubbles: true, cancelable: true }, ${JSON.stringify(init)})));
+      return true; })()`);
+  };
+
+  const GEST_FILE = path.join(SCRATCH, 'b.md');
+  const gestBefore = await wc.executeJavaScript(tabsState);
+  const gestRow = `.vv-file[data-path=${JSON.stringify(GEST_FILE)}]`;
+  assert.strictEqual(await gestureOn(gestRow, 'auxclick', { button: 1 }), true,
+                     'the fixture tree row is present for the middle-click');
+  const afterAux = await until(wc, tabsState,
+                               (t) => t.count === gestBefore.count + 1,
+                               'middle-click on a tree row to open a new tab');
+  check('middle-clicking a file-tree row opens a BACKGROUND tab (the active document never changes)', () => {
+    assert.strictEqual(afterAux.active, gestBefore.active, 'the active tab id is unchanged');
+    assert.strictEqual(afterAux.activeUri, gestBefore.activeUri, 'the shown document is unchanged');
+    assert.ok(afterAux.uris.includes(GEST_FILE), `the new tab holds the row's file: ${JSON.stringify(afterAux.uris)}`);
+  });
+
+  // the background tab really LOADED through main: activate it and read its rendered content. Wait for
+  // the strip to catch up first — it renders a frame after app-db settles.
+  await until(wc, `Array.from(document.querySelectorAll('.vv-tab'))
+    .some((el) => el.title.includes(${JSON.stringify(GEST_FILE)}))`, (v) => v === true,
+              'the background tab to appear in the strip');
+  await wc.executeJavaScript(`(() => {
+    const tab = Array.from(document.querySelectorAll('.vv-tab'))
+      .find((el) => el.title.includes(${JSON.stringify(GEST_FILE)}));
+    if (tab) tab.click();
+    return Boolean(tab); })()`);
+  const bgLoaded = await until(wc,
+    `(() => { const c = document.querySelector('.vv-content');
+       const body = document.querySelector('.vv-content .markdown-body');
+       return { key: c && c.dataset.docKey,
+                text: Boolean(body && body.textContent.trim().length > 1) }; })()`,
+    (v) => v && v.key === GEST_FILE && v.text,
+    'the background tab to show content main delivered while it was unfocused');
+  check('a background tab loads its content through the real main pipeline while unfocused', () => {
+    assert.strictEqual(bgLoaded.key, GEST_FILE, 'the activated tab shows the middle-clicked file');
+    assert.strictEqual(bgLoaded.text, true,
+                       'its rendered body is present — main delivered the content while the tab was unfocused');
+  });
+
+  // Ctrl+click is the same background gesture, and it is ALWAYS-new: a second one duplicates the tab.
+  // Switch away via the tab STRIP — the __vvopen helper is :doc/open, which navigates the active tab in
+  // place when no tab holds that uri and would silently consume the background tab under test.
+  await wc.executeJavaScript(`(() => {
+    const tab = Array.from(document.querySelectorAll('.vv-tab'))
+      .find((el) => !el.title.includes(${JSON.stringify(GEST_FILE)}));
+    if (tab) tab.click();
+    return Boolean(tab); })()`);
+  const beforeCtrlTree = await until(wc, tabsState, (t) => t.activeUri !== GEST_FILE,
+                                     'a non-fixture tab to become active before the Ctrl+click');
+  await gestureOn(gestRow, 'click', { button: 0, ctrlKey: true });
+  const afterCtrlTree = await until(wc, tabsState,
+                                    (t) => t.uris.filter((u) => u === GEST_FILE).length === 2,
+                                    'Ctrl+click on a tree row to open a SECOND tab for the same file');
+  check('Ctrl+click on a tree row opens ANOTHER background tab even when that file is already open', () => {
+    assert.strictEqual(afterCtrlTree.count, beforeCtrlTree.count + 1, 'exactly one tab was added');
+    assert.strictEqual(afterCtrlTree.activeUri, beforeCtrlTree.activeUri, 'still on the same document');
+  });
+
+  // Ctrl+Shift+click keeps the old focus-existing semantics
+  const beforeShift = await wc.executeJavaScript(tabsState);
+  await gestureOn(gestRow, 'click', { button: 0, ctrlKey: true, shiftKey: true });
+  const afterShift = await until(wc, tabsState, (t) => t.activeUri === GEST_FILE,
+                                 'Ctrl+Shift+click on a tree row to focus the file');
+  check('Ctrl+Shift+click on a tree row focuses an existing tab instead of opening another', () => {
+    assert.strictEqual(afterShift.count, beforeShift.count, 'no new tab was created');
+  });
+
+  // middle-click closes tabs — tidy up the fixture tabs with the gesture under test
+  for (let i = 0; i < 8; i++) {
+    const done = await wc.executeJavaScript(`(() => {
+      const victim = Array.from(document.querySelectorAll('.vv-tab'))
+        .find((el) => el.title.includes(${JSON.stringify(GEST_FILE)}));
+      if (!victim) return true;
+      victim.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+      return false; })()`);
+    if (done) break;
+    await sleep(120);
+  }
+  const afterCloses = await until(wc, tabsState, (t) => !t.uris.includes(GEST_FILE),
+                                  'middle-click to close every fixture tab');
+  check('middle-clicking a tab closes it (both representations share one tab-item)', () => {
+    assert.ok(afterCloses.count >= 1, 'the window still has a tab to show');
+  });
+
+  // ---- the web view never opens a native window: popups route to app tabs (ADR-0044) --------------
+  // A full-viewport link makes the click coordinate-proof; the .invalid hosts never resolve, and an
+  // http tab only loads when activated, so the assertions stay offline-safe.
+  const POPUP = path.join(SCRATCH, 'popup.html');
+  fs.writeFileSync(POPUP,
+    '<!doctype html><title>popup</title><style>a{display:block;width:100vw;height:100vh}</style>' +
+    '<a href="http://vv-e2e.invalid/mid" target="_blank">open</a>');
+  const beforePopup = await wc.executeJavaScript(tabsState);
+  const winCountBefore = BrowserWindow.getAllWindows().length;
+  await wc.executeJavaScript(`window.vv.httpShow(${JSON.stringify('file://' + POPUP)},
+    { x: 0, y: 0, width: 400, height: 300 }, window.__vvdb().ui['active-tab'])`);
+  const viewWc = await (async () => {
+    for (let i = 0; i < 100; i++) {
+      const { webContents } = require('electron');
+      const v = webContents.getAllWebContents()
+        .find((w) => w !== wc && String(w.getURL()).includes('popup.html'));
+      if (v && !v.isLoading()) return v;
+      await sleep(100);
+    }
+    throw new Error('the web view never loaded the popup fixture');
+  })();
+
+  await viewWc.executeJavaScript(`window.open('http://vv-e2e.invalid/fg', '_blank')`, true);
+  const afterFg = await until(wc, tabsState,
+                              (t) => t.uris.some((u) => u === 'http://vv-e2e.invalid/fg'),
+                              'a window.open popup to become an app tab');
+  check('a web-page popup opens an APP TAB, never a native window (focused disposition)', () => {
+    assert.strictEqual(afterFg.activeUri, 'http://vv-e2e.invalid/fg', 'the foreground popup is focused');
+    assert.strictEqual(BrowserWindow.getAllWindows().length, winCountBefore,
+                       'no extra BrowserWindow was created');
+  });
+
+  const beforeMid = await wc.executeJavaScript(tabsState);
+  viewWc.sendInputEvent({ type: 'mouseDown', x: 200, y: 150, button: 'middle', clickCount: 1 });
+  viewWc.sendInputEvent({ type: 'mouseUp', x: 200, y: 150, button: 'middle', clickCount: 1 });
+  const afterMid = await until(wc, tabsState,
+                               (t) => t.uris.some((u) => u === 'http://vv-e2e.invalid/mid'),
+                               'a middle-clicked web-page link to become an app tab');
+  check('a middle-clicked link inside a web page opens a BACKGROUND app tab', () => {
+    assert.strictEqual(afterMid.activeUri, beforeMid.activeUri, 'the reader stays on the current document');
+    assert.strictEqual(BrowserWindow.getAllWindows().length, winCountBefore,
+                       'still no extra BrowserWindow');
+  });
+  await wc.executeJavaScript('window.vv.httpHide()');
+
   console.log(`\ntree-e2e: ${passed.length} checks passed`);
 }
 

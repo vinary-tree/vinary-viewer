@@ -150,7 +150,8 @@ Useful defaults:
 | Back | `Alt+Left`, toolbar Back, or mouse back button |
 | Forward | `Alt+Right`, toolbar Forward, or mouse forward button |
 | Open link in active tab | left-click |
-| Open link in new tab | `Ctrl+click` |
+| Open link in a background tab | `Ctrl+click` or middle-click |
+| Open link in a focused new tab | `Ctrl+Shift+click` |
 
 ### 5.3 Find
 

@@ -14,7 +14,7 @@ watching model, and per-tab history behavior.
 | `electron . <path\|URL> …` or `npm run start -- <path\|URL> …` | Development equivalent; same multi-argument open. |
 | `File > Open` | Native multi-file dialog. One selected file navigates the active tab; multiple selected files open one tab each. |
 | Sidebar file tree | Clicking a file dispatches `[:doc/open path]`. |
-| Markdown links | Left-click navigates the active tab; `Ctrl+click` opens a new tab. |
+| Markdown links | Left-click navigates the active tab; `Ctrl+click` / middle-click open a **background** tab; `Ctrl+Shift+click` opens a focused one ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). |
 | Directory path | Opening a folder (CLI arg, a folder link, a breadcrumb segment, or `Alt+Up`) lists it **in the pane** — see §6. |
 | File ▸ Open Recent | Re-open one of the last 10 opened files (the MRU), or **Clear Recent** — see §6. |
 | URI bar | Normalizes typed file paths, `file://` URIs, HTTP/HTTPS URLs, and `ssh://` / `sftp://` remote URIs, then dispatches `[:tab/navigate uri]`. |
@@ -173,7 +173,8 @@ The listing is a detailed list (name · size · modified).
 | Gesture | Result |
 |---------|--------|
 | Open an entry | Single-click on Linux, double-click on Windows/macOS, or highlight + `Enter` / `Alt+Down` (a folder descends; a file shows its preview). |
-| `Ctrl+click` | Open the entry in a new tab. |
+| `Ctrl+click` / middle-click | Open the entry in a background tab (always a new one). |
+| `Ctrl+Shift+click` | Open the entry focused, reusing an existing tab for it. |
 | `↑` `↓` `←` `→` | Smoothly scroll the listing (they do not move the highlight). |
 | Right-click a folder ▸ Open in file manager | The one explicit way to hand a folder to the OS. |
 
@@ -195,7 +196,8 @@ persists to `recent.edn` (see [05-configuration.md](05-configuration.md)).
 | Open in development | `npm run start -- <path\|URL> …` |
 | Open one or many files in the app | `File > Open` |
 | Open local link in active tab | left-click |
-| Open local link in new tab | `Ctrl+click` |
+| Open local link in a background tab | `Ctrl+click` or middle-click |
+| Open local link in a focused tab | `Ctrl+Shift+click` |
 | Read diagram source | Open it as a source file |
 | Render generated diagrams in Markdown | Embed the generated `.svg` or image file |
 

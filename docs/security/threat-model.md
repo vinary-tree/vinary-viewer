@@ -407,6 +407,15 @@ explicit.
   `contextIsolation: true`, `nodeIntegration: false`, no `window.vv`), and the ad-blocker + extensions
   apply. So an untrusted local `.html` carries the trust posture of *remote* content (its scripts run, in
   the sandboxed web view), not that of a trusted first-party document.
+- **Popups never become native windows.** Every `window.open` / `target=_blank` / middle-click popup
+  request from the web view is **denied** by `setWindowOpenHandler` (ADR-0044). A PDF is routed into the
+  app's own pdf.js viewer; an `http(s)` target is relayed to the owner window's renderer over
+  `vv:web-open-tab` and opens as an ordinary app tab (background or focused per Chromium's disposition);
+  every other scheme (`about:`, `javascript:`, `data:`, custom) is refused with no tab at all. The
+  decision is a pure function pair in `vinary.main.web-policy` (unit-tested). This closes the previous
+  `{action: "allow"}` path, under which a page could spawn a **real BrowserWindow** outside the app's tab
+  model, chrome, and navigation history; the relayed url is only ever *navigated to* in a tab (never
+  executed in the first-party renderer), and page scripts now receive `null` from `window.open`.
 - **Overlay snapshots are inert rasters.** Because the native view always paints *above* the DOM, ANY DOM
   overlay (menu, context menu, or a modal dialog) is shown over the page by displaying a `capturePage`
   **still image** in the first-party renderer while the native view hides, then restoring the live view on

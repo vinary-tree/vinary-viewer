@@ -1,8 +1,8 @@
 (ns vinary.ui.tabs
   "The tab strip + the shared tab-item used by both the horizontal strip and the sidebar's vertical Tabs
    panel. Tabs are browser-like views (vinary.app.nav): each shows a current URI, labeled by its basename.
-   Click activates; × closes; right-click → context menu; drag reorders (the two representations share one
-   ordered model, so reordering one reorders the other)."
+   Click activates; × or middle-click closes (ADR-0044); right-click → context menu; drag reorders (the two
+   representations share one ordered model, so reordering one reorders the other)."
   (:require [re-frame.core :as rf]
             [vinary.app.uri :as uri]
             [vinary.ui.icons :as icons]))
@@ -16,9 +16,10 @@
       (> (.-clientY e) (+ (.-top rect)  (/ (.-height rect) 2))))))
 
 (defn tab-item
-  "One tab row. `horizontal?` selects the strip vs. the vertical Tabs panel; the behavior (activate / close
-   / context menu / drag-reorder) is identical in both, only the drop-side test (x vs y) differs. While a
-   drag hovers this tab, a CSS insertion line is drawn on the side the drop would land (before/after)."
+  "One tab row. `horizontal?` selects the strip vs. the vertical Tabs panel; the behavior (activate /
+   close / middle-click close / context menu / drag-reorder) is identical in both, only the drop-side test
+   (x vs y) differs. While a drag hovers this tab, a CSS insertion line is drawn on the side the drop
+   would land (before/after)."
   [{:keys [id uri active? horizontal? view-source?]}]
   (let [drop  @(rf/subscribe [:ui/tab-drop])
         here? (= (:over drop) id)]
@@ -28,6 +29,12 @@
            :title           (uri/display uri)
            :draggable       true
            :on-click        #(rf/dispatch [:tab/activate id])
+           ;; middle-click closes, the browser convention (ADR-0044). A middle-click on the × bubbles
+           ;; here (the × handles primary clicks only), so exactly one close fires either way.
+           :on-aux-click    (fn [^js e]
+                              (when (= 1 (.-button e))
+                                (.preventDefault e)
+                                (rf/dispatch [:tab/close id])))
            :on-context-menu (fn [^js e]
                               (.preventDefault e) (.stopPropagation e)
                               (rf/dispatch [:context-menu/show

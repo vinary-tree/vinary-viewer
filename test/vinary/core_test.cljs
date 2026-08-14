@@ -794,23 +794,40 @@
 (deftest preview-navigation-events
   (testing "preview links navigate the active tab with browser-like semantics"
     (is (= [:tab/navigate "/tmp/diagram.png"]
-           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} false)))
+           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} :same)))
+    (is (= [:tab/open-background "/tmp/diagram.png"]
+           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} :new-background)))
     (is (= [:tab/open "/tmp/diagram.png"]
-           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} true)))
+           (preview-nav/open-event {:kind :file :path "/tmp/diagram.png"} :new-focused)))
     (is (= [:tab/navigate "https://example.com"]
-           (preview-nav/open-event {:kind :http :path "https://example.com"} false)))
-    (is (= [:tab/open "https://example.com"]
-           (preview-nav/open-event {:kind :preview-link :link-kind :http :path "https://example.com"} true))))
+           (preview-nav/open-event {:kind :http :path "https://example.com"} :same)))
+    (is (= [:tab/open-background "https://example.com"]
+           (preview-nav/open-event {:kind :preview-link :link-kind :http :path "https://example.com"}
+                                   :new-background))))
   (testing "non-document preview targets keep their existing destinations"
     (is (= [:toc/goto "section"]
-           (preview-nav/open-event {:kind :anchor :path "section"} false)))
+           (preview-nav/open-event {:kind :anchor :path "section"} :same)))
     (is (= [:tab/navigate "/tmp"]
-           (preview-nav/open-event {:kind :dir :path "/tmp"} false)))   ; directories open in-pane now
-    (is (= [:tab/open "/tmp"]
-           (preview-nav/open-event {:kind :dir :path "/tmp"} true)))
+           (preview-nav/open-event {:kind :dir :path "/tmp"} :same)))   ; directories open in-pane now
+    (is (= [:tab/open-background "/tmp"]
+           (preview-nav/open-event {:kind :dir :path "/tmp"} :new-background)))
     (is (true? (preview-nav/new-tab? {:kind :preview-link :link-kind :file :path "/x"})))
     (is (true? (preview-nav/new-tab? {:kind :dir :path "/x"})))
-    (is (false? (preview-nav/new-tab? {:kind :preview-link :link-kind :anchor :path "x"})))))
+    (is (false? (preview-nav/new-tab? {:kind :preview-link :link-kind :anchor :path "x"}))))
+  (testing "a same-document anchor ignores the mode entirely — a new tab scrolled to a heading of the
+            document you are already reading is never what the gesture meant (ADR-0044)"
+    (doseq [mode [:same :new-background :new-focused]]
+      (is (= [:toc/goto "section"] (preview-nav/open-event {:kind :anchor :path "section"} mode))
+          (str "anchor + " mode))))
+  (testing "a blank/absent path yields no event at all, in any mode"
+    (doseq [mode [:same :new-background :new-focused]]
+      (is (nil? (preview-nav/open-event {:kind :file :path ""} mode)))
+      (is (nil? (preview-nav/open-event {:kind :file :path nil} mode)))))
+  (testing "the ADR-0044 gesture decode: Ctrl+Shift → focused, Ctrl → background, else same tab"
+    (is (= :same           (preview-nav/click-mode false false)))
+    (is (= :same           (preview-nav/click-mode false true))   "Shift alone is not a new-tab gesture")
+    (is (= :new-background (preview-nav/click-mode true false)))
+    (is (= :new-focused    (preview-nav/click-mode true true)))))
 
 (deftest uri-path-helpers
   (testing "dirname: parent directory, http/root → nil, trailing slash ignored"

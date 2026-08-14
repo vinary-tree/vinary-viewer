@@ -49,7 +49,7 @@ invented. See [ADR-0035](../design-decisions/0035-authenticated-remote-daemon-ev
 1. Open any file, e.g. `vv docs/README.md` from within a checked-out project, or `vv ~/notes/todo.md`
    from a directory that is not a repo.
 2. The sidebar shows the project (its top folder name as the header) as a collapsible tree.
-3. **Open a file:** click its entry. It opens in a tab (or activates an existing tab). Ctrl+click opens
+3. **Open a file:** click its entry. It opens in a tab (or activates an existing tab). Ctrl+click or middle-click opens
    it in a new tab.
 4. **Collapse/expand a folder:** click the folder name. Opening waits for a fresh directory listing,
    then reveals the directory and its new children together.

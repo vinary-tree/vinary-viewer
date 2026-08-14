@@ -437,6 +437,20 @@ async function waitCalm(win, expr, label, timeoutMs = 20000) {
   throw new Error(`Timed out waiting for ${label} (last=${JSON.stringify(last)})`);
 }
 
+// Middle-click the tab (strip entry, or vertical Tabs-panel row when `selector` says so) whose title
+// contains `uriPart` — the ADR-0044 close gesture. Waits for the element first: a db-state waitFor
+// returns a frame before Reagent has rendered the strip, so a bare querySelector would race it.
+async function middleClickTab(win, uriPart, selector = '.vv-tab') {
+  await waitFor(() => evalIn(win, `Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
+    .some((el) => el.title.includes(${JSON.stringify(uriPart)}))`),
+    `a ${selector} entry for ${uriPart} to render`, 8000);
+  return evalIn(win, `(() => {
+    const tab = Array.from(document.querySelectorAll(${JSON.stringify(selector)}))
+      .find((el) => el.title.includes(${JSON.stringify(uriPart)}));
+    tab.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    return true; })()`);
+}
+
 async function dispatchWindowKey(win, key, opts = {}) {
   return evalIn(win, `(() => {
     const event = new KeyboardEvent('keydown', {
@@ -1286,7 +1300,8 @@ async function main() {
   console.log('[ok] live refresh removes stale diff links and reapplies newly resolved targets');
 
   // Resolved filename navigation shares the preview-link contract but must outrank the enclosing summary's
-  // collapse toggle: Ctrl+left-click opens a new tab; plain left-click replaces the current view.
+  // collapse toggle: Ctrl+left-click opens a BACKGROUND tab (ADR-0044 — the reader stays on the diff);
+  // plain left-click replaces the current view.
   const diffNavBefore = await evalIn(win, `(() => {
     const ui = window.__vvdb().ui;
     return { tabCount: ui.tabs.length, active: ui['active-tab'] };
@@ -1298,15 +1313,24 @@ async function main() {
   await waitFor(() => evalIn(win, `(() => {
     const ui = window.__vvdb().ui;
     const t = ui.tabs.find(x => x.id === ui['active-tab']);
-    return ui.tabs.length === ${diffNavBefore.tabCount + 1} && t && t.uri === ${JSON.stringify(greetTarget)};
-  })()`), 'Ctrl+click on a resolved diff filename opens it in a new tab', 8000);
-  await sendChord(win, 'W', ['control']);
+    return ui.tabs.length === ${diffNavBefore.tabCount + 1}
+      && ui['active-tab'] === ${diffNavBefore.active}
+      && t && t.uri === ${JSON.stringify(diffPath)}
+      && ui.tabs.some(x => x.uri === ${JSON.stringify(greetTarget)});
+  })()`), 'Ctrl+click on a resolved diff filename opens it in a BACKGROUND tab (active unchanged)', 8000);
+  // close that background tab by MIDDLE-CLICKING its strip entry (ADR-0044's tab-close gesture), which
+  // must leave the still-active diff tab exactly where it was
+  // NB: a tab's title is uri/display — "file://<path>" for a local file — so match by containment, and
+  // WAIT for the strip to catch up: the db-state waitFor above returns a frame before Reagent renders.
+  await middleClickTab(win, greetTarget);
   await waitFor(() => evalIn(win, `(() => {
     const ui = window.__vvdb().ui;
     const t = ui.tabs.find(x => x.id === ui['active-tab']);
-    return ui.tabs.length === ${diffNavBefore.tabCount} && t && t.uri === ${JSON.stringify(diffPath)}
+    return ui.tabs.length === ${diffNavBefore.tabCount}
+      && ui['active-tab'] === ${diffNavBefore.active}
+      && t && t.uri === ${JSON.stringify(diffPath)}
       && Boolean(document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]'));
-  })()`), 'closing the Ctrl+click tab returns to the diff with its resolved link reapplied', 8000);
+  })()`), 'middle-clicking the background tab closes it; the active diff tab is undisturbed', 8000);
   assert.ok((await detailsState()).every(d => d.open), 'following the nested filename link did not toggle collapse');
   await evalIn(win, `document.querySelector('.vv-diff-file-path[data-vv-diff-path="src/greet.js"][href]').click()`);
   await waitFor(() => evalIn(win, `(() => {
@@ -1314,7 +1338,7 @@ async function main() {
     const t = ui.tabs.find(x => x.id === ui['active-tab']);
     return t && t.uri === ${JSON.stringify(greetTarget)};
   })()`), 'left-click on a resolved diff filename replaces the current view', 8000);
-  console.log('[ok] diff filename links navigate current/new tabs without collapsing their file');
+  console.log('[ok] diff filename links navigate current/background tabs without collapsing their file');
 
   // ── Settings ▸ File Type (ADR-0036): the menu re-types the SHOWN document in place ──
   // Drives the REAL menu DOM (Settings → File Type flyout → row click) so the whole renderer half is
@@ -3147,6 +3171,7 @@ async function main() {
     console.log('[ok] width-adaptive Split default: auto narrow/wide, live sidebar straddle, sticky explicit picks (ADR-0043)');
   }
 
+
   await evalIn(win, `(() => {
     const tab = document.querySelector('.vv-tab-active') || document.querySelector('.vv-tab');
     const rect = tab.getBoundingClientRect();
@@ -4545,6 +4570,333 @@ async function main() {
   assert.ok(retainedReveal.opens.every(Boolean),
     `revealing another file must not collapse existing folders, got ${JSON.stringify(retainedReveal.opens)}`);
   console.log('[ok] tree reveal still follows later activations and remains additive');
+
+  // ---- ADR-0044: the browser link-gesture family ---------------------------------------------------
+  // Ctrl+click and middle-click open a BACKGROUND tab (the reader stays put), Ctrl+Shift+click and
+  // Shift+middle-click open a focused one, and middle-click on a tab closes it. Every surface that
+  // behaves like a link participates: preview content links, file-tree rows, directory-browser rows
+  // (incl. ".."), and the address-bar breadcrumbs. Release-safe: DOM events + __vvdb/__vvopen only.
+  {
+    const g4 = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-gestures-'));
+    tempDirs.push(g4);
+    const hubPath = path.join(g4, 'hub.md');
+    const leafPath = path.join(g4, 'leaf.md');
+    const otherPath = path.join(g4, 'other.md');
+    const subDir = path.join(g4, 'sub');
+    const subChild = path.join(subDir, 'child.md');
+    fs.mkdirSync(subDir);
+    fs.writeFileSync(leafPath, '# Leaf\n\nleaf body\n');
+    fs.writeFileSync(otherPath, '# Other\n\nother body\n');
+    fs.writeFileSync(subChild, '# Child\n\nchild body\n');
+    fs.writeFileSync(hubPath, `# Hub\n\n[leaf](leaf.md) and [other](other.md)\n`);
+    // markdown is rendered by the RENDERER, so main sends it as kind 'markdown' + text (the content
+    // service's generic tail would call a .md file plain text) — mirror that, like the other md fixtures
+    for (const p of [hubPath, leafPath, otherPath, subChild]) {
+      state.contentByPath.set(p, {
+        path: p, kind: 'markdown', text: fs.readFileSync(p, 'utf8'), stamp: Date.now(), sourceable: true
+      });
+    }
+    // directories are listed by main (service.cljs list-dir), not by the content service — mirror the
+    // payload shape it sends so the in-pane directory browser renders these fixture folders
+    const dirPayload = (dir) => ({
+      path: dir, kind: 'directory', stamp: Date.now(),
+      entries: fs.readdirSync(dir, { withFileTypes: true }).map((d) => {
+        const abs = path.join(dir, d.name);
+        const st = fs.statSync(abs);
+        return { name: d.name, path: abs, 'dir?': st.isDirectory(),
+                 size: st.size, mtime: st.mtimeMs, symlink: false };
+      })
+    });
+    state.contentByPath.set(subDir, dirPayload(subDir));
+    state.contentByPath.set(g4, dirPayload(g4));
+
+    const tabsNow = () => evalIn(win, `(() => {
+      const ui = window.__vvdb().ui;
+      return { count: ui.tabs.length, active: ui['active-tab'],
+               activeUri: (ui.tabs.find(t => t.id === ui['active-tab']) || {}).uri,
+               uris: ui.tabs.map(t => t.uri) };
+    })()`);
+    // Dispatch a mouse gesture on the first element matching `sel`, after letting the surface settle:
+    // an event dispatched into a node React is mid-way through replacing lands on a detached element and
+    // never reaches the delegated root listener, so wait for the node and give the pending render a beat.
+    const gesture = async (sel, type, init) => {
+      await waitFor(() => evalIn(win, `Boolean(document.querySelector(${JSON.stringify(sel)}))`),
+        `${sel} to be present for a ${type} gesture`, 8000);
+      await delay(150);
+      return evalIn(win, `(() => {
+        const el = document.querySelector(${JSON.stringify(sel)});
+        if (!el) return false;
+        el.dispatchEvent(new MouseEvent(${JSON.stringify(type)},
+          Object.assign({ bubbles: true, cancelable: true }, ${JSON.stringify(init)})));
+        return true; })()`);
+    };
+    // Close this section's OWN fixture tabs (everything under the fixture dir) except the one showing
+    // `uri`, using the middle-click close gesture itself. Tab titles are uri/display ("file://<path>"
+    // locally), so match by containment. Pre-existing tabs from earlier sections are left alone — later
+    // sections measure paint budgets against them. The keep-tab must be present BEFORE anything closes:
+    // the strip renders a frame after the db settles, and closing while it lags could take it out.
+    // return to the hub document: closing the ACTIVE fixture tab hands focus to whatever neighbor is
+    // next, which may be an earlier section's tab — the gestures below need the hub's links on screen
+    const backToHub = async () => {
+      await evalIn(win, `window.__vvopen(${JSON.stringify(hubPath)})`);
+      await waitFor(() => evalIn(win,
+        `Boolean(document.querySelector('.markdown-body a[href$="leaf.md"]'))`),
+        'the hub document is showing again', 8000);
+    };
+
+    const closeFixtureTabsBut = async (uri) => {
+      await waitFor(() => evalIn(win, `Array.from(document.querySelectorAll('.vv-tab'))
+        .some((el) => el.title.includes(${JSON.stringify(uri)}))`),
+        `the keep-tab for ${uri} to render before closing the rest`, 8000);
+      for (let i = 0; i < 16; i += 1) {
+        const done = await evalIn(win, `(() => {
+          const tabs = Array.from(document.querySelectorAll('.vv-tab'));
+          const keep = tabs.find((el) => el.title.includes(${JSON.stringify(uri)}));
+          if (!keep) return true;                       // never close blind
+          const victim = tabs.find((el) => el !== keep && el.title.includes(${JSON.stringify(g4)}));
+          if (!victim) return true;
+          victim.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+          return false; })()`);
+        if (done) {
+          const t = await tabsNow();
+          assert.ok(t.uris.some((u) => u && u.includes(uri)),
+            `closeFixtureTabsBut kept the ${uri} tab (tabs: ${JSON.stringify(t.uris)})`);
+          return;
+        }
+        await delay(80);
+      }
+      throw new Error(`closeFixtureTabsBut(${uri}) did not converge`);
+    };
+
+    // remember the pre-section state so the section restores it (later sections measure paint budgets
+    // against a warmed cache — leftover tabs would perturb them)
+    const sectionStart = await tabsNow();
+    await evalIn(win, `window.__vvopen(${JSON.stringify(hubPath)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.markdown-body a[href$="leaf.md"]'))`),
+      'the gesture-fixture hub document renders its relative links', 8000);
+    await closeFixtureTabsBut(hubPath);
+    const base = await tabsNow();
+    assert.strictEqual(base.uris.filter((u) => u && u.includes(g4)).length, 1,
+      'the gesture section starts from exactly one fixture tab (the hub); earlier sections keep theirs');
+
+    // 1 — preview link, middle-click → BACKGROUND tab (active stays on the hub)
+    assert.strictEqual(await gesture('.markdown-body a[href$="leaf.md"]', 'auxclick', { button: 1 }), true,
+      'the hub renders a resolvable leaf link');
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === base.count + 1 && t.active === base.active
+        && t.activeUri === base.activeUri && t.uris.some((u) => u && u.includes('leaf.md'));
+    }, 'middle-click on a preview link opens a background tab', 8000);
+    // …and the background tab really loaded: activating it shows the content
+    await waitFor(() => evalIn(win,
+      `Array.from(document.querySelectorAll('.vv-tab')).some((el) => el.title.includes('leaf.md'))`),
+      'the background tab renders in the strip', 8000);
+    await evalIn(win, `(() => {
+      const tab = Array.from(document.querySelectorAll('.vv-tab'))
+        .find((el) => el.title.includes('leaf.md'));
+      tab.click(); return true; })()`);
+    await waitFor(() => evalIn(win, `document.body.textContent.includes('leaf body')`),
+      'the background tab loaded its content while unfocused', 8000);
+    await closeFixtureTabsBut(hubPath);
+    await backToHub();
+
+    // 2 — preview link, Ctrl+click → BACKGROUND; Ctrl+Shift+click → FOCUSED
+    const beforeCtrl = await tabsNow();
+    await gesture('.markdown-body a[href$="leaf.md"]', 'click', { button: 0, ctrlKey: true });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeCtrl.count + 1 && t.activeUri === beforeCtrl.activeUri;
+    }, 'Ctrl+click on a preview link opens a background tab', 8000);
+    const beforeCtrlShift = await tabsNow();
+    await gesture('.markdown-body a[href$="other.md"]', 'click', { button: 0, ctrlKey: true, shiftKey: true });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeCtrlShift.count + 1 && t.activeUri && t.activeUri.includes('other.md');
+    }, 'Ctrl+Shift+click on a preview link opens a FOCUSED tab', 8000);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(hubPath)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.markdown-body a[href$="leaf.md"]'))`),
+      'back on the hub document', 8000);
+    await closeFixtureTabsBut(hubPath);
+    await backToHub();
+
+    // 3 — file-tree rows: Ctrl+click and middle-click always open a NEW background tab (even when a tab
+    //     for that file already exists), while Ctrl+Shift+click reuses/focuses one
+    win.webContents.send('vv:tree', {
+      root: g4, files: ['hub.md', 'leaf.md', 'other.md', 'sub/child.md'], 'synthetic?': false
+    });
+    // state-guarded rail click: clicking the ALREADY-active icon collapses the sidebar (ADR-0041)
+    await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+      if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'files')
+        document.querySelector('[data-vv-rail="files"]').click();
+      return true; })()`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-file[data-path=${JSON.stringify(leafPath)}]'))`),
+      'the gesture-fixture project lists its files', 8000);
+    const treeSel = `.vv-file[data-path=${JSON.stringify(leafPath)}]`;
+    const beforeTreeAux = await tabsNow();
+    assert.strictEqual(await gesture(treeSel, 'auxclick', { button: 1 }), true, 'the tree row is present');
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeTreeAux.count + 1 && t.activeUri === beforeTreeAux.activeUri
+        && t.uris.some((u) => u && u.includes('leaf.md'));
+    }, 'middle-click on a tree row opens a background tab', 8000);
+    const beforeTreeCtrl = await tabsNow();
+    await gesture(treeSel, 'click', { button: 0, ctrlKey: true });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeTreeCtrl.count + 1
+        && t.activeUri === beforeTreeCtrl.activeUri
+        && t.uris.filter((u) => u && u.includes('leaf.md')).length === 2;
+    }, 'Ctrl+click on a tree row opens ANOTHER new tab (always-new, ADR-0044)', 8000);
+    const beforeReuse = await tabsNow();
+    await gesture(treeSel, 'click', { button: 0, ctrlKey: true, shiftKey: true });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeReuse.count && t.activeUri && t.activeUri.includes('leaf.md');
+    }, 'Ctrl+Shift+click on a tree row focuses an existing tab instead of duplicating it', 8000);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(hubPath)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.markdown-body a[href$="leaf.md"]'))`), 'back on the hub', 8000);
+    await closeFixtureTabsBut(hubPath);
+    await backToHub();
+
+    // 4 — directory-browser rows (and the ".." parent row)
+    await evalIn(win, `window.__vvopen(${JSON.stringify(subDir)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-fb-row[data-path=${JSON.stringify(subChild)}]'))`),
+      'the directory browser lists the fixture child', 8000);
+    const dirBase = await tabsNow();
+    await gesture(`.vv-fb-row[data-path=${JSON.stringify(subChild)}]`, 'auxclick', { button: 1 });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === dirBase.count + 1 && t.activeUri === dirBase.activeUri
+        && t.uris.some((u) => u && u.includes('child.md'));
+    }, 'middle-click on a directory row opens a background tab', 8000);
+    await gesture(`.vv-fb-row[data-path=${JSON.stringify(subChild)}]`,
+      'click', { button: 0, ctrlKey: true, shiftKey: true });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.activeUri && t.activeUri.includes('child.md');
+    }, 'Ctrl+Shift+click on a directory row focuses the tab', 8000);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(subDir)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.vv-fb-row.vv-fb-up'))`), 'the ".." parent row is shown', 8000);
+    const upBase = await tabsNow();
+    await gesture('.vv-fb-row.vv-fb-up', 'auxclick', { button: 1 });
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === upBase.count + 1 && t.activeUri === upBase.activeUri
+        && t.uris.some((u) => u === g4);
+    }, 'middle-click on ".." opens the parent directory in a background tab', 8000);
+    await evalIn(win, `window.__vvopen(${JSON.stringify(hubPath)})`);
+    await waitFor(() => evalIn(win,
+      `Boolean(document.querySelector('.markdown-body a[href$="leaf.md"]'))`), 'back on the hub', 8000);
+    await closeFixtureTabsBut(hubPath);
+    await backToHub();
+
+    // 5 — breadcrumbs (they replace the address input while Ctrl is held over the URI bar, so Ctrl is
+    //     already down for every crumb click: middle-click backgrounds, Shift+click focuses)
+    await dispatchWindowKey(win, 'Control', { ctrlKey: true });
+    // React synthesizes onMouseEnter from delegated mouseover/mouseout (a raw 'mouseenter' never reaches
+    // it), so hover the URI bar with a bubbling mouseover whose relatedTarget is outside it
+    await evalIn(win, `(() => {
+      const bar = document.querySelector('.vv-uribar');
+      bar.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+      return true; })()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-crumb'))`),
+      'the breadcrumb bar replaces the address input while Ctrl is held over it', 8000);
+    const crumbBase = await tabsNow();
+    // the LAST crumb of a file uri is its containing folder chain's leaf — a directory either way
+    await evalIn(win, `(() => {
+      const crumbs = Array.from(document.querySelectorAll('.vv-crumb'));
+      const c = crumbs[crumbs.length - 1];
+      c.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+      return true; })()`);
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === crumbBase.count + 1 && t.activeUri === crumbBase.activeUri;
+    }, 'middle-click on a breadcrumb opens that folder in a background tab', 8000);
+    await evalIn(win, `(() => {
+      const ev = new KeyboardEvent('keyup', { key: 'Control', ctrlKey: false, bubbles: true });
+      window.dispatchEvent(ev); return true; })()`);
+    await closeFixtureTabsBut(hubPath);
+    await backToHub();
+
+    // 6 — tab middle-close on BOTH representations, and on the ACTIVE tab
+    const beforeClose = await tabsNow();
+    await gesture(treeSel, 'auxclick', { button: 1 });   // a background tab to close
+    await waitFor(async () => (await tabsNow()).count === beforeClose.count + 1,
+      'a background tab exists to close', 8000);
+    await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+      if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'tabs')
+        document.querySelector('[data-vv-rail="tabs"]').click();
+      return true; })()`);
+    await waitFor(() => evalIn(win, `document.querySelectorAll('.vv-vtab').length >= 2`),
+      'the vertical Tabs panel lists both tabs', 8000);
+    await middleClickTab(win, 'leaf.md', '.vv-vtab');
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeClose.count && t.activeUri === beforeClose.activeUri;
+    }, 'middle-click in the vertical Tabs panel closes that tab (shared tab-item)', 8000);
+    await evalIn(win, `(() => { const ui = window.__vvdb().ui;
+      if (!ui['sidebar-visible?'] || String(ui['sidebar-tab']) !== 'files')
+        document.querySelector('[data-vv-rail="files"]').click();
+      return true; })()`);
+    // middle-clicking the ACTIVE tab closes it and a neighbor takes over
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector(${JSON.stringify(treeSel)}))`),
+      'the Files tree is back before the active-tab close arm', 8000);
+    assert.strictEqual(await gesture(treeSel, 'click', { button: 0, ctrlKey: true, shiftKey: true }), true,
+      'the tree row is clickable for the focused open');
+    await waitFor(async () => (await tabsNow()).activeUri.includes('leaf.md'),
+      'a focused second tab is active before the active-tab close', 8000);
+    await waitFor(() => evalIn(win,
+      `(document.querySelector('.vv-tab.vv-tab-active') || {}).title?.includes('leaf.md') === true`),
+      'the focused leaf tab is the active strip entry', 8000);
+    const beforeActiveClose = await tabsNow();
+    await evalIn(win, `(() => {
+      const t = document.querySelector('.vv-tab.vv-tab-active');
+      t.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+      return true; })()`);
+    // a neighbor takes over — WHICH neighbor depends on the surrounding tab order, so assert the
+    // invariants: the tab is gone, one fewer remains, and something is active
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return t.count === beforeActiveClose.count - 1
+        && t.activeUri !== beforeActiveClose.activeUri
+        && t.active != null;
+    }, 'middle-clicking the ACTIVE tab closes it and activates a neighbor', 8000);
+
+    // restore the pre-section tab set: close every fixture tab (middle-click again) and re-activate the
+    // document that was showing when the section began
+    for (let i = 0; i < 16; i += 1) {
+      const done = await evalIn(win, `(() => {
+        const victim = Array.from(document.querySelectorAll('.vv-tab'))
+          .find((el) => el.title.includes(${JSON.stringify(g4)}));
+        if (!victim) return true;
+        victim.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+        return false; })()`);
+      if (done) break;
+      await delay(80);
+    }
+    await waitFor(async () => {
+      const t = await tabsNow();
+      return !t.uris.some((u) => u && u.includes(g4));
+    }, 'the gesture section closes its fixture tabs', 8000);
+    if (sectionStart.activeUri) {
+      const restored = await evalIn(win, `(() => {
+        const tab = Array.from(document.querySelectorAll('.vv-tab'))
+          .find((el) => el.title.includes(${JSON.stringify(sectionStart.activeUri)}));
+        if (!tab) return false;
+        tab.click(); return true; })()`);
+      if (restored) {
+        await waitFor(async () => (await tabsNow()).activeUri === sectionStart.activeUri,
+          'the pre-section document is active again', 8000);
+      }
+    }
+    console.log('[ok] link gestures: Ctrl/middle → background, Ctrl+Shift → focused, across preview/tree/dir/breadcrumbs; middle-click closes tabs (ADR-0044)');
+  }
 
   // The CSP is a security control, not advice: a blocked resource is a bug, and it only ever surfaced as one
   // more red line among the re-frame warnings. Injecting MathJax's stylesheet tripped `font-src` this way.

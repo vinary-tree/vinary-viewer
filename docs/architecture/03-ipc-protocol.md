@@ -152,6 +152,7 @@ Every `on*` API returns an unsubscribe function.
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated payload]` |
+| `vv:web-open-tab` | `onWebOpenTab(cb)` | `{url, mode}` | `[:web/open-tab payload]` — a denied web-view popup becomes an app tab (`mode` = `"background"` \| `"focused"`, [ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)) |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc headings]` |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | id or nil | `[:web/active-heading id]` |
 | `vv:history-nav` | `onHistoryNav(cb)` | direction | history event |

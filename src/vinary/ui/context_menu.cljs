@@ -74,9 +74,11 @@
            {:label "Copy link URL"        :event [:clipboard/copy path]}
            (when (seq text) {:label "Copy link text" :event [:clipboard/copy text]})]
     :preview-link
-    [{:label "Open"                 :event (preview-nav/open-event target false)}
+    ;; the menu is an EXPLICIT action, so its new-tab item stays FOCUSED (:new-focused) — the background
+    ;; open belongs to the Ctrl/middle-click gestures, where the reader never left the page (ADR-0044)
+    [{:label "Open"                 :event (preview-nav/open-event target :same)}
      (when (preview-nav/new-tab? target)
-       {:label "Open in new tab"    :event (preview-nav/open-event target true)})
+       {:label "Open in new tab"    :event (preview-nav/open-event target :new-focused)})
      :sep
      {:label "Copy link location"   :event [:clipboard/copy uri]}
      {:label "Copy link text"       :event [:clipboard/copy (or text "")]}
