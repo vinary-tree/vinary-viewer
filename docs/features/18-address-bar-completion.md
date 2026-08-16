@@ -19,6 +19,12 @@ The URI bar auto-completes as you type, **Fish-shell style**:
 
 It is non-intrusive — a no-match `Enter` shows a small inline error, **never a dialog**.
 
+The bar also follows tab intent. Opening or returning to a **blank tab** focuses the bar and selects its
+text, ready for replacement or amendment. Each blank tab retains its own unsubmitted text while you work in
+other tabs. Returning to a tab that already has a document instead focuses the document body; an abandoned
+`Ctrl+L` edit over a loaded document is not mistaken for tab state. A failed path remains in the focused bar
+with its caret intact so it can be corrected immediately.
+
 ## 2 · How you use it
 
 Focus the address bar (`Ctrl+L`) and start typing a path or URL:
@@ -43,5 +49,6 @@ Focus the address bar (`Ctrl+L`) and start typing a path or URL:
 | Address-bar component (ghost overlay, dropdown, keys) | `vinary.ui.views/uri-bar` |
 | State + events | `[:ui :uri-complete]` · `:uri-complete/*` |
 
-Runtime coverage: a dedicated probe exercises ghost/dropdown/Tab/→/↑↓/Enter for both filesystem and
-history completion.
+Runtime coverage exercises ghost/dropdown/Tab/→/↑↓/Enter for both filesystem and history completion, plus
+per-blank-tab draft restoration, focus handoff, failure correction, active-close restoration, and stale
+asynchronous completion replies.

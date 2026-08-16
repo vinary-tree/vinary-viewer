@@ -666,9 +666,13 @@ function installIpc(state) {
       ],
     };
   });
-  ipcMain.handle('vv:complete-path', (_event, input) => ({
-    input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: []
-  }));
+  ipcMain.handle('vv:complete-path', async (_event, input) => {
+    state.completePathInputs.push(input);
+    // One deliberately slow live-completion reply lets the URI-tab regression prove that an answer owned by
+    // tab A cannot overwrite tab B after the user switches. Ordinary requests stay immediate.
+    if (String(input).includes('__vv_slow_complete__')) await delay(300);
+    return { input, dir: null, target: null, 'exists?': false, 'dir?': false, entries: [] };
+  });
   ipcMain.on('vv:context-open-link', () => {});
   ipcMain.on('vv:context-open-link-new-tab', () => {});
   ipcMain.on('vv:clipboard-write', (_event, text) => {
@@ -705,6 +709,7 @@ async function main() {
     snapshotDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
     lastCopiedText: null,
     pwSearch: null, pwFill: null, pwSave: null, pwDismiss: null,
+    completePathInputs: [],
     openedPaths: [],
     contentByPath: new Map(),
     diffSources: null,
@@ -1827,6 +1832,32 @@ async function main() {
   assert.strictEqual(uriFocus.selectionEnd, uriFocus.valueLength, 'Ctrl+L must select the full URI');
   console.log('[ok] Ctrl+L focuses and selects the URI input');
 
+  const documentTabBeforeBlank = await evalIn(win, `window.__vvdb().ui['active-tab']`);
+  await evalIn(win, `(() => { document.querySelector('.vv-content').focus(); return true; })()`);
+  assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+    'the tab-focus regression starts from the document body, not a pre-focused URI field');
+
+  const setUriValue = (value) => evalIn(win, `(() => {
+    const i = document.querySelector('.vv-uri-input');
+    const v = ${JSON.stringify(value)};
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(i, v);
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+    i.setSelectionRange(v.length, v.length);
+    return i.value;
+  })()`);
+  const clickTabId = async (id, label) => {
+    const clicked = await evalIn(win, `(() => {
+      const ui = window.__vvdb().ui;
+      const idx = ui.tabs.findIndex((t) => t.id === ${id});
+      const tab = document.querySelectorAll('.vv-tab')[idx];
+      if (!tab) return false;
+      tab.click(); return true;
+    })()`);
+    assert.strictEqual(clicked, true, `${label}: tab exists in the strip`);
+    await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${id}`), `${label}: tab activates`);
+  };
+
   const tabCountBefore = await evalIn(win, `document.querySelectorAll('.vv-tab').length`);
   await sendChord(win, 'T', ['control']);
   await waitFor(
@@ -1841,13 +1872,97 @@ async function main() {
     return { value:i?.value ?? null, active:document.activeElement===i,
              start:i?.selectionStart ?? -1, end:i?.selectionEnd ?? -1 }; })()`);
   assert.strictEqual(uriAfterFocusedNavigation.active, true,
-    'the URI field stays focused across a command-driven tab change');
+    'a new blank tab focuses the URI field even when the document held focus');
   assert.strictEqual(uriAfterFocusedNavigation.value, '',
-    'a focused URI field immediately follows the new blank tab instead of retaining its old draft until blur');
+    'a fresh blank tab starts with an empty URI draft');
   assert.strictEqual(uriAfterFocusedNavigation.start, 0, 'the replacement URI remains selected from its start');
   assert.strictEqual(uriAfterFocusedNavigation.end, 0, 'the empty replacement URI has an empty full selection');
-  console.log('[ok] focused/selected URI input follows an external tab URI change without blur');
-  console.log('[ok] Ctrl+T opens a blank tab');
+  const blankTabA = await evalIn(win, `window.__vvdb().ui['active-tab']`);
+  const draftA = '/tmp/unfinished-alpha';
+  assert.strictEqual(await setUriValue(draftA), draftA, 'blank tab A accepts an unfinished URI');
+
+  // A second blank tab gets an independent address task. This switch happens while the SAME controlled input
+  // remains focused, the edge that used to leak the previous tab's component-local draft.
+  await sendChord(win, 'T', ['control']);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] !== ${blankTabA}`),
+    'second blank tab activates');
+  const blankTabB = await evalIn(win, `window.__vvdb().ui['active-tab']`);
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value==='' && i.selectionStart===0 && i.selectionEnd===0; })()`),
+    'second blank tab owns an empty focused URI field');
+  const draftB = '/tmp/unfinished-beta';
+  assert.strictEqual(await setUriValue(draftB), draftB, 'blank tab B accepts its own unfinished URI');
+
+  await clickTabId(documentTabBeforeBlank, 'document tab focus');
+  await waitFor(() => evalIn(win, `document.activeElement === document.querySelector('.vv-content')`),
+    'a document tab focuses the document body');
+
+  await clickTabId(blankTabA, 'blank tab A restore');
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value===${JSON.stringify(draftA)}
+      && i.selectionStart===0 && i.selectionEnd===i.value.length; })()`),
+    'blank tab A restores and selects its unfinished URI');
+
+  const amendedA = `${draftA}/amended`;
+  assert.strictEqual(await setUriValue(amendedA), amendedA,
+    'collapsing the selection permits immediate amendment');
+  await clickTabId(blankTabB, 'blank tab B restore');
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value===${JSON.stringify(draftB)}
+      && i.selectionStart===0 && i.selectionEnd===i.value.length; })()`),
+    'blank tab B retains its independent selected draft');
+  await clickTabId(blankTabA, 'amended blank tab A restore');
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value===${JSON.stringify(amendedA)}
+      && i.selectionStart===0 && i.selectionEnd===i.value.length; })()`),
+    'blank tab A retains the amended draft independently');
+
+  // A stale completion reply from A must not overwrite B's completion owner after a switch.
+  const slowDraft = '/tmp/__vv_slow_complete__/alpha';
+  await setUriValue(slowDraft);
+  await waitFor(() => state.completePathInputs.includes(slowDraft), 'slow completion request leaves tab A');
+  await clickTabId(blankTabB, 'switch during tab A completion');
+  await waitFor(() => state.completePathInputs.includes(draftB), 'tab B refreshes completion from its restored draft');
+  await delay(350);
+  const completionOwner = await evalIn(win, `(() => { const u=window.__vvdb().ui['uri-complete'];
+    return { tab:u['tab-id'], typed:u['typed-input'], input:u.input }; })()`);
+  assert.strictEqual(completionOwner.tab, blankTabB, 'a late completion reply remains owned by tab B');
+  assert.strictEqual(completionOwner.typed, draftB, 'tab B completion keeps its restored draft as the latest input');
+
+  // Invalid Enter is corrective, not destructive: keep the blank tab, text, focus, and caret.
+  await clickTabId(blankTabA, 'blank tab A invalid navigation');
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value===${JSON.stringify(slowDraft)}
+      && i.selectionStart===0 && i.selectionEnd===i.value.length; })()`),
+    'blank tab A finishes restoring before its draft is replaced');
+  const invalidDraft = '/__vv_definitely_missing__/unfinished-location';
+  await setUriValue(invalidDraft);
+  await evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    i.dispatchEvent(new KeyboardEvent('keydown', { key:'Enter', bubbles:true, cancelable:true })); return true; })()`);
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-uri-error'))`),
+    'invalid URI shows an inline error');
+  const failedUri = await evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return { active:document.activeElement===i, value:i.value, start:i.selectionStart, end:i.selectionEnd,
+             tab:window.__vvdb().ui['active-tab'], uri:(window.__vvdb().ui.tabs.find(t=>t.id===window.__vvdb().ui['active-tab'])||{}).uri }; })()`);
+  assert.strictEqual(failedUri.tab, blankTabA, 'failed navigation stays on its originating blank tab');
+  assert.strictEqual(failedUri.uri == null, true, 'failed navigation does not turn the draft into a real tab URI');
+  assert.strictEqual(failedUri.active, true, 'failed navigation keeps URI focus for correction');
+  assert.strictEqual(failedUri.value, invalidDraft, 'failed navigation preserves the unfinished text');
+  assert.strictEqual(failedUri.start, invalidDraft.length, 'failed navigation preserves the caret start');
+  assert.strictEqual(failedUri.end, invalidDraft.length, 'failed navigation preserves the caret end');
+
+  // Closing active B reveals blank A: the same focus/restore rule must apply to close-driven activation.
+  await clickTabId(blankTabB, 'blank tab B before close');
+  await evalIn(win, `(() => { const ui=window.__vvdb().ui;
+    const idx=ui.tabs.findIndex(t=>t.id===${blankTabB});
+    document.querySelectorAll('.vv-tab')[idx].querySelector('.vv-tab-close').click(); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui['active-tab'] === ${blankTabA}`),
+    'closing active blank tab reveals its neighbor');
+  await waitFor(() => evalIn(win, `(() => { const i=document.querySelector('.vv-uri-input');
+    return document.activeElement===i && i.value===${JSON.stringify(invalidDraft)}
+      && i.selectionStart===0 && i.selectionEnd===i.value.length; })()`),
+    'close-revealed blank tab restores, focuses, and selects its draft');
+  console.log('[ok] blank-tab URI drafts persist independently; focus follows blank/document state; failures stay editable');
 
   const badgeSvg = encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="92" height="20" role="img">' +
@@ -1874,11 +1989,34 @@ async function main() {
       '```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```\n',
     stamp: Date.now()
   });
-  win.webContents.send('vv:open-files', { paths: [featureDocPath] });
+  // Open through the active-tab path so this also proves that a successful navigation consumes blank A's
+  // draft in place and hands focus from the URI field to the loaded document.
+  await evalIn(win, `window.__vvopen(${JSON.stringify(featureDocPath)})`);
   await waitFor(
     () => evalIn(win, `document.querySelector('.markdown-body h1')?.textContent.trim() === 'Markdown Features'`),
     'markdown feature fixture'
   );
+  const loadedFocus = await evalIn(win, `(() => { const ui=window.__vvdb().ui;
+    const t=ui.tabs.find(x=>x.id===ui['active-tab']); const i=document.querySelector('.vv-uri-input');
+    return { id:ui['active-tab'], uri:t?.uri, input:i?.value,
+             content:document.activeElement===document.querySelector('.vv-content') }; })()`);
+  assert.strictEqual(loadedFocus.id, blankTabA, 'successful navigation reuses the originating blank tab');
+  assert.strictEqual(loadedFocus.uri, featureDocPath, 'the document path becomes the tab URI only after success');
+  assert.strictEqual(loadedFocus.content, true, 'successful navigation transfers focus to the document body');
+  assert.ok(loadedFocus.input.includes('markdown-features.md') && loadedFocus.input !== invalidDraft,
+    'the loaded URI replaces the unfinished blank-tab draft');
+
+  // A Ctrl+L edit over a LOADED document is transient by design. Leaving and returning resumes reading the
+  // document, not an abandoned address edit.
+  await sendChord(win, 'L', ['control']);
+  const transientDocDraft = '/tmp/transient-loaded-document-edit';
+  await setUriValue(transientDocDraft);
+  await clickTabId(documentTabBeforeBlank, 'leave loaded document URI edit');
+  await clickTabId(blankTabA, 'return to loaded document after URI edit');
+  await waitFor(() => evalIn(win, `document.activeElement === document.querySelector('.vv-content')`),
+    'returning to a loaded document focuses its body');
+  assert.strictEqual(await evalIn(win, `document.querySelector('.vv-uri-input').value !== ${JSON.stringify(transientDocDraft)}`),
+    true, 'a loaded document does not retain an abandoned URI edit');
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))`),
     'inline MathJax SVG'
@@ -4679,6 +4817,7 @@ async function main() {
     const base = await tabsNow();
     assert.strictEqual(base.uris.filter((u) => u && u.includes(g4)).length, 1,
       'the gesture section starts from exactly one fixture tab (the hub); earlier sections keep theirs');
+    await evalIn(win, `(() => { document.querySelector('.vv-content').focus(); return true; })()`);
 
     // 1 — preview link, middle-click → BACKGROUND tab (active stays on the hub)
     assert.strictEqual(await gesture('.markdown-body a[href$="leaf.md"]', 'auxclick', { button: 1 }), true,
@@ -4688,6 +4827,8 @@ async function main() {
       return t.count === base.count + 1 && t.active === base.active
         && t.activeUri === base.activeUri && t.uris.some((u) => u && u.includes('leaf.md'));
     }, 'middle-click on a preview link opens a background tab', 8000);
+    assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+      'a background tab open preserves the document keyboard owner');
     // …and the background tab really loaded: activating it shows the content
     await waitFor(() => evalIn(win,
       `Array.from(document.querySelectorAll('.vv-tab')).some((el) => el.title.includes('leaf.md'))`),
@@ -4867,6 +5008,8 @@ async function main() {
         && t.activeUri !== beforeActiveClose.activeUri
         && t.active != null;
     }, 'middle-clicking the ACTIVE tab closes it and activates a neighbor', 8000);
+    await waitFor(() => evalIn(win, `document.activeElement === document.querySelector('.vv-content')`),
+      'the document revealed by active-tab close owns keyboard focus', 8000);
 
     // restore the pre-section tab set: close every fixture tab (middle-click again) and re-activate the
     // document that was showing when the section began

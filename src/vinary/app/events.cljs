@@ -61,6 +61,18 @@
 (defn- with-retention [result db]
   (update result :fx #(into (vec (or % [])) (retention-fx db))))
 
+(defn active-tab-focus-target
+  "The keyboard owner for an explicitly foregrounded tab. A nil URI is a genuine blank tab even when the
+   URI component is holding an unfinished per-tab draft; every non-nil URI belongs to the document surface."
+  [db]
+  (when (nav/active-tab db)
+    (if (nil? (nav/active-uri db)) :uri :content)))
+
+(defn- with-active-tab-focus [result db]
+  (if-let [target (active-tab-focus-target db)]
+    (update result :fx #(conj (vec (or % [])) [:dom/focus target]))
+    result))
+
 (rf/reg-event-db
  :tree/prune-extras
  (fn [db [_ retained]]
@@ -617,7 +629,8 @@
                    (and cur-git (or (not= kind "diff") (nil? git)))
                    (conj [:db/retract eid :doc/git cur-git]))
          ;; the CLI/initial file arrives before any tab exists → it opens the first tab
-         db'     (if (empty? (nav/tabs db)) (nav/add-tab db path) db)
+         opened-first-tab? (empty? (nav/tabs db))
+         db'     (if opened-first-tab? (nav/add-tab db path) db)
          ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
          ;; background live-refresh — so the MRU + trail track where the user actually went. A piped-stdin
          ;; document (payload :stdin) never enters the MRU: its spill path dies with the tab.
@@ -644,9 +657,10 @@
                    (reduce (fn [d id] (nav/set-facet d id (:path fresh-facet) (:type fresh-facet)))
                            db' facet-tab-ids)
                    db')]
-     (with-retention
-       {:db db'
-        :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
+     (cond->
+       (with-retention
+        {:db db'
+         :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
                      [:ds/transact tx]]
               ;; the Commit Graph reads [:ui :commits] — ensure its repo's branches + first page (R9)
               (= kind "git-graph") (conj [:dispatch [:git-graph/data-ensure (:root git)]])
@@ -682,8 +696,9 @@
               ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
               (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))
               (conj [:facet/ensure-loaded {:path (:path fresh-facet)}])
-              active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
-       db'))))
+               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
+        db')
+       opened-first-tab? (with-active-tab-focus db')))))
 
 (rf/reg-event-fx
  :content/rendered
@@ -785,12 +800,15 @@
 (rf/reg-event-fx
  :content/error
  (fn [{:keys [db]} [_ {:keys [path message stamp]}]]
-   (let [tx    (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)))
-         db'   (if (and path (empty? (nav/tabs db))) (nav/add-tab db path) db)]
-     (with-retention
-       (cond-> {:db db'}
-         (seq tx) (assoc :fx [[:ds/transact tx]]))
-       db'))))
+   (let [tx                (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)))
+         opened-first-tab? (and path (empty? (nav/tabs db)))
+         db'               (if opened-first-tab? (nav/add-tab db path) db)]
+     (cond->
+       (with-retention
+        (cond-> {:db db'}
+          (seq tx) (assoc :fx [[:ds/transact tx]]))
+        db')
+       opened-first-tab? (with-active-tab-focus db')))))
 
 ;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
 ;; scrolls itself, so http never requests a content-pane restore.
@@ -799,9 +817,11 @@
 (defn- nav-result [db uri scroll]
   ;; navigating to an http(s) page records it in browser history (→ address-bar history completion)
   (let [db (record-web-history db uri)]
-    {:db db
-     :fx (cond-> (into (retention-fx db) (nav-fx uri scroll))
-           (and uri (uri/http? uri)) (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}))
+    (with-active-tab-focus
+      {:db db
+       :fx (cond-> (into (retention-fx db) (nav-fx uri scroll))
+             (and uri (uri/http? uri)) (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}
+      db)))
 
 ;; FX helper: restore a history entry's view position, facet-aware. A :source entry stashes its :line for the
 ;; source view's imminent (re)mount (create-source-view consumes it); a :preview entry with a :line stashes it for
@@ -821,12 +841,14 @@
   (let [db         (record-web-history db uri)
         facet-path (get-in entry [:facet :path])
         restore    (entry-restore-fx entry)]
-    {:db db
-     :fx (cond-> (retention-fx db)
-           facet-path                       (conj [:facet/ensure-loaded {:path facet-path}])
-           (uri/file-path uri)              (into (load-fx uri))
-           (and restore (uri/file-path uri)) (conj restore)
-           (and uri (uri/http? uri))        (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}))
+    (with-active-tab-focus
+      {:db db
+       :fx (cond-> (retention-fx db)
+             facet-path                       (conj [:facet/ensure-loaded {:path facet-path}])
+             (uri/file-path uri)              (into (load-fx uri))
+             (and restore (uri/file-path uri)) (conj restore)
+             (and uri (uri/http? uri))        (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}
+      db)))
 
 ;; navigate the ACTIVE tab to uri (left-click / URI bar); creates the first tab if none. The leaving
 ;; scroll is saved into history; the new entry starts at the top.
@@ -870,7 +892,7 @@
  [(rf/inject-cofx :view-pos)]
  (fn [{:keys [db view-pos]} _]
    (let [db' (nav/add-tab (nav/save-scroll db view-pos) nil)]
-     (with-retention {:db db'} db'))))
+     (with-active-tab-focus (with-retention {:db db'} db') db'))))
 
 ;; "Open" (left-click / context menu): focus an existing tab for uri (restoring its view position, facet-aware),
 ;; else navigate
@@ -880,8 +902,10 @@
  (fn [{:keys [db view-pos]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
      (let [db' (nav/activate (nav/save-scroll db view-pos) (:id t))]
-       (with-retention
-         {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+       (with-active-tab-focus
+         (with-retention
+           {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+           db')
          db'))
      (let [db' (if (nav/active-tab db) (nav/nav-active db uri view-pos) (nav/add-tab db uri))]
        (nav-result db' uri 0)))))
@@ -893,8 +917,10 @@
  (fn [{:keys [db view-pos]} [_ uri]]
    (if-let [t (nav/find-tab db uri)]
      (let [db' (nav/activate (nav/save-scroll db view-pos) (:id t))]
-       (with-retention
-         {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+       (with-active-tab-focus
+         (with-retention
+           {:db db' :fx (cond-> [] (uri/file-path uri) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+           db')
          db'))
      (let [db' (nav/add-tab (nav/save-scroll db view-pos) uri)]
        (nav-result db' uri 0)))))
@@ -903,8 +929,10 @@
 (defn- activate-tab-result [db view-pos id]
   (let [db'    (nav/activate (nav/save-scroll db view-pos) id)
         target (nav/active-uri db')]
-    (with-retention
-      {:db db' :fx (cond-> [] (uri/file-path target) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+    (with-active-tab-focus
+      (with-retention
+        {:db db' :fx (cond-> [] (uri/file-path target) (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+        db')
       db')))
 
 (rf/reg-event-fx
@@ -920,17 +948,21 @@
    (let [db'    (cond-> db (= id (nav/active-id db)) (nav/save-scroll view-pos))
          db''   (nav/duplicate-tab db' id)
          target (nav/active-uri db'')]
-     (with-retention
-       {:db db''
-        :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
-              (conj-some (entry-restore-fx (nav/cur-entry db''))))}
-       db''))))
+     (cond->
+       (with-retention
+         {:db db''
+          :fx (cond-> [] (and (not= db' db'') (uri/file-path target))
+                (conj-some (entry-restore-fx (nav/cur-entry db''))))}
+         db'')
+       (not= db' db'') (with-active-tab-focus db'')))))
 
 (rf/reg-event-fx
  :tab/close
  (fn [{:keys [db]} [_ id]]
-   (let [[db' _uri _still?] (nav/close db id)]
-     (with-retention {:db db'} db'))))
+   (let [closing-active?       (= id (nav/active-id db))
+         [db' _uri _still?] (nav/close db id)]
+     (cond-> (with-retention {:db db'} db')
+       closing-active? (with-active-tab-focus db')))))
 
 (rf/reg-event-fx
  :tab/close-active
@@ -1203,17 +1235,23 @@
 ;; else a non-intrusive inline error (no dialog). http(s) bypasses path completion.
 (rf/reg-event-fx
  :uri/navigate
- (fn [{:keys [db]} [_ text]]
-   (cond
-     (str/blank? text) {}
-     (uri/http? text)  {:fx [[:dispatch [:tab/navigate (uri/normalize text)]]]}
-     :else
-     (let [uc           (get-in db [:ui :uri-complete])
-           [dir-part _] (uri/complete-split text)
-           [last-dir _] (uri/complete-split (or (:input uc) ""))]
-       (if (and (:input uc) (= dir-part last-dir))
-         {:fx [[:dispatch [:uri-complete/decide-enter (assoc uc :input text)]]]}
-         {:fx [[:vv/complete-path {:input text :tag :enter}]]})))))
+ (fn [{:keys [db]} [_ tab-id text]]
+   ;; A path-completion reply is asynchronous. If the user has already changed tabs, the abandoned Enter
+   ;; must not navigate whichever tab happens to be active when that reply lands.
+   (if (not= tab-id (nav/active-id db))
+     {}
+     (cond
+       (str/blank? text) {}
+       (uri/http? text)  {:fx [[:dispatch [:tab/navigate (uri/normalize text)]]]}
+       :else
+       (let [uc (get-in db [:ui :uri-complete])]
+         (if (and (= tab-id (:tab-id uc))
+                  (= text (:typed-input uc))
+                  (= text (:input uc)))
+           {:fx [[:dispatch [:uri-complete/decide-enter tab-id (assoc uc :input text)]]]}
+           {:db (update-in db [:ui :uri-complete] merge {:tab-id tab-id :typed-input text})
+            :fx [[:vv/complete-path {:input text
+                                     :tag {:kind :enter :tab-id tab-id :input text}}]]}))))))
 
 ;; ---- URI-bar path auto-completion ----
 (defn- prefix-matches
@@ -1223,7 +1261,7 @@
   (nav/sort-entries (filter #(uri/matches-prefix? (:name %) base) entries)))
 
 (def ^:private uri-complete-empty
-  {:input nil :dir nil :entries [] :target nil :exists? false :dir? false
+  {:tab-id nil :typed-input nil :input nil :dir nil :entries [] :target nil :exists? false :dir? false
    :selected -1 :dismissed? false :error? false})
 
 (rf/reg-event-db :uri-complete/clear       (fn [db _] (assoc-in db [:ui :uri-complete] uri-complete-empty)))
@@ -1245,31 +1283,46 @@
 
 (rf/reg-event-fx
  :uri-complete/typed
- (fn [{:keys [db]} [_ text]]
-   (if (or (str/blank? text) (uri/http? text))
-     {:db (assoc-in db [:ui :uri-complete] uri-complete-empty)}
-     {:db (update-in db [:ui :uri-complete] merge {:selected -1 :dismissed? false :error? false})
-      :fx [[:vv/complete-path {:input text :tag :live}]]})))
+ (fn [{:keys [db]} [_ tab-id text]]
+   (if (not= tab-id (nav/active-id db))
+     {}
+     (if (or (str/blank? text) (uri/http? text))
+       {:db (assoc-in db [:ui :uri-complete]
+                     (assoc uri-complete-empty :tab-id tab-id :typed-input text))}
+       {:db (update-in db [:ui :uri-complete] merge
+                       {:tab-id tab-id :typed-input text
+                        :selected -1 :dismissed? false :error? false})
+        :fx [[:vv/complete-path {:input text
+                                 :tag {:kind :live :tab-id tab-id :input text}}]]}))))
 
 (rf/reg-event-fx
  :uri-complete/decide-enter
- (fn [{:keys [db]} [_ {:keys [input entries exists? target]}]]
-   (let [[_ base] (uri/complete-split (or input ""))
-         ml       (first (prefix-matches entries base))]
-     (cond
-       exists? {:fx [[:dispatch [:tab/navigate target]] [:dispatch [:uri-complete/clear]]]}
-       ml      {:fx [[:dispatch [:tab/navigate (:path ml)]] [:dispatch [:uri-complete/clear]]]}
-       :else   {:db (assoc-in db [:ui :uri-complete :error?] true)
-                :fx [[:uri-complete/error-timeout]]}))))
+ (fn [{:keys [db]} [_ tab-id {:keys [input entries exists? target]}]]
+   (if (or (not= tab-id (nav/active-id db))
+           (not= tab-id (get-in db [:ui :uri-complete :tab-id]))
+           (not= input (get-in db [:ui :uri-complete :typed-input])))
+     {}
+     (let [[_ base] (uri/complete-split (or input ""))
+           ml       (first (prefix-matches entries base))]
+       (cond
+         exists? {:fx [[:dispatch [:tab/navigate target]] [:dispatch [:uri-complete/clear]]]}
+         ml      {:fx [[:dispatch [:tab/navigate (:path ml)]] [:dispatch [:uri-complete/clear]]]}
+         :else   {:db (assoc-in db [:ui :uri-complete :error?] true)
+                  :fx [[:uri-complete/error-timeout]]})))))
 
 (rf/reg-event-fx
  :uri-complete/result
  (fn [{:keys [db]} [_ tag payload]]
-   (if (= tag :enter)
-     {:fx [[:dispatch [:uri-complete/decide-enter payload]]]}
-     {:db (update-in db [:ui :uri-complete] merge
-                     (-> (select-keys payload [:input :dir :entries :exists? :dir? :target])
-                         (update :entries vec)))})))
+   (let [{:keys [kind tab-id input]} tag
+         current? (and (= tab-id (nav/active-id db))
+                       (= tab-id (get-in db [:ui :uri-complete :tab-id]))
+                       (= input (get-in db [:ui :uri-complete :typed-input])))]
+     (cond
+       (not current?) {}
+       (= kind :enter) {:fx [[:dispatch [:uri-complete/decide-enter tab-id payload]]]}
+       :else {:db (update-in db [:ui :uri-complete] merge
+                            (-> (select-keys payload [:input :dir :entries :exists? :dir? :target])
+                                (update :entries vec)))}))))
 
 ;; ---- in-app HTTP web view ----
 ;; the web view navigated → record it onto the tab that OWNS the view (`tab`), NOT the active tab: the http

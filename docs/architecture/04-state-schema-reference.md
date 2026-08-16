@@ -131,7 +131,7 @@ Important slices:
 | `[:ui :dir-selected]` | Explicitly highlighted directory-entry path (the rendered highlight also consults the trail). |
 | `[:ui :ctrl-held?]` | Whether Control is held; gates the Ctrl-hover breadcrumb URI bar. |
 | `[:ui :recent]` | Persisted recent-navigation state `{:trail {dir→child} :recent-files [...] :web-history [...]}` from `recent.edn`. |
-| `[:ui :uri-complete]` | Address-bar completion state (`{:input :entries :dismissed? :selected :error? …}`). |
+| `[:ui :uri-complete]` | Address-bar completion state (`{:tab-id :typed-input :input :entries :dismissed? :selected :error? …}`). `:tab-id` plus the exact `:typed-input` reject replies that became stale during a tab switch; latency-safe per-blank-tab drafts remain component-local (ADR-0033). |
 | `[:ui :pdf]` | In-renderer PDF view-state `{:scale :fit :invert?}` (fit + invert persisted in `settings.edn`). |
 | `[:ui :extensions]` | Extension runtime state pushed from main: `{:enabled? :installed [...] :install-status :update-status}`. |
 | `[:ui :adblock]` | Ad-block prefs `{:enabled? :lists :last-updated}` (persisted in `extensions.edn`). |

@@ -441,6 +441,13 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Tab activation now gives the keyboard to the useful surface: a genuinely blank
+      tab focuses and selects the URI bar, while any tab with a document URI focuses
+      the document body. Unsubmitted URI text is retained independently for each blank
+      tab and restored selected after a switch or active-tab close; edits made over an
+      already-loaded document remain transient. Failed path navigation stays focused
+      and editable, and tab-owned completion requests cannot navigate or overwrite a
+      different tab when an asynchronous reply arrives late.
     - Clicking the Commits sidebar tab blanked the entire window: the panel's list
       destructured :empty? from its repo map into a local `empty?` -- shadowing
       cljs.core/empty? -- and then invoked it (nil on the panel's very first render,

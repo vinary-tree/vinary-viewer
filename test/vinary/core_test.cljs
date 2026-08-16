@@ -366,6 +366,15 @@
             [:dispatch [:doc/open-new "/tmp/b.md"]]]
            (events/files-opened-fx :current ["/tmp/a.md" "/tmp/b.md"])))))
 
+(deftest active-tab-focus-policy
+  (testing "a real blank tab owns the URI field; draft text never has to masquerade as its URI"
+    (is (= :uri (events/active-tab-focus-target (nav/add-tab empty-tabs nil)))))
+  (testing "every non-nil URI — including a loading/error route — belongs to the document surface"
+    (is (= :content (events/active-tab-focus-target (nav/add-tab empty-tabs "/tmp/readme.md"))))
+    (is (= :content (events/active-tab-focus-target (nav/add-tab empty-tabs "https://example.test")))))
+  (testing "with no active tab there is no automatic focus handoff"
+    (is (nil? (events/active-tab-focus-target empty-tabs)))))
+
 ;; ---- navigation: per-tab history with scroll (Phase A) + reorder/view-source (Phase B) ----
 (deftest nav-history-scroll
   (let [db1 (nav/add-tab empty-tabs "/a")

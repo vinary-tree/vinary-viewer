@@ -62,7 +62,8 @@ stable actions available across the current UI include:
 | History back/forward | `Alt+Left` / `Alt+Right`, toolbar buttons, and mouse thumb buttons. **Keymap-independent** — bound in the `:all` block of every keymap (Standard, Vim, Emacs), so they work in any mode. |
 | Parent directory | `Alt+Up` (`:nav/parent`); Vim `K`. Navigate the active tab to the current path's parent folder. Alt key is keymap-independent. |
 | Open highlighted entry | `Alt+Down` (`:nav/open-target`); Vim `J`. Open the highlighted child of the active directory listing. Alt key is keymap-independent. |
-| Switch tabs | `Ctrl+PageUp` (previous/left) / `Ctrl+PageDown` (next/right), wrapping at the ends — **keymap-independent** (in the `:all` block of every keymap). Vim also has `g t` / `g T`; Emacs also `M-f` / `M-b`. All backed by `:tab/next` / `:tab/prev`. |
+| Switch tabs | `Ctrl+PageUp` (previous/left) / `Ctrl+PageDown` (next/right), wrapping at the ends — **keymap-independent** (in the `:all` block of every keymap). Vim also has `g t` / `g T`; Emacs also `M-f` / `M-b`. A blank tab restores, focuses, and selects its unfinished URI; a document tab focuses its body. All backed by `:tab/next` / `:tab/prev`. |
+| New blank tab | `Ctrl+T`. The URI bar is focused and selected immediately; unfinished text is retained for that blank tab when you switch away. |
 | Scroll the pane | **Bare arrow keys** (`↑`/`↓`/`←`/`→`), plus keymap commands backed by `:nav/scroll` (Vim `j`/`k`, page/half). All are smooth — see below. |
 | Toggle sidebar | Command backed by `:sidebar/toggle`. |
 | Open command palette | Command backed by palette state and command registry. |

@@ -1445,20 +1445,25 @@
 
 (defn uri-bar
   "Browser-style nav row: back / forward / reload + the address bar. The input shows the active tab's
-   URI; typing edits a local draft and triggers Fish-style path auto-completion — an inline ghost
+   URI; typing edits a latency-safe LOCAL draft and triggers Fish-style path auto-completion — an inline ghost
    suggestion plus a dropdown of matching children that appears only when the completion is ambiguous.
+   Blank tabs retain independent unfinished drafts across tab switches; the tab's real :uri stays nil, so
+   re-activating one restores, focuses, and selects its address task instead of pretending a document is loaded.
    Tab fills the matches' common prefix (accepting outright when one remains); →/End accept the ghost;
    ↑/↓ move the dropdown selection (the ghost reflects it, the typed text stays put so the match set is
    stable); Enter opens the complete path or the most-likely prefix match, else a non-intrusive inline
    error (never a dialog); Esc closes the dropdown, then reverts. Holding Ctrl while hovering turns a
    local path into a clickable breadcrumb. (Per-tab history: back/forward act on the active tab.)"
   []
-  (let [draft    (r/atom nil)
-        hover?   (r/atom false)
-        baseline (atom ::init)            ; active URI at the start of this edit
-        input*   (atom nil)]
+  (let [drafts        (r/atom {})          ; tab-id -> {:text :baseline :blank?}; never app-db (ADR-0033)
+        hover?        (r/atom false)
+        input*        (atom nil)
+        editing-owner (atom nil)           ; {:id :blank?}, stable across a focusout/tab-render race
+        context*      (atom ::init)]        ; [active-tab-id active-uri] last rendered
     (fn []
-      (let [active-uri  @(rf/subscribe [:ui/active-uri])
+      (let [tabs        @(rf/subscribe [:ui/tabs])
+            active-id   @(rf/subscribe [:ui/active-tab-id])
+            active-uri  @(rf/subscribe [:ui/active-uri])
             active-display (uri/display active-uri)
             active-path @(rf/subscribe [:ui/active-path])
             ctrl?       @(rf/subscribe [:ui/ctrl-held?])
@@ -1466,43 +1471,69 @@
             fwd?        @(rf/subscribe [:history/can-forward?])
             uc          @(rf/subscribe [:ui/uri-complete])
             web-history @(rf/subscribe [:ui/web-history])
-            editing-now? (some? @draft)
-            external?   (and editing-now? (not= @baseline ::init) (not= active-display @baseline))
-            selected-all? (let [^js el @input*]
-                            (boolean (and external? el
-                                          (identical? el (.-activeElement js/document))
-                                          (= 0 (.-selectionStart el))
-                                          (= (count (.-value el)) (.-selectionEnd el)))))
-            _sync-baseline (when (or (= @baseline ::init) (not editing-now?))
-                             (reset! baseline active-display))
-            ;; A tab/history change is authoritative even while this controlled field is focused.
-            ;; Render the model now; clear the reactive draft after this commit to avoid a write-in-render loop.
-            _sync-external (when external?
-                             (reset! baseline active-display)
-                             (r/next-tick
-                              (fn []
-                                (reset! draft nil)
-                                (rf/dispatch [:uri-complete/clear])
-                                (when selected-all?
-                                  (when-let [^js el @input*]
-                                    (when (.-isConnected el) (.select el)))))))
-            shown       (if (or external? (nil? @draft)) active-display @draft)
+            entry       (get @drafts active-id)
+            ;; A model URI change is authoritative immediately. This baseline gate prevents the old draft from
+            ;; flashing for one render while the successful navigation's focus handoff triggers its blur cleanup.
+            entry-current? (and entry (= (:baseline entry) active-uri))
+            shown       (if entry-current? (:text entry) active-display)
+            blank?      (nil? active-uri)
+            context     [active-id active-uri]
+            context-changed? (not= context @context*)
+            previous-context @context*
+            live-ids    (into #{} (map :id) tabs)
+            stale-ids   (seq (remove #(or (nil? %) (contains? live-ids %)) (keys @drafts)))
+            ;; Closing an inactive blank tab does not change `context`, so prune closed ids independently. Do the
+            ;; reactive write after this commit; otherwise updating `drafts` while dereferencing it in render can
+            ;; schedule a nested Reagent render.
+            _prune-closed (when stale-ids
+                            (let [ids (vec stale-ids)]
+                              (r/next-tick #(swap! drafts (fn [m] (apply dissoc m ids))))))
+            ;; A tab/URI transition also resets completion ownership. A loaded tab's transient edit is discarded;
+            ;; a blank tab's cached draft is retained and becomes the new completion input. `:uri-complete/typed`
+            ;; guards the captured id, so a second rapid tab switch makes this scheduled dispatch harmless.
+            _sync-context (when context-changed?
+                            (reset! context* context)
+                            (let [[previous-id previous-uri] (when (vector? previous-context) previous-context)
+                                  previous-entry (get @drafts previous-id)
+                                  active-entry entry
+                                  restore-text shown]
+                              (r/next-tick
+                               (fn []
+                                 (when (and (vector? previous-context) (some? previous-uri))
+                                   ;; Do not erase an edit begun after this render. This callback can land after
+                                   ;; the user has already focused the newly rendered URI field (the benchmark's
+                                   ;; first-key race); only discard the loaded-tab draft we actually observed.
+                                   (swap! drafts (fn [m] (if (identical? previous-entry (get m previous-id))
+                                                          (dissoc m previous-id)
+                                                          m))))
+                                 (when (some? active-uri)
+                                   (swap! drafts (fn [m] (if (identical? active-entry (get m active-id))
+                                                          (dissoc m active-id)
+                                                          m))))
+                                 (rf/dispatch [:uri-complete/clear])
+                                 (let [latest (get @drafts active-id)
+                                       latest-current? (and latest (= (:baseline latest) active-uri))]
+                                   (when (or blank? latest-current?)
+                                     (reset! editing-owner {:id active-id :blank? blank?})
+                                     (rf/dispatch [:uri-complete/typed active-id
+                                                   (if latest-current? (:text latest) restore-text)])))))))
             crumbs?     (and ctrl? @hover? active-path)
-            editing?    (some? @draft)
+            editing?    (boolean entry-current?)
+            completion-current? (= active-id (:tab-id uc))
             ;; editing an http(s) URL completes from browser history; a path completes from the filesystem
             web?        (uri/http? shown)
             [dir-part base] (if web? ["" shown] (uri/complete-split shown))
             [last-dir _]    (uri/complete-split (or (:input uc) ""))
             ;; filesystem completion data is "fresh" only while it still describes the directory the draft
             ;; points into (the IPC echoes its request as :input)
-            fresh?      (and (:input uc) (= dir-part last-dir) (not web?))
+            fresh?      (and completion-current? (:input uc) (= dir-part last-dir) (not web?))
             matches     (cond
                           (not editing?) nil
                           web?  (mapv (fn [u] {:name u :path u :dir? false :web? true})
                                       (uri/web-matches web-history shown 12))
                           fresh? (nav/sort-entries (filter #(uri/matches-prefix? (:name %) base) (:entries uc)))
                           :else nil)
-            sel         (:selected uc)
+            sel         (if completion-current? (:selected uc) -1)
             chosen      (cond (empty? matches)                          nil
                               (and (>= sel 0) (< sel (count matches)))  (nth matches sel)
                               :else                                     (first matches))
@@ -1510,11 +1541,13 @@
                           (subs (:name chosen) (count base)))
             ;; the dropdown auto-shows whenever the completion is ambiguous (>1 match) and the user
             ;; hasn't dismissed it (Esc); a single match shows only the inline ghost
-            dropdown?   (boolean (and matches (> (count matches) 1) (not (:dismissed? uc))))
+            dropdown?   (boolean (and matches (> (count matches) 1)
+                                      completion-current? (not (:dismissed? uc))))
             accept!     (fn [m]                ; commit a chosen entry; re-list if it is a directory
                           (let [nd (str dir-part (:name m) (when (:dir? m) (platform/path-sep)))]
-                            (reset! draft nd)
-                            (rf/dispatch [:uri-complete/typed nd])))]
+                            (swap! drafts assoc active-id
+                                   {:text nd :baseline active-uri :blank? blank?})
+                            (rf/dispatch [:uri-complete/typed active-id nd])))]
         [:div.vv-uribar {:on-mouse-enter #(reset! hover? true)
                          :on-mouse-leave #(reset! hover? false)}
          [:button.vv-nav-btn {:disabled (not back?) :title "Back (Alt+←)"
@@ -1524,7 +1557,7 @@
          [:button.vv-nav-btn {:title "Reload (Ctrl+R)" :on-click #(rf/dispatch [:tab/reload])} (icons/icon :reload)]
          (if crumbs?
            [breadcrumb active-uri]
-           [:div.vv-uri-field {:class (when (:error? uc) "vv-uri-error")}
+           [:div.vv-uri-field {:class (when (and completion-current? (:error? uc)) "vv-uri-error")}
             ;; ghost layer (behind the transparent input): a transparent copy of the typed text spaces
             ;; the dimmed suggestion suffix to begin exactly where the cursor sits
             [:div.vv-uri-ghost {:aria-hidden "true"}
@@ -1537,19 +1570,26 @@
               :spellCheck  false
               ;; :in-input? is derived from document.activeElement by the keymap resolver (ADR-0032)
               :on-focus    (fn [^js e]
-                             (let [v active-display]
-                               (reset! baseline v)
-                               (reset! draft v)
+                             (let [saved (get @drafts active-id)
+                                   current? (and saved (= (:baseline saved) active-uri))
+                                   v (if current? (:text saved) active-display)]
+                               (when-not current?
+                                 (swap! drafts assoc active-id
+                                        {:text v :baseline active-uri :blank? blank?}))
+                               (reset! editing-owner {:id active-id :blank? blank?})
                                (.select (.-target e))
-                               (rf/dispatch [:uri-complete/typed v])))
+                               (rf/dispatch [:uri-complete/typed active-id v])))
               :on-blur     (fn [_]
-                             (reset! baseline active-display)
-                             (reset! draft nil)
+                             (when-let [{:keys [id blank?]} @editing-owner]
+                               (when-not blank? (swap! drafts dissoc id)))
+                             (reset! editing-owner nil)
                              (rf/dispatch [:uri-complete/clear]))
               :on-change   (fn [^js e]
                              (let [v (.. e -target -value)]
-                               (reset! draft v)
-                               (rf/dispatch [:uri-complete/typed v])))
+                               (swap! drafts assoc active-id
+                                      {:text v :baseline active-uri :blank? blank?})
+                               (reset! editing-owner {:id active-id :blank? blank?})
+                               (rf/dispatch [:uri-complete/typed active-id v])))
               :on-key-down
               (fn [^js e]
                 (let [k       (.-key e)
@@ -1564,8 +1604,9 @@
                             (let [cp (uri/common-prefix (map :name matches))]
                               (if (> (count cp) (count base))  ; extend to the matches' common prefix…
                                 (let [nd (str dir-part cp)]
-                                  (reset! draft nd)
-                                  (rf/dispatch [:uri-complete/typed nd]))
+                                  (swap! drafts assoc active-id
+                                         {:text nd :baseline active-uri :blank? blank?})
+                                  (rf/dispatch [:uri-complete/typed active-id nd]))
                                 (rf/dispatch [:uri-complete/set {:dismissed? false :selected -1}]))))))  ; …else just list
                     ("ArrowRight" "End")
                     (when (and at-end? chosen ghost (seq ghost))
@@ -1586,13 +1627,19 @@
                           (do (rf/dispatch [:doc/open (:path chosen)])
                               (rf/dispatch [:uri-complete/clear]))
                           ;; else resolve the typed text (exact path / most-likely match / inline error)
-                          (rf/dispatch [:uri/navigate (or @draft "")]))
-                        (reset! draft nil)
-                        (.blur t))
+                          ;; Keep the field + local draft intact while the async path decision runs. Success
+                          ;; changes the tab URI and the focus policy hands off to content; failure leaves this
+                          ;; caret exactly where the user needs it to correct the address.
+                          (rf/dispatch [:uri/navigate active-id (.-value t)])))
                     "Escape"
                     (if dropdown?
                       (do (.preventDefault e) (rf/dispatch [:uri-complete/set {:dismissed? true :selected -1}]))
-                      (do (reset! draft nil) (rf/dispatch [:uri-complete/clear]) (.blur t)))
+                      (do (.preventDefault e)
+                          (swap! drafts dissoc active-id)
+                          (rf/dispatch [:uri-complete/clear])
+                          (if blank?
+                            (js/requestAnimationFrame #(.select t))
+                            (rf/dispatch [:nav/focus :content]))))
                     nil)))}]
             (when dropdown?
               [:ul.vv-uri-complete
@@ -1609,7 +1656,7 @@
                                                  :else     (icons/file-icon (:name m)))]
                     [:span.vv-uri-opt-name (:name m)]])
                  matches))])
-            (when (:error? uc)
+            (when (and completion-current? (:error? uc))
               [:div.vv-uri-errmsg "No matching file or directory"])])
          [view-switch-toolbar]
          [passwords-ui/toolbar-button]

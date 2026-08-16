@@ -196,10 +196,13 @@ keystrokes is what made those fields drop characters. The preview is kept — it
   inherent to the design, not a bug, and is why `on-change` must store verbatim.
 - **A superseded job reports nothing.** `slice!` callbacks never fire for a cancelled run, so callers must
   not treat a missing callback as an error.
-- **The URI bar keeps its bespoke draft.** Its completion filter depends on that draft, which by
-  construction is not in app-db, so it cannot move into a subscription without moving the draft back —
-  reintroducing the round trip the draft exists to avoid. Measured at `lag p95 = 1–2 ms` with zero
-  clobbers, it is not a bottleneck. It shares the matcher and the scheduler; only the component differs.
+- **The URI bar keeps its bespoke, tab-keyed draft cache.** Its completion filter depends on the draft,
+  which by construction is not in app-db, so it cannot move into a subscription without moving the draft
+  back — reintroducing the round trip the draft exists to avoid. Blank tabs retain one draft per tab id;
+  loaded-document edits are discarded when their tab loses focus. Completion requests carry the owning tab
+  id and exact typed input, so a late asynchronous reply cannot cross a tab switch. Measured at
+  `lag p95 = 1–2 ms` with zero clobbers, it is not a bottleneck. It shares the matcher and the scheduler;
+  only the component differs.
 - **Two DEV-only instruments ship in the source.** `vinary.renderer.input-trace` is `goog.DEBUG`-gated and
   absent from `:release`, exactly like `scroll-trace`. `finder/state-snapshot`'s cost fields are *not*
   gated, deliberately: a release build is the one whose latency matters, and they are numbers already

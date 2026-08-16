@@ -515,7 +515,7 @@
                                  (-> (.completePath v input)
                                      (.then (fn [res] (rf/dispatch [:uri-complete/result tag (js->clj res :keywordize-keys true)])))
                                      (.catch (fn [_] nil))))))]
-               (if (= tag :enter)
+               (if (= :enter (:kind tag))
                  ;; Enter is a commit, not typing: run it now, and cancel any live typing request so a
                  ;; late reply cannot re-open the dropdown over a navigation that has already happened
                  (do (sched/cancel! ::complete-path) (go))

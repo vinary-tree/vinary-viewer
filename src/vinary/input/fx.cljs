@@ -195,9 +195,15 @@
  :dom/focus
  (fn [target]
    (case target
-     :uri     (when-let [^js el (.querySelector js/document ".vv-uri-input")]
-                (.focus el)
-                (.select el))
+     ;; A foreground tab event updates app-db and requests focus in the same effect pass. Reagent commits the
+     ;; new controlled value on the next frame, so defer URI focus/select until then; selecting synchronously
+     ;; would select the previous tab's draft and React's value write would collapse it again.
+     :uri     (js/requestAnimationFrame
+               (fn []
+                 (when-let [^js el (.querySelector js/document ".vv-uri-input")]
+                   (when (.-isConnected el)
+                     (.focus el)
+                     (.select el)))))
      :tree    (some-> ^js (.querySelector js/document ".vv-tree-filter") .focus)
      ;; preventScroll: focusing a scroller normally scrolls it to reveal the focused thing, which would
      ;; make "focus the content pane" silently move the reader's position (and would appear in the scroll

@@ -70,7 +70,8 @@
         ;; :initial-mode is applied at boot / on config — vim switches this to :normal)
         :input {:mode :insert :sequence [] :count nil :in-input? false :timeout-id nil}
         ;; URI-bar path auto-completion (children of the current dir + ghost/dropdown state)
-        :uri-complete {:input nil :dir nil :entries [] :target nil :exists? false :dir? false
+        :uri-complete {:tab-id nil :typed-input nil
+                       :input nil :dir nil :entries [] :target nil :exists? false :dir? false
                        :selected -1 :dismissed? false :error? false}
         ;; extension runtime + ad-blocking (state pushed from main over vv:ext-state / vv:ext-config)
         :extensions-open? false

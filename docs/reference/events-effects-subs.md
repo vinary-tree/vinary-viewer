@@ -37,23 +37,24 @@
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:doc/open` | fx | `uri/path` | current tab, content scroll | active tab/history | focus existing tab or navigate active tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync |
-| `:doc/open-new` | fx | `uri/path` | current tab, content scroll | tabs/history | focus existing tab or open a new tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync. Since ADR-0044 this is the **Ctrl+Shift+click** / context-menu semantics — plain Ctrl+click and middle-click use `:tab/open-background` (always-new) instead |
+| `:doc/open` | fx | `uri/path` | current tab, content scroll | active tab/history | focus existing tab or navigate active tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync; foreground result focuses the document |
+| `:doc/open-new` | fx | `uri/path` | current tab, content scroll | tabs/history | focus existing tab or open a new tab; local files → `[:vv/open path]`, `[:scroll/restore n]`, retained sync; foreground result focuses the document. Since ADR-0044 this is the **Ctrl+Shift+click** / context-menu semantics — plain Ctrl+click and middle-click use `:tab/open-background` (always-new) instead |
 | `:doc/open-in-tab` **[input]** | fx | `path new?` | — | — | dispatches `:doc/open-new` when `new?`, else `:doc/open` |
-| `:tab/navigate` | fx | `uri` | active tab, content scroll | active tab/history | local files → `[:vv/open path]`; also scroll restore and retained sync |
+| `:tab/navigate` | fx | `uri` | active tab, content scroll | active tab/history | local files → `[:vv/open path]`; also scroll restore, retained sync, and focus the document |
+| `:tab/new-blank` | fx | — | active tab, content scroll | tabs, active tab | save the leaving position, append a nil-URI tab, focus and select its URI bar, sync retained files |
 | `:tab/open` | fx | `uri` | active tab, content scroll | tabs/history | add a new **focused** tab (Ctrl+Shift+click / Shift+middle-click / context menu), load local files, restore top scroll, sync retained |
 | `:tab/open-background` | fx | `uri` | active tab | tabs (appended, **active tab unchanged**) | the ADR-0044 background open (Ctrl+click / middle-click): `nav/add-tab-background` + `load-fx` only — no `:view-pos` cofx, no `[:scroll/restore]` (nothing is being left); records web history for http(s); with no active tab it degenerates to `[:tab/open uri]` |
-| `:tab/activate` | fx | `id` | content scroll | `:ui :active-tab`, saved leaving scroll | restore target scroll for local files and sync retained |
-| `:tab/close` | fx | `id` | tab list/history | tabs, active tab | sync retained files and evict no-longer-retained cached docs. Dispatched by the × button **and** by middle-clicking a tab in either representation (ADR-0044) |
-| `:tab/next` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate next tab id |
-| `:tab/prev` **[input]** | db | — | `app-db` tabs | `:ui :active-tab` | activate previous tab id |
+| `:tab/activate` | fx | `id` | content scroll | `:ui :active-tab`, saved leaving scroll | restore target scroll for local files, sync retained, then focus URI for a nil-URI tab or content for a document tab |
+| `:tab/close` | fx | `id` | tab list/history | tabs, active tab | sync retained files and evict no-longer-retained cached docs; closing the active tab applies the blank/document focus rule to its revealed neighbor. Dispatched by the × button **and** by middle-clicking a tab in either representation (ADR-0044) |
+| `:tab/next` **[input]** | fx | — | `app-db` tabs, content scroll | `:ui :active-tab` | activate next tab id and apply the blank/document focus rule |
+| `:tab/prev` **[input]** | fx | — | `app-db` tabs, content scroll | `:ui :active-tab` | activate previous tab id and apply the blank/document focus rule |
 
 ### 1.4 Navigation history
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
-| `:history/back` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
-| `:history/forward` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files |
+| `:history/back` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files, and apply the blank/document focus rule |
+| `:history/forward` | fx | — | active tab history, content scroll | active tab history idx and saved leaving scroll | load target URI, restore saved scroll, sync retained files, and apply the blank/document focus rule |
 | `:nav/parent` **[input]** | fx | — | active tab uri, content scroll | active tab/history (→ parent dir via `uri/dirname`), `[:ui :dir-selected]` ← came-from path | navigate active tab to parent, scroll restore, sync retained; **no-op** for `http(s)` / at filesystem root |
 | `:nav/open-target` **[input]** | fx | — | active path, DataScript `active-doc`, `[:ui :dir-selected]`, `[:ui :recent :trail]` | — | when `:doc/kind` = `"directory"`: `[:dispatch [:doc/open <effective-selected>]]`; else inert |
 
@@ -110,7 +111,7 @@ counter collapses the input debounce. See [ADR-0032](../design-decisions/0032-sc
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
 | `:sidebar/toggle` | db | — | `:ui :sidebar-visible?` | `:ui :sidebar-visible?` ← not — the PANEL column's visibility; the icon rail (ADR-0041) always renders, and clicking the active rail icon dispatches this | — |
-| `:nav/focus` | fx | `target` (`:tree`/`:content`/`:toggle`) | — | — | `[:dom/focus target]` |
+| `:nav/focus` | fx | `target` (`:uri`/`:tree`/`:content`/`:toggle`) | — | — | `[:dom/focus target]` |
 | `:nav/scroll` | fx | `opts` (`{:dy …}` / `{:dx …}` / `{:to …}`) | — | — | `[:dom/scroll opts]` |
 
 ### 1.10 Modal input state **[input]**
@@ -272,6 +273,9 @@ The state/items/save-prompt/result pushes from main land as `[:passwords/*-recei
 | `:hint/start` | — | Begin Vimium-style link-hint mode (`f`); emits `[:hints/collect]`. |
 | `:hints/activate` | typed label | Follow the hinted link whose label was typed. |
 | `:hints/backspace` / `:hints/cancel` | — | Edit / abort the typed hint label. |
+| `:uri/navigate` | `tab-id text` | Resolve Enter for the originating active tab; a late reply cannot navigate a different tab, and failure keeps the blank URI draft editable. |
+| `:uri-complete/typed` | `tab-id text` | Start tab-owned path completion (or reset local/history completion state). |
+| `:uri-complete/result` | `tag result` | Accept a result only when its tab id and exact input still own the active completion context. |
 | `:uri-complete/set` | completion data | Address-bar path/history completion state (ghost + dropdown). |
 | `:uri-complete/clear` / `:uri-complete/clear-error` | — | Dismiss the completion popup / clear its error flag. |
 | `:sidebar/show` | tab keyword (`:files`/`:contents`/`:tabs`/`:commits`) | Show the panel column opened to that panel (`:files` routes through the tree-restore flow); a collapsed rail icon dispatches this to expand straight into its panel. |
@@ -426,7 +430,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:vv/refresh-trees` | `{scopes on-complete}` | invoke per-scope refreshes with `Promise.all`, retaining individual failures | configured completion event with result vector |
 | `:vv/save-recent` | `edn` (EDN string) | **debounced 300 ms**, then `window.vv.saveRecent(edn)` → `vv:recent-save` IPC (persists the dir→child trail + recent-files MRU to `recent.edn`) | — |
 | `:vv/http-toc-goto` | `id` | `window.vv.httpTocGoto(id)` → `vv:http-toc-goto` IPC | — |
-| `:vv/complete-path` | `input` | `window.vv.completePath(input)` ⮐ → URI-bar completion data (SFTP-aware) | `[:uri-complete/set …]` |
+| `:vv/complete-path` | `{:input :tag}` | `window.vv.completePath(input)` ⮐ → URI-bar completion data (SFTP-aware); `tag` carries live/Enter kind, tab id, and exact input for stale-reply rejection | `[:uri-complete/result tag …]` |
 | `:uri-complete/error-timeout` | `ms` | arm a timer that clears the completion error flag | `[:uri-complete/clear-error]` |
 | `:vv/save-settings` | EDN string | `window.vv.saveSettings(edn)` → `vv:settings-save` IPC | — |
 | `:vv/save-keymap` | EDN string | `window.vv.saveKeymap(edn)` → `vv:keymap-save` IPC | — |
@@ -465,7 +469,7 @@ the loop. They are the **only** place side effects happen (effects-at-the-edge).
 | `:keymap/install-active` | `_` | install the active app-db keymap registry entry into the live keymap atom and dispatch its initial mode | `[:input/set-mode mode]` |
 | `:keymap/persist` | EDN string | debounce and save keymap registry through `window.vv.saveKeymap` | — |
 | `:dom/scroll` | `{:dy :dx :to}` | smoothly scroll the **focused pane** (the focused element's scrollable ancestor, else `.vv-content`) by easing toward an **accumulating target** through a single `requestAnimationFrame` animator — so a held key scrolls continuously and smoothly (this replaced the old per-press `behavior:"smooth"` jumps and also smooths Vim `j`/`k`, page/half scroll). Supports `:to :top`/`:bottom`; vertical `:dy` (`:page`/`:-page` ±0.9·clientH, `:half`/`:-half` ±0.5·clientH, or a number); and horizontal `:dx` (`:left`/`:right` or a number). | — |
-| `:dom/focus` | `target` | `:tree` → focus `.vv-tree-filter`; `:content` → focus `.vv-content`; `:toggle` → swap focus between them | — |
+| `:dom/focus` | `target` | `:uri` → next-frame focus + select `.vv-uri-input`; `:tree` → focus `.vv-tree-filter`; `:content` → focus `.vv-content`; `:toggle` → swap focus between tree and content | — |
 
 > **Two timeout mechanisms exist.** The **resolver** holds an authoritative synchronous chord timer
 > in a local atom (`vinary.input.resolver`); `:input/arm-timeout`/`:input/cancel-timeout` are the
