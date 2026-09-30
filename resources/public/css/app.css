@@ -741,6 +741,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-find-input { background: var(--vv-bg1); color: var(--vv-fg); border: 1px solid var(--vv-border);
   border-radius: 3px; padding: 3px 6px; font-size: 13px; font-family: inherit; outline: none; width: 180px; }
 .vv-find-count { color: var(--vv-fg-dim); font-size: 12px; min-width: 40px; text-align: center; }
+.vv-find-mode { background: var(--vv-bg1); color: var(--vv-fg); border: 1px solid var(--vv-border);
+                border-radius: 3px; font: inherit; font-size: 12px; padding: 3px 5px; }
+.vv-find-status { color: var(--vv-fg-dim); font-size: 11px; max-width: 180px;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vv-find-btn { background: transparent; color: var(--vv-fg); border: none; cursor: pointer;
   padding: 2px 6px; border-radius: 3px; font-size: 13px; }
 .vv-find-btn:hover { background: var(--vv-bg-code); color: var(--vv-head1); }
@@ -751,6 +755,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    when find moved from <mark> wrapping to the CSS Custom Highlight API. */
 ::highlight(vv-find) { background-color: var(--vv-find-hit-bg); color: var(--vv-find-hit-fg); }
 ::highlight(vv-find-current) { background-color: var(--vv-find-active-bg); color: var(--vv-fg-inverse); }
+.vv-source .cm-content .vv-cm-find { background: var(--vv-find-hit-bg); color: var(--vv-find-hit-fg); }
+.vv-source .cm-content .vv-cm-find-current { background: var(--vv-find-active-bg); color: var(--vv-fg-inverse); }
 /* The pdf.js text layer is transparent text laid over the rendered canvas (see .vv-pdf-text above), so an
    opaque highlight colour paints the glyphs a SECOND time on top of the canvas ones — any sub-pixel
    disagreement between the two reads as ghosting. Highlight the background only and let the canvas keep

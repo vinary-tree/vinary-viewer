@@ -24,6 +24,8 @@
      and scrolls every scrollable ancestor, including inner <pre>/table scrollers and #app itself."
   (:require [clojure.string :as str]
             [vinary.async.scheduler :as sched]
+            [vinary.renderer.cm :as cm]
+            [vinary.renderer.find-flex :as flex]
             [vinary.renderer.find-scan :as scan]
             [vinary.renderer.scroll :as scroll]))
 
@@ -41,6 +43,10 @@
 (def ^:private empty-state
   {:query   ""      ; the NORMALIZED query the ranges were built for
    :ranges  []      ; live DOM Ranges, in document order
+   :groups  nil     ; flexible mode: all painted Ranges for each block result
+   :mode    :exact
+   :phonetic? false
+   :kinds   []
    :idx     0       ; 0-based cursor
    :root    nil     ; the .vv-content element the buffer was built from
    :doc-key nil     ; its data-doc-key at collect time — a different document invalidates outright
@@ -69,6 +75,75 @@
 (defonce ^:private collecting (atom {:root nil :waiters []}))
 
 (defonce ^:private state (atom empty-state))
+(defonce ^:private flex-gen (atom 0))
+(defonce ^:private source-state (atom {:query "" :doc nil :matches [] :groups nil
+                                       :mode :exact :phonetic? false :kinds [] :idx 0}))
+
+(defn- source-active? []
+  (boolean (.querySelector js/document ".vv-source .cm-editor")))
+
+(defn- source-result []
+  (let [{:keys [matches idx kinds]} @source-state]
+    {:count (count matches) :idx (if (seq matches) (inc idx) 0)
+     :match-kind (nth kinds idx nil)}))
+
+(defn- source-paint! [scroll?]
+  (let [{:keys [matches groups idx]} @source-state]
+    (cm/set-find-spans! (or groups (mapv vector matches)) idx)
+    (when (and scroll? (seq matches))
+      (cm/scroll-find-to! (first (nth matches idx))))))
+
+(defn- source-phrase-buffer [doc]
+  (let [lines (.split doc "\n")
+        builder (scan/builder)
+        starts (loop [i 0 pos 0 out []]
+                 (if (< i (.-length lines))
+                   (let [line (aget lines i)]
+                     (when (pos? i) (scan/feed! builder {:kind :hard}))
+                     (scan/feed! builder {:kind :text :id i :s line})
+                     (recur (inc i) (+ pos (count line) 1) (conj out pos)))
+                   out))]
+    (assoc (scan/finish builder) :line-starts starts)))
+
+(defn- source-phrase-matches [{:keys [text segs line-starts]} q]
+  (keep (fn [m]
+          (when-let [{:keys [start end]} (scan/match-endpoints segs m)]
+            [(+ (nth line-starts (:id start)) (:off start))
+             (+ (nth line-starts (:id end)) (:off end))]))
+        (scan/scan text q)))
+
+(defn- source-search! [query on-result]
+  (let [q (scan/normalize-query query)
+        doc (cm/find-document)
+        folded (when doc (if (and (= doc (:doc @source-state)) (:folded @source-state))
+                           (:folded @source-state)
+                           (scan/safe-lower doc)))
+        phrase-buffer (when (and doc (str/includes? q " "))
+                        (if (= doc (:doc @source-state))
+                          (or (:phrase-buffer @source-state) (source-phrase-buffer doc))
+                          (source-phrase-buffer doc)))
+        matches (cond
+                  (or (nil? folded) (empty? q)) []
+                  phrase-buffer (vec (source-phrase-matches phrase-buffer q))
+                  :else (scan/scan folded q))]
+    (reset! source-state {:query q :doc doc :folded folded :matches matches :groups nil
+                          :phrase-buffer phrase-buffer
+                          :mode :exact :phonetic? false :kinds [] :idx 0})
+    (source-paint! true)
+    (on-result (source-result))))
+
+(declare search!)
+
+(defn- source-cycle! [dir on-result]
+  (let [{:keys [query doc matches idx mode phonetic?]} @source-state
+        now (cm/find-document)]
+    (if (not= doc now)
+      (search! query {:mode mode :phonetic? phonetic?}
+               (fn [_] (source-cycle! dir on-result)))
+      (do (when-let [next-idx (scan/step-idx (count matches) idx dir)]
+            (swap! source-state assoc :idx next-idx)
+            (source-paint! true))
+          (on-result (source-result))))))
 
 (defn- content-root ^js [] (.querySelector js/document ".vv-content"))
 (defn- doc-key-of [^js root] (some-> root .-dataset .-docKey))
@@ -259,7 +334,9 @@
   [ranges idx]
   (when (supported?)
     (let [cur (js/Highlight.)]
-      (when (and (seq ranges) (< idx (count ranges))) (.add cur (nth ranges idx)))
+      (if-let [group (nth (:groups @state) idx nil)]
+        (doseq [r group] (.add cur r))
+        (when (and (seq ranges) (< idx (count ranges))) (.add cur (nth ranges idx))))
       (.set (.-highlights js/CSS) "vv-find-current" cur))))
 
 ;; ---- scrolling ---------------------------------------------------------------------------------------
@@ -328,18 +405,24 @@
         (swap! state assoc :obs o :obs-root root)))))
 
 (defn clear! []
+  (swap! flex-gen inc)
   (sched/cancel! collect-key)
   (sched/cancel! match-key)
+  (flex/cancel!)
   (reset! collecting {:root nil :waiters []})
   (when (supported?)
     (.delete (.-highlights js/CSS) "vv-find")
     (.delete (.-highlights js/CSS) "vv-find-current"))
   (disconnect-observer!)
-  (reset! state empty-state))
+  (reset! state empty-state)
+  (reset! source-state {:query "" :doc nil :matches [] :groups nil
+                        :mode :exact :phonetic? false :kinds [] :idx 0})
+  (cm/clear-find!))
 
-(defn- result [] (let [{:keys [ranges idx]} @state
+(defn- result [] (let [{:keys [ranges idx kinds]} @state
                        n (count ranges)]
-                   {:count n :idx (if (pos? n) (inc idx) 0)}))
+                   {:count n :idx (if (pos? n) (inc idx) 0)
+                    :match-kind (nth kinds idx nil)}))
 
 ;; ---- the sliced pipeline -----------------------------------------------------------------------------
 
@@ -445,7 +528,7 @@
                (let [ranges (vec (.-ranges st))
                      idx    (or (when keep-idx (scan/clamp-idx (count ranges) keep-idx)) 0)]
                  (swap! state assoc
-                        :query q :ranges ranges :idx idx
+                        :query q :ranges ranges :groups nil :mode :exact :kinds [] :idx idx
                         :root root :doc-key (doc-key-of root)
                         :ranges-mut (:mut buf)
                         :cached? cached?
@@ -465,6 +548,80 @@
         cached? (some? (cached-buffer root))]
     (with-buffer! root (fn [buf] (run-match! root buf q keep-idx t0 cached? on-done)))))
 
+(defn- no-phonetic-ranges [buf]
+  (let [^js segs (:segs buf)
+        ^js nodes (:nodes buf)]
+    (loop [i 0 out []]
+      (if (>= i (.-length segs))
+        out
+        (let [start (aget segs i)
+              node (aget nodes (aget segs (+ i 1)))
+              len (aget segs (+ i 3))]
+          (recur (+ i 4)
+                 (if (and node (some-> (.-parentElement node) (.closest "code, pre")))
+                   (conj out [start (+ start len)])
+                   out)))))))
+
+(defn- finish-flex-source! [query opts doc results on-result]
+  (let [matches (mapv (fn [{:keys [anchor]}] [anchor (inc anchor)]) results)]
+    (reset! source-state {:query query :doc doc :matches matches
+                          :groups (mapv :spans results) :kinds (mapv :kind results)
+                          :mode (:mode opts) :phonetic? (:phonetic? opts) :idx 0})
+    (source-paint! true)
+    (on-result (source-result))))
+
+(defn- start-flex-source! [query opts ticket on-result]
+  (if-let [doc (cm/find-document)]
+    (-> (flex/search! [:source doc] doc "source" [] query
+                      (name (:mode opts)) (:phonetic? opts))
+        (.then (fn [results]
+                 (when (and results (= ticket @flex-gen))
+                   (finish-flex-source! query opts doc results on-result))))
+        (.catch (fn [error]
+                  (when (= ticket @flex-gen)
+                    (clear!)
+                    (on-result {:count 0 :idx 0 :error (.-message error)})))))
+    (on-result {:count 0 :idx 0})))
+
+(defn- finish-flex-dom! [root buf query opts results on-result]
+  (let [{:keys [segs nodes]} buf
+        resolved (keep (fn [{:keys [spans kind]}]
+                         (let [ranges (vec (keep #(->range nodes segs %) spans))]
+                           (when (seq ranges)
+                             {:anchor (first ranges) :ranges ranges :kind kind})))
+                       results)
+        anchors (mapv :anchor resolved)
+        groups (mapv :ranges resolved)
+        kinds (mapv :kind resolved)
+        all (when (supported?) (js/Highlight.))]
+    (when all (doseq [group groups r group] (.add all r)))
+    (swap! state assoc :query query :root root :doc-key (doc-key-of root)
+           :ranges anchors :groups groups :kinds kinds :idx 0
+           :mode (:mode opts) :phonetic? (:phonetic? opts)
+           :ranges-mut (:mut buf))
+    (when (supported?) (.set (.-highlights js/CSS) "vv-find" all))
+    (paint-current! anchors 0)
+    (scroll-to! anchors 0)
+    (on-result (result))))
+
+(defn- start-flex-dom! [root query opts ticket on-result]
+  (observe! root)
+  (with-buffer!
+    root
+    (fn [buf]
+      (when (= ticket @flex-gen)
+        (-> (flex/search! [root (:doc-key buf) (:mut buf)] (:text buf)
+                          (if (.querySelector root ".markdown-body, .vv-pdf-doc")
+                            "prose" "structured")
+                          (no-phonetic-ranges buf) query (name (:mode opts)) (:phonetic? opts))
+            (.then (fn [results]
+                     (when (and results (= ticket @flex-gen))
+                       (finish-flex-dom! root buf query opts results on-result))))
+            (.catch (fn [error]
+                      (when (= ticket @flex-gen)
+                        (clear!)
+                        (on-result {:count 0 :idx 0 :error (.-message error)})))))))))
+
 ;; ---- public API --------------------------------------------------------------------------------------
 
 (defn search!
@@ -474,14 +631,26 @@
    sliced pipeline settles. A newer `search!` cancels an older one, whose `on-result` then never fires —
    so a caller must not treat a missing callback as an error. The generation stamped by the caller remains
    the guard for the other race, an in-flight run whose reply lands after a newer one's."
-  [query on-result]
-  (let [q (scan/normalize-query query)]
-    (if (= "" q)
-      (do (clear!) (on-result {:count 0 :idx 0}))
-      (if-let [^js root (content-root)]
-        (do (observe! root)
-            (start-search! root q nil on-result))
-        (on-result {:count 0 :idx 0})))))
+  ([query on-result] (search! query {:mode :exact :phonetic? false} on-result))
+  ([query opts on-result]
+   (let [q (scan/normalize-query query)
+         mode (or (:mode opts) :exact)
+         ticket (swap! flex-gen inc)]
+     (if (= "" q)
+       (do (clear!) (on-result {:count 0 :idx 0}))
+       (if (= mode :exact)
+         (do (flex/cancel!)
+             (if (source-active?)
+               (source-search! query on-result)
+               (if-let [^js root (content-root)]
+                 (do (observe! root) (start-search! root q nil on-result))
+                 (on-result {:count 0 :idx 0}))))
+         (do (sched/cancel! match-key)
+             (if (source-active?)
+               (start-flex-source! q opts ticket on-result)
+               (if-let [^js root (content-root)]
+                 (start-flex-dom! root q opts ticket on-result)
+                 (on-result {:count 0 :idx 0})))))))))
 
 (defn- step-cursor!
   "Move the cursor by `dir` over the ranges already held, repaint the focused match, and scroll to it."
@@ -509,14 +678,19 @@
    The re-collect goes through the same sliced pipeline, so a cycle over a document that changed under it
    does not block either."
   [dir on-result]
-  (let [^js root (content-root)
-        {:keys [query doc-key idx]} @state]
+  (if (source-active?)
+    (source-cycle! dir on-result)
+    (let [^js root (content-root)
+        {:keys [query doc-key idx mode phonetic?]} @state]
     (cond
       (or (nil? root) (= "" query))    (on-result (result))
       (not= doc-key (doc-key-of root)) (do (clear!) (on-result (result)))
+      (and (not= mode :exact) (stale-ranges?))
+      (search! query {:mode mode :phonetic? phonetic?}
+               (fn [_] (on-result (step-cursor! dir))))
       (stale-ranges?)                  (start-search! root query idx
                                                       (fn [_] (on-result (step-cursor! dir))))
-      :else                            (on-result (step-cursor! dir)))))
+      :else                            (on-result (step-cursor! dir))))))
 
 (defn state-snapshot
   "DEV/test observability: what is actually matched, where it is painted, and whether it is on screen.
@@ -544,6 +718,7 @@
      ;; says whether the incremental path is actually engaging (docs/scientific/10). Question-mark-free
      ;; for the same clj->js reason as :visible below.
      :cached  (boolean cached?)
+     :flexIndexes (flex/index-count)
      ;; has the DOM changed since the buffer was built? `cached` false with `dirty` true means something
      ;; is mutating the content pane between keystrokes and defeating the reuse — a different problem from
      ;; the buffer simply not existing yet, and one only this flag can tell apart.

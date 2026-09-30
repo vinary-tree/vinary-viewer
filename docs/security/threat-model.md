@@ -490,6 +490,15 @@ absent entirely.
 
 ## 7. Summary of the posture
 
+In-page Approximate and FZF search run in a renderer Web Worker loaded from a
+first-party blob URL. The worker receives the already-open document text and
+locally staged, pinned rc.6 libdictenstein/liblevenshtein/lling-llang WASM. It
+has no preload bridge, IPC, filesystem, or network-search capability; results
+return only document offsets and match kinds. The generated worker and WASM are
+build outputs, and their source revisions are pinned in
+`scripts/find-wasm.sources.json`. An untrusted replacement for either generated
+asset would execute inside the renderer's existing trust boundary.
+
 | Property                                   | Today                                    |
 |--------------------------------------------|------------------------------------------|
 | Renderer ↔ OS isolation                    | **Strong** — `contextIsolation:true`, `nodeIntegration:false`, Node modules stubbed in the build. |
@@ -497,6 +506,7 @@ absent entirely.
 | Filesystem reads                           | Any path the user can read (CLI-viewer trust); `git` via `execFileSync` (no shell).               |
 | Office/workbook/archive parsing           | Main-process parsers with capped preview bytes, bounded archive depth/entry count, and no extraction writes. |
 | Large log / delimited previews             | Stream-paged over IPC as finite row/line windows; renderer keeps only nearby pages.               |
+| In-page flexible find                       | First-party renderer worker over already-open text; pinned local WASM, no IPC or network search.   |
 | Markdown XSS via raw HTML                   | **Sanitized** — `rehype-raw` + `rehype-sanitize` (GitHub `defaultSchema`) strip script/`on*`/`javascript:`/iframe/style; safe tags (img, tables, details, …) render. Plain-text/source kinds remain HTML-escaped. |
 | Renderer sandbox (`sandbox:true`)          | **Off** — Forthcoming (gated on preload migration).                                               |
 | CSP                                        | **Applied** — `<meta>` in `index.html`: `default-src 'none'`, `script-src` without `'unsafe-inline'` (allows `'unsafe-eval'`+`file:` — pdf.js JIT-compiles Type-4 shading via `eval` and loads its ESM via `new Function`, ADR-0013), https-only remote images, `connect-src` blocks remote exfil, `object-src`/`base-uri`/`form-action`/`frame-src` locked. |

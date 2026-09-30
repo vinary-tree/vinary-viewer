@@ -62,6 +62,10 @@
 (defn set-blame!      [hunks on-line-click] (when (ready?) ((gobj/get @sv-module "set-blame!") hunks on-line-click)))
 (defn clear-blame!    []                    (when (ready?) ((gobj/get @sv-module "clear-blame!"))))
 (defn selection-lines []                    (when (ready?) ((gobj/get @sv-module "selection-lines"))))
+(defn find-document []                      (when (ready?) ((gobj/get @sv-module "find-document"))))
+(defn set-find-spans! [spans active]         (when (ready?) ((gobj/get @sv-module "set-find-spans!") spans active)))
+(defn scroll-find-to! [pos]                 (when (ready?) ((gobj/get @sv-module "scroll-find-to!") pos)))
+(defn clear-find! []                        (when (ready?) ((gobj/get @sv-module "clear-find!"))))
 
 (defn want-source-line!
   "Stash a preview→source jump line. If the chunk is loaded, hand it straight to the source-view; otherwise buffer

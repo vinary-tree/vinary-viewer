@@ -1711,7 +1711,7 @@
           ;; did-update hook sees a document switch even when find is closed — that is what keeps a stale
           ;; count from reappearing the next time the bar is opened
           (let [ctx @(rf/subscribe [:ui/find-context])
-                {:keys [visible? query count idx]} @(rf/subscribe [:ui/find])
+                {:keys [visible? query mode count idx error match-kind]} @(rf/subscribe [:ui/find])
                 ;; A MODAL keymap (Vim) binds the cycle keys to bare printable characters — `n` and `N`
                 ;; (resources/keymaps/vim.edn:28-29). While the query box holds focus those keys are typed
                 ;; into it and can never resolve to :search/next, so under a modal set Enter COMMITS: it
@@ -1742,7 +1742,18 @@
                                                (release-find-keyboard!)
                                                (rf/dispatch [:find/close]))
                                   nil))}]
+               [:select.vv-find-mode {:aria-label "Find mode" :value (name (or mode :exact))
+                                      :on-change (fn [^js e]
+                                                   (rf/dispatch [:find/set-mode (keyword (.. e -target -value))])
+                                                   (when-let [^js input (.querySelector js/document ".vv-find-input")]
+                                                     (.focus input #js {:preventScroll true})))}
+                [:option {:value "exact"} "Exact"]
+                [:option {:value "approximate"} "Approximate"]
+                [:option {:value "fzf"} "FZF"]]
                [:span.vv-find-count (if (pos? count) (str idx "/" count) "0/0")]
+               (when (or error (= match-kind "sound-alike"))
+                 [:span.vv-find-status {:title (or error "English sound-alike match")}
+                  (or error "Sound-alike")])
                [:button.vv-find-btn {:title "Previous (⇧⏎)" :on-click #(rf/dispatch [:find/cycle -1])} (icons/icon :find-prev)]
                [:button.vv-find-btn {:title "Next (⏎)" :on-click #(rf/dispatch [:find/cycle 1])} (icons/icon :find-next)]
                [:button.vv-find-btn {:title "Close (Esc)"

@@ -9,6 +9,7 @@
    (renderer.cm) passes through is re-exported via `exports` (string keys, ^:export) at the end. Adapted from
    LightningBug's lib/editor/syntax.cljs."
   (:require [clojure.string :as str]
+            [re-frame.core :as rf]
             ["@codemirror/state" :refer [EditorState Compartment StateField RangeSetBuilder]]
             ["@codemirror/view" :refer [EditorView Decoration lineNumbers gutter GutterMarker]]
             [vinary.git.blame :as blame]
@@ -16,6 +17,7 @@
 
 ;; the currently-mounted source EditorView, so a source Contents-outline click can scroll it to a line
 (defonce ^:private current-view (atom nil))
+(defonce ^:private find-comp (atom nil))
 
 ;; a pending preview→source jump line: set (via renderer.cm/want-source-line!) BEFORE toggling to source remounts
 ;; the view, consumed when create-source-view mounts (mirrors renderer.scroll want!→apply!). defonce survives reload.
@@ -49,6 +51,33 @@
            #js {:create  (fn [_] decos)
                 :update  (fn [v _] v)            ; read-only: decorations are computed once
                 :provide (fn [f] (.. EditorView -decorations (from f)))}))
+
+(defn find-document []
+  (when-let [^js view @current-view]
+    (when (.-isConnected (.-dom view))
+      (.toString (.. view -state -doc)))))
+
+(defn set-find-spans!
+  "Paint result groups of full-document offsets as lines enter the viewport."
+  [groups active]
+  (when-let [^js view @current-view]
+    (when (.-isConnected (.-dom view))
+      (when-let [^js compartment @find-comp]
+        (let [ranges (array)
+              length (.. view -state -doc -length)]
+          (doseq [[i spans] (map-indexed vector groups)
+                  [start end] spans]
+            (when (and (<= 0 start) (< start end) (<= end length))
+              (mark-range! ranges (if (= i active) "vv-cm-find-current" "vv-cm-find") start end)))
+          (.dispatch view #js {:effects (.reconfigure compartment
+                                                    (highlight-field (decoration-set ranges)))}))))))
+
+(defn scroll-find-to! [pos]
+  (when-let [^js view @current-view]
+    (when (and (.-isConnected (.-dom view)) (number? pos))
+      (.dispatch view #js {:effects (.scrollIntoView EditorView pos #js {:y "center"})}))))
+
+(defn clear-find! [] (set-find-spans! [] -1))
 
 (defn selected-text
   "Return the selected text in a CodeMirror view, or nil when all ranges are empty."
@@ -233,15 +262,19 @@
   [^js parent text grammar prepared-spans]
   (let [hl   (Compartment.)
         bl   (Compartment.)
+        fd   (Compartment.)
         exts #js [(.of (.-readOnly EditorState) true)
                   (.of (.-editable EditorView) false)
                   (lineNumbers)
                   (.of bl #js [])                    ; blame gutter (ADR-0040), empty until ensured
+                  (.of fd #js [])
                   (.-lineWrapping EditorView)        ; a pre-built Extension, not a Facet (no .of)
                   (.of hl #js [])]
         state (.create EditorState #js {:doc text :extensions exts})
         view  (EditorView. #js {:state state :parent parent})]
     (reset! current-view view)          ; register for source-outline line-scroll
+    (reset! find-comp fd)
+    (js/requestAnimationFrame (fn [_] (rf/dispatch [:find/retry-active])))
     (reset! blame-comp bl)              ; the blame reconfigure target for THIS mount
     (when-let [l @pending-source-line]  ; consume a pending preview→source jump (deferred across the remount)
       (reset! pending-source-line nil)
@@ -273,4 +306,8 @@
        "line-info-at"           line-info-at
        "set-blame!"             set-blame!
        "clear-blame!"           clear-blame!
-       "selection-lines"        selection-lines})
+       "selection-lines"        selection-lines
+       "find-document"          find-document
+       "set-find-spans!"        set-find-spans!
+       "scroll-find-to!"        scroll-find-to!
+       "clear-find!"            clear-find!})

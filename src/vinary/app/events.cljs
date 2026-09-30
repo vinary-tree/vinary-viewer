@@ -1517,17 +1517,27 @@
 
 (defn- bump-gen [db] (update-in db [:ui :find :gen] (fnil inc 0)))
 
+(defn- find-request [db]
+  {:q (get-in db [:ui :find :query])
+   :gen (get-in db [:ui :find :gen])
+   :mode (get-in db [:ui :find :mode] :exact)
+   :phonetic? (boolean (get-in db [:ui :settings :find-phonetic?]))})
+
 (rf/reg-event-fx
  :find/toggle
  (fn [{:keys [db]} _]
    (let [vis (not (get-in db [:ui :find :visible?]))
          q   (get-in db [:ui :find :query])
-         db' (-> db (assoc-in [:ui :find :visible?] vis) bump-gen)]
+         db' (-> db
+                 (assoc-in [:ui :find :visible?] vis)
+                 (cond-> vis (assoc-in [:ui :find :mode]
+                                      (get-in db [:ui :settings :find-default-mode] :exact)))
+                 bump-gen)]
      (if vis
        ;; re-opening with a query already in the box re-runs it, so the counter and the highlights match
        ;; what is shown instead of being a stale number over an unpainted document
        {:db db'
-        :fx (if (str/blank? q) [] [[:find/search {:q q :gen (get-in db' [:ui :find :gen])}]])}
+        :fx (if (str/blank? q) [] [[:find/search (find-request db')]])}
        ;; closing cancels a pending debounce as well as clearing the paint: without it, a search armed by
        ;; the last character typed would land after the bar is gone and re-paint highlights over a
        ;; document the user is no longer searching
@@ -1541,21 +1551,39 @@
      {:db db'
       :fx [[:async/debounce {:key find-debounce-key :ms find-debounce-ms :dispatch [:find/run gen]}]]})))
 
+(rf/reg-event-fx
+ :find/set-mode
+ (fn [{:keys [db]} [_ mode]]
+   (when (contains? #{:exact :approximate :fzf} mode)
+     (let [db' (-> db (assoc-in [:ui :find :mode] mode) bump-gen)]
+       {:db db'
+        :fx (if (str/blank? (get-in db' [:ui :find :query]))
+              [[:find/clear]]
+              [[:find/search (find-request db')]])}))))
+
 ;; the debounce landing point: run only if this is still the newest request
 (rf/reg-event-fx
  :find/run
  (fn [{:keys [db]} [_ gen]]
    (when (= gen (get-in db [:ui :find :gen]))
-     {:fx [[:find/search {:q (get-in db [:ui :find :query]) :gen gen}]]})))
+     {:fx [[:find/search (find-request db)]]})))
+
+(rf/reg-event-fx
+ :find/retry-active
+ (fn [{:keys [db]} _]
+   (let [q (get-in db [:ui :find :query])]
+     (when (and (get-in db [:ui :find :visible?]) (not (str/blank? q)))
+       {:fx [[:find/search (find-request db)]]}))))
 
 ;; banks BOTH scalars at once. cycle! can change the COUNT as well as the index — reconciling stale ranges
 ;; against a changed document is part of cycling — which the old count-only / index-only pair could not
 ;; express, so a re-collect left the counter lying.
 (rf/reg-event-db
  :find/result
- (fn [db [_ {:keys [gen count idx]}]]
+ (fn [db [_ {:keys [gen count idx error match-kind]}]]
    (if (or (nil? gen) (= gen (get-in db [:ui :find :gen])))
-     (-> db (assoc-in [:ui :find :count] count) (assoc-in [:ui :find :idx] idx))
+     (-> db (assoc-in [:ui :find :count] count) (assoc-in [:ui :find :idx] idx)
+         (assoc-in [:ui :find :error] error) (assoc-in [:ui :find :match-kind] match-kind))
      db)))
 
 (rf/reg-event-fx
@@ -1908,8 +1936,9 @@
  :settings/set
  (fn [{:keys [db]} [_ k v]]
    {:db (assoc-in db [:ui :settings k] v)
-    :fx [[:async/debounce {:key :settings/apply :ms settings-apply-ms
-                           :dispatch [:settings/apply]}]]}))
+    :fx (cond-> [[:async/debounce {:key :settings/apply :ms settings-apply-ms
+                                   :dispatch [:settings/apply]}]]
+          (= k :find-phonetic?) (conj [:dispatch [:find/retry-active]]))}))
 
 (rf/reg-event-fx
  :settings/apply

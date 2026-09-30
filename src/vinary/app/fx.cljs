@@ -272,10 +272,10 @@
 ;; no-op until the tracer has been installed (goog.DEBUG only), so this costs a boolean deref in a
 ;; release build.
 (rf/reg-fx :find/search
-           (fn [{:keys [q gen]}]
+           (fn [{:keys [q gen mode phonetic?]}]
              (-> (pdf-cache/ensure-active!)
                  (.then (fn [_]
-                          (finder/search! q (fn [res]
+                          (finder/search! q {:mode mode :phonetic? phonetic?} (fn [res]
                                               (rf/dispatch [:find/result (assoc res :gen gen)])
                                               (input-trace/mark! "find/search"))))))))
 (rf/reg-fx :find/cycle (fn [{:keys [dir gen]}]

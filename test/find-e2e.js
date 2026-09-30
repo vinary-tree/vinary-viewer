@@ -59,6 +59,7 @@ const PDF = path.join(SCRATCH, 'find.pdf');
 // document whose flatten genuinely costs hundreds of milliseconds, because a gate that never provokes the
 // expensive path cannot catch it coming back (docs/scientific/10).
 const BIG = path.join(SCRATCH, 'typist-latency.md');
+const RHO = path.join(SCRATCH, 'regex_gslt_application.rho');
 
 // A multi-page PDF with REAL extractable text. test/fixtures/smoke.pdf is a single short page, so it can
 // never be taller than the viewport and cannot exercise scrolling at all. Each page emits the phrase
@@ -124,6 +125,13 @@ function writeFixtures() {
              `Filler token ${i} alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu.\n`);
   }
   fs.writeFileSync(BIG, big.join('\n'));
+
+  const source = [];
+  const hitLines = new Set([4, 42, 83, 124, 165, 206, 247, 288, 329, 370, 411, 452, 505]);
+  for (let line = 1; line <= 515; line++)
+    source.push(line === 4 ? '// source line 4: BTrue  padding' :
+      `// source line ${line}: ${hitLines.has(line) ? 'BTrue' : 'ordinary text'} and padding`);
+  fs.writeFileSync(RHO, source.join('\n'));
 }
 
 require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app
@@ -532,6 +540,135 @@ async function correctnessScenario(win, { file, kind, ready, check, phrase, othe
   await until(wc, FIND_OPEN, (v) => v === false, `${kind} find closes at the end`);
 }
 
+async function sourceFindScenario(win, check) {
+  const wc = win.webContents;
+  console.log('\n=== CodeMirror full-document and flexible find ===');
+  await open(wc, RHO);
+  await until(wc, `Boolean(document.querySelector('.vv-source .cm-editor'))`,
+              (value) => value === true, 'source view mounts');
+  await sendChord(win, 'F', ['control']);
+  await openFindOrForce(win, 'source find bar opens');
+  await evalIn(wc, SET_QUERY('BTrue'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 13,
+              'all 13 BTrue occurrences indexed');
+  const sourceCount = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('source: Ctrl+F finds all 13 occurrences, including offscreen lines', () => {
+    assert.strictEqual(sourceCount, 13);
+  });
+  const walked = [];
+  for (let i = 0; i < 13; i++) {
+    walked.push(await evalIn(wc, `window.__vvdb().ui.find.idx`));
+    await sendChord(win, 'F3');
+    await sleep(60);
+  }
+  check('source: next visits every occurrence and wraps', () => {
+    assert.deepStrictEqual(walked, Array.from({ length: 13 }, (_, i) => i + 1));
+  });
+  const wrapped = await evalIn(wc, `window.__vvdb().ui.find.idx`);
+  check('source: wrap returns to the first occurrence', () => assert.strictEqual(wrapped, 1));
+  await evalIn(wc, SET_QUERY('BTrue padding'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 1,
+              'source phrase with collapsed whitespace');
+  const phraseCount = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('source: Exact preserves whitespace-normalized phrase matching', () => {
+    assert.strictEqual(phraseCount, 1);
+  });
+  const indexesBefore = await evalIn(wc, `${VVFIND}.flexIndexes`);
+
+  const mode = (value) => `(() => { const select = document.querySelector('.vv-find-mode');
+    select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`;
+  await evalIn(wc, mode('approximate'));
+  await evalIn(wc, SET_QUERY('BTru'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 13,
+              'transposition-aware approximate matches');
+  const approximateCount = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('source: Approximate uses the full document index', () => assert.strictEqual(approximateCount, 13));
+  await evalIn(wc, SET_QUERY('padding BTru'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 13,
+              'reversed terms within each source line');
+  const reversedCount = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('source: reversed query terms match within one line', () => assert.strictEqual(reversedCount, 13));
+  await evalIn(wc, SET_QUERY('BTru BTru'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 0,
+              'repeated terms require separate occurrences');
+  const repeatedCount = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('source: repeated terms require separate occurrences', () => assert.strictEqual(repeatedCount, 0));
+
+  await evalIn(wc, mode('fzf'));
+  // B, r and e sit at separate offsets in BTrue, so CodeMirror cannot merge
+  // adjacent decorations into a single DOM span.
+  await evalIn(wc, SET_QUERY('Bre'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 13,
+              'FZF subsequence matches');
+  await until(wc, `document.querySelectorAll('.vv-source .vv-cm-find-current').length`,
+              (value) => value >= 3, 'FZF character decorations settle');
+  const highlighted = await evalIn(wc,
+    `document.querySelectorAll('.vv-source .vv-cm-find-current').length`);
+  check('source: FZF highlights matched characters', () => {
+    assert.ok(highlighted >= 3, `only ${highlighted} FZF character decorations`);
+  });
+  const indexesAfter = await evalIn(wc, `${VVFIND}.flexIndexes`);
+  check('source: Approximate and FZF reuse one libdictenstein index', () => {
+    assert.strictEqual(indexesAfter - indexesBefore, 1);
+  });
+  await sendChord(win, 'F', ['control']);
+  await until(wc, FIND_OPEN, (value) => value === false, 'source find closes');
+}
+
+async function originalSourceRepro(win, check) {
+  const file = process.env.VV_FIND_REPRO_PATH;
+  if (!file) return;
+  assert.ok(fs.existsSync(file), `missing VV_FIND_REPRO_PATH: ${file}`);
+  const wc = win.webContents;
+  await open(wc, file);
+  await until(wc, `Boolean(document.querySelector('.vv-source .cm-editor'))`,
+              (value) => value === true, 'original Rholang fixture mounts');
+  await sendChord(win, 'F', ['control']);
+  await openFindOrForce(win, 'original Rholang find bar opens');
+  await evalIn(wc, SET_QUERY('BTrue'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 13,
+              'all BTrue occurrences in the original Rholang fixture');
+  const count = await evalIn(wc, `window.__vvdb().ui.find.count`);
+  check('original Rholang fixture: BTrue finds all 13 document occurrences', () => {
+    assert.strictEqual(count, 13);
+  });
+  await sendChord(win, 'F', ['control']);
+  await until(wc, FIND_OPEN, (value) => value === false, 'original Rholang find closes');
+}
+
+async function flexibleDomScenario(win, check) {
+  const wc = win.webContents;
+  console.log('\n=== rendered-document flexible find ===');
+  await open(wc, MD);
+  await until(wc, `Boolean(document.querySelector('.markdown-body h1'))`,
+              (value) => value === true, 'Markdown document mounts');
+  await sendChord(win, 'F', ['control']);
+  await openFindOrForce(win, 'Markdown flexible find opens');
+  await evalIn(wc, `(() => { const select = document.querySelector('.vv-find-mode');
+    select.value = 'approximate'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await evalIn(wc, SET_QUERY('needl phrase'));
+  await until(wc, `window.__vvdb().ui.find.count`, (value) => value === 1,
+              'both approximate terms occur in one rendered block');
+  const approximate = await evalIn(wc, VVFIND);
+  check('rendered document: Approximate groups two terms into one block result', () => {
+    assert.strictEqual(approximate.count, 1);
+    assert.strictEqual(approximate.painted, 2);
+  });
+  await evalIn(wc, `(() => { const select = document.querySelector('.vv-find-mode');
+    select.value = 'fzf'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await evalIn(wc, SET_QUERY('ndl phr'));
+  await until(wc, `${VVFIND}.query`, (value) => value === 'ndl phr',
+              'FZF terms occur in one rendered block');
+  const fzf = await evalIn(wc, VVFIND);
+  check('rendered document: FZF maps character highlights through DOM nodes', () => {
+    assert.strictEqual(fzf.count, 1);
+    assert.ok(fzf.painted >= 6, `only ${fzf.painted} FZF character highlights`);
+  });
+  await sendChord(win, 'F', ['control']);
+  await until(wc, FIND_OPEN, (value) => value === false, 'Markdown flexible find closes');
+}
+
 // ---- typist latency (ADR-0033, docs/scientific/10) --------------------------------------------------
 //
 // The two defects this gate exists to catch, restated as the properties they violate:
@@ -671,6 +808,20 @@ async function run() {
     catch (err) { failed.push({ name, err }); console.log(`  ✗ ${name}\n      ${err.message}`); }
   };
 
+  if (process.env.VV_FIND_SOURCE_ONLY === '1') {
+    await sourceFindScenario(win, check);
+    await originalSourceRepro(win, check);
+    console.log(`find-source-e2e: ${passed.length} passed, ${failed.length} failed`);
+    if (failed.length) throw new Error(failed.map(({ name, err }) => `${name}: ${err.message}`).join('\n'));
+    return;
+  }
+  if (process.env.VV_FIND_FLEX_DOM_ONLY === '1') {
+    await flexibleDomScenario(win, check);
+    console.log(`find-flex-dom-e2e: ${passed.length} passed, ${failed.length} failed`);
+    if (failed.length) throw new Error(failed.map(({ name, err }) => `${name}: ${err.message}`).join('\n'));
+    return;
+  }
+
   const MD_READY = `Boolean(document.querySelector('.markdown-body h1'))`;
   const PDF_READY = `Boolean(document.querySelector('.vv-pdf-doc canvas.vv-pdf-canvas'))`;
 
@@ -694,6 +845,9 @@ async function run() {
   // "quick brown" is emitted as two separate Tj operators, so pdf.js renders it as two <span>s
   await correctnessScenario(win, { file: PDF, kind: 'pdf', check, ready: PDF_READY,
                                    phrase: 'quick brown', other: 'page' });
+  await sourceFindScenario(win, check);
+  await originalSourceRepro(win, check);
+  await flexibleDomScenario(win, check);
 
   // ---- text that exists ONLY in MathJax's hidden screen-reader duplicate must not be found ----------
   await open(wc, MD);
@@ -757,6 +911,8 @@ async function run() {
   await open(wc, path.join(ROOT, 'README.md'));
   await until(wc, `(() => { const p = window.__vvdb().ui.projects; return Boolean(p && p.length); })()`,
               (v) => v === true, 'the git tree loads');
+  await evalIn(wc, `(() => { const files = document.querySelector('[data-vv-rail="files"]');
+    if (files) files.click(); return Boolean(files); })()`);
   await until(wc, `Boolean(document.querySelector('.vv-tree-filter'))`, (v) => v === true, 'tree filter mounts');
   await sleep(500);
   latency.tree = await typistCheck(win, { label: 'file-tree filter', selector: '.vv-tree-filter',

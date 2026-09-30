@@ -19,6 +19,7 @@ target/
 dist/
 resources/public/js/cljs-runtime/
 resources/public/js/main.js
+resources/public/js/find-worker.js
 resources/public/js/manifest.edn
 # the lazily-loaded renderer code-split chunks (@codemirror source-view, @mathjax math-engine,
 # unified-latex+uniorg heavy-engine) + their module-loader manifest

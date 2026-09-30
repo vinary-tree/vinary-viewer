@@ -1,0 +1,9 @@
+{
+  "javascript-runtime": { "repo": "javascript-runtime", "revision": "bb4e82c21f1b13bf3e7f3d696c23b6aa7a2b07a3" },
+  "duallity": { "repo": "duallity", "local": "duallity-binding-integration", "revision": "6ef3d8ce051f229fca79e6ff5074a8c9e0f370c5" },
+  "lling-llang": { "repo": "lling-llang", "local": "lling-llang-vco-integration", "revision": "b5aecddcd4e56a97446cc256f009c47c2b155299" },
+  "libdictenstein": { "repo": "libdictenstein", "revision": "e50c762924513f30f19276b06a01ef4107c2f10f" },
+  "liblevenshtein-rust": { "repo": "liblevenshtein-rust", "revision": "919c99352b74c0ab0ba8cbf45540fec982e7b7a4" },
+  "vinary-tree-interop": { "repo": "vinary-tree-interop", "revision": "2e087ab4ff1c822ecda7f652408105fd04da8683" },
+  "llattice": { "repo": "llattice", "revision": "c2005a4989d16a0b6d15f2993d6c315e97f938d4" }
+}

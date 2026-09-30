@@ -71,6 +71,18 @@ stable actions available across the current UI include:
 | Collapse/expand all diff files | Vim `z M` / `z R` (the fold idiom; no-ops outside a diff). Also View ▸ Collapse All Files (label flips to Expand All Files) and the palette commands **Collapse/Expand all diff files**. |
 | Toggle git blame | `Ctrl+Shift+G` in Standard (`:git/blame-toggle`; self-gates — a no-op without a local source view). The chord is unbound in Vim/Emacs; every set reaches it via the palette's **Toggle git blame**. |
 
+The find bar offers Exact, Approximate, and FZF modes. Exact searches the full
+document for the entered phrase, including offscreen source lines. In the other
+two modes, space-separated terms can appear in any order within one rendered
+block or source line; the counter advances by block or line. Approximate covers
+spelling edits and adjacent swaps. Preferences can also enable English
+sound-alike matches in prose. FZF highlights the characters it matched.
+
+For a later search review: libdictenstein vocabulary term IDs could index
+document n-grams in another dictionary, and lling-llang could compose that
+index with spelling correction. Measure the extra index against the current
+block-posting approach before adding it.
+
 Use the visual editor for the authoritative active binding list; it reads the
 same registry the resolver uses.
 

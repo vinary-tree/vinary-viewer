@@ -54,6 +54,7 @@
             "s" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='s']")
             "g" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='g']")
             "t" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='t']")
+            "h" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='h']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
       (access/consume! e))))
@@ -83,4 +84,16 @@
          (boolean (:code-ligatures? s)) access-active?]
         [:div.vv-pref-section "Documents"]
         [check-field "Stream large documents (progressive rendering)" "t" :stream?
-         (stream-flag/flag-on? (:stream? s)) access-active?]]])))
+         (stream-flag/flag-on? (:stream? s)) access-active?]
+        [:div.vv-pref-section "Find"]
+        [:div.vv-pref-row
+         [:label.vv-pref-label {:for "vv-find-default-mode"} "Default find mode"]
+         [:select.vv-pref-input {:id "vv-find-default-mode"
+                                 :value (name (or (:find-default-mode s) :exact))
+                                 :on-change #(rf/dispatch [:settings/set :find-default-mode
+                                                           (keyword (.. % -target -value))])}
+          [:option {:value "exact"} "Exact"]
+          [:option {:value "approximate"} "Approximate"]
+          [:option {:value "fzf"} "FZF"]]]
+        [check-field "English sound-alike matches in prose (Approximate)" "h" :find-phonetic?
+         (boolean (:find-phonetic? s)) access-active?]]])))
