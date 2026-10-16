@@ -1871,6 +1871,51 @@ async function main() {
     console.log(`[ok] PDF view state is never deferred by a pending refresh (invert applied while one was pending); a version that raced the first mount is shown (mount landed ${race[1].framesUntilPages} frames after it)`);
   }
 
+  // ── the ORDERING GUARD (ADR-0046; vinary.app.content-guard): main numbers every read of a path (`seq`), and a
+  // window drops a payload whose number is not newer than the one its document applied — an older read (or an
+  // older read's failure) can never cover a newer version. Payloads main did not number (a web-linked PDF, this
+  // stub's own replies) always apply.
+  {
+    const guardPath = path.join(ROOT, 'test', 'fixtures', 'ordering-guard.txt');   // virtual path; text below
+    state.contentByPath.set(guardPath, { path: guardPath, kind: 'text', text: 'guard-unnumbered', stamp: Date.now() });
+    const shown = `(document.querySelector('.vv-content .markdown-body')?.textContent || '')`;
+    await evalIn(win, `window.__vvopen(${JSON.stringify(guardPath)})`);
+    await waitCalm(win, `${shown}.includes('guard-unnumbered')`, 'the guard document opens (unnumbered)', 8000);
+    // a deterministic barrier: main → renderer IPC is one ordered pipe and re-frame runs events FIFO, so once a
+    // settings marker sent AFTER a payload is in app-db, that payload's event has been handled; two frames later
+    // any render it caused has painted
+    let marker = 0;
+    const barrier = async () => {
+      marker += 1;
+      win.webContents.send('vv:settings', `{:smoke-barrier ${marker}}`);
+      await waitCalm(win, `window.__vvdb().ui.settings['smoke-barrier'] === ${marker}`, `barrier ${marker}`, 4000);
+      await evalIn(win, `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`);
+    };
+    const send = (seq, text) => win.webContents.send('vv:content', { path: guardPath, kind: 'text', text, seq, stamp: Date.now() });
+    send(7, 'guard-seven');
+    await waitCalm(win, `${shown}.includes('guard-seven')`, 'read 7 applies', 8000);
+    send(6, 'guard-six');
+    await barrier();
+    assert.strictEqual(await evalIn(win, `${shown}.includes('guard-seven') && !${shown}.includes('guard-six')`), true,
+      'an OLDER read (6 after 7) is dropped');
+    win.webContents.send('vv:error', { path: guardPath, message: 'an older read failed', seq: 5 });
+    await barrier();
+    assert.deepStrictEqual(await evalIn(win, `({ seven: ${shown}.includes('guard-seven'),
+      error: Boolean(document.querySelector('.vv-content .vv-error')) })`), { seven: true, error: false },
+      'an older read\'s FAILURE (5) is dropped too — no error page over newer content');
+    send(7, 'guard-seven-again');
+    await barrier();
+    assert.strictEqual(await evalIn(win, `${shown}.includes('guard-seven') && !${shown}.includes('again')`), true,
+      'the same read delivered twice applies once');
+    send(8, 'guard-eight');
+    await waitCalm(win, `${shown}.includes('guard-eight')`, 'a newer read (8) applies', 8000);
+    win.webContents.send('vv:content', { path: guardPath, kind: 'text', text: 'guard-unnumbered-again', stamp: Date.now() });
+    await waitCalm(win, `${shown}.includes('guard-unnumbered-again')`, 'an unnumbered payload always applies', 8000);
+    send(9, 'guard-nine');
+    await waitCalm(win, `${shown}.includes('guard-nine')`, 'and numbering resumes after it', 8000);
+    console.log('[ok] ordering guard: an older read, an older failure and a duplicate are dropped; newer and unnumbered payloads apply');
+  }
+
   // ── slide-deck DETECTION on prepare (ADR-0045): every PDF is classified from its own evidence, in the
   //    renderer, before the first mount — exposed as .vv-pdf-doc[data-deck] (DOM-level, release-safe) ──
   {

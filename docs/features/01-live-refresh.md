@@ -107,7 +107,8 @@ Current responsibilities:
 
 | Step | Owner | Behavior |
 |------|-------|----------|
-| Classify/read/send | Main | Sends `{path, kind, text?, stamp}` or a read error. |
+| Classify/read/send | Main | Delivers `{path, kind, text?, stamp, seq}` — or a read error with its `seq` — to every window that needs it (one read per path, §3). |
+| Order | Renderer | Drops a payload whose read number `seq` is not newer than the one the document applied (`:doc/seq`, `vinary.app.content-guard`) — an older read, or an older read's failure, can never cover newer content. |
 | Cache content | Renderer/DataScript | Upserts `:doc/kind`, `:doc/text`, `:doc/stamp`, and simple HTML for text. |
 | Render Markdown | Renderer effect | Runs async Markdown render with the incoming stamp. |
 | Commit render | Renderer/DataScript | Writes `:doc/html`, `:doc/toc`, and `:doc/assets` only if the stamp still matches. |

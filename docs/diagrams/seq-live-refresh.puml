@@ -39,7 +39,8 @@ deactivate BR
 
 == transact (DataScript content cache) ==
 activate RF
-RF -> RF : handler (PURE): build base via cond->\n(omit :doc/text if nil; retract stale :doc/error)
+RF -> RF : ordering guard: seq n ≤ the applied :doc/seq → drop it WHOLE\n(content-guard; an unnumbered payload always applies)
+RF -> RF : handler (PURE): build base via cond->\n(omit :doc/text if nil; retract stale :doc/error; :doc/seq n)
 RF -> DS : fx **:ds/transact**\n{:doc/path :doc/kind :doc/text :doc/stamp}
 activate DS
 DS -[#B1951D]-> RF : tx-report → [:ds/changed]\n(:ds/rev inc)  — subs :tabs/:doc/active recompute

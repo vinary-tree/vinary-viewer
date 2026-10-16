@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [goog.string :as gstr]
             [cljs.reader :as reader]
+            [vinary.app.content-guard :as content-guard]
             [vinary.app.db :as db]
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
@@ -570,138 +571,155 @@
       (assoc-in db [:ui :recent :web-history] hist))
     db))
 
+(defn read-stale?
+  "Is a payload for `path` with read number `read-n` stale against the read the document last applied in DataScript
+   value `snap` (:doc/seq)? (vinary.app.content-guard/stale?)"
+  [snap path read-n]
+  (content-guard/stale? read-n (when path (ds/doc-attr snap path :doc/seq))))
+
+;; The effects of an APPLIED vv:content payload — see :content/received, which first drops a read older than
+;; the one the document already applied (content-guard). `read-n` is the payload's read number (never bound as
+;; `seq`: this body calls cljs.core/seq).
+(defn- content-received-fx
+  [db {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
+              sourceable paged siblings language stdin baseDir git] read-n :seq :as payload}]
+  (let [snap    (ds/snapshot)
+        eid     (ds/eid-for-path snap path)
+        cur-err (and eid (ds/doc-attr snap path :doc/error))
+        ;; :doc/language must NOT linger: Settings ▸ File Type ▸ Source (auto) clears the override
+        ;; main-side, and the re-send then carries no :language — retract the stale attr (an upsert
+        ;; only overwrites present keys) or the grammar pick would stay pinned to the old language.
+        cur-lang (and eid (ds/doc-attr snap path :doc/language))
+        ;; :doc/git likewise must not linger: only a payload that carries the commit-diff facts keeps
+        ;; it (a doc re-typed away from "diff", or re-sent without its override, must drop the stale
+        ;; mapping or the derived open-commit highlight would mark the wrong rows; ADR-0042).
+        cur-git  (and eid (ds/doc-attr snap path :doc/git))
+        stamp   (if (some? stamp) stamp (js/Date.now))
+        ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
+        ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
+        ;; (ir-stream-body drives it from the file path). Small docs stay on the batch path (byte-identical).
+        stream? (stream-flag/enabled? kind (:size meta) (get-in db [:ui :settings :stream?]))
+        ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
+        ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
+        ;; directory carries its :doc/entries listing instead.
+        attrs   (cond-> {:doc/kind kind :doc/stamp stamp :doc/streaming? (boolean stream?)}
+                  (number? read-n)      (assoc :doc/seq read-n)   ; the applied read (content-guard)
+                  text                  (assoc :doc/text text)
+                  (and html (not ir-office?)) (assoc :doc/html html)   ; office-IR fills :doc/html via :office/render
+                  (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
+                  sheets                (assoc :doc/sheets (vec sheets))
+                  page                  (assoc :doc/page page)
+                  meta                  (assoc :doc/meta meta)
+                  dataUrl               (assoc :doc/data-url dataUrl)
+                  (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
+                  (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
+                  siblings              (assoc :doc/siblings (vec siblings))   ; the collocated document group (Preview/Source combo)
+                  language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
+                  baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
+                  (= kind "git-graph")  (assoc :doc/git-root (:root git))   ; the Commit Graph's repo (ADR-0040)
+                  ;; a commit-diff spill's {root from to range} facts → the derived Commits-panel
+                  ;; "open commit" highlight (ADR-0042); wire `range` (no ?) becomes :range?
+                  (and (= kind "diff") git)
+                  (assoc :doc/git {:root   (:root git)
+                                   :from   (:from git)
+                                   :to     (:to git)
+                                   :range? (boolean (:range git))})
+                  (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
+                  ;; Resolution is stamp-scoped and asynchronous. Clear the previous diff's targets immediately
+                  ;; so a live refresh cannot leave a now-missing header path clickable while main re-checks it.
+                  (= kind "diff")       (assoc :doc/diff-targets {})
+                  ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
+                  ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
+                  (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex") (not= kind "diff"))
+                  (assoc :doc/toc [] :doc/assets []))
+        ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
+        ;; does not resolve under :advanced compilation.
+        base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
+        tx      (cond-> [base]
+                  cur-err (conj [:db/retract eid :doc/error cur-err])
+                  (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang])
+                  (and cur-git (or (not= kind "diff") (nil? git)))
+                  (conj [:db/retract eid :doc/git cur-git]))
+        ;; the CLI/initial file arrives before any tab exists → it opens the first tab
+        opened-first-tab? (empty? (nav/tabs db))
+        db'     (if opened-first-tab? (nav/add-tab db path) db)
+        ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
+        ;; background live-refresh — so the MRU + trail track where the user actually went. A piped-stdin
+        ;; document (payload :stdin) never enters the MRU: its spill path dies with the tab.
+        active? (= path (nav/active-path db'))
+        ;; …nor does a Commit Graph virtual uri: Open Recent must offer real, reopenable documents
+        db'     (if (and active? (not stdin) (not= kind "git-graph"))
+                  (record-recent db' path (#{"directory" "archive"} kind))
+                  db')
+        ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
+        ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
+        ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
+        ;; Scoped to the OWNING TABS rather than the active one (ADR-0044): a group doc opened into a
+        ;; BACKGROUND tab must get its default facet now, or activating it later would show a facet whose
+        ;; file was never loaded (nothing re-resolves it on mount).
+        facet-tab-ids (when (seq siblings)
+                        (into [] (keep (fn [t] (when (and (nil? (:facet t))
+                                                          (= path (uri/file-path (:uri t))))
+                                                 (:id t))))
+                              (nav/tabs db')))
+        fresh-facet (when (seq facet-tab-ids)
+                      (facet/default-facet (vec siblings) path
+                                           (get-in db' [:ui :settings :collocated-default] :pdf)))
+        db'     (if fresh-facet
+                  (reduce (fn [d id] (nav/set-facet d id (:path fresh-facet) (:type fresh-facet)))
+                          db' facet-tab-ids)
+                  db')]
+    (cond->
+      (with-retention
+       {:db db'
+        :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
+                    [:ds/transact tx]]
+             ;; the Commit Graph reads [:ui :commits] — ensure its repo's branches + first page (R9)
+             (= kind "git-graph") (conj [:dispatch [:git-graph/data-ensure (:root git)]])
+             ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx.
+             ;; :base-dir (a piped document's invoking cwd, ADR-0036) overrides the path-derived asset base
+             ;; so `cat README.md | vv -t md` resolves relative images against the directory it was piped from.
+             (and (= kind "markdown") (not stream?))
+             (conj [:markdown/render {:text text :path path :stamp stamp :base-dir baseDir
+                                      :on-done [:content/rendered path stamp]}])
+             ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
+             ir-office?          (conj [:office/render {:html html :path path
+                                                        :on-done [:content/rendered path stamp]}])
+             ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown.
+             ;; A streaming doc is driven by ir-stream-body from the file path → skip the batch render fx.
+             (and (= kind "org") (not stream?))
+             (conj [:org/render {:text text :path path :stamp stamp :base-dir baseDir
+                                 :on-done [:content/rendered path stamp]}])
+             ;; latex (.tex) → the common-IR render via unified-latex (HTML + heading TOC + assets), like org.
+             ;; LaTeX always batch-renders (not in stream-flag/streamable-kinds), but keep the guard for symmetry.
+             (and (= kind "latex") (not stream?))
+             (conj [:latex/render {:text text :path path :stamp stamp :base-dir baseDir
+                                   :on-done [:content/rendered path stamp]}])
+             ;; diff (.diff/.patch) → the unified colored HTML + per-file Contents outline (ir.frontend.diff).
+             (= kind "diff")
+             (conj [:diff/render {:text text :path path :stamp stamp
+                                  :on-done [:content/rendered path stamp]}])
+             ;; a live-refresh of a diff whose side-by-side view was already built → rebuild it against the new text
+             (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
+             (conj [:diff/build-split {:path path :text text :stamp stamp}])
+             ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
+             ;; …as the CANDIDATE version: the pdf-view promotes it once pdf.js opens it (keep-last-good)
+             (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes :stamp stamp}])
+             ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
+             ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
+             (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))
+             (conj [:facet/ensure-loaded {:path (:path fresh-facet)}])
+              active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
+       db')
+      opened-first-tab? (with-active-tab-focus db'))))
+
+;; the ordering guard (ADR-0046): a read not newer than the one this document last applied is dropped WHOLE — no
+;; DataScript write, no render, no byte-cache candidate — so an older version can never cover a newer one
 (rf/reg-event-fx
  :content/received
- (fn [{:keys [db]} [_ {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-                            sourceable paged siblings language stdin baseDir git] :as payload}]]
-   (let [snap    (ds/snapshot)
-         eid     (ds/eid-for-path snap path)
-         cur-err (and eid (ds/doc-attr snap path :doc/error))
-         ;; :doc/language must NOT linger: Settings ▸ File Type ▸ Source (auto) clears the override
-         ;; main-side, and the re-send then carries no :language — retract the stale attr (an upsert
-         ;; only overwrites present keys) or the grammar pick would stay pinned to the old language.
-         cur-lang (and eid (ds/doc-attr snap path :doc/language))
-         ;; :doc/git likewise must not linger: only a payload that carries the commit-diff facts keeps
-         ;; it (a doc re-typed away from "diff", or re-sent without its override, must drop the stale
-         ;; mapping or the derived open-commit highlight would mark the wrong rows; ADR-0042).
-         cur-git  (and eid (ds/doc-attr snap path :doc/git))
-         stamp   (if (some? stamp) stamp (js/Date.now))
-         ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
-         ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
-         ;; (ir-stream-body drives it from the file path). Small docs stay on the batch path (byte-identical).
-         stream? (stream-flag/enabled? kind (:size meta) (get-in db [:ui :settings :stream?]))
-         ;; DataScript is the content cache keyed by :doc/path; absence = "no value" (it rejects nil).
-         ;; Pre-rendered html goes straight in; markdown's html arrives async (:content/rendered); a
-         ;; directory carries its :doc/entries listing instead.
-         attrs   (cond-> {:doc/kind kind :doc/stamp stamp :doc/streaming? (boolean stream?)}
-                   text                  (assoc :doc/text text)
-                   (and html (not ir-office?)) (assoc :doc/html html)   ; office-IR fills :doc/html via :office/render
-                   (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
-                   sheets                (assoc :doc/sheets (vec sheets))
-                   page                  (assoc :doc/page page)
-                   meta                  (assoc :doc/meta meta)
-                   dataUrl               (assoc :doc/data-url dataUrl)
-                   (contains? payload :sourceable) (assoc :doc/sourceable? (boolean sourceable))
-                   (contains? payload :paged)      (assoc :doc/paged? (boolean paged))
-                   siblings              (assoc :doc/siblings (vec siblings))   ; the collocated document group (Preview/Source combo)
-                   language              (assoc :doc/language language)  ; explicit source grammar (ADR-0036)
-                   baseDir               (assoc :doc/base-dir baseDir)   ; a piped doc's invoking cwd (asset base)
-                   (= kind "git-graph")  (assoc :doc/git-root (:root git))   ; the Commit Graph's repo (ADR-0040)
-                   ;; a commit-diff spill's {root from to range} facts → the derived Commits-panel
-                   ;; "open commit" highlight (ADR-0042); wire `range` (no ?) becomes :range?
-                   (and (= kind "diff") git)
-                   (assoc :doc/git {:root   (:root git)
-                                    :from   (:from git)
-                                    :to     (:to git)
-                                    :range? (boolean (:range git))})
-                   (= kind "text")       (assoc :doc/html (plain-html text))   ; plain text
-                   ;; Resolution is stamp-scoped and asynchronous. Clear the previous diff's targets immediately
-                   ;; so a live refresh cannot leave a now-missing header path clickable while main re-checks it.
-                   (= kind "diff")       (assoc :doc/diff-targets {})
-                   ;; markdown/office/org/latex/diff derive their :doc/toc + :doc/assets from the IR render (arriving
-                   ;; async via :content/rendered), so DON'T reset those here; every other kind clears them.
-                   (and (not= kind "markdown") (not ir-office?) (not= kind "org") (not= kind "latex") (not= kind "diff"))
-                   (assoc :doc/toc [] :doc/assets []))
-         ;; update by :db/id when cached, create by :doc/path otherwise — the :doc/path upsert/lookup-ref
-         ;; does not resolve under :advanced compilation.
-         base    (if eid (assoc attrs :db/id eid) (assoc attrs :doc/path path))
-         tx      (cond-> [base]
-                   cur-err (conj [:db/retract eid :doc/error cur-err])
-                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang])
-                   (and cur-git (or (not= kind "diff") (nil? git)))
-                   (conj [:db/retract eid :doc/git cur-git]))
-         ;; the CLI/initial file arrives before any tab exists → it opens the first tab
-         opened-first-tab? (empty? (nav/tabs db))
-         db'     (if opened-first-tab? (nav/add-tab db path) db)
-         ;; record recent navigation only for the ACTIVE tab's path (a forward nav / revisit), never a
-         ;; background live-refresh — so the MRU + trail track where the user actually went. A piped-stdin
-         ;; document (payload :stdin) never enters the MRU: its spill path dies with the tab.
-         active? (= path (nav/active-path db'))
-         ;; …nor does a Commit Graph virtual uri: Open Recent must offer real, reopenable documents
-         db'     (if (and active? (not stdin) (not= kind "git-graph"))
-                   (record-recent db' path (#{"directory" "archive"} kind))
-                   db')
-         ;; on a fresh open of a group doc (no stored facet yet), resolve + store its default view facet so the
-         ;; pane shows it and retention keeps its file; the fx below loads that file when it isn't the one received
-         ;; (the PDF-first default). Computed from the PAYLOAD group — the :doc/siblings tx is not yet applied.
-         ;; Scoped to the OWNING TABS rather than the active one (ADR-0044): a group doc opened into a
-         ;; BACKGROUND tab must get its default facet now, or activating it later would show a facet whose
-         ;; file was never loaded (nothing re-resolves it on mount).
-         facet-tab-ids (when (seq siblings)
-                         (into [] (keep (fn [t] (when (and (nil? (:facet t))
-                                                           (= path (uri/file-path (:uri t))))
-                                                  (:id t))))
-                               (nav/tabs db')))
-         fresh-facet (when (seq facet-tab-ids)
-                       (facet/default-facet (vec siblings) path
-                                            (get-in db' [:ui :settings :collocated-default] :pdf)))
-         db'     (if fresh-facet
-                   (reduce (fn [d id] (nav/set-facet d id (:path fresh-facet) (:type fresh-facet)))
-                           db' facet-tab-ids)
-                   db')]
-     (cond->
-       (with-retention
-        {:db db'
-         :fx (cond-> [[:render-cache/invalidate {:path path :stamp stamp}]
-                     [:ds/transact tx]]
-              ;; the Commit Graph reads [:ui :commits] — ensure its repo's branches + first page (R9)
-              (= kind "git-graph") (conj [:dispatch [:git-graph/data-ensure (:root git)]])
-              ;; a streaming doc is driven by ir-stream-body from the file path — skip the batch render fx.
-              ;; :base-dir (a piped document's invoking cwd, ADR-0036) overrides the path-derived asset base
-              ;; so `cat README.md | vv -t md` resolves relative images against the directory it was piped from.
-              (and (= kind "markdown") (not stream?))
-              (conj [:markdown/render {:text text :path path :stamp stamp :base-dir baseDir
-                                       :on-done [:content/rendered path stamp]}])
-              ;; office (docx/ODF) → the common-IR render (HTML + heading TOC) when :vv/ir is on
-              ir-office?          (conj [:office/render {:html html :path path
-                                                         :on-done [:content/rendered path stamp]}])
-              ;; org (.org) → the common-IR render via uniorg (HTML + heading TOC + assets), like markdown.
-              ;; A streaming doc is driven by ir-stream-body from the file path → skip the batch render fx.
-              (and (= kind "org") (not stream?))
-              (conj [:org/render {:text text :path path :stamp stamp :base-dir baseDir
-                                  :on-done [:content/rendered path stamp]}])
-              ;; latex (.tex) → the common-IR render via unified-latex (HTML + heading TOC + assets), like org.
-              ;; LaTeX always batch-renders (not in stream-flag/streamable-kinds), but keep the guard for symmetry.
-              (and (= kind "latex") (not stream?))
-              (conj [:latex/render {:text text :path path :stamp stamp :base-dir baseDir
-                                    :on-done [:content/rendered path stamp]}])
-              ;; diff (.diff/.patch) → the unified colored HTML + per-file Contents outline (ir.frontend.diff).
-              (= kind "diff")
-              (conj [:diff/render {:text text :path path :stamp stamp
-                                   :on-done [:content/rendered path stamp]}])
-              ;; a live-refresh of a diff whose side-by-side view was already built → rebuild it against the new text
-              (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
-              (conj [:diff/build-split {:path path :text text :stamp stamp}])
-              ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
-              ;; …as the CANDIDATE version: the pdf-view promotes it once pdf.js opens it (keep-last-good)
-              (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes :stamp stamp}])
-              ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
-              ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
-              (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))
-              (conj [:facet/ensure-loaded {:path (:path fresh-facet)}])
-               active? (conj [:vv/save-recent (pr-str (get-in db' [:ui :recent]))]))}
-        db')
-       opened-first-tab? (with-active-tab-focus db')))))
+ (fn [{:keys [db]} [_ {:keys [path] read-n :seq :as payload}]]
+   (when-not (read-stale? (ds/snapshot) path read-n)
+     (content-received-fx db payload))))
 
 (rf/reg-event-fx
  :content/rendered
@@ -788,30 +806,37 @@
        {:fx [[:ds/transact [[:db/add eid :doc/source-toc (vec (or toc []))]]]]}))))
 
 (defn content-error-tx
-  "Create/update a document error transaction for path, even if no content entity exists yet."
-  [snap path message stamp]
-  (when path
-    (let [message (or message "Unknown content error")]
-      (if-let [eid (ds/eid-for-path snap path)]
-        [[:db/add eid :doc/error message]
-         [:db/add eid :doc/stamp stamp]]
-        [{:doc/path path
-          :doc/kind "text"
-          :doc/error message
-          :doc/stamp stamp}]))))
+  "Create/update a document error transaction for path, even if no content entity exists yet. `read-n` — the
+   failed read's number, when main sent one — is recorded as the applied :doc/seq (content-guard)."
+  ([snap path message stamp] (content-error-tx snap path message stamp nil))
+  ([snap path message stamp read-n]
+   (when path
+     (let [message (or message "Unknown content error")]
+       (if-let [eid (ds/eid-for-path snap path)]
+         (cond-> [[:db/add eid :doc/error message]
+                  [:db/add eid :doc/stamp stamp]]
+           (number? read-n) (conj [:db/add eid :doc/seq read-n]))
+         [(cond-> {:doc/path path
+                   :doc/kind "text"
+                   :doc/error message
+                   :doc/stamp stamp}
+            (number? read-n) (assoc :doc/seq read-n))])))))
 
+;; a failed read is ordered with the content reads of its path: one not newer than the read the document applied
+;; is dropped (content-guard) — an old failure must never replace newer content
 (rf/reg-event-fx
  :content/error
- (fn [{:keys [db]} [_ {:keys [path message stamp]}]]
-   (let [tx                (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)))
-         opened-first-tab? (and path (empty? (nav/tabs db)))
-         db'               (if opened-first-tab? (nav/add-tab db path) db)]
-     (cond->
-       (with-retention
-        (cond-> {:db db'}
-          (seq tx) (assoc :fx [[:ds/transact tx]]))
-        db')
-       opened-first-tab? (with-active-tab-focus db')))))
+ (fn [{:keys [db]} [_ {:keys [path message stamp] read-n :seq}]]
+   (when-not (read-stale? (ds/snapshot) path read-n)
+     (let [tx                (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)) read-n)
+           opened-first-tab? (and path (empty? (nav/tabs db)))
+           db'               (if opened-first-tab? (nav/add-tab db path) db)]
+       (cond->
+         (with-retention
+          (cond-> {:db db'}
+            (seq tx) (assoc :fx [[:ds/transact tx]]))
+          db')
+         opened-first-tab? (with-active-tab-focus db'))))))
 
 ;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
 ;; scrolls itself, so http never requests a content-pane restore.
