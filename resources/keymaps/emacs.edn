@@ -65,6 +65,8 @@
    "."         :slides/black
    "w"         :slides/white               ; while presenting: blank to white
    ","         :slides/white
+   "tab"       :slides/overview            ; the overview grid of frames (pdfpc's Tab); Tab / o / Escape close it
+   "o"         :slides/overview
    "0" {:id :slides/digit :args [0]} "1" {:id :slides/digit :args [1]} "2" {:id :slides/digit :args [2]}
    "3" {:id :slides/digit :args [3]} "4" {:id :slides/digit :args [4]} "5" {:id :slides/digit :args [5]}
    "6" {:id :slides/digit :args [6]} "7" {:id :slides/digit :args [7]} "8" {:id :slides/digit :args [8]}

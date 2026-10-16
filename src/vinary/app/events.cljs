@@ -2085,6 +2085,35 @@
       (slides-stop-fx db' {:fullscreen-gone? true})
       {:db db'})))
 
+;; ---- the overview grid (ADR-0045 §Overview) -------------------------------------------------------------
+(defn slides-overview-close-fx
+  "Effects of closing the overview: forget it and give the keyboard back to the slides. nil when it is closed."
+  [db]
+  (when (slides/overview? db)
+    {:db (update-in db [:ui :slides] dissoc :overview?)
+     :fx [[:dom/focus :content]]}))
+
+(defn slides-overview-fx
+  "Effects of the overview key (Tab / o) or menu item: open the grid over a PDF in the slides layout, or close it
+   when it is open. `:open?` (Go to Slide…) only ever opens. A no-op without a slides view."
+  [db {:keys [open?]}]
+  (cond
+    (slides/overview? db)                          (when-not open? (slides-overview-close-fx db))
+    (= :slides (get-in db [:ui :slides :layout])) {:db (-> db (assoc-in [:ui :slides :overview?] true)
+                                                           slides/clear-digits)}
+    :else                                          nil))
+
+(defn slides-overview-pick-fx
+  "Effects of opening `page` from the overview: close the grid and jump there (a JUMP — Back returns), ending a
+   blanked screen too (an explicit choice)."
+  [db page]
+  {:db (-> db (update-in [:ui :slides] dissoc :overview?) slides/clear-blank slides/clear-digits)
+   :fx [[:slides/command [:jump page]] [:dom/focus :content]]})
+
+(rf/reg-event-fx :slides/overview       (fn [{:keys [db]} [_ opts]] (slides-overview-fx db opts)))
+(rf/reg-event-fx :slides/overview-close (fn [{:keys [db]} _] (slides-overview-close-fx db)))
+(rf/reg-event-fx :slides/overview-pick  (fn [{:keys [db]} [_ page]] (slides-overview-pick-fx db page)))
+
 (rf/reg-event-fx :slides/present      (fn [{:keys [db]} [_ opts]] (slides-present-fx db (:from opts))))
 (rf/reg-event-fx :slides/stop         (fn [{:keys [db]} _] (slides-stop-fx db {})))
 (rf/reg-event-fx :slides/black        (fn [{:keys [db]} _] (slides-blank-fx db :black)))

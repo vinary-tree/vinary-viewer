@@ -48,6 +48,13 @@ Added
       over a show; switching tabs, navigating, focusing the address bar or
       leaving fullscreen yourself ends it. The window's saved size is never
       overwritten by fullscreen geometry.
+      Tab or o opens the slide OVERVIEW: a grid with one tile per frame (each
+      shown fully built), over the slides -- in a tab or during a show. Arrows,
+      PgUp/PgDn and Home/End move, digits pick a frame by the number printed on
+      it, Enter opens the frame fully built and Shift+Enter at its first
+      overlay, a click opens a tile, and Escape/Tab/o close it; opening a slide
+      is a jump, so Back returns. Thumbnails render lazily near the viewport and
+      far ones are released, so a 150-slide deck stays light.
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a

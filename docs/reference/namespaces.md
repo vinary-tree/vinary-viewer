@@ -42,7 +42,8 @@ window/view work. Renderer code never imports these namespaces.
 | `vinary.main.settings` | `settings.edn` load/save/watch: theme + fonts + view prefs. |
 | `vinary.main.recent` | `recent.edn` load/save/watch: the dir→last-child `:trail`, the `:recent-files` MRU (File ▸ Open Recent), and the `:web-history` URL MRU. |
 | `vinary.main.connections` | Persisted **non-secret** SSH connection metadata (`connections.edn`): host entries for URI/host hints. Secrets never land here (see `ssh.cljs`). |
-| `vinary.main.window` | Persisted main-window geometry (`window.edn`): position, size, maximized state, clamped to a visible display. Main-only. |
+| `vinary.main.window` | Persisted main-window geometry (`window.edn`): position, size, maximized state, clamped to a visible display; never saved while the window is fullscreen (`persistable-bounds`, ADR-0045). Main-only. |
+| `vinary.main.fullscreen` | Window-level fullscreen for slide shows (ADR-0045): `vv:set-fullscreen` / `vv:fullscreen-request` routed to the SENDER's window, the pure `decide` table (main only ever leaves a fullscreen it entered), and enter/leave reporting on `vv:fullscreen-changed`. |
 | `vinary.main.grammars` | Grammar registry (main side): decides which files are `source` (→ the read-only CodeMirror view) and pushes the user grammar + filetype registry. |
 | `vinary.main.git` | Async, strictly read-only git data layer (ADR-0039): the `vv:git-log`/`vv:git-branches`/`vv:git-open-diff` handlers, the ownership-scoped `.git` watcher behind `vv:git-watch` → `vv:git-changed`, commit-diff spills (stdin-style lifecycle + dedupe), and the boot sweep. Electron-free — the service binds its channels; argv/parsing live lower in `vinary.git.log`. |
 | `vinary.main.shell` | Menu-bar shell actions: the multi-file Open dialog, clipboard writes, reveal/open-path, open-external, app-info, quit, devtools, and app-window zoom. |
@@ -93,6 +94,8 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 | `vinary.app.nav` | Pure browser-tab + per-tab-history transforms over app-db. A tab is a view `{:id :uri :hist … :facet :facet-mru :diff-view :diff-collapsed …}` (see the [state schema §5](../architecture/04-state-schema-reference.md#5-tab-shape)). |
 | `vinary.app.uri` | URI/path normalization and local-vs-HTTP-vs-remote predicates (`file-path`, `http?`, `remote?`, `dirname`, `segments`). |
 | `vinary.app.zoom` | Pure context-aware zoom helpers (`context` → `:pdf`/`:web`/`:window`, `percent`, `presets`) shared by the zoom events and the `:view/zoom-percent` sub. |
+| `vinary.app.slides` | Pure app-db helpers for slide decks (ADR-0045): the `:slides-open-as` / fullscreen / click-advance / overview-page preferences, the document view's explicit layout, the running presentation, the EFFECTIVE layout (the engine's own rule fed the `:doc/deck` summary), and the `[:ui :slides]` mirror's UI-owned keys (`merge-report`, typed digits, blank, overview). |
+| `vinary.app.overlay` | `blocking?` — one pure answer to "does an overlay or modal own the keyboard?" (menus, context menu, hints, palette, SSH prompt, the modal dialogs); gates the slides key layer. |
 | `vinary.app.link` | One source of truth for "what does following this rendered-document link do" — classify + route a preview/link activation. |
 | `vinary.app.commits` | Pure model for the Commits surfaces (ADR-0039): panel repo derivation, the `A..B`/`A...B`/single-ref range grammar, the shared selection reducers (cursor/anchor/selected), and refresh-survival pruning of hash-keyed UI state. |
 | `vinary.app.events` | re-frame events for content, streaming, tabs, history, representation/diff switches, settings, menu, tree, TOC, find, hints, SSH, passwords, extensions, and shell commands. |
@@ -147,11 +150,12 @@ find, scroll, and the pdf.js / CodeMirror engines.
 | `vinary.renderer.figures` | Measure and size embedded local SVG/image figures (pre-DOM, no flash) + refit on font change. |
 | `vinary.renderer.latex` | LaTeX → HTML string, the reusable front-end shared by standalone `.tex` documents and embedded-in-Org LaTeX (ADR-0025). |
 | `vinary.renderer.toc` | Content-agnostic heading-offset cache + binary-search scroll-spy + TOC jump helpers (Markdown, PDF, HTML …). |
-| `vinary.renderer.scroll` | Per-navigation content-pane scroll restore (`want!`/`apply!`) and late-retry guard. |
+| `vinary.renderer.scroll` | Content-pane scroll ownership (ADR-0032): per-navigation restore (`want!`/`apply!`), confined scrolling (`confined-top`, `scroll-rect-to!`), and the **scroll delegate** (`set-delegate!`/`delegate!`) through which the slides layout takes every keymap's scroll commands (ADR-0045). |
 | `vinary.renderer.source-nav` | Bidirectional source⇄preview jump helpers — content-agnostic (any format that stamps `data-vv-source-*`). |
 | `vinary.renderer.pdf` | In-renderer pdf.js engine: worker bootstrap, canvas/text/link layers, virtualization, zoom, outline, and the `:pdf/reflow` effect (ADR-0013). |
 | `vinary.renderer.pdf-layout` | Pure, DOM-free PDF geometry/zoom/outline helpers (unit-tested). |
-| `vinary.renderer.pdf-cache` | PDF byte cache (keyed by `:doc/path`, not DataScript) + the in-page-find text-materialization hook; deliberately free of any `pdfjs-dist` require. |
+| `vinary.renderer.pdf-cache` | PDF byte cache (keyed by `:doc/path`, not DataScript) with keep-last-good candidate/promote/reject versions, the in-page-find text-materialization hook, and the slides hook (`slides-active?`, `slides-command!`, `slides-snapshot` — what the scroll delegate, effects and the overview borrow); deliberately free of any `pdfjs-dist` require. |
+| `vinary.renderer.pdf-thumbs` | Lazy, bounded thumbnails for the slide overview grid: an IntersectionObserver band (±½ viewport), a 2-at-a-time render queue into detached canvases, a per-thumbnail pixel budget, far canvases released, generation fencing — on the BORROWED document. |
 | `vinary.renderer.virtual-layout` | Pure, DOM-free vertical-stack geometry shared by the in-renderer PDF view and the streaming preview body (pre-estimated sibling spacer). |
 | `vinary.renderer.find` | CSS Custom Highlight API in-page search (`search!`/`cycle!`/`clear!`). Asynchronous and sliced: flattening and matching run under separate scheduler keys, and the flattened buffer is reused while the DOM is unchanged (ADR-0033). |
 | `vinary.renderer.input-trace` | DEV-only text-input latency tracer (`window.__vvinputtrace`): keystroke queue delay, programmatic `.value` writes that discard typed characters, and long tasks. `goog.DEBUG`-gated. |
@@ -196,6 +200,9 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.preview-navigation` | Navigation events for links activated from preview surfaces (classify link/target → the right open event). |
 | `vinary.ui.passwords` | Renderer UI for the native password-manager bridge: provider status + login picker + save prompt — **status/metadata only, never a secret**. |
 | `vinary.ui.ssh` | Renderer UI for SSH/SFTP remote files: the auth prompt (password / key passphrase / multi-prompt MFA) and the connection-error surface. The typed secret stays in the modal's local state. |
+| `vinary.ui.refresh-note` | The non-fatal live-refresh banner (ADR-0045 / ADR-0046): the last good version stays on screen; Retry / dismiss. |
+| `vinary.ui.slides-hud` | What floats over the slides layout in `.vv-content-wrap`: the "Go to 12" chip while a slide number is typed, and the black / white screen of a running show. |
+| `vinary.ui.slides-overview` | The slide overview grid (ADR-0045): a focused `[data-vv-keynav]` overlay of one tile per frame — grid keys, label digits, Enter / Shift+Enter, click — drawn by `vinary.renderer.pdf-thumbs` from the mounted view's borrowed document. |
 
 ---
 

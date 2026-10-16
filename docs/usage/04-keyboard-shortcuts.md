@@ -115,7 +115,8 @@ the slide show, in every keymap set.
 | `F5` / `Shift+F5` | start a **slide show** of the shown PDF from the first / the current slide (any PDF; `F5` again during a show goes back to the first slide) |
 | `b` `.` / `w` `,` | during a show: black / white screen; the same key again, any navigation key, a click or `Escape` brings the slide back (a navigation key does not also move on) |
 | click / `Shift`+click | during a show: next / previous slide (not on a link, not the end of a text selection or a drag) |
-| `Escape` during a show | unwinds one step at a time: a typed number, then a blanked screen, then the show itself |
+| `Tab` / `o` | the **overview** grid: one tile per frame, each showing the frame fully built. Arrows, PgUp/PgDn and Home/End move; digits pick a frame by the number on its slide; `Enter` opens it fully built and `Shift+Enter` at its first overlay; a click opens a tile (`Shift`+click the other end); `Escape`, `Tab` or `o` close it. Opening a slide from the overview is a jump, so Back returns. |
+| `Escape` during a show | unwinds one step at a time: the overview, a typed number, a blanked screen, then the show itself |
 
 The slide keys (`Space`, `Shift+Space`, `Backspace`, `Enter`, `Shift+arrows`, digits) form a `:slides` layer
 that is active only while the slides layout is showing **and** the keyboard is on the document — not in a text

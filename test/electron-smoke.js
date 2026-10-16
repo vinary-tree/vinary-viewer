@@ -2005,6 +2005,94 @@ async function main() {
     console.log('[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds, Shift+F5 from current, leaving fullscreen ends it');
   }
 
+  // ── OVERVIEW GRID (ADR-0045 §Overview): o / Tab open a focused grid of FRAMES over the slides layout; arrows move,
+  // digits select by label, Enter opens a frame fully built (its LAST overlay), Shift+Enter its first, a click
+  // opens a tile, Escape closes without moving; a pick is a jump (Back returns); thumbnails are lazy and bounded.
+  // Deck (from the arms above): 8 pages, frames [1, 3, 1, 2, 1] — frame index f covers pages
+  // f0 [0], f1 [1-3], f2 [4], f3 [5-6], f4 [7]; Beamer labels 1 2 2 2 3 4 4 5; the show above ended on page 3.
+  {
+    const { makeDeckPdf, pageColour } = require('./fixtures/pdf-gen');
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const selFrame = () => evalIn(win, `(document.querySelector('.vv-slides-tile-sel') || {}).dataset?.frame`);
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await slidesAt(3, 'on page 4 (frame 2) before the overview');
+    await sendChord(win, 'o');
+    await waitCalm(win, `(() => { const o = document.querySelector('.vv-slides-overview');
+        return Boolean(o) && document.activeElement === o && o.querySelectorAll('.vv-slides-tile').length === 5
+          && (o.querySelector('.vv-slides-tile-sel') || {}).dataset?.frame === '1'; })()`,
+      'o opens the overview: 5 frame tiles, the current frame selected, the grid focused', 8000);
+    await waitCalm(win, `document.querySelectorAll('.vv-slides-overview canvas.vv-slides-tile-canvas').length === 5`,
+      'every visible tile gets its thumbnail', 15000);
+    const tilePx = await evalIn(win, `(() => { const cv = document.querySelector('.vv-slides-tile[data-frame="1"] canvas');
+      const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+      return [d[0], d[1], d[2]]; })()`);
+    const want = pageColour(3);
+    assert.ok(tilePx.every((v, i) => Math.abs(v - want[i]) <= 12),
+      `frame 2's tile shows its LAST overlay (page 4) by default: ${tilePx} ≈ ${want}`);
+    await sendChord(win, 'Right');
+    await waitCalm(win, `(document.querySelector('.vv-slides-tile-sel') || {}).dataset?.frame === '2'`, '→ moves the selection', 4000);
+    await sendChord(win, 'Right');
+    await sendChord(win, 'Enter');
+    await waitCalm(win, `!document.querySelector('.vv-slides-overview')`, 'Enter closes the overview', 4000);
+    await slidesAt(6, 'Enter opens frame 4 fully built (its last page)');
+    assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+      'the keyboard is back on the slides');
+    await sendChord(win, 'Tab');
+    await waitCalm(win, `Boolean(document.querySelector('.vv-slides-overview'))`, 'Tab opens the overview too', 4000);
+    await sendChord(win, '2');
+    await waitCalm(win, `(document.querySelector('.vv-slides-tile-sel') || {}).dataset?.frame === '1'`,
+      'typing 2 selects frame 2 by its label', 4000);
+    await sendChord(win, 'Enter', ['shift']);
+    await slidesAt(1, "Shift+Enter opens the frame's FIRST overlay");
+    await evalIn(win, `window.__vvslides('back')`);
+    await slidesAt(6, 'a pick is a jump: Back returns');
+    await sendChord(win, 'o');
+    await waitCalm(win, `Boolean(document.querySelector('.vv-slides-tile[data-frame="0"]'))`, 'reopened', 4000);
+    await evalIn(win, `document.querySelector('.vv-slides-tile[data-frame="0"]').click(); true`);
+    await slidesAt(0, 'a click opens a tile');
+    await sendChord(win, 'o');
+    await waitCalm(win, `Boolean(document.querySelector('.vv-slides-overview'))`, 'reopened again', 4000);
+    await sendChord(win, 'Right');
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!document.querySelector('.vv-slides-overview')
+      && document.activeElement === document.querySelector('.vv-content')`, 'Escape closes the overview', 4000);
+    assert.strictEqual(await evalIn(win, `window.__vvdb().ui.slides.page`), 0, 'Escape does not move the slide');
+    assert.strictEqual(await selFrame(), undefined);
+
+    // bounded thumbnails: a 150-page deck keeps canvases only for tiles within the observer band (±½ viewport)
+    const bigPath = path.join(ROOT, 'test', 'fixtures', 'slides-150.pdf');   // virtual path; bytes below
+    state.contentByPath.set(bigPath, { path: bigPath, kind: 'pdf', bytes: new Uint8Array(makeDeckPdf({ pages: 150 })), stamp: Date.now() });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(bigPath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).pages === 150 && Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`,
+      'the 150-page deck opens in the slides layout', 15000);
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await sendChord(win, 'o');
+    await waitCalm(win, `document.querySelectorAll('.vv-slides-overview .vv-slides-tile').length === 150`, '150 tiles', 8000);
+    const band = `(() => { const o = document.querySelector('.vv-slides-overview'); const r = o.getBoundingClientRect();
+      const lo = r.top - r.height / 2, hi = r.bottom + r.height / 2;
+      const tiles = [...o.querySelectorAll('.vv-slides-tile')];
+      const near = tiles.filter((t) => { const q = t.getBoundingClientRect(); return q.bottom >= lo && q.top <= hi; }).length;
+      return { near, canvases: o.querySelectorAll('canvas.vv-slides-tile-canvas').length,
+               firstHas: Boolean(tiles[0].querySelector('canvas')), lastHas: Boolean(tiles[tiles.length - 1].querySelector('canvas')) }; })()`;
+    // (within one grid row — at most 8 columns — of the tiles in the band: the observer's edge semantics differ
+    // from a rect test by a row at most)
+    const top = await waitCalm(win, `(() => { const b = ${band}; return b.firstHas && b.canvases >= b.near - 8 ? b : false; })()`,
+      'the thumbnails near the top render', 20000);
+    assert.ok(top.canvases <= top.near + 8 && top.canvases < 150 && !top.lastHas,
+      `only the band is rendered at the top: ${JSON.stringify(top)}`);
+    await sendChord(win, 'End');
+    const bottom = await waitCalm(win, `(() => { const b = ${band}; return b.lastHas && !b.firstHas && b.canvases >= b.near - 8 ? b : false; })()`,
+      'End scrolls to the last frame, its band renders, and the top band is released', 20000);
+    assert.ok(bottom.canvases <= bottom.near + 8 && bottom.canvases < 150,
+      `far thumbnails are released (the count stays bounded): ${JSON.stringify(bottom)}`);
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!document.querySelector('.vv-slides-overview')`, 'closed', 4000);
+    console.log('[ok] PDF overview grid: o/Tab open, thumbnails show each frame fully built, arrows/digits/Enter/Shift+Enter/click/Escape, picks are jumps, thumbnails bounded on a 150-page deck'
+      + ` (live canvases ${top.canvases} at the top, ${bottom.canvases} at the end, of 150 tiles; band ${top.near}/${bottom.near})`);
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

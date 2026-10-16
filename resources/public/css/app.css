@@ -357,6 +357,28 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-slides-blank { position: absolute; inset: 0; z-index: 7; cursor: none; }
 .vv-slides-blank[data-blank="black"] { background: #000; }
 .vv-slides-blank[data-blank="white"] { background: #fff; }
+/* the slide OVERVIEW grid (ADR-0045 §Overview): a focused overlay over the slides layout (a sibling of .vv-content,
+   z 8 — over the blank screen, under the chip and the find bar) with its own scroller; one tile per frame */
+.vv-slides-overview { position: absolute; inset: 0; z-index: 8; overflow-y: auto; outline: none;
+  background: var(--vv-bg1); color: var(--vv-fg); }
+.vv-root.vv-presenting .vv-slides-overview { background: #111; color: #ddd; }
+.vv-slides-overview-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 12px;
+  padding: 10px 16px; font-size: 13px; background: inherit; border-bottom: 1px solid var(--vv-border); }
+.vv-slides-overview-title { font-weight: 600; }
+.vv-slides-overview-count, .vv-slides-overview-hint { opacity: 0.65; font-size: 12px; }
+.vv-slides-overview-hint { margin-left: auto; }
+.vv-slides-overview-grid { display: grid; gap: 16px; padding: 16px; }
+.vv-slides-tile { display: flex; flex-direction: column; gap: 4px; cursor: pointer; border-radius: 6px;
+  padding: 4px; border: 2px solid transparent; min-width: 0; }
+.vv-slides-tile:hover { border-color: var(--vv-border); }
+.vv-slides-tile-current .vv-slides-tile-label { color: var(--vv-head1); font-weight: 600; }
+.vv-slides-tile-sel { border-color: var(--vv-head1); }
+.vv-slides-tile-thumb { width: 100%; background: var(--vv-figure-bg, #fafafa); box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  overflow: hidden; }
+.vv-slides-tile-canvas { display: block; width: 100%; height: 100%; }
+.vv-slides-overview.vv-pdf-invert .vv-slides-tile-canvas { filter: invert(1) hue-rotate(180deg); }
+.vv-slides-tile-label { font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; opacity: 0.85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
 .vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
   background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }

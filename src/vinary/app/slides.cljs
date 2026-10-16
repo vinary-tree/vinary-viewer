@@ -81,10 +81,10 @@
 
 ;; ---- the [:ui :slides] mirror ------------------------------------------------------------------------------
 (def ui-keys
-  "Keys of [:ui :slides] that the UI owns, not the engine's position report: the typed slide number (:digits)
-   and a blanked screen (:blank — :black or :white, while presenting). They survive the reports of the same deck
-   in the slides layout (merge-report)."
-  [:digits :blank])
+  "Keys of [:ui :slides] that the UI owns, not the engine's position report: the typed slide number (:digits), a
+   blanked screen (:blank — :black or :white, while presenting) and the open overview grid (:overview?). They
+   survive the reports of the same deck in the slides layout (merge-report)."
+  [:digits :blank :overview?])
 
 (defn merge-report
   "The new [:ui :slides] for the engine's position report `m` over the current `cur`: the report, plus `cur`'s
@@ -118,3 +118,14 @@
   (if (contains? (get-in db [:ui :slides]) :blank)
     (update-in db [:ui :slides] dissoc :blank)
     db))
+
+(defn overview?
+  "Is the slide overview grid open?"
+  [db]
+  (boolean (get-in db [:ui :slides :overview?])))
+
+(defn overview-page
+  "The :slides-overview-page preference — which page of a frame its overview tile shows and opens: :last (the
+   default — the slide fully built, pdfpc's convention) or :first."
+  [db]
+  (if (= :first (get-in db [:ui :settings :slides-overview-page])) :first :last))

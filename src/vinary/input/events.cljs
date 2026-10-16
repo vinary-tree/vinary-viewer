@@ -37,8 +37,8 @@
 ;; ---- universal escape/cancel ----
 (defn escape-fx
   "PURE: what Escape does in app-db `db` — the FIRST cancel step that applies, in order: close the palette, close
-   the find bar, the slide show's own steps (a half-typed slide number, then a blanked screen, then the running
-   show itself), switch to Vim's normal mode, else clear the pending key sequence. The slide show's steps come
+   the find bar, the slide show's own steps (the overview grid, a half-typed slide number, a blanked screen, then
+   the running show itself), switch to Vim's normal mode, else clear the pending key sequence. The slide show's steps come
    BEFORE the mode switch, so Escape never has a mode side effect while it is cancelling something on a slide
    (ADR-0045 §Keys)."
   [db]
@@ -48,6 +48,7 @@
     (cond
       palette?            {:fx [[:dispatch [:palette/close]]]}
       find?               {:fx [[:dispatch [:find/close]]]}
+      (slides/overview? db) {:fx [[:dispatch [:slides/overview-close]]]}
       (slides/digits db)  {:fx [[:dispatch [:slides/digits-clear]]]}
       (slides/blank db)   {:fx [[:dispatch [:slides/unblank]]]}
       (slides/presenting? db) {:fx [[:dispatch [:slides/stop]]]}

@@ -138,6 +138,31 @@
     0
     (-> (js/Math.round (/ scroll-top sh)) (max 0) (min (dec n)))))
 
+;; ---- the slide overview grid (ADR-0045 §Overview) ------------------------------------------------------------
+(def overview-defaults
+  "The overview grid's geometry knobs: tiles at least :min-tile CSS px wide, :gap between and around them, at most
+   :max-cols columns, a :label-h px label row under each thumbnail, and a :thumb-max-pixels device-pixel budget
+   per thumbnail canvas (a 4K-wide tile of a 16:9 slide is ≈ 2.3 MP — the budget keeps a HiDPI grid bounded)."
+  {:min-tile 180 :gap 16 :max-cols 8 :label-h 22 :thumb-max-pixels (* 1024 1024)})
+
+(defn grid-geometry
+  "PURE. The overview grid for a `width` × `height` px pane: as many columns of at least :min-tile px (with :gap
+   between and around them) as fit — at least 1, at most :max-cols — the resulting tile width, the height of one
+   row (a thumbnail of `aspect` = height / width, its label row and a gap), and how many whole rows fit (≥ 1),
+   which is what PageUp/PageDown move by. The column count depends on the width alone, so a deck with few frames
+   keeps ordinary-sized tiles instead of stretching them across the pane."
+  ([width height aspect] (grid-geometry width height aspect overview-defaults))
+  ([width height aspect opts]
+   (let [{:keys [min-tile gap max-cols label-h]} (merge overview-defaults opts)
+         w      (max 1 (or width 1))
+         cols   (-> (js/Math.floor (/ (- w gap) (+ min-tile gap))) (max 1) (min max-cols))
+         tile-w (max 1 (/ (- w (* gap (inc cols))) cols))
+         row-h  (+ (* tile-w (if (and (number? aspect) (pos? aspect)) aspect 0.5625)) label-h gap)]
+     {:cols      cols
+      :tile-w    tile-w
+      :row-h     row-h
+      :page-rows (max 1 (js/Math.floor (/ (max 1 (or height 1)) row-h)))})))
+
 (defn outline->toc
   "Flatten a pdf.js getOutline() tree [{:title :dest :items [...]}…] into the app's :doc/toc shape
    [{:level :text :id \"vv-pdf-page-N\"}…], using `dest->page` (dest → 1-based page number, or nil).

@@ -162,7 +162,7 @@ generation, the bar's match mode (`[:ui :find :mode]`: `:exact`, `:approximate` 
 | `:input/escape` | fx | — | `:ui :palette :open?`, `:ui :find :visible?`, `:ui :slides :digits`, `:ui :input :mode` | mode→`:normal` or clear sequence/count (see precedence) | palette open→`[:dispatch [:palette/close]]`; else find→`[:dispatch [:find/close]]`; else a typed slide number→`[:dispatch [:slides/digits-clear]]` — the pure `input-events/escape-fx` |
 
 > **`:input/escape` precedence** (first match wins): close palette → close find → the slide show's own
-> cancel steps (ADR-0045: a half-typed slide number, then a blanked screen, then the running show itself) →
+> cancel steps (ADR-0045: the overview grid, a half-typed slide number, a blanked screen, then the running show itself) →
 > leave non-normal mode (→ `:normal`) → clear the pending sequence + count. This is the "universal cancel". The slide steps come before the mode switch so
 > Escape has no mode side effect while it is cancelling something on a slide.
 
@@ -687,6 +687,9 @@ by the engine and by `vinary.app.slides` (menus, subscriptions), so the two neve
 | `:slides/unblank` | db | — | — | dissoc `[:ui :slides :blank]` | — — a click on the blank overlay, Escape's blank step |
 | `:slides/click` | fx | `{:shift? bool}` | `[:ui :presentation]`, `[:ui :settings :slides-click-advance?]` | — | presenting and the preference on → `[:dispatch [:slides/command (if shift? :prev :next)]]` — `events/slides-click-fx`; reported by the engine for a plain primary click on the slide (no link, no selection, under 4 px of drag) |
 | `:view/fullscreen-changed` | fx | `#js {fullscreen owned}` (main's `vv:fullscreen-changed`) | `[:ui :fullscreen?]`, `[:ui :presentation]` | `[:ui :fullscreen?]` ← fullscreen; the window LEAVING the fullscreen a show asked for ends the show (no `:vv/set-fullscreen` — it is already gone) | — — `events/fullscreen-changed-fx` |
+| `:slides/overview` | fx | `{:open? bool}` \| nil | `[:ui :slides :overview?]`, `[:ui :slides :layout]` | open → `[:ui :slides :overview?]` ← true (clears a typed number); open + not `:open?` → closes (`slides-overview-close-fx`) | — — `events/slides-overview-fx`; a no-op without a PDF in the slides layout. Keys Tab / `o` in the `:slides` layer; the palette's Slide overview / Go to slide… (`{:open? true}` — only opens) |
+| `:slides/overview-close` | fx | — | `[:ui :slides :overview?]` | dissoc `[:ui :slides :overview?]` | `[:dom/focus :content]` (the keyboard returns to the slides) — `events/slides-overview-close-fx`; the grid's own Escape / Tab / `o`, and Escape's FIRST slide step |
+| `:slides/overview-pick` | fx | `page` (0-based) | — | dissoc `:overview?`, clears the blank and a typed number | `[:slides/command [:jump page]]` (a jump — Back returns) `[:dom/focus :content]` — `events/slides-overview-pick-fx`; a tile's Enter / click (Shift → the frame's other end) |
 
 ## 2. Effects
 
@@ -944,6 +947,10 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:slides/presentation` | `app-db` | `[:ui :presentation]` — the running slide show `{:active? :tab-id :path :from :fullscreen?}` \| nil |
 | `:slides/presenting?` | `:<- [:slides/presentation]` | bool — a show is running in this window (`.vv-root.vv-presenting`; the palette's `:presenting?`) |
 | `:slides/blank` | `app-db` | `[:ui :slides :blank]` — `:black` / `:white` while the running show is blanked \| nil (the blank overlay, `ui/slides-hud`) |
+| `:slides/overview?` | `app-db` | bool — `[:ui :slides :overview?]`, the overview grid is open (`ui/slides-overview`) |
+| `:slides/doc-gen` | `app-db` | `[:ui :slides :doc-gen]` — the mounted slides view's document generation; a live refresh bumps it and the open overview re-borrows the document (`pdf-cache/slides-snapshot`) |
+| `:slides/overview-page` | `app-db` | `slides/overview-page` — which page of a frame its overview tile shows and opens: `:last` (default — fully built) \| `:first` (the `:slides-overview-page` preference) |
+| `:pdf/invert?` | `app-db` | bool — `[:ui :pdf :invert?]`, the dark-invert of PDF pages; the overview grid mirrors it on its thumbnails |
 | `:doc/deck` | `:<- [:doc/active]` | the shown PDF's slide-deck classification `{:deck? :tier :source :pages :frame-count}` \| nil (ADR-0045) |
 | `:doc/refresh-note` | `:<- [:doc/active]` | the shown document's non-fatal live-refresh note `{:kind :message :stamp :at}` \| nil — rendered by `ui/refresh-note` over the last good version (§1.31) |
 

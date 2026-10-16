@@ -257,6 +257,12 @@
 (rf/reg-sub :slides/presenting? :<- [:slides/presentation] (fn [p _] (boolean (:active? p))))
 ;; the running show's blanked screen (:black / :white) or nil — the blank overlay
 (rf/reg-sub :slides/blank (fn [db _] (get-in db [:ui :slides :blank])))
+;; the overview grid (ADR-0045 §Overview): open?, the mounted view's document generation (a live refresh bumps
+;; it — the grid re-borrows the document), which page a frame's tile shows, and the dark-invert flag it mirrors
+(rf/reg-sub :slides/overview?      (fn [db _] (boolean (get-in db [:ui :slides :overview?]))))
+(rf/reg-sub :slides/doc-gen        (fn [db _] (get-in db [:ui :slides :doc-gen])))
+(rf/reg-sub :slides/overview-page  (fn [db _] (slides/overview-page db)))
+(rf/reg-sub :pdf/invert?           (fn [db _] (boolean (get-in db [:ui :pdf :invert?]))))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.

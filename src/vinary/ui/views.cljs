@@ -39,6 +39,7 @@
             [vinary.ui.ssh :as ssh-ui]
             [vinary.ui.refresh-note :as refresh-note]
             [vinary.ui.slides-hud :as slides-hud]
+            [vinary.ui.slides-overview :as slides-overview]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -1891,6 +1892,8 @@
       [refresh-note/refresh-note]
       ;; the slide show's indicators (the "Go to 12" chip) — over the slides, never inside the scroller (ADR-0045)
       [slides-hud/hud]
+      ;; the overview grid of frames (Tab / o) — a sibling overlay of .vv-content, z 8 (ADR-0045 §Overview)
+      [slides-overview/overview]
       [find-bar]
       ;; the hover-URL status bar lives INSIDE this wrap, so its bottom:0 floats above the zoom bar (the
       ;; wrap ends above the bar) instead of overlapping it
