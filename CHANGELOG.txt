@@ -547,6 +547,13 @@ Fixed
       host 10 ms away took 0.93 s instead of 0.19 s, and over loopback 2 s
       instead of 14 ms. Hosts 50 ms or more away are unchanged. See
       docs/scientific/11-remote-read-and-reload-safety-experiments.md.
+    - A PDF view no longer loses a view change made while a new version of the
+      document is loading. Turning dark-invert on, starting a slide show or
+      switching between the slides and document layouts during a live refresh
+      used to take effect only at the next, unrelated change; it now applies
+      at once. And a new version that arrives while the document is still
+      opening for the first time is shown as soon as that first open finishes
+      -- before, the view kept the older version until something else changed.
     - A live refresh whose PDF bytes cannot be opened (read while pdflatex was
       still writing the file) no longer leaves a blank pane: the last good
       version stays on screen with a non-fatal banner (Retry / dismiss), and the

@@ -174,6 +174,7 @@ Reagent view components and their pure view-helpers.
 | Namespace | Responsibility |
 |-----------|----------------|
 | `vinary.ui.views` | Main shell, content strategy (per-kind view selection), Markdown body lifecycle, toolbar, status/modeline; hosts the in-pane directory browser (`:doc/kind = "directory"`) and the Ctrl-hover breadcrumb URI bar. |
+| `vinary.ui.pdf-view-lifecycle` | PURE. The pdf-view's lifecycle decisions (ADR-0045 §Live refresh): what a re-render does — remount another path, mount, refresh a newer stamp in place, and ALWAYS apply the view state once mounted (a refresh lands without re-rendering) — and whether a version that raced the first mount is refreshed to when that mount lands. |
 | `vinary.ui.tabs` | The tab strip + the shared tab-item used by the horizontal strip and the sidebar's vertical Tabs list. |
 | `vinary.ui.sidebar` | The left sidebar shell: a vertical icon rail (ADR-0041) beside one full-height panel — the multi-project Files tree, the Contents (TOC) outline, open Tabs, or the Commits panel. Collapsed, the rail alone remains; clicking the active icon collapses, any icon expands into its panel. |
 | `vinary.ui.tree` | The Files tree view: controlled refresh-before-open `<details>`, automatic watcher-scope sync, and file navigation. Narrowing/folding and expansion arithmetic live in pure app models (ADRs 0033/0034). |

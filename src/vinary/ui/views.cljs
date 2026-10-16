@@ -16,6 +16,7 @@
             [vinary.renderer.scroll :as scroll]
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
+            [vinary.ui.pdf-view-lifecycle :as pdf-life]
             [vinary.renderer.warm-cache :as warm-cache]
             [vinary.slides.deck :as deck]
             [vinary.ui.tabs :as tabs]
@@ -855,7 +856,9 @@
    released (destroying its PDFDocumentProxy), and the candidate is promoted to the cache's good version. On
    failure — pdf.js cannot open bytes read while pdflatex was still writing — the candidate is rejected, the
    last good document stays, and :pdf/refresh-failed raises the non-fatal refresh note. At most one refresh is
-   in preparation; a newer stamp supersedes it. Zoom/fit/invert changes re-drive pdf/update! as before."
+   in preparation; a newer stamp supersedes it. Every render re-drives pdf/update! with the view state (zoom, fit,
+   invert, layout, presenting, transition) — a pending refresh never defers it — and a version that arrived while
+   the first mount was being prepared is refreshed to when that mount lands (vinary.ui.pdf-view-lifecycle)."
   [_path _stamp]
   (let [node    (atom nil)
         ctrl    (atom nil)            ; the per-DOM pdf engine controller (nil until a document has mounted)
@@ -892,35 +895,6 @@
                        (release! @lease*) (reset! lease* nil)
                        (when-let [p @pending] (release! (:lease p)) (reset! pending nil))
                        (reset! shown nil))
-        mount!   (fn mount! [path]
-                   ;; a FRESH mount: the newest cached version (a pending candidate, else the last good one). A
-                   ;; candidate that fails to open falls back to the good version when there is one.
-                   (when-let [{:keys [bytes stamp]} (pdf-cache/bytes-for path)]
-                     (let [gen   (swap! gen* inc)
-                           lease (prepare path stamp bytes)
-                           ;; a restored history entry's SLIDE (Back/Forward, a tab switch — ADR-0045): the engine
-                           ;; opens on it, and the pixel restore is dropped (it would land anywhere in a layout whose
-                           ;; slot height follows the window)
-                           want  (pdf-cache/take-want-page! path)]
-                       (reset! lease* lease)
-                       (-> (:promise lease)
-                           (.then (fn [prepared]
-                                    (when (and (= gen @gen*) @node)
-                                      (reset! ctrl (pdf/mount-prepared! @node prepared path
-                                                                        (cond-> @vstate (some? want) (assoc :page want))))
-                                      (reset! shown [path stamp])
-                                      (pdf-cache/promote! path stamp)
-                                      (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
-                                      (rf/dispatch [:pdf/refreshed path stamp])
-                                      (if (some? want) (scroll/discard!) (scroll/apply! @node)))))
-                           (.catch (fn [e]
-                                     (when (= gen @gen*)
-                                       (js/console.error "[pdf] prepare failed" e)
-                                       (release! lease) (reset! lease* nil)
-                                       (reset! failed stamp)
-                                       (if (pdf-cache/reject! path stamp)
-                                         (mount! path)          ; the last good version opens instead
-                                         (rf/dispatch [:pdf/refresh-failed path stamp (or (.-message e) (str e))])))))))))
         refresh! (fn [path stamp]
                    ;; a newer version of the MOUNTED document: prepare it beside the live one, then swap in place
                    (when-let [{:keys [bytes] s :stamp} (pdf-cache/bytes-for path)]
@@ -947,7 +921,43 @@
                                          (reset! pending nil)
                                          (reset! failed s)
                                          (pdf-cache/reject! path s)
-                                         (rf/dispatch [:pdf/refresh-failed path s (or (.-message e) (str e))])))))))))]
+                                         (rf/dispatch [:pdf/refresh-failed path s (or (.-message e) (str e))])))))))))
+        mount!   (fn mount! [path]
+                   ;; a FRESH mount: the newest cached version (a pending candidate, else the last good one). A
+                   ;; candidate that fails to open falls back to the good version when there is one.
+                   (when-let [{:keys [bytes stamp]} (pdf-cache/bytes-for path)]
+                     (let [gen   (swap! gen* inc)
+                           lease (prepare path stamp bytes)
+                           ;; a restored history entry's SLIDE (Back/Forward, a tab switch — ADR-0045): the engine
+                           ;; opens on it, and the pixel restore is dropped (it would land anywhere in a layout whose
+                           ;; slot height follows the window)
+                           want  (pdf-cache/take-want-page! path)]
+                       (reset! lease* lease)
+                       (-> (:promise lease)
+                           (.then (fn [prepared]
+                                    (when (and (= gen @gen*) @node)
+                                      (reset! ctrl (pdf/mount-prepared! @node prepared path
+                                                                        (cond-> @vstate (some? want) (assoc :page want))))
+                                      (reset! shown [path stamp])
+                                      (pdf-cache/promote! path stamp)
+                                      (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
+                                      (rf/dispatch [:pdf/refreshed path stamp])
+                                      (if (some? want) (scroll/discard!) (scroll/apply! @node))
+                                      ;; a NEWER version that arrived while this one was being prepared (a re-open
+                                      ;; racing the mount): no did-update caught it — the controller did not exist
+                                      ;; yet — so refresh to it now, in place
+                                      (let [newest (:stamp (pdf-cache/bytes-for path))]
+                                        (when (pdf-life/refresh-after-mount? {:mounted stamp :newest newest
+                                                                              :failed @failed})
+                                          (refresh! path newest))))))
+                           (.catch (fn [e]
+                                     (when (= gen @gen*)
+                                       (js/console.error "[pdf] prepare failed" e)
+                                       (release! lease) (reset! lease* nil)
+                                       (reset! failed stamp)
+                                       (if (pdf-cache/reject! path stamp)
+                                         (mount! path)          ; the last good version opens instead
+                                         (rf/dispatch [:pdf/refresh-failed path stamp (or (.-message e) (str e))])))))))))]
     (r/create-class
      {:display-name "vv-pdf-view"
       :component-did-mount    (fn [this]
@@ -955,25 +965,20 @@
                                   (.addEventListener @node "contextmenu" on-ctx)
                                   (mount! path)))
       :component-did-update   (fn [this]
+                                ;; the decision table lives in vinary.ui.pdf-view-lifecycle (unit-tested): remount
+                                ;; another path; mount when nothing is mounted or preparing; refresh a newer stamp
+                                ;; in place; and ALWAYS apply the view state once mounted — a refresh lands without
+                                ;; re-rendering, so a change it skipped would stay lost
                                 (let [[_ path stamp] (r/argv this)
-                                      [shown-path shown-stamp] @shown]
-                                  (cond
-                                    ;; a different document in this slot (not expected — content-view keys by
-                                    ;; path — but never show one file's pages under another's name)
-                                    (and shown-path (not= path shown-path))
+                                      acts (pdf-life/update-actions {:path path :stamp stamp :shown @shown
+                                                                     :mounted? (some? @ctrl)
+                                                                     :preparing? (some? @lease*)
+                                                                     :failed @failed})]
+                                  (if (:remount acts)
                                     (do (swap! gen* inc) (unmount-doc!) (set! (.-innerHTML @node) "") (mount! path))
-
-                                    ;; nothing mounted yet (first prepare still running or failed): try again
-                                    ;; only when a NEW stamp arrived
-                                    (nil? @ctrl)
-                                    (when (and (not= stamp @failed) (nil? @lease*)) (mount! path))
-
-                                    ;; a live refresh of the shown document
-                                    (and (not= stamp shown-stamp) (not= stamp @failed))
-                                    (refresh! path stamp)
-
-                                    :else
-                                    (pdf/update! @ctrl @vstate))))           ; zoom/fit/invert
+                                    (do (when (:mount acts) (mount! path))
+                                        (when (:refresh acts) (refresh! path stamp))
+                                        (when (:update acts) (pdf/update! @ctrl @vstate))))))
       :component-will-unmount (fn [this]
                                 (swap! gen* inc)
                                 (when @node (.removeEventListener @node "contextmenu" on-ctx))

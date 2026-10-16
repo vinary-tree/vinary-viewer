@@ -1779,6 +1779,98 @@ async function main() {
     console.log('[ok] PDF live refresh swaps in place (position kept); a torn refresh keeps the last good render behind a note');
   }
 
+  // ── a pending refresh never holds the VIEW STATE hostage (ADR-0045 §Live refresh; vinary.ui.pdf-view-lifecycle) ──
+  // A refresh is prepared beside the live document and lands WITHOUT a re-render. The old pdf-view chose EITHER the
+  // refresh OR the view-state update on each render, so (A) a view-state change rendered while a refresh was pending
+  // was dropped until some unrelated change re-rendered the view, and (B) a version that arrived while the FIRST mount
+  // was being prepared was never shown. A 1200-page version keeps pdf.js busy for many frames (calibrated: ≈330 ms to
+  // prepare in Node alone, more with the renderer's worker), so both windows are wide — and each part ASSERTS that it
+  // hit its window, so neither can pass by timing luck.
+  {
+    const { makeDeckPdf } = require('./fixtures/pdf-gen');
+    const portrait = (pages, creator) => makeDeckPdf({ pages, sizes: Array.from({ length: pages }, () => [300, 800]),
+      labels: null, creator, producer: 'smoke' });
+    const SLOW = 1200;
+    const pageCount = `document.querySelectorAll('.vv-content .vv-pdf-doc .vv-pdf-page').length`;
+    const inverted = `Boolean(document.querySelector('.vv-content .vv-pdf-doc.vv-pdf-invert'))`;
+
+    // A — dark-invert turned on while a refresh is being prepared
+    const livePath = path.join(ROOT, 'test', 'fixtures', 'live-refresh.pdf');
+    assert.strictEqual(await evalIn(win, pageCount), 8, 'the live-refresh document is shown (8 pages)');
+    assert.strictEqual(await evalIn(win, `Boolean(window.__vvdb().ui.pdf['invert?'])`), false, 'dark-invert starts off');
+    // when the setting ARRIVES (the app's own listener has only queued its event), note the page count; three frames
+    // later its render has run — Reagent flushes on the first animation frame after app-db changes — so a refresh
+    // still pending then proves the change rendered while the refresh was pending
+    await evalIn(win, `(() => { const probe = window.__vvInvertProbe = {};
+      window.__vvInvertOff = window.vv.onSettings(() => {
+        if (probe.atArrival) return;
+        probe.atArrival = { pages: ${pageCount} };
+        let frames = 0;
+        const tick = () => { frames += 1;
+          if (frames < 3) { requestAnimationFrame(tick); return; }
+          probe.afterRender = { pages: ${pageCount}, inverted: ${inverted} }; };
+        requestAnimationFrame(tick); });
+      return true; })()`);
+    // the slow version and the setting go out back to back: the setting lands with (or just after) the new stamp,
+    // long before pdf.js has prepared 1200 pages
+    const stampA = state.sentStamps.get(livePath) + 4;
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(portrait(SLOW, 'slow refresh')), stamp: stampA });
+    win.webContents.send('vv:settings', '{:pdf-invert? true}');
+    const probeA = await waitFor(() => evalIn(win, `window.__vvInvertProbe.afterRender ? window.__vvInvertProbe : null`),
+      'the invert probe records its render', 8000);
+    await evalIn(win, `(window.__vvInvertOff(), delete window.__vvInvertOff, delete window.__vvInvertProbe, true)`);
+    assert.deepStrictEqual(probeA, { atArrival: { pages: 8 }, afterRender: { pages: 8, inverted: true } },
+      'dark-invert applies on its own render while the refresh is still being prepared (a pending refresh must not defer it)');
+    await waitCalm(win, `${pageCount} === ${SLOW}`, 'the slow refresh lands in place', 30000);
+    assert.strictEqual(await evalIn(win, inverted), true, 'the refreshed document is still inverted');
+    win.webContents.send('vv:settings', '{:pdf-invert? false}');
+    await waitCalm(win, `!${inverted}`, 'dark-invert off again', 4000);
+
+    // B — a newer version that arrives while the FIRST mount is still being prepared
+    const racePath = path.join(ROOT, 'test', 'fixtures', 'first-mount-race.pdf');   // virtual path; bytes below
+    state.contentByPath.set(racePath, { path: racePath, kind: 'pdf', bytes: new Uint8Array(portrait(SLOW, 'slow first mount')), stamp: Date.now() });
+    // for each version of this path that arrives, what the NEW view showed at that moment; for the second, how many
+    // frames later the first version's pages appeared. The previous tab's view stays in the DOM for a frame after the
+    // new tab activates, so every view present now is marked and the probes only ever look at an unmarked one
+    await evalIn(win, `(() => { const seen = window.__vvRace = [];
+      document.querySelectorAll('.vv-pdf-doc').forEach((el) => { el.__vvBeforeRace = true; });
+      const fresh = () => { const el = document.querySelector('.vv-content .vv-pdf-doc');
+        return el && !el.__vvBeforeRace ? el : null; };
+      window.__vvRaceFresh = fresh;
+      window.__vvRaceOff = window.vv.onContent((p) => {
+        if (p.path !== ${JSON.stringify(racePath)}) return;
+        const el = fresh();
+        const rec = { doc: Boolean(el), pages: el ? el.querySelectorAll('.vv-pdf-page').length : 0 };
+        seen.push(rec);
+        if (seen.length !== 2) return;
+        let frames = 0;
+        const tick = () => { frames += 1; const now = fresh();
+          if ((now && now.querySelectorAll('.vv-pdf-page').length > 0) || frames >= 900) { rec.framesUntilPages = frames; return; }
+          requestAnimationFrame(tick); };
+        requestAnimationFrame(tick); });
+      return true; })()`);
+    win.webContents.send('vv:open-files', { paths: [racePath] });
+    // the NEW view exists — so the first version has arrived and its mount is preparing 1200 pages…
+    await evalIn(win, `new Promise((done, fail) => { const t0 = performance.now();
+      const look = () => {
+        if (window.__vvRaceFresh() && window.__vvRace.length === 1) return done(true);
+        if (performance.now() - t0 > 15000) return fail(new Error('the race document never started mounting'));
+        requestAnimationFrame(look); };
+      look(); })`);
+    // …when a newer, 3-page version arrives
+    const stampB = state.sentStamps.get(racePath) + 1;
+    win.webContents.send('vv:content', { path: racePath, kind: 'pdf', bytes: new Uint8Array(portrait(3, 'raced first mount')), stamp: stampB });
+    const race = await waitFor(() => evalIn(win, `window.__vvRace.length === 2 && window.__vvRace[1].framesUntilPages !== undefined
+      ? window.__vvRace : null`), 'the race probe sees the first version mount', 30000);
+    await evalIn(win, `(window.__vvRaceOff(), delete window.__vvRaceOff, delete window.__vvRace, delete window.__vvRaceFresh, true)`);
+    assert.strictEqual(race[1].doc, true, 'the newer version arrived after the view had started its first mount');
+    assert.strictEqual(race[1].pages, 0, 'the newer version arrived before the first mount landed');
+    assert.ok(race[1].framesUntilPages >= 4 && race[1].framesUntilPages < 900,
+      `the first mount landed only after the newer version had rendered (${race[1].framesUntilPages} frames later)`);
+    await waitCalm(win, `${pageCount} === 3`, 'the version that raced the first mount is shown, in place', 20000);
+    console.log(`[ok] PDF view state is never deferred by a pending refresh (invert applied while one was pending); a version that raced the first mount is shown (mount landed ${race[1].framesUntilPages} frames after it)`);
+  }
+
   // ── slide-deck DETECTION on prepare (ADR-0045): every PDF is classified from its own evidence, in the
   //    renderer, before the first mount — exposed as .vv-pdf-doc[data-deck] (DOM-level, release-safe) ──
   {
