@@ -56,6 +56,45 @@
   [rects scroll-top viewport-h overscan]
   (vl/visible-range rects scroll-top viewport-h overscan))
 
+(defn anchor-of
+  "The reading anchor at document offset `doc-top` (the viewport top, in document coordinates) over page
+   `rects`: {:idx i :frac f} — the first page whose box reaches below doc-top, and how far down that page the
+   viewport top sits, as a fraction of its height in [0, 1] (0 when doc-top falls in the gap above it). nil
+   when there are no pages. Scale-free, so `anchor-top` can restore the same reading position after a zoom, a
+   re-fit, or a live refresh that changed page sizes."
+  [rects doc-top]
+  (when (seq rects)
+    (let [n (count rects)
+          i (or (first (keep-indexed (fn [i {:keys [top height]}] (when (< doc-top (+ top height)) i)) rects))
+                (dec n))
+          {:keys [top height]} (nth rects i)]
+      {:idx i :frac (if (pos? height) (-> (/ (- doc-top top) height) (max 0) (min 1)) 0)})))
+
+(defn anchor-top
+  "The document offset that puts `anchor` {:idx :frac} back at the viewport top under `rects`. :idx is clamped
+   into range — a refreshed document may have fewer pages. nil when there are no pages."
+  [rects {:keys [idx frac]}]
+  (when (seq rects)
+    (let [i (-> (or idx 0) (max 0) (min (dec (count rects))))
+          {:keys [top height]} (nth rects i)]
+      (+ top (* (or frac 0) height)))))
+
+(def max-canvas-pixels
+  "Device-pixel budget for one page canvas: pdf.js's own viewer default (maxCanvasPixels = 2^25 ≈ 33.6 M
+   pixels, ≈ 134 MB of RGBA). Past it a page rasterizes at a lower density and CSS stretches it."
+  (* 4096 8192))
+
+(defn budget-dpr
+  "The device-pixel ratio to rasterize a page of CSS size w×h at: the screen's `dpr`, lowered when w·h·dpr²
+   would exceed `max-pixels`, so an extreme zoom — or a fullscreen slide on a HiDPI display — can never
+   allocate a gigapixel canvas. Never below 0.25."
+  ([w h dpr] (budget-dpr w h dpr max-canvas-pixels))
+  ([w h dpr max-pixels]
+   (let [area (* w h)]
+     (if (and (pos? area) (> (* area dpr dpr) max-pixels))
+       (max 0.25 (js/Math.sqrt (/ max-pixels area)))
+       dpr))))
+
 (defn outline->toc
   "Flatten a pdf.js getOutline() tree [{:title :dest :items [...]}…] into the app's :doc/toc shape
    [{:level :text :id \"vv-pdf-page-N\"}…], using `dest->page` (dest → 1-based page number, or nil).

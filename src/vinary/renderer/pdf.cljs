@@ -17,7 +17,7 @@
 (def ^:const overscan 1.5)  ; viewport-heights of canvas-render overscan each side
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
-         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text!)
+         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr!)
 
 ;; ---- pdf.js module + worker bootstrap -----------------------------------------------------------
 ;; pdfjs-dist uses dynamic import() internally, which Closure :simple cannot bundle — so we do NOT
@@ -169,20 +169,22 @@
                      (let [^js div (sheet-of state idx)
                            scale   (:scale @state)
                            vp      (.getViewport pg #js {:scale scale})
-                           dpr     (or (.-devicePixelRatio js/window) 1)
+                           ;; the screen's DPR, capped by the per-canvas device-pixel budget (an extreme zoom
+                           ;; or a fullscreen slide on a HiDPI display must not allocate a gigapixel canvas)
+                           dpr     (layout/budget-dpr (.-width vp) (.-height vp)
+                                                      (or (.-devicePixelRatio js/window) 1))
                            canvas  (js/document.createElement "canvas")
                            ;; willReadFrequently → a CPU-backed 2D surface on the normal raster path; avoids
                            ;; the GPU "blank canvas until a forced repaint" compositing bug (Linux/Electron)
                            ctx     (.getContext canvas "2d" #js {:willReadFrequently true})]
-                       ;; clear any canvas/status left by a prior attempt → idempotent re-render
-                       (when-let [^js old (.querySelector div "canvas.vv-pdf-canvas")] (.remove old))
+                       ;; DOUBLE-BUFFERED: rasterize into this DETACHED canvas and swap it in only once it is
+                       ;; complete. A re-render — after a zoom, a re-fit, a DPR change, or a live refresh — so
+                       ;; keeps showing the previous raster (CSS-stretched to the new box: .vv-pdf-canvas is
+                       ;; 100% × 100% of its sheet) instead of flashing white while pdf.js paints.
                        (clear-status! div)
                        (set! (.-className canvas) "vv-pdf-canvas")
                        (set! (.-width canvas) (js/Math.round (* (.-width vp) dpr)))
                        (set! (.-height canvas) (js/Math.round (* (.-height vp) dpr)))
-                       (set! (.. canvas -style -width) (str (.-width vp) "px"))
-                       (set! (.. canvas -style -height) (str (.-height vp) "px"))
-                       (.appendChild div canvas)
                        (let [task (.render pg #js {:canvasContext ctx :viewport vp
                                                    :transform #js [dpr 0 0 dpr 0 0]})
                              ;; a heavy page rasterizes on the main thread for a long time and would look
@@ -201,6 +203,10 @@
                                       (when (identical? (get-in @state [:tasks idx]) task)
                                         (clear-status! div)
                                         (swap! state update :tasks dissoc idx)
+                                        ;; the swap: the finished raster replaces the stale one in place
+                                        (if-let [^js old (.querySelector div "canvas.vv-pdf-canvas")]
+                                          (.replaceWith old canvas)
+                                          (.prepend div canvas))
                                         (build-text-layer! state idx pg vp)
                                         (build-link-layer! state idx pg vp))))
                              (.catch (fn [^js err]
@@ -316,6 +322,9 @@
 (defn- build-link-layer! [state idx ^js pg ^js vp]
   (let [^js div (sheet-of state idx)
         adiv    (js/document.createElement "div")]
+    ;; idempotent: a page whose canvas was released and later re-rendered keeps its text layer but must not
+    ;; stack a second link layer over the first
+    (when-let [^js old (.querySelector div ".vv-pdf-anno")] (.remove old))
     (set! (.-className adiv) "vv-pdf-anno")
     (set! (.. adiv -style -width) (str (.-width vp) "px"))
     (set! (.. adiv -style -height) (str (.-height vp) "px"))
@@ -449,27 +458,64 @@
         (when (<= 0 lo)
           (doseq [idx (range lo (inc hi))] (render-page! state idx)))))))
 
-(defn- rescale!
-  "Re-layout placeholders + re-render visible pages at the current :scale, preserving the reading anchor
-   (the page nearest the viewport top)."
+(defn- strip-layers!
+  "Remove a sheet's scale-dependent layers (text, links, status) — the next render rebuilds them. The canvas
+   stays: CSS stretches it to the sheet's new size until its double-buffered re-render swaps in."
+  [^js sheet]
+  (doseq [^js el (array-seq (.querySelectorAll sheet ".vv-pdf-text, .vv-pdf-anno, .vv-pdf-status"))]
+    (.remove el)))
+
+(defn- drop-offscreen-canvases!
+  "After a relayout, drop every canvas outside the (overscanned) visible band: the IntersectionObserver's
+   release path only knows pages in :rendered, which a rescale just reset, so stale rasters off-screen would
+   otherwise linger and pin memory."
   [state]
-  (let [{:keys [page-divs observer container rects]} @state
-        scroller   (scroller-of container)
-        anchor-top (when scroller (- (.-scrollTop scroller) (.-offsetTop container)))
-        anchor-idx (when (and anchor-top (seq rects))
-                     (first (keep-indexed (fn [i {:keys [top height]}]
-                                            (when (< anchor-top (+ top height)) i))
-                                          rects)))]
+  (let [{:keys [container rects sheet-divs]} @state
+        scroller (scroller-of container)]
+    (when (and scroller (seq rects))
+      (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
+            vh      (.-clientHeight scroller)
+            [lo hi] (layout/visible-range rects doc-top vh (* overscan vh))]
+        (dotimes [i (count sheet-divs)]
+          (when (or (neg? lo) (< i lo) (> i hi))
+            (when-let [^js c (.querySelector (nth sheet-divs i) "canvas.vv-pdf-canvas")] (.remove c))))))))
+
+(defn- rescale!
+  "Re-layout placeholders + re-render visible pages at the current :scale, preserving the reading anchor —
+   the page at the viewport top AND how far down it the reader was (pdf-layout/anchor-of), so a zoom, a re-fit
+   or a DPR change keeps the same line in view rather than snapping to the page top. Visible pages keep their
+   (stretched) canvases until the double-buffered re-render swaps fresh ones in."
+  [state]
+  (let [{:keys [observer container rects]} @state
+        scroller (scroller-of container)
+        anchor   (when scroller (layout/anchor-of rects (- (.-scrollTop scroller) (.-offsetTop container))))]
     (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
     ;; bump :gen so any in-flight getPage/render from the OLD layout bails instead of clobbering the new one
     (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built {}) (update :gen inc)))
-    (doseq [^js sheet (:sheet-divs @state)] (set! (.-innerHTML sheet) ""))
+    (doseq [^js sheet (:sheet-divs @state)] (strip-layers! sheet))
     (apply-layout! state)
-    (when (and scroller anchor-idx) (scroll-to-page! state (inc anchor-idx)))
+    (when (and scroller anchor)
+      (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor))))
+    (drop-offscreen-canvases! state)
     (when observer
       (.disconnect observer)
-      (doseq [^js div page-divs] (.observe observer div)))
+      (doseq [^js div (:page-divs @state)] (.observe observer div)))
     (render-visible! state)))   ; deterministic re-render — don't rely on the IO re-fire after re-observe
+
+(defn- watch-dpr!
+  "Re-render when the device-pixel ratio changes — the window moved to a display with a different scale (a
+   projector, an external monitor) or the OS scale changed. Canvases are rasterized at a fixed DPR, so they
+   would otherwise turn blurry or needlessly heavy. A `(resolution: Xdppx)` media query fires `change` exactly
+   when the ratio leaves X; it is re-armed for the new ratio after each change."
+  [state]
+  (when (and (exists? js/matchMedia) (not (:destroyed? @state)))
+    (let [^js mq (js/matchMedia (str "(resolution: " (or (.-devicePixelRatio js/window) 1) "dppx)"))
+          handler (fn [_]
+                    (when-not (:destroyed? @state)
+                      (rescale! state)
+                      (watch-dpr! state)))]
+      (.addEventListener mq "change" handler #js {:once true})
+      (swap! state assoc :dpr-watch [mq handler]))))
 
 (defn- refit!
   "Re-resolve a fit-mode scale against the (resized) scroller and re-render only if it changed. No-op for
@@ -577,6 +623,7 @@
     (build-placeholders! state)
     (observe! state)
     (observe-resize! state)
+    (watch-dpr! state)
     (extract-outline! state doc path)
     state))
 
@@ -608,6 +655,7 @@
                                       (build-placeholders! state)
                                       (observe! state)
                                       (observe-resize! state)
+                                      (watch-dpr! state)
                                       (extract-outline! state doc path)))))))))
         (.catch (fn [e] (js/console.error "[pdf] load failed" e))))
     state))
@@ -642,5 +690,6 @@
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
   (when-let [^js obs (:observer @state)] (.disconnect obs))
   (when-let [^js ro (:resize-observer @state)] (.disconnect ro))
+  (when-let [[^js mq handler] (:dpr-watch @state)] (.removeEventListener mq "change" handler))
   (when (not= false (:owns-doc? @state))
     (when-let [^js doc (:doc @state)] (try (.destroy doc) (catch :default _ nil)))))

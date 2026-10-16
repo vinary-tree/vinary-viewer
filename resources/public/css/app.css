@@ -84,7 +84,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-pdf-page { position: relative; margin: 0 auto 16px; }
 .vv-pdf-sheet { position: relative; width: 100%; height: 100%; background: #fff;
   box-shadow: 0 1px 6px var(--vv-pdf-page-shadow); }
-.vv-pdf-canvas { display: block; }
+/* the canvas fills its sheet: a stale raster CSS-stretches to a resized sheet until its double-buffered
+   re-render swaps in (renderer.pdf/render-page!), instead of a white flash */
+.vv-pdf-canvas { display: block; width: 100%; height: 100%; }
 /* pdf.js text layer — canonical rules (from pdf_viewer.css), scoped: transparent, selectable spans */
 .vv-pdf-text { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1;
   text-align: initial; text-size-adjust: none; forced-color-adjust: none;
