@@ -6,6 +6,7 @@
             [re-frame.db :as rfdb]
             [clojure.string :as str]
             [vinary.app.ds :as ds]
+            [vinary.app.overlay :as overlay]
             [vinary.app.events]
             [vinary.app.subs]
             [vinary.app.commands]
@@ -367,14 +368,11 @@
   (boolean (and el (.-closest el)
                 (.closest el "input, textarea, select, [contenteditable], .cm-editor, [data-vv-keynav]"))))
 
-(defn- overlay-open-now? []
-  (let [ui (:ui @rfdb/app-db)]
-    (boolean (or (:menu ui) (:context-menu ui) (:settings-open? ui) (:about-open? ui)
-                 (:extensions-open? ui)
-                 (get-in ui [:passwords :open?])
-                 (get-in ui [:passwords :save-prompt])
-                 (get-in ui [:kbedit :open?]) (get-in ui [:palette :open?])
-                 (get-in ui [:hints :active?])))))
+(defn- overlay-open-now?
+  "Does an overlay or modal own the keyboard (vinary.app.overlay/blocking? — menus, context menu, palette, hints,
+   every modal dialog incl. the SSH prompt)? Read straight from app-db: keydown is outside a reactive context."
+  []
+  (overlay/blocking? @rfdb/app-db))
 
 (def ^:private arrow->scroll
   {"ArrowDown"  [:nav/scroll {:dy 80}]

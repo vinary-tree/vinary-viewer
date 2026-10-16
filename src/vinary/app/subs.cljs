@@ -8,6 +8,7 @@
             [vinary.app.commands :as commands]
             [vinary.app.commits :as commits]
             [vinary.app.nav :as nav]
+            [vinary.app.overlay :as overlay]
             [vinary.app.palette :as palette]
             [vinary.app.tree-model :as tree-model]
             [vinary.app.uri :as uri]
@@ -53,19 +54,10 @@
 (rf/reg-sub :ui/recent-files   (fn [db _] (get-in db [:ui :recent :recent-files])))
 (rf/reg-sub :ui/web-history    (fn [db _] (get-in db [:ui :recent :web-history])))
 (rf/reg-sub :ui/overlay-open?
-            ;; any blocking DOM overlay (menu / context menu / palette / modal dialog) is open — the
-            ;; native web view hides while this is true so the overlay isn't painted beneath it.
-            ;; (PDFs now render in-renderer via pdf.js — ADR 0013 — so only the web view is native.)
-            (fn [db _]
-              (boolean (or (get-in db [:ui :menu])
-                           (get-in db [:ui :context-menu])
-                           (get-in db [:ui :settings-open?])
-                           (get-in db [:ui :about-open?])
-                           (get-in db [:ui :kbedit :open?])
-                           (get-in db [:ui :extensions-open?])
-                           (get-in db [:ui :passwords :open?])
-                           (get-in db [:ui :passwords :save-prompt])
-                           (get-in db [:ui :palette :open?])))))
+            ;; a DOM overlay is showing that the native web view would paint over (menus, the palette, every modal
+            ;; dialog incl. the SSH prompt — vinary.app.overlay/paints-over-content?) — the native web view hides
+            ;; while this is true. (PDFs now render in-renderer via pdf.js — ADR 0013 — so only the web view is native.)
+            (fn [db _] (overlay/paints-over-content? db)))
 (rf/reg-sub :ui/re-frame-10x-open? (fn [db _] (get-in db [:ui :re-frame-10x-open?])))
 (rf/reg-sub :ui/hints          (fn [db _] (get-in db [:ui :hints])))
 

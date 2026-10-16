@@ -7,6 +7,7 @@
             [re-frame.db :as rfdb]
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
+            [vinary.app.overlay :as overlay]
             [vinary.app.slides :as slides]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -351,12 +352,13 @@
             nil)
           true)))))
 
-(defn- modal-open? [db]
-  (or (get-in db [:ui :settings-open?])
-      (get-in db [:ui :about-open?])
-      (get-in db [:ui :kbedit :open?])
-      (get-in db [:ui :palette :open?])
-      (get-in db [:ui :context-menu])))
+(defn access-keys-blocked?
+  "Must Alt+letter NOT open a menu? When any overlay other than the menubar's own open menu owns the keyboard
+   (vinary.app.overlay/blocking? — a dialog, a context menu, the palette, link hints): opening a menu behind it
+   would be invisible or steal its keys. (Before this used its own five-item list, which let Alt open a menu over
+   the Extensions, Passwords and SSH dialogs.)"
+  [db]
+  (overlay/blocking? (update db :ui dissoc :menu)))
 
 (defn- handle-keydown! [^js e]
   (let [db @rfdb/app-db]
@@ -380,7 +382,7 @@
         :else
         (when-let [k (access/event-letter e)]
           (when-let [action (and (or (get-in db [:ui :menu])
-                                      (and (.-altKey e) (not (modal-open? db))))
+                                      (and (.-altKey e) (not (access-keys-blocked? db))))
                                  (access-action db k))]
             (access/consume! e)
             (dispatch-access-action! action)))))))

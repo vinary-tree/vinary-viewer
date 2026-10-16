@@ -75,12 +75,9 @@
             ;; a blocking modal dialog owns the keyboard while open, so the resolver must not fire background
             ;; commands (vim j/k, etc.). The dialog's own React handlers — incl. the shared modal's keydown
             ;; stopPropagation — handle its keys; this flag guards the case where focus escapes the panel.
-            :modal-open?   (boolean (or (get-in db [:ui :settings-open?])
-                                        (get-in db [:ui :about-open?])
-                                        (get-in db [:ui :extensions-open?])
-                                        (get-in db [:ui :passwords :open?])
-                                        (get-in db [:ui :passwords :save-prompt])
-                                        (get-in db [:ui :kbedit :open?])))})))
+            ;; (vinary.app.overlay — the SSH prompt is a modal dialog too; menus and hints preempt via their own
+            ;; capture handlers, and the palette is :palette-open? above.)
+            :modal-open?   (overlay/modal-dialog-open? db)})))
 
 (defn- leaf-decision [node]
   (cond

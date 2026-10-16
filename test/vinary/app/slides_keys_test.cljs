@@ -12,7 +12,8 @@
             [vinary.input.resolver :as resolver]
             [vinary.renderer.scroll :as scroll]
             [vinary.slides.deck :as deck]
-            [vinary.ui.keybindings-editor :as kbe]))
+            [vinary.ui.keybindings-editor :as kbe]
+            [vinary.ui.menubar :as menubar]))
 
 (def ^:private presets [:default :vim :emacs])
 
@@ -139,6 +140,27 @@
     (is (= :normal (get-in (:db (input-events/escape-fx (assoc-in slides-db [:ui :input :mode] :insert)))
                            [:ui :input :mode]))
         "with nothing typed, Escape switches to normal mode as before")))
+
+(deftest overlay-categories
+  (testing "modal dialogs — the SSH prompt included (it was missing from every older copy)"
+    (doseq [[label db] [["Preferences" {:ui {:settings-open? true}}] ["About" {:ui {:about-open? true}}]
+                        ["Extensions" {:ui {:extensions-open? true}}] ["Passwords" {:ui {:passwords {:open? true}}}]
+                        ["the save prompt" {:ui {:passwords {:save-prompt {:host "x"}}}}]
+                        ["the key-binding editor" {:ui {:kbedit {:open? true}}}]
+                        ["the SSH prompt" {:ui {:ssh-prompt {:promptId 1}}}]]]
+      (is (true? (overlay/modal-dialog-open? db)) label)
+      (is (true? (overlay/paints-over-content? db)) (str label " hides the native web view"))))
+  (testing "menus, the palette and hints are not dialogs"
+    (doseq [db [{:ui {:menu "View"}} {:ui {:context-menu {:x 1}}} {:ui {:palette {:open? true}}} {:ui {:hints {:active? true}}}]]
+      (is (false? (overlay/modal-dialog-open? db)) (pr-str db))))
+  (testing "link hints own the keyboard but do not hide the web view (they label app DOM; a web page has none)"
+    (is (true? (overlay/blocking? {:ui {:hints {:active? true}}})))
+    (is (false? (overlay/paints-over-content? {:ui {:hints {:active? true}}}))))
+  (testing "menubar access keys: blocked by any OTHER overlay, never by its own open menu"
+    (is (false? (menubar/access-keys-blocked? {:ui {:menu "File"}})))
+    (doseq [db [{:ui {:extensions-open? true}} {:ui {:passwords {:open? true}}} {:ui {:ssh-prompt {:promptId 2}}}
+                {:ui {:hints {:active? true}}} {:ui {:context-menu {:x 1}}} {:ui {:palette {:open? true}}}]]
+      (is (true? (menubar/access-keys-blocked? db)) (pr-str db)))))
 
 (deftest overlays-that-own-the-keyboard
   (is (false? (overlay/blocking? {:ui {}})))

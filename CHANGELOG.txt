@@ -519,6 +519,13 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - The SSH password prompt now owns the keyboard like every other dialog:
+      keymap chords (Ctrl+T, Vim keys, ...), menubar Alt access keys and the
+      page keys no longer act behind it, and a web page no longer paints over
+      it. The app had six separately written "is a dialog or menu open?"
+      checks that had drifted apart; they are now one (vinary.app.overlay),
+      which also stops Alt+letter opening a menu over the Extensions and
+      Passwords dialogs.
     - Closing the active tab now brings the revealed tab back where you left it --
       its scroll position, source line, or slide -- like any other tab switch;
       before, its view reopened at the top (or on a deck's first slide).

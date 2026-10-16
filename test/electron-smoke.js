@@ -1485,6 +1485,28 @@ async function main() {
     state.sshReply = null;
     win.webContents.send('vv:ssh-prompt', { promptId: 'smoke1', kind: 'password', host: 'demo.example', user: 'alice', attempt: 1 });
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-ssh-prompt .vv-ssh-input'))`), 'the SSH auth-prompt modal appears', 8000);
+    // the prompt is a modal dialog that owns the keyboard (vinary.app.overlay): keymap chords, menubar access keys and
+    // document scrolling must not act behind it — before the predicates were unified it was in none of their lists
+    const tabsBefore = await evalIn(win, `window.__vvdb().ui.tabs.length`);
+    // make the pane scrollable for the duration, so "PageDown scrolls nothing behind it" can actually fail
+    await evalIn(win, `(() => { const sp = document.createElement('div'); sp.id = 'vv-smoke-scroll-spacer';
+      sp.style.height = '6000px'; document.querySelector('.vv-content').appendChild(sp); return true; })()`);
+    const scrollBefore = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+    // focus INSIDE the prompt: the menubar listens in the capture phase, ahead of the modal's own key handling
+    await sendChord(win, 'F', ['alt']);
+    // focus ESCAPED from the panel: now only the shared predicates stand between a key and the document
+    await evalIn(win, `document.activeElement && document.activeElement.blur(); true`);
+    await sendChord(win, 'T', ['control']);
+    await sendChord(win, 'PageDown');
+    await delay(300);
+    const behind = await evalIn(win, `({ tabs: window.__vvdb().ui.tabs.length, menu: window.__vvdb().ui.menu,
+      scroll: document.querySelector('.vv-content').scrollTop, prompt: Boolean(document.querySelector('.vv-ssh-prompt')),
+      webHidden: window.__vvdb().ui['ssh-prompt'] != null })`);
+    assert.deepStrictEqual({ tabs: behind.tabs, menu: behind.menu, scroll: behind.scroll, prompt: behind.prompt },
+      { tabs: tabsBefore, menu: null, scroll: scrollBefore, prompt: true },
+      'with the SSH prompt open, Ctrl+T opens no tab, Alt+F opens no menu, PageDown scrolls nothing behind it');
+    await evalIn(win, `(() => { document.getElementById('vv-smoke-scroll-spacer').remove();
+      document.querySelector('.vv-ssh-input').focus(); return true; })()`);
     await evalIn(win, `(() => {
       const i = document.querySelector('.vv-ssh-input');
       // React controlled input: set via the native value setter so React/reagent's onChange fires
