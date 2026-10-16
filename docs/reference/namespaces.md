@@ -322,6 +322,8 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 | `vinary.git.blame` | Pure `git blame --line-porcelain` parsing (ADR-0040): per-line records coalesced into hunks with cached per-commit metadata, the binary-search line lookup, and the gutter's relative-date buckets. |
 | `vinary.git.graph-geometry` | Pure SVG geometry for the Commit Graph document (ADR-0040): per-kind edge paths, self-contained row cells with incoming top-half ink, lane clamping + overflow, ref-badge normalization, keyboard cursor math, and the shared history-chip label. |
 | `vinary.grammar-catalog` | Compile-time catalog of bundled tree-sitter grammars. |
+| `vinary.slides.deck` | Pure, DOM-free slide-deck model (ADR-0045): deck **detection** (`classify` — Beamer Creator/XMP, `/PageMode /FullScreen`, exact slide-export canvases, Beamer paper + TeX producer; landscape alone never qualifies), **frames** from Beamer's shared overlay page labels, the navigation reducer `step` (page/frame steps, jumps with a bounded GoBack/GoForward history), typed-number goto (label first, then page number), and the pure input mappings (scroll command → slide op, pdf.js-style wheel accumulation, overview tiles + grid movement, effective layout). |
+| `vinary.slides.evidence` | Reads slide-deck evidence from a pdf.js document proxy — `/Info` Creator + Producer, XMP `xmp:CreatorTool`, `/PageMode`, page labels — with every call isolated (a failure yields nil, never a rejected open). Browser and Node legacy pdf.js builds alike, so GUI, CLI and a future terminal slide mode share it. |
 
 ---
 
@@ -329,6 +331,6 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 
 Renderer code does not import `vinary.main.*`. Main code does not import renderer
 UI namespaces. The preload IPC seam (`resources/preload.js`) is the process
-boundary. The `vinary.ir.*`, `vinary.stream.*`, and `vinary.diff` libraries are
+boundary. The `vinary.ir.*`, `vinary.stream.*`, `vinary.slides.*`, and `vinary.diff` libraries are
 DOM-free and process-agnostic, so both the renderer and the headless
 `vinary.cli.*` / `vinary.tui.*` tools depend on them — never the reverse.
