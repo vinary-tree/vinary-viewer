@@ -326,6 +326,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   border: 1px solid var(--vv-border); border-radius: 10px; padding: 1px 9px; cursor: pointer; }
 .vv-refresh-note button:hover { border-color: var(--vv-head1); color: var(--vv-head1); }
 .vv-refresh-note-dismiss { border: none !important; padding: 1px 5px !important; font-size: 14px; line-height: 1; }
+/* a slide TRANSITION's snapshot of the outgoing slide (S8): over the slides (z 6 — under the blank screen, the
+   chip and the find bar), never a hit target; it copies the canvas, so a dark-inverted document inverts it too */
+.vv-slides-transition { position: absolute; z-index: 6; pointer-events: none; }
+.vv-slides-transition-invert { filter: invert(1) hue-rotate(180deg); }
 /* the slides layout takes horizontal touch gestures itself (a swipe flips a slide — deck/swipe-op); vertical pans
    and pinch-zoom stay the browser's */
 .vv-pdf-doc.vv-pdf-slides { touch-action: pan-y pinch-zoom; }

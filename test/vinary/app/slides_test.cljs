@@ -54,7 +54,15 @@
                                             {:deck? false}))
         "presenting always shows slides")
     (is (= :slides (slides/open-as db1)) "the default preference")
-    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil} (slides/layout-request db1)))))
+    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none} (slides/layout-request db1)))))
+
+(deftest the-transition-preference
+  (is (= :none (slides/transition {})) "the default: an instant flip")
+  (doseq [t [:fade :push]]
+    (is (= t (slides/transition {:ui {:settings {:slides-transition t}}}))))
+  (is (= :none (slides/transition {:ui {:settings {:slides-transition :spin}}})) "an unknown kind reads as none")
+  (is (= :push (:transition (slides/layout-request {:ui {:settings {:slides-transition :push}}})))
+      "the engine receives it through the layout request"))
 
 (deftest the-slide-is-remembered-not-the-pixel-offset
   (let [t       (tab 1 "/d/talk.pdf")

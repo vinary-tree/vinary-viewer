@@ -73,6 +73,12 @@ Added
       Print, SaveAs, Quit or FullScreen links stay inert.
       On a touch screen or with a pen, a quick horizontal swipe flips a slide
       (leftward forward, rightward back); a mouse drag still selects text.
+      Slides can animate from one to the next: Preferences > Slides > Slide
+      transition offers None (instant, the default), Fade and Push. Only the
+      flips you ask for animate -- keys, the wheel, clicks, swipes, the slide
+      bar, links and the overview -- while find and the Contents outline still
+      jump instantly; a flip during a transition finishes it at once, and the
+      system's reduce-motion setting turns transitions off.
       A deck remembers its slide: Back/Forward and switching tabs away and back
       reopen the slide you left (a history entry stores the slide itself, since
       a pixel offset would land anywhere once the window size changes).

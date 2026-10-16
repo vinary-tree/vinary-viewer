@@ -60,6 +60,7 @@
             "w" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='w']")
             "u" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='u']")
             "k" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='k']")
+            "r" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='r']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
       (access/consume! e))))
@@ -125,6 +126,17 @@
                                        (access/access-attrs "w"))
           [:option {:value "last"} "Fully built (its last overlay)"]
           [:option {:value "first"} "At its first overlay"]]]
+        [:div.vv-pref-row
+         [:label.vv-pref-label {:for "vv-slides-transition"}
+          [access/label "Slide transition" "r" access-active?]]
+         [:select.vv-pref-input (merge {:id "vv-slides-transition"
+                                        :value (name (if (#{:fade :push} (:slides-transition s)) (:slides-transition s) :none))
+                                        :on-change #(rf/dispatch [:settings/set :slides-transition
+                                                                  (keyword (.. % -target -value))])}
+                                       (access/access-attrs "r"))
+          [:option {:value "none"} "None (instant)"]
+          [:option {:value "fade"} "Fade"]
+          [:option {:value "push"} "Push"]]]
         [check-field "Present full screen" "u" :slides-fullscreen?
          (not= false (:slides-fullscreen? s)) access-active?]
         [check-field "Click advances the slide show" "k" :slides-click-advance?

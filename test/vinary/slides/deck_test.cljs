@@ -266,3 +266,14 @@
     (is (nil? (deck/swipe-op {:dx -100 :dy 80 :dt 200})) "a diagonal mostly-vertical drag (100 < 1.5 × 80)")
     (is (nil? (deck/swipe-op {:dx nil :dy 0 :dt 100})))
     (is (nil? (deck/swipe-op {})))))
+
+(deftest transitions-are-planned-purely
+  (is (nil? (deck/transition-plan {:transition :none :from 0 :to 1})) "none is the default: an instant flip")
+  (is (nil? (deck/transition-plan {:from 0 :to 1})) "no preference → instant")
+  (is (= {:kind :fade :direction :forward :ms 220} (deck/transition-plan {:transition :fade :from 2 :to 3})))
+  (is (= {:kind :push :direction :backward :ms 260} (deck/transition-plan {:transition :push :from 5 :to 1}))
+      "the direction follows page order (Back after a jump pushes the other way)")
+  (is (nil? (deck/transition-plan {:transition :push :from 3 :to 3})) "no page change → nothing to animate")
+  (is (nil? (deck/transition-plan {:transition :fade :from 0 :to 1 :reduced-motion? true}))
+      "prefers-reduced-motion wins")
+  (is (nil? (deck/transition-plan {:transition :spin :from 0 :to 1})) "an unknown kind is ignored"))

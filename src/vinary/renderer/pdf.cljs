@@ -670,16 +670,88 @@
     (swap! state assoc :current idx)
     (report! state)))
 
+;; ---- slide transitions (S8) -----------------------------------------------------------------------------
+;; A command-driven flip (keys, clicks, swipes, the slide bar, links, the overview) may animate: the outgoing slide's
+;; pixels are copied into an overlay over its old rect, the scroller jumps instantly as always, and the overlay fades
+;; out (:fade) or is pushed off while the incoming sheet slides in (:push) — deck/transition-plan decides, from the
+;; :slides-transition preference and prefers-reduced-motion. Scroll-driven moves (find, Contents) never animate.
+
+(defn- reduced-motion? []
+  (boolean (and (exists? js/matchMedia) (.-matches (js/matchMedia "(prefers-reduced-motion: reduce)")))))
+
+(defn- finish-transition!
+  "End a running transition at once: its animations jump to their end state and the snapshot overlay goes."
+  [state]
+  (when-let [{:keys [^js overlay anims]} (:transition-run @state)]
+    (doseq [^js a anims] (try (.finish a) (catch :default _ nil)))
+    (when overlay (.remove overlay))
+    (swap! state assoc :transition-run nil)))
+
+(defn- snapshot-of
+  "A canvas COPY of page `idx`'s rendered slide, positioned (absolutely, inside .vv-content-wrap) exactly over the
+   sheet's current on-screen rect — or nil when that slide has no canvas yet (nothing to animate from)."
+  [state idx]
+  (let [^js sheet (sheet-of state idx)
+        ^js cv    (some-> sheet (.querySelector "canvas.vv-pdf-canvas"))
+        ^js wrap  (some-> ^js (:container @state) (.closest ".vv-content-wrap"))]
+    (when (and cv wrap (pos? (.-width cv)) (pos? (.-height cv)))
+      (let [r    (.getBoundingClientRect sheet)
+            w    (.getBoundingClientRect wrap)
+            copy (js/document.createElement "canvas")]
+        (set! (.-width copy) (.-width cv))
+        (set! (.-height copy) (.-height cv))
+        (.drawImage (.getContext copy "2d") cv 0 0)
+        (set! (.-className copy) (str "vv-slides-transition" (when (:invert? @state) " vv-slides-transition-invert")))
+        (set! (.. copy -style -cssText)
+              (str "left:" (- (.-left r) (.-left w)) "px;top:" (- (.-top r) (.-top w)) "px;"
+                   "width:" (.-width r) "px;height:" (.-height r) "px"))
+        copy))))
+
+(defn- start-transition!
+  "Animate a flip whose instant scroll has already happened: `snap` (snapshot-of the outgoing slide) fades, or is
+   pushed one slot-width away while the incoming sheet slides in from the other side."
+  [state {:keys [kind direction ms]} ^js snap to]
+  (let [^js wrap (some-> ^js (:container @state) (.closest ".vv-content-wrap"))
+        ^js sc   (scroller-of (:container @state))]
+    (if-not (and wrap sc)
+      (.remove snap)
+      (let [_        (.appendChild wrap snap)
+            dist     (.-clientWidth sc)
+            sign     (if (= direction :forward) -1 1)                 ; forward: the old slide leaves to the left
+            out      (case kind
+                       :fade (.animate snap #js [#js {:opacity 1} #js {:opacity 0}]
+                                       #js {:duration ms :easing "ease-out" :fill "forwards"})
+                       (.animate snap #js [#js {:transform "translateX(0)"}
+                                           #js {:transform (str "translateX(" (* sign dist) "px)")}]
+                                 #js {:duration ms :easing "ease-in-out" :fill "forwards"}))
+            ^js in-s (when (= kind :push) (sheet-of state to))
+            in       (when in-s
+                       (.animate in-s #js [#js {:transform (str "translateX(" (* (- sign) dist) "px)")}
+                                           #js {:transform "translateX(0)"}]
+                                 #js {:duration ms :easing "ease-in-out"}))]
+        (swap! state assoc :transition-run {:overlay snap :anims (filterv some? [out in])})
+        (-> (.-finished out)
+            (.then (fn [_] (when (identical? snap (:overlay (:transition-run @state)))
+                             (finish-transition! state))))
+            (.catch (fn [_] nil)))))))
+
 (defn command!
   "Apply a slide-navigation `op` (any vinary.slides.deck/step op: :next :prev :next-frame :prev-frame :first
    :last [:goto i] [:goto-label s] [:jump i] :back :forward) in the slides layout. Jumps are recorded in the
-   GoBack/GoForward history; sequential steps are not. No-op in the document layout."
+   GoBack/GoForward history; sequential steps are not. No-op in the document layout. A flip animates when the
+   :slides-transition preference asks for it (deck/transition-plan); a flip during one ends it first."
   [state op]
   (when (and (slides? state) (not (:destroyed? @state)))
-    (let [nav  {:page (:current @state 0) :back (:back @state []) :fwd (:fwd @state [])}
-          nav' (deck/step (:deck @state) nav op)]
+    (let [from (:current @state 0)
+          nav  {:page from :back (:back @state []) :fwd (:fwd @state [])}
+          nav' (deck/step (:deck @state) nav op)
+          to   (:page nav')
+          plan (deck/transition-plan {:transition (:transition @state) :from from :to to
+                                      :reduced-motion? (reduced-motion?)})
+          snap (when plan (finish-transition! state) (snapshot-of state from))]
       (swap! state assoc :back (:back nav') :fwd (:fwd nav'))
-      (go-to-page! state (:page nav')))))
+      (go-to-page! state to)
+      (when (and plan snap) (start-transition! state plan snap to)))))
 
 (defn- track-current!
   "As the scroller moves (find centring a match, a Contents click, keyboard), keep :current = the slot at the
@@ -869,6 +941,7 @@
    slides shows the page that was at the viewport top; leaving shows the current slide's page at the top."
   [state layout]
   (when (not= layout (:layout @state))
+    (finish-transition! state)
     (let [page (or (:idx (current-anchor state)) 0)]
       (swap! state assoc :layout layout :current page)
       ;; the class goes on FIRST: CSS hides the scroller's scrollbar in the slides layout, and the slot geometry
@@ -1028,6 +1101,7 @@
         state  (atom {:container container :path path :doc doc :owns-doc? false
                       :deck d :doc-gen 0 :layout layout
                       :presenting? (boolean (:presenting? view-state))
+                      :transition (:transition view-state)
                       :current (deck/clamp-page d (or (:page view-state) 0))
                       :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                       :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
@@ -1145,7 +1219,7 @@
           was-presenting? (boolean (:presenting? @state))
           presenting? (boolean (:presenting? view-state))]
       (toggle-class! container "vv-pdf-invert" (:invert? view-state))
-      (swap! state assoc :invert? (boolean (:invert? view-state)))
+      (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state))
       (cond
         (not= layout (:layout @state))
         (do (swap! state assoc :presenting? presenting? :fit (:fit view-state)
@@ -1184,6 +1258,7 @@
   (cache/clear-slides! (:hook @state))
   (detach-slides-listeners! state)
   (detach-present-listeners! state)
+  (finish-transition! state)
   (doseq [k [:report-raf :scroll-raf]] (when-let [r (k @state)] (js/cancelAnimationFrame r)))
   (swap! state assoc :destroyed? true)
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))

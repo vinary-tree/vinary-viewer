@@ -48,6 +48,7 @@ Settings persist as EDN (the keys below are exactly those the Preferences UI wri
  ;; slide decks (ADR-0045) — Preferences ▸ Slides
  :slides-open-as :slides       ; a DETECTED deck opens as :slides (one per screen) or :document
  :slides-overview-page :last   ; an overview tile shows (and opens) its frame :last (fully built) or :first
+ :slides-transition :none      ; how a slide flip animates: :none (instant), :fade or :push
  :slides-fullscreen? true      ; a slide show (F5) makes its window fullscreen
  :slides-click-advance? true}  ; a click on the slide advances a running show (Shift+click goes back)
 ```
@@ -58,8 +59,13 @@ means ligatures are off. Unknown keys are merged into the settings map but only 
 settings have visible effects. Beyond fonts and theme, `settings.edn` also remembers the
 **sidebar** width and open/closed state, so the shell reopens the way you left it.
 
-**Slides.** The four `:slides-*` keys are the Preferences dialog's *Slides* section (Alt+O, Alt+W, Alt+U, Alt+K).
-The two checkboxes default **on**: an absent key means on, and only an explicit `false` turns them off. Whether
+**Slides.** The five `:slides-*` keys are the Preferences dialog's *Slides* section (Alt+O, Alt+W, Alt+R, Alt+U,
+Alt+K). The two checkboxes default **on**: an absent key means on, and only an explicit `false` turns them off.
+`:slides-transition` animates only the flips you ask for — keys, the wheel, clicks, swipes, the slide bar, links and
+the overview: `:fade` dissolves the outgoing slide over the incoming one (220 ms) and `:push` slides it off while the
+incoming one slides in from the side the deck moves toward (260 ms). Find and the Contents outline still jump
+instantly, a flip during a transition ends it at once, and the operating system's *reduce motion* setting
+(`prefers-reduced-motion`) turns transitions off whatever the preference says. Whether
 a *particular* PDF shows as slides or as a document is not a setting — it is chosen per document view (View ▸
 View as Slide Show / View as Document, the address bar's toggle) and remembered by Back/Forward; the
 `:slides-open-as` preference only decides how a *detected* deck opens the first time.

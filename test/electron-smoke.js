@@ -2449,6 +2449,57 @@ async function main() {
     console.log('[ok] PDF swipe: touch/pen swipes flip slides; slow, vertical and mouse drags do not');
   }
 
+  // ── TRANSITIONS (S8): with the :slides-transition preference a command-driven flip animates — a snapshot of the
+  // outgoing slide fades (or is pushed off while the incoming sheet slides in) and is removed when it ends; the flip
+  // itself is instant as always (vinary.slides.deck/transition-plan)
+  {
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && s.layout === 'slides' && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    // flip, then sample every 10 ms for 1 s: did a snapshot overlay appear, did the incoming sheet animate, is it gone?
+    const flipAndWatch = (op) => evalIn(win, `new Promise((done) => {
+      const seen = { overlay: false, sheetAnim: false };
+      window.__vvslides(${JSON.stringify(op)});
+      const t0 = performance.now();
+      const id = setInterval(() => {
+        if (document.querySelector('.vv-slides-transition')) seen.overlay = true;
+        if (Array.from(document.querySelectorAll('.vv-pdf-sheet')).some((sh) => sh.getAnimations().length > 0)) seen.sheetAnim = true;
+        if (performance.now() - t0 > 1000) { clearInterval(id);
+          done({ ...seen, leftover: Boolean(document.querySelector('.vv-slides-transition')) }); }
+      }, 10);
+    })`);
+    // app-db holds a new preference a frame BEFORE the engine does: the view state reaches pdf/update! through the
+    // pdf-view's re-render, which Reagent batches onto the next animation frame. Its flush was queued when app-db
+    // changed — before these callbacks — so two frames later the engine has the preference (an ordering, not a
+    // sleep; a flip dispatched sooner sees the previous transition, as it did when this arm first failed)
+    const engineHasSettings = () => evalIn(win, `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`);
+    await evalIn(win, `window.__vvslides('first')`);
+    await slidesAt(0, 'transitions: on slide 1');
+    await waitCalm(win, `Boolean(document.querySelector('#vv-pdf-page-1 canvas.vv-pdf-canvas'))`, 'slide 1 rendered', 8000);
+    win.webContents.send('vv:settings', '{:slides-transition :fade}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-transition'] === 'fade'`, 'fade selected', 4000);
+    await engineHasSettings();
+    const fade = await flipAndWatch('next');
+    await slidesAt(1, 'the faded flip still lands on slide 2');
+    assert.deepStrictEqual(fade, { overlay: true, sheetAnim: false, leftover: false },
+      'fade: a snapshot overlay fades out and is removed; the incoming sheet does not move');
+    win.webContents.send('vv:settings', '{:slides-transition :push}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-transition'] === 'push'`, 'push selected', 4000);
+    await engineHasSettings();
+    await waitCalm(win, `Boolean(document.querySelector('#vv-pdf-page-2 canvas.vv-pdf-canvas'))`, 'slide 2 rendered', 8000);
+    const push = await flipAndWatch('prev');
+    await slidesAt(0, 'the pushed flip lands on slide 1');
+    assert.deepStrictEqual(push, { overlay: true, sheetAnim: true, leftover: false },
+      'push: the snapshot is pushed off while the incoming sheet slides in, and both end');
+    win.webContents.send('vv:settings', '{:slides-transition :none}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-transition'] === 'none'`, 'transitions off again', 4000);
+    await engineHasSettings();
+    const none = await flipAndWatch('next');
+    await slidesAt(1, 'an instant flip');
+    assert.deepStrictEqual(none, { overlay: false, sheetAnim: false, leftover: false }, 'none: no animation at all');
+    console.log('[ok] PDF slide transitions: fade (snapshot fades), push (snapshot pushed + incoming slides in), none (instant)');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

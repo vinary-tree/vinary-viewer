@@ -356,6 +356,23 @@
              (>= (js/Math.abs dx) (* swipe-ratio (js/Math.abs dy))))
     (if (neg? dx) :next :prev)))
 
+;; ---- slide transitions ---------------------------------------------------------------------------------
+
+(def transition-ms
+  "How long each transition kind takes (ms) — short: a presenter's flip must never feel sluggish."
+  {:fade 220 :push 260})
+
+(defn transition-plan
+  "PURE. How a slide flip from page `from` to page `to` is animated under preference `transition`
+   (:none — the default — :fade or :push): {:kind :fade|:push :direction :forward|:backward :ms n}, or nil for an
+   instant flip — no transition chosen, no actual page change, or the viewer asked the OS for reduced motion
+   (`reduced-motion?`, prefers-reduced-motion: reduce). The direction follows the page order, so Back after a jump
+   pushes the old slide the other way."
+  [{:keys [transition from to reduced-motion?]}]
+  (let [kind (#{:fade :push} transition)]
+    (when (and kind (not reduced-motion?) (number? from) (number? to) (not= from to))
+      {:kind kind :direction (if (> to from) :forward :backward) :ms (transition-ms kind)})))
+
 ;; ---- overview grid --------------------------------------------------------------------------------------
 
 (defn overview-tiles

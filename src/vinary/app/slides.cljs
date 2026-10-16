@@ -58,15 +58,22 @@
   [db]
   (not= false (get-in db [:ui :settings :slides-click-advance?])))
 
+(defn transition
+  "The :slides-transition preference — how a slide flip animates: :none (the default), :fade or :push."
+  [db]
+  (let [t (get-in db [:ui :settings :slides-transition])]
+    (if (#{:fade :push} t) t :none)))
+
 (defn layout-request
-  "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from}.
-   The engine combines it with the document's own deck classification, and applies :present-from when
-   :presenting? turns on."
+  "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from
+   :transition}. The engine combines it with the document's own deck classification, applies :present-from when
+   :presenting? turns on, and animates command-driven flips per :transition."
   [db]
   {:explicit     (explicit-layout db)
    :open-as      (open-as db)
    :presenting?  (presenting? db)
-   :present-from (present-from db)})
+   :present-from (present-from db)
+   :transition   (transition db)})
 
 (defn effective-layout
   "The layout the shown PDF uses: :slides or :document (vinary.slides.deck/effective-layout)."
