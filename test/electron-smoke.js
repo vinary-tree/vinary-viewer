@@ -4065,6 +4065,10 @@ async function main() {
 
     // 1 — auto default NARROW: a fresh tab (no explicit choice) at the 1000px window (content ≈720)
     await sendChord(win, 'T', ['control']);
+    // sendInputEvent returns before the renderer has handled the chord: open the diff only once the fresh tab is
+    // active, or __vvopen can win the race and open it in the PREVIOUS tab, leaving the new tab blank
+    await waitFor(() => evalIn(win, `document.querySelector('.vv-empty')?.textContent.trim() === 'New Tab'`),
+      'a fresh tab for the auto-layout diff', 8000);
     await evalIn(win, `window.__vvopen(${JSON.stringify(f2Diff)})`);
     await waitFor(() => evalIn(win, unifiedShowing),
       'an unchosen diff in a narrow pane renders Unified', 8000);
