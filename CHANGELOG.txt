@@ -342,9 +342,11 @@ Changed
       lint gains a documentation gate: every re-frame registration must have a
       row in the right section of docs/reference/events-effects-subs.md (events,
       effects/cofx, subscriptions), and every vv:* IPC channel in the preloads or
-      main must appear in docs/reference/ipc-channels.md -- in both directions, so
-      a retired id or removed channel left in a catalog fails too. Document new
-      events, effects, subscriptions and channels in the same commit. See
+      main must appear in docs/reference/ipc-channels.md, and every namespace and
+      JS module under src/vinary must have a row in docs/reference/namespaces.md
+      -- in both directions, so a retired id, removed channel or deleted namespace
+      left in a catalog fails too. Document new events, effects, subscriptions,
+      channels and namespaces in the same commit. See
       docs/engineering/04-lint-and-conventions.md.
     - Link gestures follow browser convention everywhere (ADR-0044): Ctrl+click and
       middle-click open a link in a BACKGROUND tab -- it loads behind you while the
@@ -572,7 +574,10 @@ Fixed
       vv:load-pdf-bytes (also scrubbed from the architecture, feature and
       remote-SSH pages; ADRs 0025/0026/0027 carry dated amendment notes); the
       state-schema reference shows the real attribute list and the facet-based tab
-      shape; ADR-0027's terminal-parity claim is corrected for vv --tui.
+      shape; ADR-0027's terminal-parity claim is corrected for vv --tui; and
+      namespaces.md describes the 30 namespaces and 2 JS modules it lacked (the
+      lazily-loaded engine chunks and their facades, the main-process registries,
+      the piped-stdin and file-type cores, the find worker, and more).
     - Tab activation now gives the keyboard to the useful surface: a genuinely blank
       tab focuses and selects the URI bar, while any tab with a document URI focuses
       the document body. Unsubmitted URI text is retained independently for each blank

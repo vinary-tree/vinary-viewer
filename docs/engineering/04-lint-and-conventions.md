@@ -94,16 +94,18 @@ shipped surface, not just the legacy one, closed the gap.)
 
 ### 1.3 Check 4 — the reference catalogs match the code, in both directions
 
-Two reference pages promise to be **exhaustive**, and both had drifted silently:
+Three reference pages promise to be **exhaustive**, and all three had drifted silently:
 before this check existed, 159 re-frame registrations had no reference row (99 were
 never mentioned anywhere), 7 rows described retired ids, 3 IPC channels were
-uncatalogued, and the removed `vv:load-pdf-bytes` channel was still listed. Check 4
-makes the drift a build failure:
+uncatalogued, the removed `vv:load-pdf-bytes` channel was still listed, and 30
+namespaces and 2 JS modules had no row in the namespace reference. Check 4 makes the
+drift a build failure:
 
 | Sub-check | Code side | Doc side | Fails when |
 |-----------|-----------|----------|------------|
 | **4a** re-frame | every `(rf/reg-event-db\|reg-event-fx\|reg-event-ctx\|reg-fx\|reg-cofx\|reg-sub <id>` in `src/vinary/**/*.cljs` | first-column table rows of [`reference/events-effects-subs.md`](../reference/events-effects-subs.md): events in §1, effects/cofx in §2, subscriptions in §3 | a registration has no row **in its kind's section**, or a row names an id not registered for that kind |
 | **4b** IPC | every `'vv:…'` / `"vv:…"` literal in `resources/preload.js`, `resources/web-preload.js` and `src/vinary/main/**` | every `` `vv:…` `` code span in [`reference/ipc-channels.md`](../reference/ipc-channels.md) | a channel in code is uncatalogued, or the catalog names a channel the code no longer has |
+| **4c** namespaces | the `(ns …)` form of every `src/vinary/**/*.cljs` / `.clj` / `.cljc` file, and every JS module under `src/vinary/` (named `vinary.<dir>.<file>.js`, e.g. `vinary.main.content_service.js`) | first-column `vinary.*` table rows of [`reference/namespaces.md`](../reference/namespaces.md) | a namespace or module has no row, or a row names one the code no longer has |
 
 Ids are compared **literally** — `::local` subscriptions are written `::name` in the
 doc, exactly as in the source — and an id registered as two kinds (an event and an
@@ -112,7 +114,7 @@ deliberate exception is declared in the doc itself with an HTML comment,
 `<!-- lint:allow <id-or-channel> -->`, so the exemption is reviewed with the page.
 
 The rule this enforces: **a commit that registers an event, effect, subscription or
-IPC channel documents it in the same commit.**
+IPC channel — or adds a namespace or JS module — documents it in the same commit.**
 
 ---
 

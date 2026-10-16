@@ -6,6 +6,7 @@
 //   4. the exhaustive reference catalogs match the code in both directions:
 //        a. docs/reference/events-effects-subs.md ↔ every re-frame registration (per section)
 //        b. docs/reference/ipc-channels.md ↔ every vv:* IPC channel in the preloads + main
+//        c. docs/reference/namespaces.md ↔ every namespace and JS module under src/vinary
 // Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
 const path = require('path');
@@ -151,6 +152,37 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
     `${docPath} documents all ${inCode.size} IPC channels used by the preloads + main` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
   log(stale.length === 0,
     `${docPath} names no removed channel` + (stale.length ? ` — NOT IN CODE: ${show(stale)}` : ''));
+}
+
+//  4c. Namespaces: every namespace under src/vinary (the `(ns …)` form of each .cljs / .clj / .cljc file) and every JS
+//      module there (catalogued as `vinary.<dir>.<file>.js`, e.g. `vinary.main.content_service.js`) must have a
+//      FIRST-COLUMN row in the namespace reference, and every first-column `vinary.*` row there must still exist in
+//      code. (Before this gate, 30 namespaces and 2 JS modules had no row.)
+{
+  const nsRe = /^\(ns\s+([A-Za-z0-9.\-]+)/m;
+  const inCode = new Set();
+  for (const f of walkFiles(path.join(root, 'src/vinary'), ['.cljs', '.clj', '.cljc'])) {
+    const m = fs.readFileSync(f, 'utf8').match(nsRe);
+    if (m) inCode.add(m[1]);
+  }
+  for (const f of walkFiles(path.join(root, 'src/vinary'), ['.js', '.mjs', '.cjs'])) {
+    const parts = path.relative(path.join(root, 'src'), f).split(path.sep);    // ['vinary', 'main', 'x.js']
+    inCode.add(parts.slice(0, -1).join('.') + '.' + parts[parts.length - 1]);
+  }
+  const docPath = 'docs/reference/namespaces.md';
+  const doc = fs.readFileSync(path.join(root, docPath), 'utf8');
+  const allow = allowed(doc);
+  const inDoc = new Set();
+  for (const line of doc.split('\n')) {
+    const m = line.match(/^\|\s*`(vinary\.[A-Za-z0-9_.\-]+)`/);
+    if (m) inDoc.add(m[1]);
+  }
+  const missing = [...inCode].filter((n) => !inDoc.has(n) && !allow.has(n)).sort();
+  const stale = [...inDoc].filter((n) => !inCode.has(n) && !allow.has(n)).sort();
+  log(missing.length === 0,
+    `${docPath} documents all ${inCode.size} namespaces + JS modules under src/vinary` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
+  log(stale.length === 0,
+    `${docPath} names no removed namespace` + (stale.length ? ` — NOT IN CODE: ${show(stale)}` : ''));
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');
