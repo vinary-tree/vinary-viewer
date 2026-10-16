@@ -335,6 +335,28 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
 .vv-slides-goto b { font-variant-numeric: tabular-nums; color: var(--vv-head1); font-size: 16px; }
 .vv-slides-goto-hint { opacity: 0.6; font-size: 11px; margin-left: 4px; }
+/* PRESENTING (ADR-0045): a running slide show hides the app chrome and shows the slide on black. Nothing is
+   unmounted — the slides view keeps its find/text/link layers and Escape brings the chrome straight back. The
+   SSH prompt, the palette, the context menu and the find bar still appear over the show (they are not chrome). */
+.vv-root.vv-presenting .vv-menubar,
+.vv-root.vv-presenting .vv-sidebar,
+.vv-root.vv-presenting .vv-tabs,
+.vv-root.vv-presenting .vv-uribar,
+.vv-root.vv-presenting .vv-bottombar,
+.vv-root.vv-presenting .vv-statusbar { display: none !important; }
+.vv-root.vv-presenting,
+.vv-root.vv-presenting .vv-content { background: #000; }
+.vv-root.vv-presenting .vv-pdf-sheet { box-shadow: none; }
+/* non-fatal notices stay readable but out of the audience's way during a show */
+.vv-root.vv-presenting .vv-refresh-note { top: 4px; font-size: 11px; opacity: 0.85; }
+.vv-root.vv-presenting .vv-ssh-error { opacity: 0.85; transform: scale(0.9); transform-origin: bottom right; }
+/* the pointer hides after 2.5 s without moving while presenting (the engine toggles the class) */
+.vv-pdf-doc.vv-pdf-cursor-idle,
+.vv-pdf-doc.vv-pdf-cursor-idle * { cursor: none !important; }
+/* the black / white screen of a running show (b . / w ,) — over the slides, under the chip and the find bar */
+.vv-slides-blank { position: absolute; inset: 0; z-index: 7; cursor: none; }
+.vv-slides-blank[data-blank="black"] { background: #000; }
+.vv-slides-blank[data-blank="white"] { background: #fff; }
 /* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
 .vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
   background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }

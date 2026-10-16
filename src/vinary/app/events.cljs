@@ -1932,10 +1932,18 @@
    ;; different document or the document layout starts without them.
    (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m))))
 
-(rf/reg-event-db
- :slides/unmounted
- (fn [db [_ path]]
-   (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)))
+(declare slides-stop-fx)
+
+(defn slides-unmounted-fx
+  "Effects of the pdf-view unmounting `path` (a tab switch, navigation, Reflow): drop its position mirror, and
+   end a slide show of that document — the show is of a VIEW, and the view is gone."
+  [db path]
+  (let [db' (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)]
+    (if (= path (:path (slides/presentation db')))
+      (slides-stop-fx db' {})
+      {:db db'})))
+
+(rf/reg-event-fx :slides/unmounted (fn [{:keys [db]} [_ path]] (slides-unmounted-fx db path)))
 
 ;; ---- typed slide numbers (ADR-0045 §Keys): 1 2 Enter goes to slide 12 ------------------------------------
 ;; The number names a LABEL first — in a Beamer deck the label is the frame number printed on the slide, so
@@ -1954,11 +1962,15 @@
   (conj (or fx []) [:async/debounce {:key slides-digits-key :ms slides-digits-ms :dispatch [:slides/digits-clear]}]))
 
 (defn slides-command-fx
-  "Effects of :slides/command `op`: run it on the mounted slide show, abandoning a half-typed slide number."
+  "Effects of :slides/command `op`: run it on the mounted slide show, abandoning a half-typed slide number.
+   While the screen is blanked (presenting), a navigation only ends the blanking — the audience sees the slide
+   they left, not the next one (pdfpc's convention)."
   [db op]
-  (cond-> {:fx [[:slides/command op]]}
-    (slides/digits db) (-> (assoc :db (slides/clear-digits db))
-                           (update :fx conj [:async/cancel slides-digits-key]))))
+  (if (slides/blank db)
+    {:db (slides/clear-blank db)}
+    (cond-> {:fx [[:slides/command op]]}
+      (slides/digits db) (-> (assoc :db (slides/clear-digits db))
+                             (update :fx conj [:async/cancel slides-digits-key])))))
 
 (defn slides-digit-fx
   "Effects of typing digit `d` (0–9): append it to the typed number — only while the mounted PDF is in the slides
@@ -1972,7 +1984,7 @@
   "Effects of Enter: go to the typed slide (label first, then page number), else the next slide."
   [db]
   (if-let [typed (slides/digits db)]
-    {:db (slides/clear-digits db)
+    {:db (-> db slides/clear-digits slides/clear-blank)      ; an explicit "go to" also ends a blanking
      :fx [[:async/cancel slides-digits-key] [:slides/command [:goto-label typed]]]}
     {:fx [[:dispatch [:slides/command :next]]]}))
 
@@ -2003,6 +2015,84 @@
    ;; the 2.5 s timeout, Escape, or anything else that abandons the typed number (cancelling the timer is
    ;; harmless when it is the timer that fired)
    {:db (slides/clear-digits db) :fx [[:async/cancel slides-digits-key]]}))
+
+;; ---- presenting: the fullscreen slide show (ADR-0045 §Presenting) ---------------------------------------
+;; A show is of the shown PDF in THIS window: [:ui :presentation] {:active? :tab-id :path :from :fullscreen?}. The
+;; engine sees :presenting? (and :present-from) through the :pdf/layout-request sub — it forces the slides layout,
+;; drops the slide margin, applies :from, and turns on click-advance and the idle cursor. CSS hides the app chrome
+;; (.vv-root.vv-presenting); main makes the window fullscreen when the :slides-fullscreen? preference allows, and
+;; only ever leaves a fullscreen it entered (vinary.main.fullscreen/decide).
+(defn slides-present-fx
+  "Effects of starting the slide show of the shown PDF from `from` (:first — the default, :current, or a page
+   index). A no-op unless a PDF is shown. While a show is already running, :first goes back to the first slide (F5
+   again), an index goes there, and :current does nothing."
+  [db from]
+  (let [from (or from :first)]
+    (cond
+      (not (slides/pdf-shown? db)) nil
+
+      (slides/presenting? db)
+      (cond (= :first from)   {:fx [[:dispatch [:slides/command :first]]]}
+            (integer? from)   {:fx [[:dispatch [:slides/command [:goto from]]]]}
+            :else             nil)
+
+      :else
+      (let [fs? (slides/fullscreen-preferred? db)]
+        {:db (-> db
+                 (assoc-in [:ui :presentation] {:active?     true
+                                                :tab-id      (nav/active-id db)
+                                                :path        (facet/active-content-path db)
+                                                :from        from
+                                                :fullscreen? fs?})
+                 slides/clear-digits
+                 slides/clear-blank)
+         :fx (cond-> [[:dom/focus :content]]
+               fs? (conj [:vv/set-fullscreen {:on true}]))}))))
+
+(defn slides-stop-fx
+  "Effects of ending the slide show: forget it and any blanking, and leave the fullscreen it asked for (main
+   ignores that when the window was fullscreen before the show). `:fullscreen-gone?` — the window already left
+   fullscreen, so there is nothing to leave. nil when no show is running."
+  [db {:keys [fullscreen-gone?]}]
+  (when-let [pres (slides/presentation db)]
+    {:db (-> db (update :ui dissoc :presentation) slides/clear-blank)
+     :fx (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])}))
+
+(defn slides-blank-fx
+  "Effects of the black/white screen keys (`color` :black / :white) while presenting: blank the screen to that
+   colour, or un-blank it when it already is. A no-op outside a show."
+  [db color]
+  (when (slides/presenting? db)
+    {:db (if (= color (slides/blank db))
+           (slides/clear-blank db)
+           (assoc-in db [:ui :slides :blank] color))}))
+
+(defn slides-click-fx
+  "Effects of a plain click on the slide during a show (reported by the engine, which has already excluded links,
+   selections and drags): next slide, or previous with Shift — when the :slides-click-advance? preference allows."
+  [db shift?]
+  (when (and (slides/presenting? db) (slides/click-advance? db))
+    {:fx [[:dispatch [:slides/command (if shift? :prev :next)]]]}))
+
+(defn fullscreen-changed-fx
+  "Effects of main reporting this window's fullscreen state {:fullscreen :owned}. Records [:ui :fullscreen?];
+   when the window LEAVES a fullscreen the show asked for (F11, the window manager), the show ends with it."
+  [db {:keys [fullscreen]}]
+  (let [was? (get-in db [:ui :fullscreen?])
+        db'  (assoc-in db [:ui :fullscreen?] (boolean fullscreen))
+        pres (slides/presentation db')]
+    (if (and pres (:fullscreen? pres) was? (not fullscreen))
+      (slides-stop-fx db' {:fullscreen-gone? true})
+      {:db db'})))
+
+(rf/reg-event-fx :slides/present      (fn [{:keys [db]} [_ opts]] (slides-present-fx db (:from opts))))
+(rf/reg-event-fx :slides/stop         (fn [{:keys [db]} _] (slides-stop-fx db {})))
+(rf/reg-event-fx :slides/black        (fn [{:keys [db]} _] (slides-blank-fx db :black)))
+(rf/reg-event-fx :slides/white        (fn [{:keys [db]} _] (slides-blank-fx db :white)))
+(rf/reg-event-db :slides/unblank      (fn [db _] (slides/clear-blank db)))
+(rf/reg-event-fx :slides/click        (fn [{:keys [db]} [_ {:keys [shift?]}]] (slides-click-fx db shift?)))
+(rf/reg-event-fx :view/fullscreen-changed
+                 (fn [{:keys [db]} [_ p]] (fullscreen-changed-fx db (js->clj p :keywordize-keys true))))
 
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last
@@ -2295,7 +2385,16 @@
          nxt (nth theme-cycle (mod (inc idx) (count theme-cycle)))]
      {:fx [[:dispatch [:theme/set nxt]]]})))
 
-(rf/reg-event-fx :nav/focus  (fn [_ [_ target]] {:fx [[:dom/focus target]]}))
+(defn nav-focus-fx
+  "Effects of moving the keyboard focus to `target`. Focusing chrome that a slide show hides (the URI bar, the
+   sidebar's tree, the focus toggle) ends the show first, so the focus lands on something visible (ADR-0045)."
+  [db target]
+  (if (and (slides/presenting? db) (#{:uri :tree :toggle} target))
+    (let [{db' :db fx :fx} (slides-stop-fx db {})]
+      {:db db' :fx (conj (vec fx) [:dom/focus target])})
+    {:fx [[:dom/focus target]]}))
+
+(rf/reg-event-fx :nav/focus  (fn [{:keys [db]} [_ target]] (nav-focus-fx db target)))
 (rf/reg-event-fx :nav/scroll (fn [_ [_ opts]]   {:fx [[:dom/scroll opts]]}))
 
 ;; "open in tab": new? → a new tab, else navigate the active tab (both focus an existing tab for the path)

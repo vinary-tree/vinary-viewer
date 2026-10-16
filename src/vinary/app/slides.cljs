@@ -36,13 +36,37 @@
   (when-let [p (facet/active-content-path db)]
     (ds/doc-attr (ds/snapshot) p :doc/deck)))
 
-(defn layout-request
-  "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting?}. The engine
-   combines it with the document's own deck classification."
+(defn presentation
+  "The running slide show {:active? :tab-id :path :from :fullscreen?}, or nil. :from is where it started
+   (:first, :current or a page index); :fullscreen? whether it asked main for fullscreen."
   [db]
-  {:explicit    (explicit-layout db)
-   :open-as     (open-as db)
-   :presenting? (presenting? db)})
+  (get-in db [:ui :presentation]))
+
+(defn present-from
+  "Where the running slide show asked to start (:first / :current / a page index), or nil."
+  [db]
+  (get-in db [:ui :presentation :from]))
+
+(defn fullscreen-preferred?
+  "The :slides-fullscreen? preference — does a slide show make the window fullscreen? (default yes; settings
+   turn an unset checkbox into false, so only an explicit false opts out)"
+  [db]
+  (not= false (get-in db [:ui :settings :slides-fullscreen?])))
+
+(defn click-advance?
+  "The :slides-click-advance? preference — does a click on the slide advance a running show? (default yes)"
+  [db]
+  (not= false (get-in db [:ui :settings :slides-click-advance?])))
+
+(defn layout-request
+  "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from}.
+   The engine combines it with the document's own deck classification, and applies :present-from when
+   :presenting? turns on."
+  [db]
+  {:explicit     (explicit-layout db)
+   :open-as      (open-as db)
+   :presenting?  (presenting? db)
+   :present-from (present-from db)})
 
 (defn effective-layout
   "The layout the shown PDF uses: :slides or :document (vinary.slides.deck/effective-layout)."
@@ -57,9 +81,10 @@
 
 ;; ---- the [:ui :slides] mirror ------------------------------------------------------------------------------
 (def ui-keys
-  "Keys of [:ui :slides] that the UI owns, not the engine's position report: the typed slide number (:digits).
-   They survive the reports of the same deck in the slides layout (merge-report)."
-  [:digits])
+  "Keys of [:ui :slides] that the UI owns, not the engine's position report: the typed slide number (:digits)
+   and a blanked screen (:blank — :black or :white, while presenting). They survive the reports of the same deck
+   in the slides layout (merge-report)."
+  [:digits :blank])
 
 (defn merge-report
   "The new [:ui :slides] for the engine's position report `m` over the current `cur`: the report, plus `cur`'s
@@ -80,4 +105,16 @@
   [db]
   (if (contains? (get-in db [:ui :slides]) :digits)
     (update-in db [:ui :slides] dissoc :digits)
+    db))
+
+(defn blank
+  "The running show's blanked screen — :black or :white — or nil."
+  [db]
+  (get-in db [:ui :slides :blank]))
+
+(defn clear-blank
+  "db without a blanked screen."
+  [db]
+  (if (contains? (get-in db [:ui :slides]) :blank)
+    (update-in db [:ui :slides] dissoc :blank)
     db))

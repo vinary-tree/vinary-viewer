@@ -85,6 +85,9 @@ contextBridge.exposeInMainWorld('vv', {
   zoom: (dir) => ipcRenderer.send('vv:zoom', dir),
   zoomSet: (f) => ipcRenderer.send('vv:zoom-set', f),
   requestZoom: () => ipcRenderer.send('vv:zoom-request'),   // boot pull: seed the zoom bar with the restored factor
+  // slide shows (ADR-0045): window-level fullscreen of THIS window only; main leaves only a fullscreen it entered
+  setFullscreen: (on) => ipcRenderer.send('vv:set-fullscreen', { on: Boolean(on) }),
+  requestFullscreenState: () => ipcRenderer.send('vv:fullscreen-request'),   // boot pull, like requestZoom
   httpZoom: (dir) => ipcRenderer.send('vv:http-zoom', dir),
   httpZoomSet: (f) => ipcRenderer.send('vv:http-zoom-set', f),
 
@@ -195,6 +198,7 @@ contextBridge.exposeInMainWorld('vv', {
   onSshStatus: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:ssh-status', h); return () => ipcRenderer.removeListener('vv:ssh-status', h); },
   onConnections: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:connections', h); return () => ipcRenderer.removeListener('vv:connections', h); },
   onZoomChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:zoom-changed', h); return () => ipcRenderer.removeListener('vv:zoom-changed', h); },
+  onFullscreenChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:fullscreen-changed', h); return () => ipcRenderer.removeListener('vv:fullscreen-changed', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:app-info', h);

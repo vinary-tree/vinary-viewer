@@ -17,6 +17,7 @@
             [vinary.main.settings :as settings]
             [vinary.main.recent :as recent]
             [vinary.main.window :as window]
+            [vinary.main.fullscreen :as fullscreen]
             [vinary.main.windows :as windows]
             [vinary.main.paths :as paths]
             [vinary.main.shell :as shell]
@@ -148,6 +149,8 @@
          (fn [^js e ^js url] (when-not (= url (.getURL wc)) (.preventDefault e))))
     (.setWindowOpenHandler wc (fn [_] #js {:action "deny"}))
     (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
+    (fullscreen/init!)                     ; slide-show fullscreen IPC (once per process; routed to the sender)
+    (fullscreen/wire! win)                 ; report this window's fullscreen enter/leave to its renderer
     (.once wc "did-finish-load"
            (fn []
              (profile/mark! "did-finish-load")

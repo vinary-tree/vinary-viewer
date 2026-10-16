@@ -121,6 +121,8 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:devtools` | `toggleDevtools()` | none | `shell` | Toggle renderer devtools. |
 | `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | direction / factor | `shell` | Adjust the app-window zoom (DOM views); reports the new factor on `vv:zoom-changed`. |
 | `vv:zoom-request` | `requestZoom()` | none | `shell` | Boot pull: once its listener is attached the renderer asks for the (Chromium-restored) window zoom, and main answers on `vv:zoom-changed` `{context "window" factor}` so the zoom bar seeds from the true factor instead of app-db's default 1.0. Every main→renderer state channel needs a listener **and** a boot pull. |
+| `vv:set-fullscreen` | `setFullscreen(on)` | `{on}` | `fullscreen` | Slide show (ADR-0045): make the SENDER's window fullscreen (`BrowserWindow.fromWebContents(event.sender)`), or leave it. Main remembers a fullscreen it entered (`owned`) and only ever leaves that one — a window the user had made fullscreen stays fullscreen when the show ends (`fullscreen/decide`). Nothing is ever made fullscreen except on this request. |
+| `vv:fullscreen-request` | `requestFullscreenState()` | none | `fullscreen` | Boot pull: main answers on `vv:fullscreen-changed` with this window's state, so `[:ui :fullscreen?]` is right for a window restored fullscreen. |
 
 ### 1.8 Retired native-PDF seam
 
@@ -173,6 +175,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths, focus-first?}` | `[:files/opened …]` | Deliver file/URI selections from the native Open dialog **or** the command-line arguments at launch (each opened in its own tab). `focus-first` (command-line launch) re-focuses the first path's tab. |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata map | `[:app-info/received …]` | Deliver app metadata for the About dialog. |
 | `vv:zoom-changed` | `onZoomChanged(cb)` | `{:context "window"\|"web" :factor n}` | `[:view/zoom-changed …]` | Report the resolved app-window / web-view zoom factor so the zoom bar shows the live %. |
+| `vv:fullscreen-changed` | `onFullscreenChanged(cb)` | `{fullscreen owned}` | `[:view/fullscreen-changed …]` | This window entered or left fullscreen (on request, or by the user — F11, the window manager — which also ends main's ownership), or the boot pull's answer. When the window leaves a fullscreen a slide show asked for, the show ends. |
 
 ### 2.4 Extensions & ad-blocking
 

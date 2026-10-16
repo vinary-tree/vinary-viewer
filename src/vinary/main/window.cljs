@@ -56,15 +56,28 @@
       (assoc base :x (:x saved) :y (:y saved))
       base)))
 
+(defn persistable-bounds
+  "PURE. What to save for a window snapshot {:fullscreen? :maximized? :normal {:x :y :width :height}}: the
+   normal bounds plus the maximized flag — or nil while the window is FULLSCREEN (a slide show, ADR-0045). The
+   fullscreen geometry must never become the window's saved size: some platforms report it from
+   getNormalBounds while fullscreen, and entering fullscreen itself fires resize. nil leaves the bounds saved
+   before fullscreen on disk."
+  [{:keys [fullscreen? maximized? normal]}]
+  (when-not fullscreen?
+    (assoc (select-keys normal [:x :y :width :height]) :maximized? (boolean maximized?))))
+
 (defn remember!
   "Reapply the saved maximized state and persist the window's normal bounds + maximized flag on
-   resize / move (debounced) and on close (flushed)."
+   resize / move (debounced) and on close (flushed) — never while fullscreen (persistable-bounds)."
   [^js win]
   (let [save (fn []
                (when (and win (not (.isDestroyed win)))
                  (let [b (.getNormalBounds win)]
-                   (write-bounds! {:x (.-x b) :y (.-y b) :width (.-width b) :height (.-height b)
-                                   :maximized? (.isMaximized win)}))))
+                   (when-let [m (persistable-bounds {:fullscreen? (.isFullScreen win)
+                                                     :maximized?  (.isMaximized win)
+                                                     :normal      {:x (.-x b) :y (.-y b)
+                                                                   :width (.-width b) :height (.-height b)}})]
+                     (write-bounds! m)))))
         debounced (fn []
                     (when-let [t @save-timer] (js/clearTimeout t))
                     (reset! save-timer (js/setTimeout save 400)))]

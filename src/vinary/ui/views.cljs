@@ -1874,7 +1874,9 @@
           [:span.vv-hint-rest (subs label (count typed))]])])))
 
 (defn root []
-  [:div.vv-root
+  ;; .vv-presenting: a slide show is running in this window (ADR-0045) — CSS hides the app chrome and blacks out
+  ;; the background; nothing remounts, so the slides view (and its find / text layers) stays as it was
+  [:div {:class (str "vv-root" (when @(rf/subscribe [:slides/presenting?]) " vv-presenting"))}
    [menubar/menubar]
    [:div.vv-app
     [sidebar/sidebar]

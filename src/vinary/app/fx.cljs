@@ -242,6 +242,12 @@
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
 ;; drive the mounted slide show (ADR-0045) through pdf-cache's pdf.js-free hook; a no-op without one
 (rf/reg-fx :slides/command  (fn [op] (pdf-cache/slides-command! op)))
+;; window-level fullscreen of THIS window for a slide show (ADR-0045) — main decides (vinary.main.fullscreen):
+;; it enters only on request and only leaves a fullscreen it entered
+(rf/reg-fx :vv/set-fullscreen
+           (fn [{:keys [on]}]
+             (when-let [^js vv (.-vv js/window)]
+               (when (.-setFullscreen vv) (.setFullscreen vv (boolean on))))))
 (rf/reg-fx :render-cache/invalidate
            (fn [{:keys [path stamp]}] (warm-cache/invalidate-path! path stamp)))
 (rf/reg-fx :render-cache/retain-only (fn [paths] (warm-cache/retain-only! paths)))

@@ -22,7 +22,9 @@
    :slides-view?   (fn [ctx] (boolean (:slides-view? ctx)))
    ;; … and the slides key layer applies — set only by the keymap resolver, so a command gated on it is
    ;; keyboard-only and never offered by the palette
-   :slides-active? (fn [ctx] (boolean (:slides-active? ctx)))})
+   :slides-active? (fn [ctx] (boolean (:slides-active? ctx)))
+   ;; a slide show is running in this window
+   :presenting?    (fn [ctx] (boolean (:presenting? ctx)))})
 
 ;; id -> command spec
 (def registry
@@ -113,6 +115,12 @@
    :slides/digit      {:id :slides/digit :title "Type a slide number" :category "Slides" :dispatch [:slides/digit] :when :slides-active?}
    :slides/enter      {:id :slides/enter :title "Go to the typed slide (else next)" :category "Slides" :dispatch [:slides/enter] :when :slides-active?}
    :slides/backspace  {:id :slides/backspace :title "Delete a typed digit (else previous)" :category "Slides" :dispatch [:slides/backspace] :when :slides-active?}
+   ;; the fullscreen slide show of the shown PDF (deck or not): F5 / Shift+F5; Escape ends it
+   :slides/present         {:id :slides/present :title "Start slide show" :category "Slides" :dispatch [:slides/present {:from :first}] :when :pdf-view?}
+   :slides/present-current {:id :slides/present-current :title "Start slide show from the current slide" :category "Slides" :dispatch [:slides/present {:from :current}] :when :pdf-view?}
+   :slides/stop            {:id :slides/stop :title "End slide show" :category "Slides" :dispatch [:slides/stop] :when :presenting?}
+   :slides/black           {:id :slides/black :title "Black screen (toggle)" :category "Slides" :dispatch [:slides/black] :when :presenting?}
+   :slides/white           {:id :slides/white :title "White screen (toggle)" :category "Slides" :dispatch [:slides/white] :when :presenting?}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :passwords/open {:id :passwords/open :title "Passwords" :category "Web" :dispatch [:passwords/open]}
@@ -172,4 +180,5 @@
            :find-visible? (get-in db [:ui :find :visible?])
            :pdf-view?     (slides/pdf-shown? db)
            :slides-view?  (slides/slides-view? db)
+           :presenting?   (slides/presenting? db)
            :in-input?     true)))

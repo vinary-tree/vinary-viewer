@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('vv', {
 | Native views | renderer → main | Show, hide, and position main-owned PDF and HTTP views; relay HTTP heading metadata back to the renderer. |
 | Clipboard and shell helpers | renderer → main | Copy explicit text to the OS clipboard, open local paths through the OS, open external URLs, zoom, devtools, and quit. |
 | App metadata and dialogs | both | Open the native file dialog and deliver selected paths; deliver About metadata. |
+| Window fullscreen (slide shows, ADR-0045) | renderer → main → renderer | Ask main to make the **requesting** window fullscreen, or to leave it; receive that window's fullscreen state (`vv:set-fullscreen`, `vv:fullscreen-request`, `vv:fullscreen-changed`). |
 
 Each `on*` returns an **unsubscribe** function and passes only the message **payload** to the callback
 (`(_e, payload) => cb(payload)`) — the raw Electron `IpcRendererEvent` (which carries `sender`,
@@ -112,6 +113,16 @@ Each `on*` returns an **unsubscribe** function and passes only the message **pay
 
 The channel catalog is maintained in
 [reference/ipc-channels.md](../reference/ipc-channels.md).
+
+Fullscreen IPC is narrowed the same way (ADR-0045, `vinary.main.fullscreen`). A request only ever affects
+the window whose `webContents` sent it (`BrowserWindow.fromWebContents(event.sender)` — a renderer cannot
+name another window). Main remembers whether **it** made a window fullscreen and only ever leaves a
+fullscreen it entered, so a page cannot pull a user out of their own fullscreen. Nothing becomes fullscreen
+except on this explicit request from a user action (F5, a menu item): a PDF's `/PageMode /FullScreen` is read
+only as slide-deck *evidence* and never triggers it. The app uses window-level fullscreen rather than the HTML
+Fullscreen API, so the app's own prompts (the SSH authentication modal, the palette, the context menu) stay
+visible above a slide show, and Escape remains the app's to handle. While fullscreen, the window's saved
+geometry is not overwritten (`window/persistable-bounds`).
 
 Tree refresh IPC is capability-narrowed in main: renderer root sync intersects with roots main has
 already offered to that window; explicit refresh requires the root to remain visible; and
@@ -136,9 +147,9 @@ This is the important half of the analysis. The renderer **cannot**:
 
 **Consequence:** the seam is a **mediator** with a fixed, small vocabulary. An attacker who fully
 controls the renderer's JavaScript can, at worst, ask the main process to **read and watch arbitrary
-paths the user can read**, write explicit text to the clipboard, control native preview surfaces, and
-request the documented shell helpers — they cannot escalate to arbitrary file writes, running commands,
-or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of §4.)
+paths the user can read**, write explicit text to the clipboard, control native preview surfaces, make
+its own window fullscreen, and request the documented shell helpers — they cannot escalate to arbitrary
+file writes, running commands, or arbitrary IPC. (Whether "read any path" is itself a concern is the subject of §4.)
 
 > **Design note.** This single-seam shape is a deliberate decision: see
 > [design-decisions/0009-mediator-ipc-over-point-to-point.md](../design-decisions/0009-mediator-ipc-over-point-to-point.md).

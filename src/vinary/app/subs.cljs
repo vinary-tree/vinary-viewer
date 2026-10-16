@@ -141,13 +141,13 @@
  ::palette-ctx
  :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
  :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
- :<- [:view/pdf-active?] :<- [:slides/view?]
- (fn [[tabs active-tab active-path back? fwd? find pdf? slides?] _]
+ :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?]
+ (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting?] _]
    {:tabs tabs :active-tab active-tab :active-path active-path
     :can-back? back? :can-forward? fwd?
     :find-visible? (:visible? find)
     ;; gate the PDF / Slides commands (ADR-0045); :slides-active? is deliberately absent — keyboard-only
-    :pdf-view? pdf? :slides-view? slides?
+    :pdf-view? pdf? :slides-view? slides? :presenting? presenting?
     ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being
     ;; free must not be offered
     :in-input? true}))
@@ -240,10 +240,7 @@
 (rf/reg-sub :doc/deck :<- [:doc/active] (fn [doc _] (:doc/deck doc)))
 
 ;; ---- slides layout (ADR-0045) — built on :doc/active + app-db slices, never a DataScript query per app-db write
-(rf/reg-sub ::slides-inputs
-            (fn [db _] {:explicit    (nav/pdf-layout db)
-                        :open-as     (slides/open-as db)
-                        :presenting? (slides/presenting? db)}))
+(rf/reg-sub ::slides-inputs (fn [db _] (slides/layout-request db)))
 ;; what the pdf-view hands the engine besides zoom/fit/invert
 (rf/reg-sub :pdf/layout-request :<- [::slides-inputs] (fn [inputs _] inputs))
 ;; is the shown PDF in the slides layout? (the same rule the engine applies to the doc's deck classification)
@@ -255,6 +252,11 @@
 (rf/reg-sub :slides/state (fn [db _] (get-in db [:ui :slides])))
 ;; the slide number being typed in the slides layout ("12"), or nil — the "Go to 12" chip
 (rf/reg-sub :slides/digits (fn [db _] (get-in db [:ui :slides :digits])))
+;; the running slide show ({:active? :tab-id :path :from :fullscreen?}) or nil — .vv-presenting, menus (ADR-0045)
+(rf/reg-sub :slides/presentation (fn [db _] (get-in db [:ui :presentation])))
+(rf/reg-sub :slides/presenting? :<- [:slides/presentation] (fn [p _] (boolean (:active? p))))
+;; the running show's blanked screen (:black / :white) or nil — the blank overlay
+(rf/reg-sub :slides/blank (fn [db _] (get-in db [:ui :slides :blank])))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.

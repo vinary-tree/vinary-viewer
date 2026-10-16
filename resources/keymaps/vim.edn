@@ -51,6 +51,9 @@
   {"escape" :input/escape}
   :all
   {"escape" :input/escape
+   ;; slide show (ADR-0045): F5 presents the shown PDF from the first slide, Shift+F5 from the current one
+   "f5"   :slides/present
+   "S-f5" :slides/present-current
    ;; Alt+arrow navigation is keymap-independent (here in :all, not :normal, so vim's normal
    ;; mode does not consume them): ←/→ history, ↑ parent dir, ↓ open highlighted target.
    "M-left"  :history/back
@@ -84,6 +87,10 @@
    "S-down"    :slides/next-frame
    "S-left"    :slides/prev-frame
    "S-up"      :slides/prev-frame
+   "b"         :slides/black               ; while presenting: blank to black (again = back), like pdfpc
+   "."         :slides/black
+   "w"         :slides/white               ; while presenting: blank to white
+   ","         :slides/white
    "0" {:id :slides/digit :args [0]} "1" {:id :slides/digit :args [1]} "2" {:id :slides/digit :args [2]}
    "3" {:id :slides/digit :args [3]} "4" {:id :slides/digit :args [4]} "5" {:id :slides/digit :args [5]}
    "6" {:id :slides/digit :args [6]} "7" {:id :slides/digit :args [7]} "8" {:id :slides/digit :args [8]}

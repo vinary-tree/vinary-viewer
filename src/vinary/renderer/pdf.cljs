@@ -23,6 +23,8 @@
 ;; of the document layout would keep ~5 fullscreen-sized canvases alive.
 (def ^:const slides-overscan 0.5)
 (def ^:const slides-margin 16)   ; px around a slide in the in-tab slides layout (0 when presenting)
+(def ^:const cursor-idle-ms 2500) ; presenting: the pointer hides after this long without moving
+(def ^:const click-slop-px 4)     ; presenting: a press that moved further than this is a drag, not a click
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
          resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command!)
@@ -732,6 +734,73 @@
   (when-let [t (:snap-timer @state)] (js/clearTimeout t))
   (swap! state assoc :slides-listeners nil :snap-timer nil))
 
+(defn- interactive-target?
+  "Is `t` (a click target) something with its own click meaning — a link of the link layer, a form control?"
+  [^js t]
+  (boolean (some-> t (.closest "a, .vv-pdf-link, button, input, select, textarea, [contenteditable]"))))
+
+(defn- attach-present-listeners!
+  "While a slide show runs (presenting, slides layout): a plain click on the slide reports :slides/click — the
+   event decides whether it advances (the :slides-click-advance? preference); Shift+click goes back — but never a
+   click on a link, one that ends a text selection, a non-primary button, or the end of a drag of more than
+   click-slop-px; and the pointer hides after cursor-idle-ms without moving."
+  [state]
+  (when-not (:present-listeners @state)
+    (when-let [^js scroller (scroller-of (:container @state))]
+      (let [container (:container @state)
+            down      (atom nil)                     ; [x y] of the primary-button press, or nil
+            idle      (atom nil)                     ; the pending cursor-hide timer
+            on-down   (fn [^js e]
+                        (reset! down (when (zero? (.-button e)) [(.-clientX e) (.-clientY e)]))
+                        ;; Shift+click goes back — but a Shift+press is also the browser's "extend the selection"
+                        ;; gesture, which would turn the click into a selection the guard below rejects. Suppress
+                        ;; it on the slide, as pdf.js's presentation mode does for every press.
+                        (when (and (zero? (.-button e)) (.-shiftKey e) (not (interactive-target? (.-target e))))
+                          (.preventDefault e)))
+            on-click  (fn [^js e]
+                        (let [[x y] @down]
+                          (reset! down nil)
+                          (when (and x (zero? (.-button e))
+                                     (< (js/Math.hypot (- (.-clientX e) x) (- (.-clientY e) y)) click-slop-px)
+                                     (not (interactive-target? (.-target e)))
+                                     (let [^js sel (.getSelection js/window)] (or (nil? sel) (.-isCollapsed sel))))
+                            (rf/dispatch [:slides/click {:shift? (.-shiftKey e)}]))))
+            wake!     (fn [_]
+                        (toggle-class! container "vv-pdf-cursor-idle" false)
+                        (when-let [t @idle] (js/clearTimeout t))
+                        (reset! idle (js/setTimeout #(toggle-class! container "vv-pdf-cursor-idle" true)
+                                                    cursor-idle-ms)))]
+        (.addEventListener scroller "mousedown" on-down)     ; not passive: may preventDefault (Shift+press)
+        (.addEventListener scroller "click" on-click)
+        (.addEventListener scroller "mousemove" wake! #js {:passive true})
+        (wake! nil)
+        (swap! state assoc :present-listeners [scroller on-down on-click wake! idle])))))
+
+(defn- detach-present-listeners! [state]
+  (when-let [[^js scroller on-down on-click wake! idle] (:present-listeners @state)]
+    (.removeEventListener scroller "mousedown" on-down)
+    (.removeEventListener scroller "click" on-click)
+    (.removeEventListener scroller "mousemove" wake!)
+    (when-let [t @idle] (js/clearTimeout t))
+    (toggle-class! (:container @state) "vv-pdf-cursor-idle" false)
+    (swap! state assoc :present-listeners nil)))
+
+(defn- sync-present-listeners!
+  "The presenting-only listeners exist exactly while a show runs in the slides layout."
+  [state]
+  (if (and (slides? state) (:presenting? @state) (not (:destroyed? @state)))
+    (attach-present-listeners! state)
+    (detach-present-listeners! state)))
+
+(defn- apply-present-from!
+  "A slide show just started: show the slide it asked to start from — :first the first slide, a page index that
+   page, :current (or nil) the slide already in view (entering the slides layout kept the reader's page)."
+  [state from]
+  (cond
+    (= :first from) (go-to-page! state 0)
+    (integer? from) (go-to-page! state from)
+    :else           nil))
+
 (defn- set-layout!
   "Switch between the continuous document layout and the slides layout, keeping the reader's page: entering
    slides shows the page that was at the viewport top; leaving shows the current slide's page at the top."
@@ -914,6 +983,7 @@
     (when (= layout :slides)
       (go-to-page! state (:current @state))
       (attach-slides-listeners! state))
+    (sync-present-listeners! state)
     (observe! state)
     (observe-resize! state)
     (watch-dpr! state)
@@ -1004,6 +1074,7 @@
     (let [container   (:container @state)
           old-scale   (:scale @state)
           layout      (wanted-layout (:deck @state) view-state)
+          was-presenting? (boolean (:presenting? @state))
           presenting? (boolean (:presenting? view-state))]
       (toggle-class! container "vv-pdf-invert" (:invert? view-state))
       (swap! state assoc :invert? (boolean (:invert? view-state)))
@@ -1014,7 +1085,7 @@
             (set-layout! state layout))
 
         (slides? state)
-        (when (not= presenting? (:presenting? @state))
+        (when (not= presenting? was-presenting?)
           (swap! state assoc :presenting? presenting?)
           (relayout! state (current-anchor state)))
 
@@ -1023,7 +1094,12 @@
               (apply-fit! state (:fit view-state))
               (swap! state assoc :scale (layout/clamp-zoom (or (:scale view-state) old-scale)) :fit nil))
             (when (not= (:scale @state) old-scale)
-              (rescale! state)))))))
+              (rescale! state))))
+      ;; a show that just started opens on the slide it asked for (presenting forces the slides layout, so the
+      ;; layout switch above has already happened); the presenting-only listeners follow the state
+      (when (and presenting? (not was-presenting?) (slides? state))
+        (apply-present-from! state (:present-from view-state)))
+      (sync-present-listeners! state))))
 
 (defn ensure-all-text!
   "Materialize text layers for every page (so in-page find covers the whole document, not just the
@@ -1039,6 +1115,7 @@
   (cache/clear-ensurer! (:ensure-fn @state))
   (cache/clear-slides! (:hook @state))
   (detach-slides-listeners! state)
+  (detach-present-listeners! state)
   (doseq [k [:report-raf :scroll-raf]] (when-let [r (k @state)] (js/cancelAnimationFrame r)))
   (swap! state assoc :destroyed? true)
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))

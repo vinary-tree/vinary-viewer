@@ -66,6 +66,7 @@
             ;; the shown document is a PDF / a PDF in the slides layout (gate the Slides commands, like the palette)
             :pdf-view?     (slides/pdf-shown? db)
             :slides-view?  (slides/slides-view? db)
+            :presenting?   (slides/presenting? db)
             ;; the slides key layer applies (keyboard-only: the palette's context never sets it, so the typed-number
             ;; commands never show up there)
             :slides-active? (slides-active? db in-input?)

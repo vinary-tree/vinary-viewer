@@ -52,4 +52,4 @@
                                             {:deck? false}))
         "presenting always shows slides")
     (is (= :slides (slides/open-as db1)) "the default preference")
-    (is (= {:explicit nil :open-as :slides :presenting? false} (slides/layout-request db1)))))
+    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil} (slides/layout-request db1)))))

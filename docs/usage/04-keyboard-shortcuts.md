@@ -112,6 +112,10 @@ the slide show, in every keymap set.
 | digits, then `Enter` | go to that slide — the number printed on a Beamer slide (its frame number) first, else the page number; a "Go to 12" chip shows what you typed |
 | `Backspace` while typing | delete the last digit |
 | `Escape` | forget a typed number (it is also forgotten 2.5 s after the last digit) |
+| `F5` / `Shift+F5` | start a **slide show** of the shown PDF from the first / the current slide (any PDF; `F5` again during a show goes back to the first slide) |
+| `b` `.` / `w` `,` | during a show: black / white screen; the same key again, any navigation key, a click or `Escape` brings the slide back (a navigation key does not also move on) |
+| click / `Shift`+click | during a show: next / previous slide (not on a link, not the end of a text selection or a drag) |
+| `Escape` during a show | unwinds one step at a time: a typed number, then a blanked screen, then the show itself |
 
 The slide keys (`Space`, `Shift+Space`, `Backspace`, `Enter`, `Shift+arrows`, digits) form a `:slides` layer
 that is active only while the slides layout is showing **and** the keyboard is on the document — not in a text
@@ -120,6 +124,15 @@ a mode's own binding wins: in Vim normal mode `Space` stays the leader (use `→
 the same in every bundled set and can be overridden like a mode, under `:keymaps {:slides {…}}` (§5). The
 palette's **Slides** commands (Next slide, Next frame, First slide, …) are offered only while a PDF is in the
 slides layout; **View as slide show / document** switches any PDF's layout.
+
+A **slide show** (`F5`) shows the slides layout full-window: the menus, sidebar, tabs, address bar and status
+bar hide, the slide fills the window on black with no margin, and the window goes fullscreen — only the
+window you started it in, and only while the show runs (a window you had already made fullscreen stays
+fullscreen afterwards). The pointer hides after 2.5 s without moving. The SSH password prompt, the palette and
+the find bar still appear over a show. Switching tabs, navigating, focusing the address bar (`Ctrl+L`) or the
+sidebar, or leaving fullscreen yourself (`F11`, your window manager) also ends it. `F5` and `Shift+F5` are in
+every set's `:all` block, so they work in any mode; the Alt access keys of the hidden menu bar are off during
+a show.
 
 **Opening files/folders is OS-dependent.** In both the **directory browser** and the
 **git file tree**, a **single click opens on Linux** and a **double click opens on

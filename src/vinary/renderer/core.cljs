@@ -145,7 +145,12 @@
       (when (.-requestZoom vv) (.requestZoom vv)))
     (when (.-onAppInfo vv)
       (.onAppInfo vv (fn [payload] (rf/dispatch [:app-info/received (js->clj payload :keywordize-keys true)])))
-      (when (.-requestAppInfo vv) (.requestAppInfo vv)))))
+      (when (.-requestAppInfo vv) (.requestAppInfo vv)))
+    ;; this window's fullscreen state (ADR-0045): a slide show ends when the window leaves the fullscreen it asked
+    ;; for; a boot pull seeds [:ui :fullscreen?] (a window restored fullscreen), like requestZoom
+    (when (.-onFullscreenChanged vv)
+      (.onFullscreenChanged vv (fn [p] (rf/dispatch [:view/fullscreen-changed p])))
+      (when (.-requestFullscreenState vv) (.requestFullscreenState vv)))))
 
 (defn keybindings!
   "Install the keymap resolver: vim/emacs/default keymaps + the command registry + modal/chord

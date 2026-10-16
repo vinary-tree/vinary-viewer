@@ -38,6 +38,11 @@
         :settings-open? false
         :about-open? false
         :app-info nil               ; {:name :version :repo} pushed by main
+        ;; slide shows (ADR-0045): the show running in THIS window, and this window's fullscreen state as main
+        ;; reports it (vv:fullscreen-changed) — a show ends when the window leaves the fullscreen it asked for.
+        ;; ([:ui :slides] — the mounted slide show's position mirror — appears only while a PDF view is mounted.)
+        :presentation nil           ; {:active? :tab-id :path :from :fullscreen?} while a slide show runs
+        :fullscreen? false
         :open-dialog-mode :current  ; how vv:open-files should handle selected paths
         :context-menu nil           ; {:x :y :target {…}} or nil
         :hover-link nil             ; URI of the link under the cursor (status bar), or nil

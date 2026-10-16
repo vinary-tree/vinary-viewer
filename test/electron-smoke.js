@@ -515,6 +515,17 @@ function installIpc(state) {
   });
   // the zoom bar's boot-pull (fix for the "% resets to 100 after restart" bug): reply with the live factor,
   // exactly as src/vinary/main/shell.cljs does. Count calls so the regression test can assert it auto-fires.
+  // slide-show fullscreen (ADR-0045): the stub main records every request and answers like the real
+  // vinary.main.fullscreen does for a window that was not fullscreen before (owned = it entered it)
+  ipcMain.on('vv:set-fullscreen', (event, payload) => {
+    const on = Boolean(payload && payload.on);
+    state.fullscreenRequests = (state.fullscreenRequests || []).concat([on]);
+    event.sender.send('vv:fullscreen-changed', { fullscreen: on, owned: on });
+  });
+  ipcMain.on('vv:fullscreen-request', (event) => {
+    state.fullscreenStatePulls = (state.fullscreenStatePulls || 0) + 1;
+    event.sender.send('vv:fullscreen-changed', { fullscreen: false, owned: false });
+  });
   ipcMain.on('vv:zoom-request', (event) => {
     state.zoomRequests = (state.zoomRequests || 0) + 1;
     event.sender.send('vv:zoom-changed', { context: 'window', factor: event.sender.getZoomFactor() });
@@ -1901,6 +1912,97 @@ async function main() {
     await sendChord(win, 'Space');
     await slidesAt(2, 'focus back on the document → Space flips again');
     console.log('[ok] PDF slides keys: arrows/PgUp/PgDn/Home/End via the scroll delegate, Space/Shift+arrows/digits+Enter/Backspace/Escape via the :slides layer, inactive off the document');
+  }
+
+  // ── PRESENTING (ADR-0045 §Presenting): F5 runs a fullscreen slide show of the shown PDF in THIS window — the
+  // chrome hides (CSS, nothing remounts), main is asked for fullscreen, the slide fills the window with no
+  // margin, b/w blank the screen (a navigation key only un-blanks), a click advances, an SSH prompt still
+  // appears over the show (and owns the keyboard), Escape unwinds blank → show, Shift+F5 starts from the
+  // current slide, and the window leaving the show's fullscreen ends it. (Stub main: it records every
+  // vv:set-fullscreen and answers like the real vinary.main.fullscreen.)
+  {
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const page = () => evalIn(win, `(window.__vvdb().ui.slides || {}).page`);
+    const showing = `(() => { const p = window.__vvdb().ui.presentation;
+      return Boolean(p && p['active?']) && document.querySelector('.vv-root').classList.contains('vv-presenting'); })()`;
+    const fsBefore = (state.fullscreenRequests || []).length;
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await sendChord(win, 'F5');
+    await waitCalm(win, showing, 'F5 starts the show', 8000);
+    await slidesAt(0, 'F5 starts from the first slide');
+    assert.deepStrictEqual((state.fullscreenRequests || []).slice(fsBefore), [true], 'the show asked main for fullscreen');
+    await waitCalm(win, `window.__vvdb().ui['fullscreen?'] === true`, "main's fullscreen report is recorded", 4000);
+    const chrome = await evalIn(win, `['.vv-menubar', '.vv-tabs', '.vv-uribar', '.vv-bottombar', '.vv-sidebar']
+      .map((sel) => { const el = document.querySelector(sel); return el ? getComputedStyle(el).display : 'absent'; })`);
+    assert.ok(chrome.every((d) => d === 'none' || d === 'absent'), `the app chrome is hidden during the show: ${chrome}`);
+    await waitCalm(win, `(() => { const c = document.querySelector('.vv-content').getBoundingClientRect();
+        const slot = document.getElementById('vv-pdf-page-1').getBoundingClientRect();
+        const sh = document.querySelector('#vv-pdf-page-1 .vv-pdf-sheet').getBoundingClientRect();
+        return Math.abs(c.width - innerWidth) <= 1 && Math.abs(c.height - innerHeight) <= 1
+          && Math.abs(slot.height - c.height) <= 1
+          && (Math.abs(sh.width - slot.width) <= 1 || Math.abs(sh.height - slot.height) <= 1); })()`,
+      'the slide fills the window: the pane is the viewport and the sheet spans the slot (no margin)', 8000);
+    // keys still flip; b blanks; a navigation key only un-blanks (the audience sees the slide they left)
+    await sendChord(win, 'Right');
+    await slidesAt(1, '→ during the show');
+    await sendChord(win, 'b');
+    await waitCalm(win, `getComputedStyle(document.querySelector('.vv-slides-blank') || document.body).backgroundColor === 'rgb(0, 0, 0)'
+      && document.querySelector('.vv-slides-blank').dataset.blank === 'black'`, 'b blanks the screen to black', 4000);
+    await sendChord(win, 'Right');
+    await waitCalm(win, `!document.querySelector('.vv-slides-blank')`, 'a navigation key ends the blanking', 4000);
+    assert.strictEqual(await page(), 1, '…without moving the slide');
+    await sendChord(win, ',');
+    await waitCalm(win, `(document.querySelector('.vv-slides-blank') || {}).dataset?.blank === 'white'`, ', blanks to white', 4000);
+    await sendChord(win, ',');
+    await waitCalm(win, `!document.querySelector('.vv-slides-blank')`, 'the same key again un-blanks', 4000);
+    // a plain click on the slide advances; Shift+click goes back
+    const centre = await evalIn(win, `(() => { const r = document.querySelector('.vv-content').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    const click = (modifiers) => {
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: centre.x, y: centre.y, button: 'left', clickCount: 1, modifiers });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: centre.x, y: centre.y, button: 'left', clickCount: 1, modifiers });
+    };
+    click([]);
+    await slidesAt(2, 'a click advances the show');
+    click(['shift']);
+    await slidesAt(1, 'Shift+click goes back');
+    // an SSH prompt appears OVER the show and owns the keyboard (the slides layer stands aside)
+    win.webContents.send('vv:ssh-prompt', { promptId: 'present1', kind: 'password', host: 'demo.example', user: 'alice', attempt: 1 });
+    await waitCalm(win, `(() => { const m = document.querySelector('.vv-ssh-prompt'); if (!m) return false;
+        const r = m.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(m).visibility !== 'hidden'; })()`,
+      'the SSH prompt is visible during the show', 8000);
+    assert.strictEqual(await evalIn(win, showing), true, 'the prompt does not end the show');
+    await sendChord(win, 'Space');
+    await new Promise((r) => setTimeout(r, 250));
+    assert.strictEqual(await page(), 1, 'Space goes to the prompt, not the slides');
+    await evalIn(win, `Array.from(document.querySelectorAll('.vv-ssh-prompt button')).find((b) => b.textContent.trim() === 'Cancel').click(); true`);
+    await waitCalm(win, `!document.querySelector('.vv-ssh-prompt')`, 'the prompt closes', 8000);
+    // Escape unwinds: the blank first, then the show itself (which leaves the fullscreen it asked for)
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await sendChord(win, 'b');
+    await waitCalm(win, `Boolean(document.querySelector('.vv-slides-blank'))`, 'blanked again', 4000);
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!document.querySelector('.vv-slides-blank')`, 'Escape ends the blanking first', 4000);
+    assert.strictEqual(await evalIn(win, showing), true, '…and the show is still running');
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!window.__vvdb().ui.presentation && !document.querySelector('.vv-root').classList.contains('vv-presenting')
+      && getComputedStyle(document.querySelector('.vv-tabs')).display !== 'none'`, 'Escape ends the show and the chrome returns', 8000);
+    assert.deepStrictEqual((state.fullscreenRequests || []).slice(fsBefore), [true, false], 'ending the show left its fullscreen');
+    assert.strictEqual(await page(), 1, 'the slides layout keeps the slide the show ended on');
+    // Shift+F5 starts from the CURRENT slide; the window leaving the show's fullscreen (F11 / the WM) ends it
+    await evalIn(win, `window.__vvslides('goto', 3)`);
+    await slidesAt(3, 'on slide 4 before Shift+F5');
+    await sendChord(win, 'F5', ['shift']);
+    await waitCalm(win, showing, 'Shift+F5 starts the show', 8000);
+    await waitCalm(win, `window.__vvdb().ui['fullscreen?'] === true`, 'fullscreen again', 4000);
+    assert.strictEqual(await page(), 3, 'Shift+F5 starts from the current slide');
+    win.webContents.send('vv:fullscreen-changed', { fullscreen: false, owned: false });
+    await waitCalm(win, `!window.__vvdb().ui.presentation`, 'leaving the show\'s fullscreen ends the show', 8000);
+    assert.deepStrictEqual((state.fullscreenRequests || []).slice(fsBefore), [true, false, true],
+      'no extra exit request when the window already left fullscreen');
+    console.log('[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds, Shift+F5 from current, leaving fullscreen ends it');
   }
 
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.

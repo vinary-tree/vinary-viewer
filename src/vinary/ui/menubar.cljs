@@ -331,7 +331,10 @@
 
 (defn- handle-keydown! [^js e]
   (let [db @rfdb/app-db]
-    (when-not (get-in db [:ui :kbedit :capture])
+    ;; no access keys while capturing a key binding, nor during a slide show — the menubar is hidden then, and
+    ;; Alt+letter must not open an invisible menu (ADR-0045)
+    (when-not (or (get-in db [:ui :kbedit :capture])
+                  (get-in db [:ui :presentation :active?]))
       (cond
         (= "Alt" (.-key e))
         (rf/dispatch [:access-keys/set true])

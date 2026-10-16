@@ -155,7 +155,9 @@ Important slices:
 | `[:ui :input]` | Modal/chord resolver display state. |
 | `[:ui :kbedit]` | Keybinding editor state and undo/redo stacks. |
 | `[:ui :hints]` | Vimium-style link hint state. |
-| `[:ui :slides]` | The mounted slide show's position mirror `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` (from `:slides/changed`, ≤ 1 per frame); dissoc'd when the PDF view unmounts (ADR-0045). |
+| `[:ui :slides]` | The mounted slide show's position mirror `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` (from `:slides/changed`, ≤ 1 per frame) plus two UI-owned keys that survive the reports of the same deck in the slides layout (`slides/merge-report`): `:digits` — a slide number being typed (`"12"`, forgotten 2.5 s after the last digit) — and `:blank` — `:black`/`:white` while a running show is blanked. dissoc'd when the PDF view unmounts (ADR-0045). |
+| `[:ui :presentation]` | The slide show running in this window, `{:active? :tab-id :path :from :fullscreen?}` — `:from` where it started (`:first`/`:current`/a page index), `:fullscreen?` whether it asked main for fullscreen — or nil. Drives `.vv-root.vv-presenting` and the engine's `:presenting?` (ADR-0045). |
+| `[:ui :fullscreen?]` | This window's fullscreen state as main reports it (`vv:fullscreen-changed`, plus a boot pull); the window leaving a fullscreen a show asked for ends the show. |
 
 ---
 
