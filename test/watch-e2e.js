@@ -25,6 +25,13 @@ const { isLiveWindow } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-watch-e2e-')));
+
+// Never read or write the developer's real ~/.config/vinary-viewer: the real main persists the keymap selection
+// recent files and window geometry there, and a resident `vv --daemon` from the
+// same checkout watches those files — an unisolated run switched the LIVE app's keymap. Same idiom as tree-e2e.
+// A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
+const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-watch-e2e-config-')));
+process.env.XDG_CONFIG_HOME = CONFIG_HOME;
 const DOC = path.join(SCRATCH, 'shared.md');
 process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(SCRATCH, 'daemon-events.json');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,11 +178,11 @@ async function run() {
 app.whenReady().then(() =>
   run()
     .then(() => {
-      fs.rmSync(SCRATCH, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(0);
     })
     .catch((error) => {
       console.error('\nwatch-e2e FAILED:\n', error && error.stack ? error.stack : error);
-      fs.rmSync(SCRATCH, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(1);
     }));

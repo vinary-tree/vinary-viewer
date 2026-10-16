@@ -367,3 +367,68 @@ One further judgement, made from measurement rather than principle: **the URI ba
 left in its render function.** It depends on the local draft, which by construction is not in app-db, so
 it cannot be moved into a subscription without moving the draft back — reintroducing the round trip the
 draft exists to avoid. Measured at `lag p95 = 1–2 ms` with zero clobbers, it is not a bottleneck.
+
+---
+
+## 10 · Harness isolation and environmental sensitivity (2026-10-16)
+
+Found while verifying the slide-show work (ADR-0045 F4/F5). Three findings, in the order they were made.
+
+**Finding 1 — the harness wrote the developer's real configuration.** `test/find-e2e.js` (and
+`test/watch-e2e.js`, `scripts/bench-input-latency.cjs`) boot the real compiled main without setting
+`XDG_CONFIG_HOME`. The real main persists `keybindings.edn`, `recent.edn` and `window.edn` under
+`$XDG_CONFIG_HOME/vinary-viewer`, so a gate run rewrote the developer's files. find-e2e switches keymaps per
+scenario (`__vvkeymap`), which saves `keybindings.edn` — and a resident `vv --daemon` started from the same
+checkout watches that file, so the gate switched the keymap of the developer's live application.
+- *Evidence:* during the 12:45:18–12:48:21 run, `keybindings.edn` (12:45:53) and `recent.edn` (12:48:16)
+  were rewritten; `recent.edn` held `/tmp/vv-*-e2e` paths from earlier runs.
+- *Fix:* each harness points `XDG_CONFIG_HOME` at its own `mkdtemp` directory — separate from its scratch
+  directory, which may be adopted as a watched Files-tree project — and removes it at exit (the idiom
+  `tree-e2e` already used). Verified: the `.edn` mtimes are unchanged across isolated find-e2e and watch-e2e
+  runs.
+- *Side effect:* setting `XDG_CONFIG_HOME` inside the script also moves Electron's own `userData` (probe:
+  `app.getPath('userData')` = `<tmp>/Electron`), so isolated runs start with a cold Chromium profile.
+
+**Finding 2 — a hidden dependency on the developer's settings.** With default settings the isolated
+find-e2e failed at "tree filter mounts": the Files panel is already open by default, and the scenario's
+unconditional click on the Files rail button *collapsed* it. It had passed only because the developer's
+`settings.edn` has `:sidebar-visible? false`. The click is now idempotent (only when the filter is absent).
+
+**Finding 3 — T3 is sensitive to machine-wide load, not to the configuration.** With finding 2 fixed, the
+isolated runs failed T3 (the tree-filter's worst main-process round trip, budget 200 ms) intermittently.
+Hypotheses and arms (each a full find-e2e run, pinned to cores 16–63):
+
+| arm | `.edn` config | Electron profile | tree-filter worst lag | T3 |
+|---|---|---|---|---|
+| unisolated (F4, F5 verification) | developer's | `~/.config/Electron` (warm) | 131 ms, 114 ms | pass, pass |
+| isolated, defaults | temp, defaults | temp (cold) | 982 ms, 123 ms | fail, pass |
+| A — isolated + developer's settings | temp + copy of `settings.edn` | temp (cold) | 1025 ms | fail |
+| B — isolated + `{:sidebar-visible? false}` | temp | temp (cold) | 97 ms | pass |
+| F — cold profile + warm ad-block cache | temp, defaults | temp + copied `adblock-engine.bin` | 171, 872, 1020 ms | 1/3 pass |
+| D — isolated `.edn`, status-quo profile | temp, defaults | `~/.config/Electron` (warm) | 230, 112, 869 ms | 1/3 pass |
+| **G — original conditions, nothing touched** | temp + **copies of all the developer's `.edn`** | `~/.config/Electron` (warm) | 857, 1156, 178 ms | 1/3 pass |
+
+- **Refuted: "isolation causes the failures".** Arm G reproduces the original conditions exactly (the
+  same `.edn` content, the same warm profile) without touching the developer's files, and fails as often
+  (2 of 3). Raw per-run lines: `data/10/harness-isolation-2026-10-16.txt`.
+- **Refuted: "a cold ad-block cache stalls main at startup"** (the ad-block engine is cached in `userData`
+  and fetched when absent). Arm F seeds the cache and still fails.
+- **Refuted: "the developer's settings are what made it pass".** Arm A, with the developer's
+  `settings.edn`, failed; arms B and C passed on defaults.
+- **What changed between the passing and failing runs was the machine.** During the failing period the
+  load average was 40–58 on 64 CPUs: a `pgmcp` indexing daemon at ≈ 435 % CPU and PostgreSQL I/O workers
+  saturating the disk. The renderer's long tasks stayed ≤ 69 ms (input trace) while the round trip
+  peaked near 1 s, i.e. the stall is on the main-process / IPC side. In the same runs the find-bar typist —
+  no main-process work per keystroke — stayed at 82–124 ms in every arm; only the tree filter stalled. That
+  is consistent with the stall sitting in the Files tree's main-side filesystem work (listings, expansion
+  watchers) under disk contention — an inference, not yet attributed by a trace.
+
+**Consequences.**
+- The isolation change is kept: it is required by the never-touch-the-developer's-files rule and, per arm
+  G, does not change what the gate measures.
+- T3 is a tail statistic over main-process round trips. It is meaningful on a quiet machine — the condition
+  the budget was derived under (§8) — and the harness now prints `os.loadavg()` beside the environment
+  summary, so a failure can be read against the load it ran under.
+- Not done here (recorded for a follow-up): attributing the main-side stall (a `perf`/eBPF trace of the
+  Electron main thread during the tree-filter phase under I/O load), and deciding whether T3 should
+  measure a percentile instead of the maximum.

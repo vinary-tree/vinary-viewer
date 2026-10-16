@@ -50,6 +50,14 @@ const { app, BrowserWindow } = require('electron');
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-input-')));
 
+// Never read or write the developer's real ~/.config/vinary-viewer: the real main persists the keymap selection
+// recent files and window geometry there, and a resident `vv --daemon` from the
+// same checkout watches those files — an unisolated run switched the LIVE app's keymap. Same idiom as tree-e2e;
+// default settings also make the measurement reproducible across machines.
+// A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
+const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-input-config-')));
+process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+
 const GPU = process.env.VV_BENCH_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -501,7 +509,7 @@ app.whenReady().then(async () => {
     console.error('[bench] FAILED:', e && e.stack || e);
     code = 1;
   } finally {
-    try { fs.rmSync(SCRATCH, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+    try { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     app.exit(code);
   }
 });

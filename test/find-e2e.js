@@ -41,6 +41,13 @@ const { showForTest } = require('./headless-window.js');
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e2e-')));
 
+// Never read or write the developer's real ~/.config/vinary-viewer: the real main persists the keymap selection
+// (this harness switches keymaps), recent files and window geometry there, and a resident `vv --daemon` from the
+// same checkout watches those files — an unisolated run switched the LIVE app's keymap. Same idiom as tree-e2e.
+// A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
+const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e2e-config-')));
+process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+
 // VV_FIND_E2E_GPU=1 re-runs WITH hardware acceleration. app.disableHardwareAcceleration() changes the
 // scroller's compositing and therefore possibly the scroll-offset quantum the runaway-animator bug depends
 // on, so the confound is switchable and REPORTED rather than hidden (docs/scientific/07 §1.2).
@@ -874,7 +881,11 @@ async function run() {
   await open(wc, path.join(ROOT, 'README.md'));
   await until(wc, `(() => { const p = window.__vvdb().ui.projects; return Boolean(p && p.length); })()`,
               (v) => v === true, 'the git tree loads');
-  await evalIn(wc, `(() => { const files = document.querySelector('[data-vv-rail="files"]');
+  // idempotent: with default settings (the isolated config dir) the Files panel is ALREADY the open one, and
+  // clicking its rail button would collapse it — this used to pass only because the developer's own persisted
+  // settings had another panel open
+  await evalIn(wc, `(() => { if (document.querySelector('.vv-tree-filter')) return true;
+    const files = document.querySelector('[data-vv-rail="files"]');
     if (files) files.click(); return Boolean(files); })()`);
   await until(wc, `Boolean(document.querySelector('.vv-tree-filter'))`, (v) => v === true, 'tree filter mounts');
   await sleep(500);
@@ -891,6 +902,9 @@ async function run() {
 
   console.log('\n--- environment ---');
   console.log(`hardware acceleration : ${GPU ? 'ON (VV_FIND_E2E_GPU=1)' : 'OFF (disableHardwareAcceleration)'}`);
+  // T3 is a TAIL statistic over main-process round trips: heavy I/O or CPU load elsewhere on the machine moves it
+  // (docs/scientific/10 §10) — report the load so a failure can be read against it
+  console.log(`load average (1/5/15) : ${os.loadavg().map((x) => x.toFixed(1)).join(' / ')} on ${os.cpus().length} cpus`);
   console.log(`markdown probe        : ${JSON.stringify(mdProbe)}`);
   console.log(`pdf probe             : ${JSON.stringify(pdfProbe)}`);
   console.log(`typist cadence        : ${TYPE_CADENCE_MS} ms/char, lag budget ${MAX_LAG_MS} ms`);
@@ -907,9 +921,9 @@ async function run() {
 
 app.whenReady().then(() =>
   run()
-    .then(() => { fs.rmSync(SCRATCH, { recursive: true, force: true }); app.exit(0); })
+    .then(() => { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); app.exit(0); })
     .catch((err) => {
       console.error('\nfind-e2e FAILED:\n', err && err.stack ? err.stack : err);
-      fs.rmSync(SCRATCH, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
       app.exit(1);
     }));

@@ -1,0 +1,21 @@
+# find-e2e typist results per experiment arm — docs/scientific/10 §10 (2026-10-16)
+# arm-run | find-e2e summary | typist find | typist tree filter | load (G arms: 1-min loadavg at run end)
+f4-find-e2e | find-e2e: 68 passed, 0 failed | max lag 93 ms over 225 probes | max lag 131 ms over 108 probes
+f5-find-e2e | find-e2e: 68 passed, 0 failed | max lag 91 ms over 225 probes | max lag 114 ms over 107 probes
+iso-find-e2e2 | find-e2e: 67 passed, 1 failed | max lag 85 ms over 225 probes | max lag 982 ms over 108 probes
+exp-find-usersettings | find-e2e: 67 passed, 1 failed | max lag 97 ms over 224 probes | max lag 1025 ms over 108 probes
+exp-find-sidebarhidden | find-e2e: 68 passed, 0 failed | max lag 96 ms over 225 probes | max lag 97 ms over 109 probes
+exp-find-defaults2 | find-e2e: 68 passed, 0 failed | max lag 93 ms over 225 probes | max lag 123 ms over 108 probes
+exp-F-1 | find-e2e: 68 passed, 0 failed | max lag 83 ms over 225 probes | max lag 171 ms over 109 probes
+exp-F-2 | find-e2e: 67 passed, 1 failed | max lag 101 ms over 225 probes | max lag 872 ms over 108 probes
+exp-F-3 | find-e2e: 67 passed, 1 failed | max lag 96 ms over 225 probes | max lag 1020 ms over 108 probes
+exp-D-1 | find-e2e: 67 passed, 1 failed | max lag 92 ms over 225 probes | max lag 230 ms over 108 probes
+exp-D-2 | find-e2e: 68 passed, 0 failed | max lag 90 ms over 225 probes | max lag 112 ms over 108 probes
+exp-D-3 | find-e2e: 67 passed, 1 failed | max lag 91 ms over 225 probes | max lag 869 ms over 109 probes
+exp-G-1 | find-e2e: 67 passed, 1 failed | max lag 82 ms over 226 probes | max lag 857 ms over 108 probes
+exp-G-2 | find-e2e: 67 passed, 1 failed | max lag 87 ms over 225 probes | max lag 1156 ms over 104 probes
+exp-G-3 | find-e2e: 68 passed, 0 failed | max lag 124 ms over 225 probes | max lag 178 ms over 109 probes
+# G-arm loads: load 42.58 load 58.42 load 44.40 
+# arm map: f4/f5-find-e2e = unisolated (F4/F5 verification); iso-find-e2e2 = isolated defaults (after the Files-rail fix);
+#          exp-find-usersettings = A; exp-find-sidebarhidden = B; exp-find-defaults2 = isolated defaults (repeat);
+#          exp-F-* = F (cold profile + warm ad-block cache); exp-D-* = D (isolated .edn + status-quo profile); exp-G-* = G (original conditions)
