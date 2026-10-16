@@ -3,8 +3,10 @@
    its current history entry — so Back/Forward restores it, a facet switch keeps it, and a new document starts
    from detection again (D14); and the effective layout is the engine's own rule fed the :doc/deck summary."
   (:require [cljs.test :refer [deftest is testing]]
+            [vinary.app.events :as events]
             [vinary.app.nav :as nav]
-            [vinary.app.slides :as slides]))
+            [vinary.app.slides :as slides]
+            [vinary.renderer.pdf-cache :as pdf-cache]))
 
 (defn- tab [id uri] {:id id :uri uri :hist {:stack [{:uri uri :scroll 0 :facet nil}] :idx 0}})
 
@@ -53,3 +55,35 @@
         "presenting always shows slides")
     (is (= :slides (slides/open-as db1)) "the default preference")
     (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil} (slides/layout-request db1)))))
+
+(deftest the-slide-is-remembered-not-the-pixel-offset
+  (let [t       (tab 1 "/d/talk.pdf")
+        src-tab (assoc-in t [:hist :stack 0 :facet] {:path "/d/talk.tex" :type :source})]
+    (testing "leaving a PDF in the slides layout saves its slide beside the pixel offset"
+      (is (= {:uri "/d/talk.pdf" :scroll 900 :facet nil :page 7}
+             (get-in (nav/capture-pos t {:scroll 900 :line nil :page 7}) [:hist :stack 0]))))
+    (testing "a later position without a slide clears a stale one (the layout changed, or another document)"
+      (let [t' (nav/capture-pos (nav/capture-pos t {:scroll 900 :page 7}) {:scroll 40 :page nil})]
+        (is (not (contains? (get-in t' [:hist :stack 0]) :page)))
+        (is (= 40 (get-in t' [:hist :stack 0 :scroll])))))
+    (testing "a :source entry keeps its line and never a slide"
+      (is (= {:uri "/d/talk.pdf" :scroll 0 :facet {:path "/d/talk.tex" :type :source} :line 12}
+             (get-in (nav/capture-pos src-tab {:scroll 900 :line 12 :page 7}) [:hist :stack 0])))))
+  (testing "restoring an entry with a slide parks it for the pdf-view of the entry's document"
+    (is (= [:slides/want-page {:path "/d/talk.pdf" :page 7}]
+           (events/entry-restore-fx {:uri "/d/talk.pdf" :scroll 900 :facet nil :page 7}))
+        "a local file: its path")
+    (is (= [:slides/want-page {:path "/d/talk.pdf" :page 2}]
+           (events/entry-restore-fx {:uri "/d/talk.tex" :scroll 0 :facet {:path "/d/talk.pdf" :type :preview} :page 2}))
+        "a collocated group's PDF facet: the facet's path")
+    (is (= [:slides/want-page {:path "sftp://host/~/talk.pdf" :page 3}]
+           (events/entry-restore-fx {:uri "sftp://host/~/talk.pdf" :scroll 0 :facet nil :page 3}))
+        "a remote PDF is keyed by its uri")
+    (is (= [:scroll/restore 900] (events/entry-restore-fx {:uri "/d/paper.pdf" :scroll 900 :facet nil}))
+        "no slide: the pixel offset as before")))
+
+(deftest a-parked-slide-is-taken-once-by-its-own-document
+  (pdf-cache/want-page! "/d/talk.pdf" 5)
+  (is (nil? (pdf-cache/take-want-page! "/d/other.pdf")) "another document's mount does not take it")
+  (is (= 5 (pdf-cache/take-want-page! "/d/talk.pdf")))
+  (is (nil? (pdf-cache/take-want-page! "/d/talk.pdf")) "taken once"))

@@ -2218,6 +2218,38 @@ async function main() {
     console.log('[ok] PDF named actions: NextPage advances, GoTo jumps, GoBack returns, Find opens find, Print is inert');
   }
 
+  // ── REMEMBERING THE SLIDE (ADR-0045 F9): leaving a deck saves its SLIDE in the history entry (a pixel offset
+  // depends on the window size in the slides layout), and Back/Forward or a tab switch reopens that slide.
+  {
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && s.layout === 'slides' && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 10000);
+    const entry = (offset) => evalIn(win, `(() => { const ui = window.__vvdb().ui;
+      const t = ui.tabs.find((x) => x.id === ui['active-tab']); const h = t.hist; return h.stack[h.idx + (${offset})] || null; })()`);
+    await evalIn(win, `window.__vvslides('goto', 2)`);
+    await slidesAt(2, 'on slide 3 of the links deck');
+    const otherPath = path.join(ROOT, 'test', 'fixtures', 'entry-doc.pdf');   // still in the stub's content map
+    await evalIn(win, `window.__vvopen(${JSON.stringify(otherPath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'document' && (window.__vvdb().ui.slides || {}).pages === 4
+      && !document.querySelector('.vv-pdf-slides')`, 'navigated to another (document-layout) PDF', 15000);
+    const left = await entry(-1);
+    assert.strictEqual(left && left.page, 2, `the left entry remembers the slide: ${JSON.stringify(left)}`);
+    await sendChord(win, 'Left', ['alt']);
+    await slidesAt(2, 'Back reopens the deck on the remembered slide');
+    // a tab switch away and back restores it too — and a NEW position replaces the old one
+    await evalIn(win, `window.__vvslides('goto', 1)`);
+    await slidesAt(1, 'on slide 2 now');
+    await sendChord(win, 'T', ['control']);
+    await waitCalm(win, `document.activeElement && document.activeElement.classList.contains('vv-uri-input')`, 'a new blank tab', 4000);
+    await sendChord(win, 'PageUp', ['control']);
+    await slidesAt(1, 'switching back to the deck tab reopens its slide');
+    await sendChord(win, 'PageDown', ['control']);
+    await sendChord(win, 'W', ['control']);   // close the blank tab again
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'slides'`, 'the blank tab closed; the deck shows', 8000);
+    await slidesAt(1, 'the deck is still on its slide');
+    console.log('[ok] PDF remembered slide: Back and a tab switch reopen the slide (not a pixel offset); a new position replaces the old');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

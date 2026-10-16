@@ -990,7 +990,8 @@
   "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface, in the layout `view-state` asks for
    ({:scale :fit :invert? :explicit :open-as :presenting? :page}). Per-mount canvases, observers, tasks, and
    text/link layers are still recreated and torn down normally. A slides-layout mount opens on `:page` (a
-   restored slide, ADR-0045 §Remembering the slide) or the first page."
+   restored slide, ADR-0045 §Remembering the slide) or the first page; a document-layout mount given a `:page`
+   scrolls that page to the top."
   [container {:keys [doc sizes] :as prepared} path view-state]
   (let [d      (:deck prepared)
         layout (wanted-layout d view-state)
@@ -1013,9 +1014,13 @@
     (reset! current-doc {:doc doc :path path})
     (when (and (:fit view-state) (not= layout :slides)) (apply-fit! state (:fit view-state)))
     (build-placeholders! state)
-    (when (= layout :slides)
-      (go-to-page! state (:current @state))
-      (attach-slides-listeners! state))
+    (if (= layout :slides)
+      (do (go-to-page! state (:current @state))
+          (attach-slides-listeners! state))
+      ;; a restored slide (:page) arriving at a document-layout mount (the layout preference changed meanwhile):
+      ;; keep the reader on that page instead of dropping the position
+      (when (some? (:page view-state))
+        (scroll-to-page! state (inc (:current @state)))))
     (sync-present-listeners! state)
     (observe! state)
     (observe-resize! state)

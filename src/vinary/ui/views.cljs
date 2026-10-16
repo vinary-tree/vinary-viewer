@@ -896,17 +896,22 @@
                    ;; candidate that fails to open falls back to the good version when there is one.
                    (when-let [{:keys [bytes stamp]} (pdf-cache/bytes-for path)]
                      (let [gen   (swap! gen* inc)
-                           lease (prepare path stamp bytes)]
+                           lease (prepare path stamp bytes)
+                           ;; a restored history entry's SLIDE (Back/Forward, a tab switch — ADR-0045): the engine
+                           ;; opens on it, and the pixel restore is dropped (it would land anywhere in a layout whose
+                           ;; slot height follows the window)
+                           want  (pdf-cache/take-want-page! path)]
                        (reset! lease* lease)
                        (-> (:promise lease)
                            (.then (fn [prepared]
                                     (when (and (= gen @gen*) @node)
-                                      (reset! ctrl (pdf/mount-prepared! @node prepared path @vstate))
+                                      (reset! ctrl (pdf/mount-prepared! @node prepared path
+                                                                        (cond-> @vstate (some? want) (assoc :page want))))
                                       (reset! shown [path stamp])
                                       (pdf-cache/promote! path stamp)
                                       (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
                                       (rf/dispatch [:pdf/refreshed path stamp])
-                                      (scroll/apply! @node))))
+                                      (if (some? want) (scroll/discard!) (scroll/apply! @node)))))
                            (.catch (fn [e]
                                      (when (= gen @gen*)
                                        (js/console.error "[pdf] prepare failed" e)

@@ -47,6 +47,11 @@
         (js/requestAnimationFrame set-it)
         (js/setTimeout retry 80)))))
 
+(defn discard!
+  "Drop a pending scroll restore — the view restores something better than a pixel offset (a PDF slide, ADR-0045)."
+  []
+  (reset! pending nil))
+
 (defn current
   "The content scroller's current scrollTop — read at nav time to save the leaving history entry."
   []

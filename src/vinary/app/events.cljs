@@ -830,10 +830,18 @@
 ;; source view's imminent (re)mount (create-source-view consumes it); a :preview entry with a :line stashes it for
 ;; the preview remount; otherwise the pixel :scroll is restored on the next content render (scroll/apply!). nil when
 ;; a source entry has no captured line (nothing to restore → stay at the top).
-(defn- entry-restore-fx [{:keys [scroll line facet]}]
+(defn entry-restore-fx
+  "The effect restoring history entry `entry`'s view position (see above). A PDF left in the slides layout restores
+   its SLIDE ({:path :page} for the pdf-view of that path to open on — ADR-0045), not the pixel offset."
+  [{:keys [uri scroll line facet page]}]
   (case (:type facet)
     :source (when line [:source/want-line line])
-    (if line [:preview/want-line line] [:scroll/restore (or scroll 0)])))
+    (cond
+      ;; the content path in :doc/path form: the facet's file, else a local file path, else the raw uri (a remote
+      ;; ssh:// / sftp:// document is keyed by its uri)
+      (some? page) [:slides/want-page {:path (or (:path facet) (uri/file-path uri) uri) :page page}]
+      line         [:preview/want-line line]
+      :else        [:scroll/restore (or scroll 0)])))
 
 (defn- history-result
   "Back/Forward (or a tab switch) landed on `entry` {:uri :scroll :line :facet}. Reload the primary doc

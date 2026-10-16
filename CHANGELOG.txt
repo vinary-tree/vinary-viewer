@@ -69,6 +69,9 @@ Added
       Previous/First/Last page, GoBack/GoForward (Beamer's back-find-forward
       symbol) and Find (opens the find bar). Only those actions are honoured: a
       document's Print, SaveAs, Quit or FullScreen links stay inert.
+      A deck remembers its slide: Back/Forward and switching tabs away and back
+      reopen the slide you left (a history entry stores the slide itself, since
+      a pixel offset would land anywhere once the window size changes).
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a

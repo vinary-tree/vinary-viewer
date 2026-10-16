@@ -98,6 +98,25 @@
   []
   (when-let [f (:snapshot @slides-hook)] (f)))
 
+;; ---- the slide a restored view opens on (ADR-0045 §Remembering the slide) ----------------------------------
+;; Back/Forward and tab switches restore a history entry's position. For a PDF left in the slides layout that
+;; position is a SLIDE, not a pixel offset (slot height follows the window, so a saved scrollTop would land
+;; anywhere): the restore effect parks {:path :page} here and the pdf-view of that path takes it when it mounts.
+(defonce ^:private wanted-page (atom nil))   ; {:path :page} | nil
+
+(defn want-page!
+  "The next PDF view of `path` to mount should open on slide `page` (0-based)."
+  [path page]
+  (reset! wanted-page {:path path :page page}))
+
+(defn take-want-page!
+  "The page parked for `path` (clearing it), or nil when none is parked for that path."
+  [path]
+  (let [{p :path page :page} @wanted-page]
+    (when (and (some? p) (= p path))
+      (reset! wanted-page nil)
+      page)))
+
 (defn set-ensurer!   [f] (reset! ensurer f))
 (defn clear-ensurer! [f] (when (identical? @ensurer f) (reset! ensurer nil)))
 

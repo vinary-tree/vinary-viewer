@@ -110,16 +110,20 @@
     (update-in db [:ui :tabs] (fn [ts] (mapv #(if (= (:id %) id) (f %) %) ts)))))
 
 ;; ---- per-tab history with a facet-aware view position ----
-(defn- capture-pos
+(defn capture-pos
   "Save the leaving view's position onto tab `t`'s current history entry — facet-aware: a :source entry stores the
-   CodeMirror viewport :line, every other (preview/default) entry stores the pixel :scroll. `pos` = {:scroll :line}
-   (both read eagerly at nav time; the field kept is the one the entry's facet type makes authoritative)."
+   CodeMirror viewport :line, every other (preview/default) entry stores the pixel :scroll — and, for a PDF left
+   in the slides layout, its :page (the slide; restored instead of the pixel offset, which depends on the window
+   size there — ADR-0045). A position without a :page clears a stale one. `pos` = {:scroll :line :page} (read
+   eagerly at nav time; the fields kept are the ones the entry's facet type makes authoritative)."
   [t pos]
   (let [idx  (get-in t [:hist :idx])
         type (get-in t [:hist :stack idx :facet :type])]
     (if (= type :source)
       (assoc-in t [:hist :stack idx :line]   (:line pos))
-      (assoc-in t [:hist :stack idx :scroll] (or (:scroll pos) 0)))))
+      (-> t
+          (assoc-in [:hist :stack idx :scroll] (or (:scroll pos) 0))
+          (update-in [:hist :stack idx] #(if (some? (:page pos)) (assoc % :page (:page pos)) (dissoc % :page)))))))
 
 (defn cur-entry
   "The active tab's current history entry {:uri :scroll :line :facet} (the anchor for a tab-switch position

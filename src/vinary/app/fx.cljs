@@ -4,6 +4,7 @@
   (:require [re-frame.core :as rf]
             [datascript.core :as d]
             [vinary.app.ds :as ds]
+            [vinary.app.facet :as facet]
             [vinary.diff :as diff]
             [vinary.ir.frontend.diff :as ir-diff]
             [vinary.ir.backend.html :as ir-html]
@@ -36,13 +37,25 @@
 
 (rf/reg-fx :async/cancel (fn [key] (sched/cancel! key)))
 
+(defn- slides-page-now
+  "The current slide of the mounted PDF view when it shows the ACTIVE document in the slides layout, else nil —
+   so a history entry remembers the slide instead of a pixel offset (which depends on the window size there)."
+  [db]
+  (let [{:keys [path layout current]} (pdf-cache/slides-snapshot)]
+    (when (and (= :slides layout) (some? path) (= path (facet/active-content-path db)))
+      current)))
+
 ;; content-pane view position: a cofx reads the leaving view's position — both the preview pixel scrollTop AND the
 ;; source viewport line (each nav event saves the one its facet makes authoritative, via nav/capture-pos — so a
 ;; :source facet restores its LINE, a preview facet its pixel :scroll); the fx requests the next-rendered document
 ;; be restored to a saved pixel position (the source-line restore rides the :source/want-line fx instead).
 (rf/reg-cofx :view-pos (fn [cofx _] (assoc cofx :view-pos {:scroll (scroll/current)
-                                                           :line   (cm/current-viewport-line)})))
+                                                           :line   (cm/current-viewport-line)
+                                                           ;; a PDF in the slides layout: its SLIDE (ADR-0045)
+                                                           :page   (slides-page-now (:db cofx))})))
 (rf/reg-fx   :scroll/restore (fn [n] (scroll/want! n)))
+;; a restored history entry's PDF slide: the pdf-view of `path` opens on it when it mounts (ADR-0045)
+(rf/reg-fx   :slides/want-page (fn [{:keys [path page]}] (pdf-cache/want-page! path page)))
 
 ;; `:tree/received` commits project data first, then this schedules the DOM follow-up after Reagent has rendered
 ;; the new row. Active-path changes use the same coalesced scheduler from the tree component lifecycle.

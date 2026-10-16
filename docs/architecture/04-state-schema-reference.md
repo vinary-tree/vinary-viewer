@@ -183,8 +183,11 @@ Important slices:
 The tab's current `:uri` mirrors the current history entry, and may be a **virtual
 URI** (`ssh://`, `sftp://`, `vv-archive://`) as well as a local path; local URI
 paths are also the retained paths used for watcher/cache ownership. A history entry is
-`{:uri :scroll :line :facet}`: `:scroll` is the preview's pixel `scrollTop`, `:line` the Source view's top line
-(CodeMirror scrolls internally), and `:facet` the entry's facet. The per-tab `:facet` `{:path :type}` selects *which
+`{:uri :scroll :line :facet :pdf-layout :page}`: `:scroll` is the preview's pixel `scrollTop`, `:line` the Source
+view's top line (CodeMirror scrolls internally), `:facet` the entry's facet, and — for a PDF left in the slides
+layout — `:page`, the 0-based slide it was on (ADR-0045 §Remembering the slide). A slide is restored instead of the
+pixel offset, which depends on the window size in that layout (`events/entry-restore-fx` → `[:slides/want-page]`);
+a later position without one clears it. The per-tab `:facet` `{:path :type}` selects *which
 file of the collocated group* is shown and *as which type* (`:preview`/`:source`) — it replaced the retired
 `:view-source?` and `:representation` axes (`vinary.app.facet`). `:facet`, `:facet-mru`, `:diff-collapsed` and `:pdf-layout` are
 **cleared when the tab navigates to a different URI** (`nav-active`, `nav-tab`, `step`). `:pdf-layout` is also
