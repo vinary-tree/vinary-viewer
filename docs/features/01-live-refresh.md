@@ -118,6 +118,16 @@ Current responsibilities:
 The stamp check prevents a slow older Markdown render from overwriting newer
 content.
 
+**A refresh that fails never blanks a document.** When main cannot read a file the
+window already shows — it was deleted, renamed away, made unreadable, or its SSH
+connection dropped — the numbered `vv:error` becomes a non-fatal note
+(`:doc/refresh-note`, kind `"refresh-failed"`) over the last good version instead
+of an error page: nothing remounts, the scroll position and slide stay, and every
+window showing the file says the same thing. Retry re-reads through the ordinary
+open flow; the next good read (the file re-created, the connection back) clears the
+note by itself. A document that never loaded, or a renderer-side render failure,
+still shows the error page.
+
 ---
 
 ## 5. Why UI state survives

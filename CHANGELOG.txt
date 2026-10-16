@@ -572,6 +572,13 @@ Fixed
       of saves arriving while a read is still running costs one more read, not
       one per save. Every delivery carries its read number, and a window drops
       a read (or a read's failure) older than the version it already shows.
+    - A file that is deleted, renamed away or unreadable during live refresh
+      no longer replaces its document with an error page: the last version
+      stays on screen with a small banner saying the file couldn't be reloaded
+      (hover for the reason; Retry / dismiss), and re-creating the file
+      refreshes it and removes the banner. The same holds for a File Type
+      re-type that fails and for Reload of a vanished file. A document that
+      never loaded still shows the error page.
     - A PDF view no longer loses a view change made while a new version of the
       document is loading. Turning dark-invert on, starting a slide show or
       switching between the slides and document layouts during a live refresh

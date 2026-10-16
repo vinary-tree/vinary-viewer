@@ -35,12 +35,24 @@ Most likely causes:
 | Cause | Check |
 |-------|-------|
 | The file is not retained by any open tab history. | `__vvdb()` and inspect `:ui :tabs`; local files in any tab history should be retained. |
-| The file is unreadable or was moved. | `test -r <path>` |
+| The file is unreadable or was moved. | `test -r <path>` — a banner over the document says *"Couldn't reload the file — showing the last loaded version"*; hover it for the reason (below). |
 | The editor uses unusual save semantics. | Append a line in place with `printf` and see if refresh fires. |
 | The render failed after content arrived. | Check the document body for `Error:` and inspect DevTools console. |
 
 Retained local paths are synced from the renderer to main after tab/history
 changes. The main process keeps watchers only for that retained set.
+
+**A banner over the document instead of new content.** When a refresh cannot be
+shown, the window keeps the last good version on screen and says why in a small
+banner (its tooltip carries the exact error):
+
+| Banner | Meaning | What to do |
+|--------|---------|------------|
+| *Couldn't reload the file — showing the last loaded version* | Main could not read the file: deleted, renamed away, permissions, a dropped SSH connection. | Restore the file (it refreshes by itself when it reappears) or press **Retry**. |
+| *The updated file couldn't be displayed — showing the last good version* | A PDF's new bytes did not open (read while LaTeX was still writing it). | Usually nothing: the next save replaces it. **Retry** re-reads now. |
+
+**×** dismisses the banner; the next successful refresh removes it. A document
+that never loaded still shows the error page.
 
 ---
 

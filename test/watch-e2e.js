@@ -155,6 +155,31 @@ async function run() {
     'and that read is the last version');
   console.log(`[ok] a burst of ${6} writes ends on the last version in both windows (reads ${b1.slice(s1.length).join(' ')})`);
 
+  // Deleting the file is a failed READ, not a reason to blank the document (ADR-0046): both windows keep the last
+  // version behind the non-fatal refresh note; re-creating it refreshes both and clears the note
+  const note = (win) => evalIn(win, `(() => { const n = document.querySelector('.vv-refresh-note');
+    return n ? n.dataset.kind : null; })()`);
+  const errorPage = (win) => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-error'))`);
+  fs.rmSync(DOC);
+  await Promise.all([
+    until(() => note(first), (k) => k === 'refresh-failed', 'the first window notes the failed read'),
+    until(() => note(second), (k) => k === 'refresh-failed', 'the second window notes the failed read')
+  ]);
+  for (const win of [first, second]) {
+    assert.ok((await renderedText(win)).includes('burst-final'), 'the last version stays on screen');
+    assert.strictEqual(await errorPage(win), false, 'no error page replaces it');
+  }
+  fs.writeFileSync(DOC, '# Shared watch\n\nversion-restored\n');
+  await Promise.all([
+    waitForText(first, 'version-restored', 'the re-created file refreshes the first window'),
+    waitForText(second, 'version-restored', 'the re-created file refreshes the second window')
+  ]);
+  await Promise.all([
+    until(() => note(first), (k) => k === null, 'the good read clears the first window\'s note'),
+    until(() => note(second), (k) => k === null, 'the good read clears the second window\'s note')
+  ]);
+  console.log('[ok] a deleted file keeps its last version behind a refresh note in every window; re-creating it refreshes and clears the note');
+
   // Tree watchers have separate ownership: one shared depth-0 watcher per expanded directory, with the
   // owner set reconciled from each mounted Files view. A structural add must fan out to both windows.
   const treeBoth = path.join(SCRATCH, 'tree-both.md');

@@ -38,3 +38,19 @@
     (testing "no entity, or no summary, → no transaction"
       (is (= [] (events/deck-tx snap "/d/missing.pdf" summary)))
       (is (= [] (events/deck-tx snap "/d/talk.pdf" nil))))))
+
+(deftest a-failed-read-keeps-what-is-shown
+  (let [snap (db-with {:doc/path "/d/notes.md" :doc/kind "markdown" :doc/stamp 9 :doc/seq 4}
+                      {:doc/path "/d/broken.md" :doc/kind "text" :doc/error "ENOENT" :doc/stamp 3})
+        eid  (ds/eid-for-path snap "/d/notes.md")]
+    (testing "a document with content keeps it; an error page or no document has nothing to keep"
+      (is (true? (events/keeps-last-good? snap "/d/notes.md")))
+      (is (false? (events/keeps-last-good? snap "/d/broken.md")) "already showing an error")
+      (is (false? (events/keeps-last-good? snap "/d/missing.md")) "never loaded")
+      (is (false? (events/keeps-last-good? snap nil))))
+    (testing "the failure becomes a refresh note + the applied read number — never :doc/error or :doc/stamp"
+      (is (= [[:db/add eid :doc/refresh-note {:kind "refresh-failed" :message "ENOENT: no such file" :seq 5 :at 77}]
+              [:db/add eid :doc/seq 5]]
+             (events/refresh-failed-tx snap "/d/notes.md" "ENOENT: no such file" 5 77)))
+      (is (= "Unknown content error" (-> (events/refresh-failed-tx snap "/d/notes.md" nil 5 77) first last :message))
+          "a failure without a message still says something"))))

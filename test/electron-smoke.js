@@ -1914,6 +1914,32 @@ async function main() {
     send(9, 'guard-nine');
     await waitCalm(win, `${shown}.includes('guard-nine')`, 'and numbering resumes after it', 8000);
     console.log('[ok] ordering guard: an older read, an older failure and a duplicate are dropped; newer and unnumbered payloads apply');
+
+    // a FAILED READ keeps the last good document (ADR-0046): main's numbered vv:error for a document the window
+    // already shows raises the non-fatal note over it — no error page, nothing remounted; Retry re-reads it through
+    // the ordinary open flow and the next good read clears the note
+    win.webContents.send('vv:error', { path: guardPath, message: 'ENOENT: no such file or directory', seq: 10, refresh: true });
+    await waitCalm(win, `Boolean(document.querySelector('.vv-refresh-note[data-kind="refresh-failed"]'))`,
+      'a failed read of a shown document raises the refresh note', 8000);
+    assert.deepStrictEqual(await evalIn(win, `({ nine: ${shown}.includes('guard-nine'),
+      error: Boolean(document.querySelector('.vv-content .vv-error')) })`), { nine: true, error: false },
+      'the last good version stays on screen — no error page');
+    state.contentByPath.set(guardPath, { path: guardPath, kind: 'text', text: 'guard-restored', stamp: Date.now() });
+    await evalIn(win, `document.querySelector('.vv-refresh-note-retry').click(); true`);
+    await waitCalm(win, `${shown}.includes('guard-restored') && !document.querySelector('.vv-refresh-note')`,
+      'Retry re-reads the file and the good read clears the note', 8000);
+    // an UNNUMBERED error is renderer-side (a render that failed), and shows the error page as before
+    win.webContents.send('vv:error', { path: guardPath, message: 'a renderer-side failure' });
+    await waitCalm(win, `Boolean(document.querySelector('.vv-content .vv-error'))`, 'an unnumbered error shows the error page', 8000);
+    // …as does a numbered failure of a document the window never showed (nothing to keep)
+    const neverPath = path.join(ROOT, 'test', 'fixtures', 'never-loaded.txt');   // the stub has no content for it
+    await evalIn(win, `window.__vvopen(${JSON.stringify(neverPath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.tabs.find((t) => t.id === window.__vvdb().ui['active-tab']) || {}).uri === ${JSON.stringify(neverPath)}`,
+      'the never-loaded document is the active tab', 8000);
+    win.webContents.send('vv:error', { path: neverPath, message: 'EACCES: permission denied', seq: 11 });
+    await waitCalm(win, `(document.querySelector('.vv-content .vv-error')?.textContent || '').includes('EACCES')`,
+      'a failed first read shows the error page', 8000);
+    console.log('[ok] a failed read keeps a shown document behind a refresh note (Retry clears it); unnumbered or first-read failures show the error page');
   }
 
   // ── slide-deck DETECTION on prepare (ADR-0045): every PDF is classified from its own evidence, in the

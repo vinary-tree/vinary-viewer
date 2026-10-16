@@ -594,6 +594,9 @@
         ;; it (a doc re-typed away from "diff", or re-sent without its override, must drop the stale
         ;; mapping or the derived open-commit highlight would mark the wrong rows; ADR-0042).
         cur-git  (and eid (ds/doc-attr snap path :doc/git))
+        ;; a read that SUCCEEDED supersedes a note about an earlier one that did not (ADR-0046); a PDF's bytes may
+        ;; still fail to open in pdf.js, which then raises a fresh "render-failed" note
+        cur-note (and eid (ds/doc-attr snap path :doc/refresh-note))
         stamp   (if (some? stamp) stamp (js/Date.now))
         ir-office? (= kind "office")   ; office always renders via :office/render (IR → HTML + TOC; ADR-0017)
         ;; A large document of an implemented streaming kind renders as a bounded-memory INCREMENTAL stream
@@ -639,7 +642,8 @@
                   cur-err (conj [:db/retract eid :doc/error cur-err])
                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang])
                   (and cur-git (or (not= kind "diff") (nil? git)))
-                  (conj [:db/retract eid :doc/git cur-git]))
+                  (conj [:db/retract eid :doc/git cur-git])
+                  cur-note (conj [:db/retract eid :doc/refresh-note cur-note]))
         ;; the CLI/initial file arrives before any tab exists → it opens the first tab
         opened-first-tab? (empty? (nav/tabs db))
         db'     (if opened-first-tab? (nav/add-tab db path) db)
@@ -822,21 +826,43 @@
                    :doc/stamp stamp}
             (number? read-n) (assoc :doc/seq read-n))])))))
 
+(defn keeps-last-good?
+  "Does `path`'s document in DataScript value `snap` hold content this window shows — an entity without :doc/error?
+   (Entities are created only by applied content or by an error, so that is exactly 'has content'.)"
+  [snap path]
+  (boolean (and path (ds/eid-for-path snap path) (nil? (ds/doc-attr snap path :doc/error)))))
+
+(defn refresh-failed-tx
+  "A failed main-side read numbered `read-n` of a document this window already shows (ADR-0046): the shared
+   non-fatal :doc/refresh-note (\"refresh-failed\") and the applied read number — never :doc/error or :doc/stamp,
+   so nothing remounts and the last good version stays on screen."
+  [snap path message read-n at]
+  (let [eid (ds/eid-for-path snap path)]
+    [[:db/add eid :doc/refresh-note {:kind "refresh-failed" :message (str (or message "Unknown content error"))
+                                     :seq read-n :at at}]
+     [:db/add eid :doc/seq read-n]]))
+
 ;; a failed read is ordered with the content reads of its path: one not newer than the read the document applied
-;; is dropped (content-guard) — an old failure must never replace newer content
+;; is dropped (content-guard) — an old failure must never replace newer content. A failed READ by main (numbered)
+;; of a document this window already shows keeps that document on screen behind a refresh note (ADR-0046 — a file
+;; deleted, renamed away or unreadable mid-edit); with nothing shown yet, or an unnumbered (renderer-side) error,
+;; the error page appears as before.
 (rf/reg-event-fx
  :content/error
  (fn [{:keys [db]} [_ {:keys [path message stamp] read-n :seq}]]
-   (when-not (read-stale? (ds/snapshot) path read-n)
-     (let [tx                (content-error-tx (ds/snapshot) path message (or stamp (js/Date.now)) read-n)
-           opened-first-tab? (and path (empty? (nav/tabs db)))
-           db'               (if opened-first-tab? (nav/add-tab db path) db)]
-       (cond->
-         (with-retention
-          (cond-> {:db db'}
-            (seq tx) (assoc :fx [[:ds/transact tx]]))
-          db')
-         opened-first-tab? (with-active-tab-focus db'))))))
+   (let [snap (ds/snapshot)]
+     (when-not (read-stale? snap path read-n)
+       (if (and (number? read-n) (keeps-last-good? snap path))
+         {:fx [[:ds/transact (refresh-failed-tx snap path message read-n (js/Date.now))]]}
+         (let [tx                (content-error-tx snap path message (or stamp (js/Date.now)) read-n)
+               opened-first-tab? (and path (empty? (nav/tabs db)))
+               db'               (if opened-first-tab? (nav/add-tab db path) db)]
+           (cond->
+             (with-retention
+              (cond-> {:db db'}
+                (seq tx) (assoc :fx [[:ds/transact tx]]))
+              db')
+             opened-first-tab? (with-active-tab-focus db'))))))))
 
 ;; FX helper: load the uri's content + (for a local file) restore the target history scroll. The web view
 ;; scrolls itself, so http never requests a content-pane restore.
