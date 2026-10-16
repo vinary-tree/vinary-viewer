@@ -5,7 +5,8 @@
             [re-frame.db :as rfdb]
             [vinary.async.scheduler :as sched]
             [vinary.input.scroll-math :as sm]
-            [vinary.input.keymaps-registry :as registry]))
+            [vinary.input.keymaps-registry :as registry]
+            [vinary.renderer.scroll :as scroll]))
 
 ;; install the keymap set with the given id into the live keymap atom. The MODE is now set synchronously in
 ;; the dispatching event's :db (events.cljs), so this no longer dispatches :input/set-mode — removing the
@@ -174,11 +175,14 @@
 
 (rf/reg-fx
  :dom/scroll
- (fn [{:keys [dy dx to]}]
+ (fn [{:keys [dy dx to] :as opts}]
    (when-let [^js el (focused-scroll-el)]
      (let [keep-top  (fn [t _] t)
            keep-left (fn [l _] l)]
        (cond
+         ;; a content view that does not scroll by pixels (the slides layout, ADR-0045) takes the command first —
+         ;; but only when the CONTENT pane is the target: a focused sidebar or inner scroller keeps its scrolling
+         (and (identical? el (content-el)) (scroll/delegate! opts)) nil
          (= to :top)    (ease-scroll! el (fn [_ _]     0)                                 keep-left)
          (= to :bottom) (ease-scroll! el (fn [_ ^js e] (.-scrollHeight e))                keep-left)
          (= dy :page)   (ease-scroll! el (fn [t ^js e] (+ t (* 0.9 (.-clientHeight e))))  keep-left)

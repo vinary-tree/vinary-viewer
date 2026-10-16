@@ -1843,6 +1843,66 @@ async function main() {
     console.log('[ok] PDF slides layout: slots fill the pane, page/frame/wheel/jump navigation, layout toggle + refresh keep the slide');
   }
 
+  // ── SLIDES KEYS (ADR-0045 §Keys): REAL key events flip slides — bare arrows / PgUp/PgDn / Home/End through
+  // key-scroll! → :dom/scroll → the slides layout's scroll delegate; Space / Shift+arrows / digits / Enter /
+  // Backspace through the :slides keymap layer — and the layer stands aside when focus leaves the document.
+  // The deck is the refreshed 8-page one from the arm above: frames [1, 3, 1, 2, 1], Beamer labels 1 2 2 2 3 4 4 5.
+  {
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const page = () => evalIn(win, `(window.__vvdb().ui.slides || {}).page`);
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    assert.strictEqual(await evalIn(win, `window.__vvdb().ui.keymaps.active`), 'default', 'the Standard set is active here');
+    await sendChord(win, 'Home');
+    await slidesAt(0, 'Home → the first slide');
+    await sendChord(win, 'Right');
+    await slidesAt(1, '→ (a bare arrow, through the scroll delegate) → the next slide');
+    await sendChord(win, 'PageDown');
+    await slidesAt(2, 'PgDn → the next slide');
+    await sendChord(win, 'Right', ['shift']);
+    await slidesAt(4, 'Shift+→ (the :slides layer) skips frame 2\'s last overlay → frame 3');
+    await sendChord(win, 'PageUp', ['shift']);
+    await slidesAt(3, 'Shift+PgUp (:shift? through the delegate) → frame 2, fully built');
+    await sendChord(win, 'Space');
+    await slidesAt(4, 'Space → the next slide');
+    await sendChord(win, 'Space', ['shift']);
+    await slidesAt(3, 'Shift+Space → the previous slide');
+    await sendChord(win, 'End');
+    await slidesAt(7, 'End → the last slide');
+    // a typed slide number names the LABEL first: "2" is frame 2, whose first overlay is page index 1
+    await sendChord(win, '2');
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).digits === '2'
+      && (document.querySelector('.vv-slides-goto b') || {}).textContent === '2'`,
+      'typing 2 shows the "Go to 2" chip', 4000);
+    await sendChord(win, 'Enter');
+    await slidesAt(1, '2 Enter → frame 2 (label "2")');
+    assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-slides-goto'))`), false, 'Enter consumes the chip');
+    await sendChord(win, '5');
+    await sendChord(win, 'Backspace');
+    await waitCalm(win, `!(window.__vvdb().ui.slides || {}).digits && !document.querySelector('.vv-slides-goto')`,
+      'Backspace deletes the typed digit', 4000);
+    assert.strictEqual(await page(), 1, 'Backspace with a typed digit does not move the slide');
+    const modeBefore = await evalIn(win, `window.__vvdb().ui.input.mode`);
+    await sendChord(win, '4');
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).digits === '4'`, 'typing 4', 4000);
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!(window.__vvdb().ui.slides || {}).digits`, 'Escape forgets the typed number', 4000);
+    assert.strictEqual(await page(), 1, 'Escape does not move the slide');
+    assert.strictEqual(await evalIn(win, `window.__vvdb().ui.input.mode`), modeBefore, 'Escape had no mode side effect');
+    // focus OFF the document (the URI bar): the slides layer stands aside — Space reaches the field, not the deck
+    await evalIn(win, `(() => { const u = document.querySelector('.vv-uri-input'); u.focus(); u.select(); return true; })()`);
+    await sendChord(win, 'Space');
+    await sendChord(win, 'Right', ['shift']);
+    await new Promise((r) => setTimeout(r, 250));
+    assert.strictEqual(await page(), 1, 'with focus in the URI bar, Space and Shift+→ do not flip slides');
+    await evalIn(win, `(() => { const u = document.querySelector('.vv-uri-input'); u.blur();
+      document.querySelector('.vv-content').focus({ preventScroll: true }); return true; })()`);
+    await sendChord(win, 'Space');
+    await slidesAt(2, 'focus back on the document → Space flips again');
+    console.log('[ok] PDF slides keys: arrows/PgUp/PgDn/Home/End via the scroll delegate, Space/Shift+arrows/digits+Enter/Backspace/Escape via the :slides layer, inactive off the document');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

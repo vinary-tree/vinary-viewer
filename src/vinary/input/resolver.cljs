@@ -12,7 +12,10 @@
             [re-frame.db :as rfdb]
             [vinary.app.nav :as nav]
             [vinary.app.commands :as commands]
+            [vinary.app.overlay :as overlay]
+            [vinary.app.slides :as slides]
             [vinary.input.keys :as keys]
+            [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.text-edit :as text-edit]
             [vinary.input.keymap :as keymap]))
 
@@ -25,20 +28,47 @@
 (defn- arm!          [] (cancel-timer!) (reset! timer (js/setTimeout reset-seq! (keymap/timeout-ms))))
 (defn- push!         [token] (swap! pending conj token) (mirror!) (arm!))
 
+(defn- focus-on-document?
+  "Is the keyboard focus on the page itself (nothing focused / <body>) or inside the content pane? Read from
+   document.activeElement on every keydown — never cached (ADR-0032)."
+  []
+  (let [^js a (.-activeElement js/document)]
+    (boolean (or (nil? a)
+                 (identical? a (.-body js/document))
+                 (identical? a (.-documentElement js/document))
+                 (some-> a (.closest ".vv-content"))))))
+
+(defn- slides-active?
+  "Does the slides key layer apply to this keydown (ADR-0045)? A PDF is mounted in the slides layout right now
+   (the engine's own answer, not an app-db mirror), the keyboard is on the document — not the sidebar, the URI
+   bar, a button or an overlay's own focused surface — no text field has focus, and nothing modal is open."
+  [db in-input?]
+  (and (pdf-cache/slides-active?)
+       (focus-on-document?)
+       (not in-input?)
+       (not (overlay/blocking? db))))
+
 (defn- build-ctx
   "Assemble the resolution context from app-db (read directly — keydown is outside a reactive context).
    The tab/nav slice (tabs, active-path, can-back?/forward?) comes from vinary.app.nav."
   []
-  (let [db @rfdb/app-db]
+  (let [db        @rfdb/app-db
+        ;; DERIVED from document.activeElement, never read from app-db (ADR-0032). The app-db copy is
+        ;; maintained by focusin/focusout for display and for the palette, but it CANNOT be the
+        ;; authority: an input that unmounts while focused fires no blur, so the cached flag sticks
+        ;; `true` and silently swallows every bare printable binding — which is how closing the find
+        ;; bar with Esc used to kill Vim's `/`, `n`, `j` and `k` for the rest of the session.
+        in-input? (text-edit/text-field-focused?)]
     (merge (nav/base-ctx db)
            {:mode          (get-in db [:ui :input :mode])
             :sequence      @pending
-            ;; DERIVED from document.activeElement, never read from app-db (ADR-0032). The app-db copy is
-            ;; maintained by focusin/focusout for display and for the palette, but it CANNOT be the
-            ;; authority: an input that unmounts while focused fires no blur, so the cached flag sticks
-            ;; `true` and silently swallows every bare printable binding — which is how closing the find
-            ;; bar with Esc used to kill Vim's `/`, `n`, `j` and `k` for the rest of the session.
-            :in-input?     (text-edit/text-field-focused?)
+            :in-input?     in-input?
+            ;; the shown document is a PDF / a PDF in the slides layout (gate the Slides commands, like the palette)
+            :pdf-view?     (slides/pdf-shown? db)
+            :slides-view?  (slides/slides-view? db)
+            ;; the slides key layer applies (keyboard-only: the palette's context never sets it, so the typed-number
+            ;; commands never show up there)
+            :slides-active? (slides-active? db in-input?)
             :find-visible? (get-in db [:ui :find :visible?])
             :palette-open? (get-in db [:ui :palette :open?])
             ;; a blocking modal dialog owns the keyboard while open, so the resolver must not fire background
@@ -60,9 +90,15 @@
 
 (defn step
   "Pure resolution. modes = active keymap modes; returns a decision map
-   {:action :dispatch|:prefix|:consume|:pass|:retry …}."
+   {:action :dispatch|:prefix|:consume|:pass|:retry …}.
+
+   The root trie layers, lowest first: `:all`, then — only while ctx says `:slides-active?` — the `:slides`
+   layer (ADR-0045), then the current mode. The slides layer sits BELOW the mode, so a mode's own binding of the
+   same key wins (Vim's Space leader, `n`), and a shallow merge never replaces a mode's prefix map wholesale."
   [modes mode sequence token ctx]
-  (let [root (merge (get modes :all) (get modes mode))
+  (let [root (merge (get modes :all)
+                    (when (:slides-active? ctx) (get modes :slides))
+                    (get modes mode))
         node (get-in root (conj (vec sequence) token))]
     (or (leaf-decision node)
         (if (seq sequence)

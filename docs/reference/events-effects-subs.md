@@ -159,10 +159,12 @@ generation, the bar's match mode (`[:ui :find :mode]`: `:exact`, `:approximate` 
 | `:input/push-sequence` | fx | `token timeout-ms` | `:ui :input :timeout-id` | `:ui :input :sequence` ← conj token | `[:input/cancel-timeout id]`, `[:input/arm-timeout ms]` |
 | `:input/reset-sequence` | fx | — | `:ui :input :timeout-id` | `:ui :input :sequence` ← `[]`, `:count` ← nil | `[:input/cancel-timeout id]` |
 | `:input/timeout` | db | — | — | `:ui :input :sequence` ← `[]`, `:count` ← nil | — |
-| `:input/escape` | fx | — | `:ui :palette :open?`, `:ui :find :visible?`, `:ui :input :mode` | mode→`:normal` or clear sequence/count (see precedence) | palette open→`[:dispatch [:palette/close]]`; else find→`[:dispatch [:find/close]]` |
+| `:input/escape` | fx | — | `:ui :palette :open?`, `:ui :find :visible?`, `:ui :slides :digits`, `:ui :input :mode` | mode→`:normal` or clear sequence/count (see precedence) | palette open→`[:dispatch [:palette/close]]`; else find→`[:dispatch [:find/close]]`; else a typed slide number→`[:dispatch [:slides/digits-clear]]` — the pure `input-events/escape-fx` |
 
-> **`:input/escape` precedence** (first match wins): close palette → close find → leave non-normal
-> mode (→ `:normal`) → clear the pending sequence + count. This is the "universal cancel".
+> **`:input/escape` precedence** (first match wins): close palette → close find → the slide show's own
+> cancel steps (a half-typed slide number; ADR-0045) → leave non-normal mode (→ `:normal`) → clear the
+> pending sequence + count. This is the "universal cancel". The slide steps come before the mode switch so
+> Escape has no mode side effect while it is cancelling something on a slide.
 
 ### 1.11 Keymap config **[input]**
 
@@ -671,9 +673,13 @@ by the engine and by `vinary.app.slides` (menus, subscriptions), so the two neve
 | --- | --- | --- | --- | --- | --- |
 | `:pdf/layout-toggle` | fx | — | `slides/pdf-shown?`, `slides/effective-layout` | — | `[:dispatch [:pdf/set-layout :document\|:slides]]` — the OPPOSITE of the effective layout (View ▸ View as Slide Show ↔ View as Document); no-op unless a PDF is shown |
 | `:pdf/set-layout` | fx | `:slides` \| `:document` \| `nil` | `slides/pdf-shown?` | active tab `:pdf-layout` + its current history entry's (`nav/set-pdf-layout`; `nil` clears → follow detection again) | — ; the pdf-view's `:pdf/layout-request` sub re-drives the engine (`pdf/update!` → `set-layout!`, keeping the page) |
-| `:slides/changed` | db | `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` | — | `[:ui :slides]` ← the map | — — the engine's position report (`deck/position` + layout), at most one per animation frame; feeds the slide counter, menus and tests (`__vvdb().ui.slides`) |
+| `:slides/changed` | db | `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` | `[:ui :slides]` | `[:ui :slides]` ← `slides/merge-report`: the map, keeping the UI-owned keys (`slides/ui-keys` — the typed `:digits`) only for the same `:path` still in the `:slides` layout | — — the engine's position report (`deck/position` + layout), at most one per animation frame; feeds the slide counter, menus and tests (`__vvdb().ui.slides`) |
 | `:slides/unmounted` | db | `path` | `[:ui :slides :path]` | dissoc `[:ui :slides]` when it belongs to `path` | — — dispatched by the pdf-view's unmount (tab switch, navigation, Reflow) |
-| `:slides/command` | fx | `op` — a `vinary.slides.deck/step` op (`:next :prev :next-frame :prev-frame :first :last [:goto i] [:goto-label s] [:jump i] :back :forward`) | — | — | `[:slides/command op]` |
+| `:slides/command` | fx | `op` — a `vinary.slides.deck/step` op (`:next :prev :next-frame :prev-frame :first :last [:goto i] [:goto-label s] [:jump i] :back :forward`) | `[:ui :slides :digits]` | clears a half-typed slide number | `[:slides/command op]` (+ `[:async/cancel :slides/digits-timeout]` when a number was typed) — `events/slides-command-fx`. Dispatched by the slides layout's scroll delegate (every keymap's scroll keys → `deck/scroll->op`), the `:slides` key layer, the palette's Slides commands, menus and `window.__vvslides` |
+| `:slides/digit` | fx | `d` — 0–9 | `[:ui :slides :layout]` (no-op unless `:slides`) | `[:ui :slides :digits]` ← `deck/digits-step` (at most 6 digits) | `[:async/debounce {:key :slides/digits-timeout :ms 2500 :dispatch [:slides/digits-clear]}]` — `events/slides-digit-fx`; bound to the digit keys in the `:slides` key layer |
+| `:slides/enter` | fx | — | `[:ui :slides :digits]` | clears the typed number | typed → `[:async/cancel :slides/digits-timeout]` `[:slides/command [:goto-label typed]]` (label first — Beamer's frame number — then the 1-based page); none → `[:dispatch [:slides/command :next]]` — `events/slides-enter-fx` |
+| `:slides/backspace` | fx | — | `[:ui :slides :digits]` | drops the last typed digit | shorter number → re-arms the timeout; last digit → `[:async/cancel …]`; none typed → `[:dispatch [:slides/command :prev]]` — `events/slides-backspace-fx` |
+| `:slides/digits-clear` | fx | — | — | dissoc `[:ui :slides :digits]` | `[:async/cancel :slides/digits-timeout]` — the 2.5 s timeout firing, or Escape's first slide step (`input-events/escape-fx`) |
 
 ## 2. Effects
 
@@ -926,6 +932,7 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:pdf/layout-request` | `:<- [::slides-inputs]` | the layout request the pdf-view merges into the engine's view-state (the engine combines it with the document's own deck classification) |
 | `:slides/view?` | `:<- [:view/pdf-active?]` `:<- [::slides-inputs]` `:<- [:doc/deck]` | bool — the shown PDF is in the slides layout (`vinary.slides.deck/effective-layout`, the engine's own rule) |
 | `:slides/state` | `app-db` | `[:ui :slides]` — the mounted slide show's position mirror (`:slides/changed`) \| nil |
+| `:slides/digits` | `app-db` | `[:ui :slides :digits]` — the slide number being typed (`"12"`) \| nil; the "Go to 12" chip (`ui/slides-hud`) |
 | `:doc/deck` | `:<- [:doc/active]` | the shown PDF's slide-deck classification `{:deck? :tier :source :pages :frame-count}` \| nil (ADR-0045) |
 | `:doc/refresh-note` | `:<- [:doc/active]` | the shown document's non-fatal live-refresh note `{:kind :message :stamp :at}` \| nil — rendered by `ui/refresh-note` over the last good version (§1.31) |
 
@@ -964,7 +971,8 @@ command palette. Predicates: `:always`, `:has-tabs`, `:can-back?`, `:can-forward
 | File | `:file/open` (prompt), `:file/open-in-new-tab` (prompt), `:file/open-dialog`, `:file/open-dialog-new-tab`, `:file/reveal-in-tree` (→ `[:sidebar/reveal]`), `:doc/reload` (→ `[:tab/reload]`) |
 | Navigation | `:history/back`, `:history/forward`, `:nav/parent`, `:nav/open-target`, `:nav/scroll-down`, `:nav/scroll-up`, `:nav/scroll-left`, `:nav/scroll-right`, `:nav/page-down`, `:nav/page-up`, `:nav/half-page-down`, `:nav/half-page-up`, `:nav/scroll-top`, `:nav/scroll-bottom`, `:hint/start`, `:focus/uri`, `:focus/sidebar`, `:focus/content`, `:focus/toggle`, `:tree/down`, `:tree/up`, `:tree/open`, `:jump/to-source` (→ `[:jump/goto-source]`), `:jump/to-preview` (→ `[:jump/goto-preview]`) |
 | Search | `:search/start`, `:search/next`, `:search/prev`, `:search/close`, `:palette/open`, `:palette/files` |
-| View | `:sidebar/toggle`, `:view/toggle-source` (→ `[:tab/toggle-source]`), `:view/toggle-diff-split` (→ `[:tab/toggle-diff-view]`), `:view/diff-collapse-all`, `:view/diff-expand-all`, `:theme/cycle`, `:theme/pick` (prompt), `:view/zoom-in`, `:view/zoom-out`, `:view/zoom-reset`, `:view/devtools`, `:view/re-frame-10x` |
+| View | `:sidebar/toggle`, `:view/toggle-source` (→ `[:tab/toggle-source]`), `:view/toggle-diff-split` (→ `[:tab/toggle-diff-view]`), `:view/diff-collapse-all`, `:view/diff-expand-all`, `:theme/cycle`, `:theme/pick` (prompt), `:view/zoom-in`, `:view/zoom-out`, `:view/zoom-reset`, `:view/devtools`, `:view/re-frame-10x`, `:view/toggle-slides` (→ `[:pdf/layout-toggle]`, `:when :pdf-view?`) |
+| Slides (ADR-0045) | `:slides/next`, `:slides/prev`, `:slides/next-frame`, `:slides/prev-frame`, `:slides/first`, `:slides/last`, `:slides/back`, `:slides/forward` (each → `[:slides/command op]`, `:when :slides-view?` — palette-visible only with a PDF in the slides layout); `:slides/digit` (→ `[:slides/digit d]` via the binding's `:args [d]`), `:slides/enter`, `:slides/backspace` (`:when :slides-active?` — keyboard-only: only the resolver's context sets it, so the palette never offers them) |
 | Git | `:git/blame-toggle` (→ `[:blame/toggle]`), `:git/open-graph` (→ `[:git-graph/open]`), `:git/file-history`, `:git/line-history` (→ `[:git/line-history-from-selection]`) |
 | Settings · Web · Help | `:settings/open`, `:passwords/open`, `:about/open` |
 | Editor | `:kbedit/undo`, `:kbedit/redo` (the key-binding editor's undo/redo, §1.27) |
@@ -985,6 +993,23 @@ normal-mode key), `:pass` (let it reach inputs/browser), or `:retry` (restart re
 key while a text input is focused in non-modal/insert mode. The pending sequence + chord timer are
 held in resolver-**local atoms** (synchronous, authoritative) and mirrored into `app-db` only for the
 mode-line display.
+
+**Layers (ADR-0045).** The root trie `step` walks is a shallow merge, lowest first, of `:all`, then the
+**`:slides` layer** — only while the context says `:slides-active?` — then the current mode. The slides layer
+therefore sits *below* the mode: a mode's own binding of the same key wins (Vim's `SPC` leader, `n`), and the
+shallow merge never replaces a mode's prefix map wholesale. `build-ctx` derives `:slides-active?` from the live
+DOM on every keydown (ADR-0032 — never cached): the PDF engine reports a mounted slides layout
+(`pdf-cache/slides-active?`), focus is on `<body>` or inside `.vv-content` (not the sidebar, the URI bar, a
+button or an overlay's own focused surface), no text field has focus, and `vinary.app.overlay/blocking?` is
+false (menubar menu, context menu, link hints, palette, SSH prompt, the modal dialogs). It also adds
+`:pdf-view?` and `:slides-view?` (the palette's contexts carry those two as well).
+
+**Scroll commands in the slides layout.** Arrows, PgUp/PgDn (with `:shift?` from `key-scroll!` for a frame
+step), Home/End, Vim `j/k/h/l/C-d/C-u/C-f/C-b/gg/G`, Emacs `C-v/M-v/C-n/C-p` and the palette's scroll commands
+all reach `:dom/scroll` as the same opts map. `:dom/scroll` first offers it to the **scroll delegate**
+(`vinary.renderer.scroll/delegate!`) when the content pane is the target; the slides layout registers one that
+maps the opts through `deck/scroll->op` and dispatches `[:slides/command op]`, and always claims the command, so
+the smooth-scroll animator never starts a chase that the slide snap would fight.
 
 ### 4.3 Keymaps (`vinary.input.keymap` + `vinary.input.keymaps-registry`)
 

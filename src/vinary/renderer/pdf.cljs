@@ -7,6 +7,7 @@
    (scripts/sync-pdfjs.mjs). Pure geometry/zoom/outline helpers live in vinary.renderer.pdf-layout."
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
+            [vinary.renderer.scroll :as scroll]
             [vinary.slides.deck :as deck]
             [vinary.slides.evidence :as evidence]
             [vinary.renderer.toc :as toc]
@@ -689,10 +690,23 @@
       (swap! state assoc :wheel st)
       (when op (command! state op)))))
 
+(defn- scroll-delegate
+  "The content-scroll delegate of the slides layout (vinary.renderer.scroll): every keymap's scroll command —
+   arrows, PageUp/PageDown (Shift = a frame), Home/End, Vim j/k/h/l/C-d/C-u/C-f/C-b/gg/G, Emacs C-v/M-v/C-n/C-p —
+   becomes the slide op deck/scroll->op names, run through :slides/command so a typed slide number or (while
+   presenting) a blanked screen sees it first. Always claims the command: a pixel scroll would only be undone by
+   the snap."
+  [_state]
+  (fn [opts]
+    (when-let [op (deck/scroll->op opts)]
+      (rf/dispatch [:slides/command op]))
+    true))
+
 (defn- attach-slides-listeners!
   "While the slides layout is active: track the current slot on scroll, snap at scroll end (`scrollend`, plus a
-   150 ms quiet-period fallback), and turn the wheel into slide flips (the scroller itself is overflow:hidden in
-   this layout, so the wheel never scrolls it natively)."
+   150 ms quiet-period fallback), turn the wheel into slide flips (the scroller itself is overflow:hidden in
+   this layout, so the wheel never scrolls it natively), and claim the keyboard's scroll commands (the scroll
+   delegate)."
   [state]
   (when-not (:slides-listeners @state)
     (when-let [^js scroller (scroller-of (:container @state))]
@@ -701,17 +715,20 @@
                         (when-let [t (:snap-timer @state)] (js/clearTimeout t))
                         (swap! state assoc :snap-timer (js/setTimeout #(snap! state) 150)))
             on-end    (fn [_] (snap! state))
-            on-wheel  (fn [e] (on-wheel! state e))]
+            on-wheel  (fn [e] (on-wheel! state e))
+            delegate  (scroll-delegate state)]
         (.addEventListener scroller "scroll" on-scroll #js {:passive true})
         (.addEventListener scroller "scrollend" on-end)
         (.addEventListener scroller "wheel" on-wheel #js {:passive true})
-        (swap! state assoc :slides-listeners [scroller on-scroll on-end on-wheel])))))
+        (scroll/set-delegate! delegate)
+        (swap! state assoc :slides-listeners [scroller on-scroll on-end on-wheel delegate])))))
 
 (defn- detach-slides-listeners! [state]
-  (when-let [[^js scroller on-scroll on-end on-wheel] (:slides-listeners @state)]
+  (when-let [[^js scroller on-scroll on-end on-wheel delegate] (:slides-listeners @state)]
     (.removeEventListener scroller "scroll" on-scroll)
     (.removeEventListener scroller "scrollend" on-end)
-    (.removeEventListener scroller "wheel" on-wheel))
+    (.removeEventListener scroller "wheel" on-wheel)
+    (scroll/clear-delegate! delegate))
   (when-let [t (:snap-timer @state)] (js/clearTimeout t))
   (swap! state assoc :slides-listeners nil :snap-timer nil))
 

@@ -96,6 +96,31 @@ toward an *accumulating* target, so a held key scrolls continuously and smoothly
 page/half-page commands. Implemented in `vinary.input.fx` (`:dom/scroll`); the
 bare-arrow / page-key capture handler is `vinary.renderer.core/key-scroll!`.
 
+### Slides (a PDF in the slides layout)
+
+When a PDF shows one slide per screen (a detected slide deck, or View ▸ View as Slide Show — ADR-0045), the
+same keys flip slides instead of scrolling pixels. Nothing needs rebinding: every scroll command is routed to
+the slide show, in every keymap set.
+
+| Keys | Slides action |
+|------|---------------|
+| `→` `↓` `PgDn`, Vim `j` `l` `Ctrl+D` `Ctrl+F`, Emacs `C-v` `C-n`, `Space`, the mouse wheel | next slide (one overlay page) |
+| `←` `↑` `PgUp`, Vim `k` `h` `Ctrl+U` `Ctrl+B`, Emacs `M-v` `C-p`, `Shift+Space`, `Backspace` | previous slide |
+| `Shift+→` `Shift+↓` `Shift+PgDn` | next **frame** — skips the rest of this Beamer slide's overlays |
+| `Shift+←` `Shift+↑` `Shift+PgUp` | previous frame, shown fully built |
+| `Home` / `End`, Vim `g g` / `G` | first / last slide |
+| digits, then `Enter` | go to that slide — the number printed on a Beamer slide (its frame number) first, else the page number; a "Go to 12" chip shows what you typed |
+| `Backspace` while typing | delete the last digit |
+| `Escape` | forget a typed number (it is also forgotten 2.5 s after the last digit) |
+
+The slide keys (`Space`, `Shift+Space`, `Backspace`, `Enter`, `Shift+arrows`, digits) form a `:slides` layer
+that is active only while the slides layout is showing **and** the keyboard is on the document — not in a text
+field, the sidebar, the URI bar, or an open menu, dialog or prompt. The layer sits below the current mode, so
+a mode's own binding wins: in Vim normal mode `Space` stays the leader (use `→`, `j` or `PgDn` there). It is
+the same in every bundled set and can be overridden like a mode, under `:keymaps {:slides {…}}` (§5). The
+palette's **Slides** commands (Next slide, Next frame, First slide, …) are offered only while a PDF is in the
+slides layout; **View as slide show / document** switches any PDF's layout.
+
 **Opening files/folders is OS-dependent.** In both the **directory browser** and the
 **git file tree**, a **single click opens on Linux** and a **double click opens on
 Windows/macOS** (the host file-manager convention, via

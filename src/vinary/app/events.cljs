@@ -21,6 +21,7 @@
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
             [vinary.app.slides :as slides]
+            [vinary.slides.deck :as deck]
             [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.app.fx]
             [vinary.input.fx]))
@@ -1926,19 +1927,82 @@
  :slides/changed
  (fn [db [_ m]]
    ;; the mounted engine's position report {:path :layout :page :pages :frame :frames :overlay :overlays :label
-   ;; :doc-gen} — one per animation frame at most; feeds the slide counter, menus and tests
-   (assoc-in db [:ui :slides] m)))
+   ;; :doc-gen} — one per animation frame at most; feeds the slide counter, menus and tests. The UI-owned keys
+   ;; (slides/ui-keys: a typed slide number, …) survive the reports of the same deck in the slides layout; a
+   ;; different document or the document layout starts without them.
+   (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m))))
 
 (rf/reg-event-db
  :slides/unmounted
  (fn [db [_ path]]
    (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)))
 
+;; ---- typed slide numbers (ADR-0045 §Keys): 1 2 Enter goes to slide 12 ------------------------------------
+;; The number names a LABEL first — in a Beamer deck the label is the frame number printed on the slide, so
+;; "12" opens frame 12's first overlay — else the 1-based page (vinary.slides.deck/resolve-goto). The buffer lives
+;; in [:ui :slides :digits] (shown by the "Go to 12" chip) and forgets itself 2.5 s after the last digit. The
+;; handlers' bodies are pure functions of app-db, unit-tested in vinary.app.slides-keys-test.
+(def slides-digits-key
+  "The scheduler key of the typed-number timeout (not the :slides/digits subscription)."
+  :slides/digits-timeout)
+
+(def slides-digits-ms
+  "A typed slide number is forgotten this long after its last digit."
+  2500)
+
+(defn- rearm-digits [fx]
+  (conj (or fx []) [:async/debounce {:key slides-digits-key :ms slides-digits-ms :dispatch [:slides/digits-clear]}]))
+
+(defn slides-command-fx
+  "Effects of :slides/command `op`: run it on the mounted slide show, abandoning a half-typed slide number."
+  [db op]
+  (cond-> {:fx [[:slides/command op]]}
+    (slides/digits db) (-> (assoc :db (slides/clear-digits db))
+                           (update :fx conj [:async/cancel slides-digits-key]))))
+
+(defn slides-digit-fx
+  "Effects of typing digit `d` (0–9): append it to the typed number — only while the mounted PDF is in the slides
+   layout (the [:ui :slides] mirror says so) — and re-arm the 2.5 s timeout. nil otherwise."
+  [db d]
+  (when (and (integer? d) (<= 0 d 9) (= :slides (get-in db [:ui :slides :layout])))
+    {:db (assoc-in db [:ui :slides :digits] (deck/digits-step (slides/digits db) d))
+     :fx (rearm-digits [])}))
+
+(defn slides-enter-fx
+  "Effects of Enter: go to the typed slide (label first, then page number), else the next slide."
+  [db]
+  (if-let [typed (slides/digits db)]
+    {:db (slides/clear-digits db)
+     :fx [[:async/cancel slides-digits-key] [:slides/command [:goto-label typed]]]}
+    {:fx [[:dispatch [:slides/command :next]]]}))
+
+(defn slides-backspace-fx
+  "Effects of Backspace: delete the last typed digit (the timeout re-arms), else the previous slide."
+  [db]
+  (if-let [typed (slides/digits db)]
+    (let [shorter (subs typed 0 (dec (count typed)))]
+      (if (seq shorter)
+        {:db (assoc-in db [:ui :slides :digits] shorter) :fx (rearm-digits [])}
+        {:db (slides/clear-digits db) :fx [[:async/cancel slides-digits-key]]}))
+    {:fx [[:dispatch [:slides/command :prev]]]}))
+
 (rf/reg-event-fx
  :slides/command
- (fn [_ [_ op]]
-   ;; a slide-navigation op (vinary.slides.deck/step) for the mounted slide show — palette, menus, tests
-   {:fx [[:slides/command op]]}))
+ (fn [{:keys [db]} [_ op]]
+   ;; a slide-navigation op (vinary.slides.deck/step) for the mounted slide show — keys (through the scroll
+   ;; delegate and the slides key layer), palette, menus, tests
+   (slides-command-fx db op)))
+
+(rf/reg-event-fx :slides/digit     (fn [{:keys [db]} [_ d]] (slides-digit-fx db d)))
+(rf/reg-event-fx :slides/enter     (fn [{:keys [db]} _] (slides-enter-fx db)))
+(rf/reg-event-fx :slides/backspace (fn [{:keys [db]} _] (slides-backspace-fx db)))
+
+(rf/reg-event-fx
+ :slides/digits-clear
+ (fn [{:keys [db]} _]
+   ;; the 2.5 s timeout, Escape, or anything else that abandons the typed number (cancelling the timer is
+   ;; harmless when it is the timer that fired)
+   {:db (slides/clear-digits db) :fx [[:async/cancel slides-digits-key]]}))
 
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last

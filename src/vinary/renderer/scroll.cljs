@@ -116,3 +116,28 @@
   [^js el opts]
   (when el
     (scroll-rect-to! (scroller-of el) (.getBoundingClientRect el) opts)))
+
+;; ---- the scroll delegate (ADR-0045) ------------------------------------------------------------------------
+;; A content view whose "scrolling" is not pixels can claim every content-scroll command. The slides layout
+;; registers one: arrows, PageUp/PageDown, Home/End, Vim j/k/C-d/C-f/gg/G, Emacs C-v/M-v/C-n/C-p and the
+;; palette's scroll commands all arrive at `:dom/scroll` as the same opts map ({:dy :dx :to :shift?}), so ONE
+;; delegate turns all of them into slide flips — and the smooth-scroll animator never starts a chase that the
+;; slides layout's snap would then fight. Identity-checked like pdf-cache's hooks, so an unmounting view can
+;; never clear a newer view's registration.
+(defonce ^:private delegate (atom nil))   ; (fn [opts] → truthy when it took the scroll) | nil
+
+(defn set-delegate!
+  "Route content-scroll commands to `f` (fn [opts] → truthy when it handled them) until cleared."
+  [f]
+  (reset! delegate f))
+
+(defn clear-delegate!
+  "Stop routing to `f` — only if `f` is still the registered delegate."
+  [f]
+  (when (and f (identical? @delegate f)) (reset! delegate nil)))
+
+(defn delegate!
+  "Offer the content-scroll command `opts` to the registered delegate. Returns truthy when it took it (the caller
+   must then not scroll), nil when there is no delegate or it declined."
+  [opts]
+  (when-let [f @delegate] (f opts)))

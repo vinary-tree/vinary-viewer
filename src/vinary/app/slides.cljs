@@ -54,3 +54,30 @@
   "Is a PDF showing in the slides layout?"
   [db]
   (and (pdf-shown? db) (= :slides (effective-layout db))))
+
+;; ---- the [:ui :slides] mirror ------------------------------------------------------------------------------
+(def ui-keys
+  "Keys of [:ui :slides] that the UI owns, not the engine's position report: the typed slide number (:digits).
+   They survive the reports of the same deck in the slides layout (merge-report)."
+  [:digits])
+
+(defn merge-report
+  "The new [:ui :slides] for the engine's position report `m` over the current `cur`: the report, plus `cur`'s
+   UI-owned keys when it is the same document still in the slides layout — a different document, or the document
+   layout, starts without them."
+  [cur m]
+  (if (and (= (:path cur) (:path m)) (= :slides (:layout m)))
+    (merge m (select-keys cur ui-keys))
+    m))
+
+(defn digits
+  "The slide number being typed (a non-empty string of digits), or nil."
+  [db]
+  (not-empty (get-in db [:ui :slides :digits])))
+
+(defn clear-digits
+  "db without a typed slide number."
+  [db]
+  (if (contains? (get-in db [:ui :slides]) :digits)
+    (update-in db [:ui :slides] dissoc :digits)
+    db))

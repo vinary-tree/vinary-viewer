@@ -38,6 +38,7 @@
             [vinary.ui.passwords :as passwords-ui]
             [vinary.ui.ssh :as ssh-ui]
             [vinary.ui.refresh-note :as refresh-note]
+            [vinary.ui.slides-hud :as slides-hud]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -1886,6 +1887,8 @@
       [content-view]
       ;; the non-fatal live-refresh banner (the last good version stays on screen beneath it)
       [refresh-note/refresh-note]
+      ;; the slide show's indicators (the "Go to 12" chip) — over the slides, never inside the scroller (ADR-0045)
+      [slides-hud/hud]
       [find-bar]
       ;; the hover-URL status bar lives INSIDE this wrap, so its bottom:0 floats above the zoom bar (the
       ;; wrap ends above the bar) instead of overlapping it

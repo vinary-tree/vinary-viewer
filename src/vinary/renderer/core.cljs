@@ -398,8 +398,11 @@
    scroller (html/#app are overflow:hidden), so neither scrolls. Skipped inside editable elements (inputs /
    textareas / CodeMirror), which keep their native caret + Page/Home/End movement, and while a
    menu/overlay is open. (The native web view scrolls these keys itself via its own preload when it holds
-   focus.) Arrows ignore all modifiers; the page/home/end keys ignore Shift but not Ctrl/Alt/Meta. Held
-   keys auto-repeat into the smooth-scroll animator. Capture-phase so it preempts the keymap resolver."
+   focus.) Arrows act only with no modifier held — Shift+arrows reach the keymap instead (the slides layer binds
+   them to frame steps); PageDown/PageUp/Home/End also act with Shift held (never with Ctrl/Alt/Meta) and pass
+   `:shift?` along, so the slides layout's scroll delegate turns Shift+PageDown/PageUp into a frame step
+   (ADR-0045). Held keys auto-repeat into the smooth-scroll animator. Capture-phase so it preempts the keymap
+   resolver."
   []
   (.addEventListener js/window "keydown"
                      (fn [^js e]
@@ -407,7 +410,8 @@
                              ev      (when (and no-cam?
                                                 (not (editable-target? (.-target e)))
                                                 (not (overlay-open-now?)))
-                                       (or (get page->scroll (.-key e))
+                                       (or (some-> (get page->scroll (.-key e))
+                                                   (cond-> (.-shiftKey e) (assoc-in [1 :shift?] true)))
                                            (when-not (.-shiftKey e) (get arrow->scroll (.-key e)))))]
                          (when ev
                            (.preventDefault e)

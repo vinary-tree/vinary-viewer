@@ -7,6 +7,7 @@
             [vinary.input.keymap :as keymap]
             [vinary.input.keymaps-registry :as registry]
             [vinary.input.kbedit-history :as hist]
+            [vinary.app.slides :as slides]
             [vinary.input.fx]))
 
 ;; ---- modal + input-focus state ----
@@ -34,18 +35,24 @@
  (fn [db _] (-> db (assoc-in [:ui :input :sequence] []) (assoc-in [:ui :input :count] nil))))
 
 ;; ---- universal escape/cancel ----
-(rf/reg-event-fx
- :input/escape
- (fn [{:keys [db]} _]
-   (let [palette? (get-in db [:ui :palette :open?])
-         find?    (get-in db [:ui :find :visible?])
-         mode     (get-in db [:ui :input :mode])]
-     (cond
-       palette?           {:fx [[:dispatch [:palette/close]]]}
-       find?              {:fx [[:dispatch [:find/close]]]}
-       (not= mode :normal) {:db (assoc-in db [:ui :input :mode] :normal)}
-       :else              {:db (-> db (assoc-in [:ui :input :sequence] [])
-                                   (assoc-in [:ui :input :count] nil))}))))
+(defn escape-fx
+  "PURE: what Escape does in app-db `db` — the FIRST cancel step that applies, in order: close the palette, close
+   the find bar, the slide show's own steps (a half-typed slide number), switch to Vim's normal mode, else clear
+   the pending key sequence. The slide show's steps come BEFORE the mode switch, so Escape never has a mode side
+   effect while it is cancelling something on a slide (ADR-0045 §Keys)."
+  [db]
+  (let [palette? (get-in db [:ui :palette :open?])
+        find?    (get-in db [:ui :find :visible?])
+        mode     (get-in db [:ui :input :mode])]
+    (cond
+      palette?            {:fx [[:dispatch [:palette/close]]]}
+      find?               {:fx [[:dispatch [:find/close]]]}
+      (slides/digits db)  {:fx [[:dispatch [:slides/digits-clear]]]}
+      (not= mode :normal) {:db (assoc-in db [:ui :input :mode] :normal)}
+      :else               {:db (-> db (assoc-in [:ui :input :sequence] [])
+                                   (assoc-in [:ui :input :count] nil))})))
+
+(rf/reg-event-fx :input/escape (fn [{:keys [db]} _] (escape-fx db)))
 
 ;; ---- user keymap config from main (over the Mediator IPC) ----
 (rf/reg-event-fx

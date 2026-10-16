@@ -5,7 +5,8 @@
    (Command pattern: invokers — keymap, palette, mouse — are decoupled from the actions.)"
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
-            [vinary.app.nav :as nav]))
+            [vinary.app.nav :as nav]
+            [vinary.app.slides :as slides]))
 
 ;; predicate registry: ctx -> bool. The resolver assembles ctx from subs so predicates stay pure.
 (def predicates
@@ -15,7 +16,13 @@
    :can-forward?  (fn [ctx] (boolean (:can-forward? ctx)))
    :find-visible? (fn [ctx] (boolean (:find-visible? ctx)))
    :palette-open? (fn [ctx] (boolean (:palette-open? ctx)))
-   :not-in-input? (fn [ctx] (not (:in-input? ctx)))})
+   :not-in-input? (fn [ctx] (not (:in-input? ctx)))
+   ;; ADR-0045: a PDF is shown / is shown in the slides layout (keymap AND palette contexts carry these) …
+   :pdf-view?      (fn [ctx] (boolean (:pdf-view? ctx)))
+   :slides-view?   (fn [ctx] (boolean (:slides-view? ctx)))
+   ;; … and the slides key layer applies — set only by the keymap resolver, so a command gated on it is
+   ;; keyboard-only and never offered by the palette
+   :slides-active? (fn [ctx] (boolean (:slides-active? ctx)))})
 
 ;; id -> command spec
 (def registry
@@ -86,6 +93,26 @@
    :git/file-history {:id :git/file-history :title "File history" :category "Git" :dispatch [:git/file-history {}]}
    :git/line-history {:id :git/line-history :title "Line range history" :category "Git" :dispatch [:git/line-history-from-selection]}
    :view/re-frame-10x {:id :view/re-frame-10x :title "re-frame-10x" :category "View" :dispatch [:view/re-frame-10x]}
+   ;; the shown PDF's layout: one slide per screen ↔ the continuous document (ADR-0045; any PDF, deck or not)
+   :view/toggle-slides {:id :view/toggle-slides :title "View as slide show / document" :category "View" :dispatch [:pdf/layout-toggle] :when :pdf-view?}
+   ;; ---- Slides (ADR-0045) ----
+   ;; Navigation of a PDF shown in the slides layout. Gated on :slides-view?, so the palette offers them only then.
+   ;; The SAME ops reach the slide show from every keymap's scroll keys too (arrows, PgUp/PgDn, Home/End, Vim
+   ;; j/k/gg/G, Emacs C-v/M-v) — through the scroll delegate, not these entries. A "frame" is one Beamer frame:
+   ;; all the overlay pages of one slide.
+   :slides/next       {:id :slides/next :title "Next slide" :category "Slides" :dispatch [:slides/command :next] :when :slides-view?}
+   :slides/prev       {:id :slides/prev :title "Previous slide" :category "Slides" :dispatch [:slides/command :prev] :when :slides-view?}
+   :slides/next-frame {:id :slides/next-frame :title "Next frame (skip overlays)" :category "Slides" :dispatch [:slides/command :next-frame] :when :slides-view?}
+   :slides/prev-frame {:id :slides/prev-frame :title "Previous frame (fully built)" :category "Slides" :dispatch [:slides/command :prev-frame] :when :slides-view?}
+   :slides/first      {:id :slides/first :title "First slide" :category "Slides" :dispatch [:slides/command :first] :when :slides-view?}
+   :slides/last       {:id :slides/last :title "Last slide" :category "Slides" :dispatch [:slides/command :last] :when :slides-view?}
+   :slides/back       {:id :slides/back :title "Back to the slide before the last jump" :category "Slides" :dispatch [:slides/command :back] :when :slides-view?}
+   :slides/forward    {:id :slides/forward :title "Forward again after Back (slides)" :category "Slides" :dispatch [:slides/command :forward] :when :slides-view?}
+   ;; type a slide number (Beamer's frame number — the number on the slide — else the page number) then Enter;
+   ;; keyboard-only (:slides-active?), and bound per digit with {:id :slides/digit :args [d]}
+   :slides/digit      {:id :slides/digit :title "Type a slide number" :category "Slides" :dispatch [:slides/digit] :when :slides-active?}
+   :slides/enter      {:id :slides/enter :title "Go to the typed slide (else next)" :category "Slides" :dispatch [:slides/enter] :when :slides-active?}
+   :slides/backspace  {:id :slides/backspace :title "Delete a typed digit (else previous)" :category "Slides" :dispatch [:slides/backspace] :when :slides-active?}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :passwords/open {:id :passwords/open :title "Passwords" :category "Web" :dispatch [:passwords/open]}
@@ -143,4 +170,6 @@
   (let [db @rfdb/app-db]
     (assoc (nav/base-ctx db)
            :find-visible? (get-in db [:ui :find :visible?])
+           :pdf-view?     (slides/pdf-shown? db)
+           :slides-view?  (slides/slides-view? db)
            :in-input?     true)))

@@ -26,6 +26,17 @@ Added
       document view (Back/Forward restores it; a new document starts fresh), and a
       live refresh keeps the slide being shown. Zoom is inert in the Slides layout
       (slides fit themselves). Landscape pages alone never make a deck.
+      Keys flip slides in every keymap set without rebinding: arrows, PgUp/PgDn,
+      Home/End, Vim j/k/gg/G and Emacs C-v/M-v go slide by slide, Space /
+      Shift+Space too, Shift+arrows and Shift+PgUp/PgDn step a whole frame
+      (skipping or rebuilding its overlays), and typing a number then Enter goes
+      to that slide -- the number printed on a Beamer slide first, else the page
+      number (a "Go to 12" chip shows the digits; Backspace deletes one, Escape
+      forgets them). The slide keys are a :slides keymap layer under the current
+      mode (Vim's Space leader still wins), active only while the keyboard is on
+      the document, and overridable in keybindings.edn. The palette gains a
+      Slides category and "View as slide show / document"; the key-binding
+      editor now also lists the Git and Web commands it was missing.
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a

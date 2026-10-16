@@ -174,7 +174,10 @@
                                                  :on-click #(rf/dispatch [:kbedit/capture-commit])} "Done"]]]]))))
 
 ;; ---------- right pane: action catalog ----------
-(def ^:private category-order ["Tabs" "File" "Navigation" "Search" "View" "Mode" "Editor" "Settings" "Help"])
+;; every category the command registry uses — a category missing here is silently absent from the editor (the
+;; "Git" and "Web" commands were, until the Slides category was added)
+(def category-order ["Tabs" "File" "Navigation" "Search" "View" "Slides" "Git" "Web" "Mode" "Editor"
+                     "Settings" "Help"])
 
 (defn- binding-chips [{:keys [id custom? default-mode]} action idx]
   (let [bindings (get idx action)]

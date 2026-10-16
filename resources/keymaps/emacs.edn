@@ -42,4 +42,23 @@
    "C-0" :view/zoom-reset
    "C-=" :view/zoom-in
    "C-+" :view/zoom-in
-   "C--" :view/zoom-out}}}
+   "C--" :view/zoom-out}
+  ;; ADR-0045 — the SLIDES layer. Active only while a PDF is shown in the slides layout AND the keyboard is on the
+  ;; document (not a text field, the sidebar, the URI bar, or an open overlay). It sits BELOW the mode, so a
+  ;; mode's own binding of the same key wins (Vim's Space leader). Arrows, PageUp/PageDown (Shift = a whole
+  ;; frame), Home/End and every keymap's scroll keys already flip slides through the scroll delegate — they are
+  ;; not bound here. Identical in every preset (a test asserts it); override it in keybindings.edn under
+  ;; :keymaps {:slides {…}}.
+  :slides
+  {"space"     :slides/next
+   "S-space"   :slides/prev
+   "backspace" :slides/backspace           ; deletes a typed digit, else the previous slide
+   "enter"     :slides/enter               ; goes to the typed slide, else the next one
+   "S-right"   :slides/next-frame          ; a frame = all the overlay pages of one Beamer slide
+   "S-down"    :slides/next-frame
+   "S-left"    :slides/prev-frame
+   "S-up"      :slides/prev-frame
+   "0" {:id :slides/digit :args [0]} "1" {:id :slides/digit :args [1]} "2" {:id :slides/digit :args [2]}
+   "3" {:id :slides/digit :args [3]} "4" {:id :slides/digit :args [4]} "5" {:id :slides/digit :args [5]}
+   "6" {:id :slides/digit :args [6]} "7" {:id :slides/digit :args [7]} "8" {:id :slides/digit :args [8]}
+   "9" {:id :slides/digit :args [9]}}}}

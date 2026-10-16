@@ -141,10 +141,13 @@
  ::palette-ctx
  :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
  :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
- (fn [[tabs active-tab active-path back? fwd? find] _]
+ :<- [:view/pdf-active?] :<- [:slides/view?]
+ (fn [[tabs active-tab active-path back? fwd? find pdf? slides?] _]
    {:tabs tabs :active-tab active-tab :active-path active-path
     :can-back? back? :can-forward? fwd?
     :find-visible? (:visible? find)
+    ;; gate the PDF / Slides commands (ADR-0045); :slides-active? is deliberately absent — keyboard-only
+    :pdf-view? pdf? :slides-view? slides?
     ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being
     ;; free must not be offered
     :in-input? true}))
@@ -250,6 +253,8 @@
               (boolean (and pdf? (= :slides (deck/effective-layout (assoc inputs :deck? (boolean (:deck? d)))))))))
 ;; the mounted slide show's position mirror ([:ui :slides]) or nil
 (rf/reg-sub :slides/state (fn [db _] (get-in db [:ui :slides])))
+;; the slide number being typed in the slides layout ("12"), or nil — the "Go to 12" chip
+(rf/reg-sub :slides/digits (fn [db _] (get-in db [:ui :slides :digits])))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.
