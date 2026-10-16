@@ -541,6 +541,15 @@ async function remoteReaddir(uri) {
   return out;
 }
 
+// ───────────────────────────── whole-file and ranged reads (ADR-0046 §Faster remote loading) ─────────────────────────────
+//
+// WHY. ssh2's createReadStream keeps ONE request in flight, so reading a whole file costs a network round trip per
+// 64 KiB — three, against a server whose ident caps reads at 31 952 bytes. Experiment 11 measured that reader within
+// 1–2 % of exactly that model (H1, docs/scientific/11). A file HANDLE lets one read keep D requests of C bytes in
+// flight instead (H2): round trips fall to ⌈S/(D·C)⌉ until the SSH channel window caps the bytes in flight.
+
+// The pre-ADR-0046 whole-file reader — ssh2's createReadStream (one request in flight), concatenated — kept as the
+// measured BASELINE: scripts/bench-remote-read.cjs times it as `stream-legacy` (via _readFileStream).
 function readAll(stream, max) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -555,10 +564,204 @@ function readAll(stream, max) {
   });
 }
 
-async function remoteReadFile(uri, o) {
+async function readFileStream(uri, o) {
   o = o || {};
   const { sftp, path: p } = await resolvePath(uri);
   return readAll(sftp.createReadStream(p), o.maxBytes || opts.maxBytes);
+}
+
+const READ_LEN_FALLBACK = 31952;              // ssh2's read cap for a non-OpenSSH ident (34 000 − 2 048 overhead)
+const PIPELINE_BYTES = 2 * 1024 * 1024;       // bytes kept in flight ≈ ssh2's default SSH channel window
+const MIN_DEPTH = 4;
+const MAX_DEPTH = 64;
+
+// ssh2's per-request read cap — a PRIVATE field, `_maxReadLen`: 260 096 for an OpenSSH/dropbear ident (or what the
+// server's limits@openssh.com says), else 31 952. ssh2 splits a larger request into SEQUENTIAL sub-reads, which
+// would serialize a pipelined reader, so a chunk never exceeds it. Guarded: should ssh2 rename the field, the safe
+// minimum keeps every read correct, only smaller (test/ssh-transport-smoke.js watches the field).
+function maxReadLenOf(sftp) {
+  const n = sftp && sftp._maxReadLen;
+  return Number.isInteger(n) && n > 0 ? n : READ_LEN_FALLBACK;
+}
+
+// The pipeline's shape: chunk C = min(requested, L); depth D = clamp(⌈2 MiB / C⌉, 4, 64) unless asked.
+function pipelineShape(sftp, o) {
+  const L = maxReadLenOf(sftp);
+  const chunk = Math.max(1, Math.min(o && o.chunk > 0 ? o.chunk : L, L));
+  const depth = o && o.depth > 0 ? o.depth
+    : Math.min(MAX_DEPTH, Math.max(MIN_DEPTH, Math.ceil(PIPELINE_BYTES / chunk)));
+  return { chunk, depth };
+}
+
+// Fill buf[0, len) from file offset `base` with at most `depth` requests of at most `chunk` bytes in flight.
+// Resolves to the bytes filled: `len`, or the offset (relative to base) at which the file ENDED, when it ends first.
+//   • `splitAt` forces a request boundary there: readAll puts the file's expected end at it, so a file of exactly
+//     that size fills its body with whole requests and ends with ONE request starting at `splitAt` that reads nothing
+//     — end-of-file confirmed in the same round trip as the body, not one later.
+//   • A SHORT read re-requests its remainder. If that remainder then returns data, the server caps its reads (a
+//     server answering fewer bytes than asked), and every later request shrinks to the first short read's size; if
+//     it returns nothing, the file simply ended there — a short read at end-of-file never shrinks the pipeline.
+//   • On an error no new request is issued; the promise rejects once those in flight have settled — so `buf` is
+//     never written after this returns.
+function pipelinedFill(file, buf, base, len, shape, splitAt) {
+  return new Promise((resolve, reject) => {
+    let chunk = shape.chunk;
+    const queue = [];                       // [offset, length, size of the short read this re-requests, or 0]
+    const cut = Math.max(0, Math.min(len, splitAt === undefined ? len : splitAt));
+    for (let off = 0; off < cut; off += chunk) queue.push([off, Math.min(chunk, cut - off), 0]);
+    for (let off = cut; off < len; off += chunk) queue.push([off, Math.min(chunk, len - off), 0]);
+    let inFlight = 0;
+    let end = len;            // the smallest offset at which a read found end-of-file
+    let error = null;
+    let settled = false;
+    const pump = () => {
+      if (settled) return;
+      if (error) {
+        if (inFlight === 0) { settled = true; reject(error); }
+        return;
+      }
+      while (inFlight < shape.depth && queue.length) {
+        let [off, n, after] = queue.shift();
+        if (off >= end) continue;                                   // past the known end of the file
+        if (n > chunk) { queue.unshift([off + chunk, n - chunk, 0]); n = chunk; }   // honour a shrunken chunk
+        inFlight += 1;
+        file.readAt(buf, off, n, base + off).then((got) => {
+          inFlight -= 1;
+          if (got === 0) end = Math.min(end, off);
+          else {
+            if (after > 0) chunk = Math.max(1, Math.min(chunk, after));   // data after a short read: a capping server
+            if (got < n) queue.unshift([off + got, n - got, got]);
+          }
+          pump();
+        }, (err) => {
+          inFlight -= 1;
+          error = error || err;
+          pump();
+        });
+      }
+      if (!error && inFlight === 0) { settled = true; resolve(end); }
+    };
+    pump();
+  });
+}
+
+// The bytes [0, n) of `buf` as the result: the buffer itself when it is (nearly) full, else a right-sized COPY — a
+// file that shrank must not pin a much larger allocation, and no byte past n (never written) is ever returned.
+function filledPart(buf, n) {
+  if (n === buf.length) return buf;
+  return n >= buf.length * 0.75 ? buf.subarray(0, n) : Buffer.from(buf.subarray(0, n));
+}
+
+// A remote file HANDLE: one OPEN, then random-access reads (readAt, readRange, readAll), fstat, and close. It is
+// registered in its connection's openStreams like a stream: a dropped connection REJECTS its pending requests —
+// ssh2 silently drops writes on a dead channel, so they would otherwise never settle — and the idle reaper leaves
+// the connection alone while the handle is open. Callers close it in a `finally`.
+async function remoteOpenFile(uri) {
+  const { conn, sftp, path: p } = await resolvePath(uri);
+  const handle = await new Promise((resolve, reject) => sftp.open(p, 'r', (e, h) => (e ? reject(e) : resolve(h))));
+  const pending = new Set();
+  let dropped = null;
+  let closed = false;
+  const file = {
+    uri,
+    destroy(err) {                                   // the connection dropped (destroyStreams)
+      dropped = dropped || err || new Error('SSH connection lost');
+      for (const reject of pending) reject(dropped);
+      pending.clear();
+    },
+    dropped: () => dropped,
+  };
+  conn.openStreams.add(file);
+  conn.lastUsed = Date.now();
+  // one SFTP request → a Promise, rejected at once if the connection drops
+  const request = (issue) => new Promise((resolve, reject) => {
+    if (dropped) { reject(dropped); return; }
+    if (closed) { reject(new Error('remote file handle is closed')); return; }
+    pending.add(reject);
+    conn.lastUsed = Date.now();
+    issue((err, ...results) => {
+      if (!pending.delete(reject)) return;          // already rejected by a drop
+      if (err) reject(err); else resolve(results);
+    });
+  });
+  // read `len` bytes at `pos` into buf[off…]: the number of bytes read — 0 at end-of-file (ssh2 reports EOF that way)
+  file.readAt = (buf, off, len, pos) => request((cb) => sftp.read(handle, buf, off, len, pos, cb)).then(([n]) => n || 0);
+  file.fstat = () => request((cb) => sftp.fstat(handle, cb)).then(([st]) => toStat(st, false));
+  // `len` bytes at `pos` — fewer when the file ends first
+  file.readRange = async (pos, len, o) => {
+    const buf = Buffer.allocUnsafe(Math.max(0, len));
+    return filledPart(buf, await pipelinedFill(file, buf, pos, buf.length, pipelineShape(sftp, o)));
+  };
+  // the whole file (see readAllFrom)
+  file.readAll = (o) => readAllFrom(file, sftp, o);
+  file.close = async () => {
+    if (closed) return;
+    try {
+      if (!dropped) await request((cb) => sftp.close(handle, cb));
+    } catch (_e) {
+      /* the handle dies with its session */
+    } finally {
+      closed = true;
+      conn.openStreams.delete(file);
+      conn.lastUsed = Date.now();
+    }
+  };
+  return file;
+}
+
+// Read a whole remote file through an open handle, PREALLOCATED and PIPELINED.
+//   • size: o.size when the caller already stat'ed the file (no extra round trip), else fstat(handle);
+//   • a file over the cap (o.maxBytes, default opts.maxBytes) is refused before a single READ;
+//   • the buffer is size + one chunk, filled in ONE pipeline — the extra chunk, a request of its own starting
+//     exactly at `size`, is the end-of-file probe, overlapped with the body and inside the same depth limit: the file
+//     is exactly `size` when it reads nothing (one round trip for body and EOF together), shorter when an earlier
+//     read hit end-of-file, LONGER when the probe chunk came back full — then it is read on, doubling the buffer, to
+//     its real end (still capped);
+//   • an SFTP-level refusal (a STATUS reply — ssh2 gives it a numeric `code`) retries once at depth 1: a server that
+//     cannot serve many requests at once. A transport failure — the connection dropped (EPIPE, ECONNRESET, or the
+//     handle destroyed by destroyStreams) — never retries: the next request would fail the same way.
+async function readAllFrom(file, sftp, o) {
+  o = o || {};
+  const maxBytes = o.maxBytes || opts.maxBytes;
+  const size = Number.isInteger(o.size) && o.size >= 0 ? o.size : (await file.fstat()).size;
+  if (size > maxBytes) throw new Error(`remote file exceeds the ${maxBytes}-byte read limit`);
+  const shape = pipelineShape(sftp, o);
+  const attempt = async (depth) => {
+    const s = { chunk: shape.chunk, depth };
+    let buf = Buffer.allocUnsafe(size + s.chunk);
+    let filled = await pipelinedFill(file, buf, 0, buf.length, s, size);
+    while (filled === buf.length) {                     // the file grew past the probe: read on to its end
+      if (filled > maxBytes) throw new Error(`remote file exceeds the ${maxBytes}-byte read limit`);
+      const grown = Buffer.allocUnsafe(Math.min(maxBytes + 1, buf.length * 2));
+      buf.copy(grown, 0, 0, filled);
+      buf = grown;
+      filled += await pipelinedFill(file, buf.subarray(filled), filled, buf.length - filled, s);
+    }
+    if (filled > maxBytes) throw new Error(`remote file exceeds the ${maxBytes}-byte read limit`);
+    return filledPart(buf, filled);
+  };
+  try {
+    return await attempt(shape.depth);
+  } catch (e) {
+    const refused = e && typeof e.code === 'number';     // an SFTP STATUS, not a socket error
+    if (!refused || file.dropped() || shape.depth === 1) throw e;
+    return attempt(1);
+  }
+}
+
+// The read helpers below do not WAIT for the handle's CLOSE: it completes in the background (the handle stays in
+// openStreams until it has, so the reaper still leaves the connection alone), and a read resolves a round trip
+// sooner — the legacy stream likewise resolved at end-of-stream, before its handle closed.
+const closeSoon = (file) => { file.close().catch(() => {}); };
+
+async function remoteReadFile(uri, o) {
+  o = o || {};
+  const file = await remoteOpenFile(uri);
+  try {
+    return await file.readAll({ size: o.size, maxBytes: o.maxBytes });
+  } finally {
+    closeSoon(file);
+  }
 }
 
 async function remoteReadText(uri, o) {
@@ -567,10 +770,22 @@ async function remoteReadText(uri, o) {
 }
 
 async function remoteReadPrefix(uri, nBytes) {
-  const { sftp, path: p } = await resolvePath(uri);
-  const stream = sftp.createReadStream(p, { start: 0, end: Math.max(0, nBytes - 1) });
-  const buf = await readAll(stream, nBytes + 16);
-  return buf.slice(0, nBytes).toString('utf8');
+  const file = await remoteOpenFile(uri);
+  try {
+    return (await file.readRange(0, Math.max(0, nBytes))).toString('utf8');
+  } finally {
+    closeSoon(file);
+  }
+}
+
+// The whole-file reader with an explicit pipeline shape — the benchmark's `pipelined:D:C` (docs/scientific/11 E1/E3).
+async function readAllPipelined(uri, o) {
+  const file = await remoteOpenFile(uri);
+  try {
+    return await file.readAll({ depth: o && o.depth, chunk: o && o.chunk, size: o && o.size });
+  } finally {
+    closeSoon(file);
+  }
 }
 
 // A Node Readable over a remote file — a drop-in for fs.createReadStream so the streaming/paging engines are
@@ -645,23 +860,31 @@ function connectionHealth(uri) {
   } catch (_e) { return null; }
 }
 
-const reaper = setInterval(() => {
-  const now = Date.now();
+// Close every pooled connection idle longer than opts.idleMs with nothing open on it (no stream, no file handle).
+// `now` is injectable so a test can run the reaper at a chosen moment instead of waiting for its timer.
+function reapIdle(now) {
+  const t = now === undefined ? Date.now() : now;
   for (const [key, conn] of pool) {
-    if (conn.state === 'ready' && conn.openStreams.size === 0 && (now - conn.lastUsed) > opts.idleMs) {
+    if (conn.state === 'ready' && conn.openStreams.size === 0 && (t - conn.lastUsed) > opts.idleMs) {
       closeConn(conn);
       pool.delete(key);
     }
   }
-}, 30000);
+}
+
+const reaper = setInterval(() => reapIdle(), 30000);
 if (reaper.unref) reaper.unref();
 
 module.exports = {
   configure, isRemoteUri,
   remoteStat, remoteReaddir, remoteReadFile, remoteReadText, remoteReadPrefix, remoteCreateReadStream,
+  remoteOpenFile,
   remoteResolvePath, remoteForwardOut, connectionKey,
   openConnection, closeConnection, closeAll, connectionCount, connectionHealth,
   // exposed for tests / diagnostics (scripts/bench-remote-read.cjs reaches the raw SFTP channel through
   // _resolvePath to time ssh2's own readFile/fastGet as reference readers)
   _resolveForUri: resolveForUri, _childUri: childUri, _execCapture: execCapture, _resolvePath: resolvePath,
+  // the ADR-0046 reader's knobs + the pre-ADR-0046 baseline, for the benchmark and the white-box smoke
+  _readAllPipelined: readAllPipelined, _readFileStream: readFileStream, _maxReadLenOf: maxReadLenOf,
+  _pipelineShape: pipelineShape, _reapIdle: reapIdle,
 };

@@ -761,6 +761,9 @@ async function openRemoteUri(uri, kind, opts = {}) {
     };
   }
   const meta = { size: st.size, mtime: st.mtime };
+  // every whole-file read below reuses this stat's size (ADR-0046): the pipelined reader preallocates it and skips
+  // its own fstat round trip — and still reads a file that changed since to its real end (growth probe / EOF)
+  const sized = (o) => Object.assign({ size: st.size }, o);
   // `kind` has ALWAYS been threaded here (the grammar-aware CLJS classification), so unlike openLocal its
   // mere presence can't mean "the user said so" — opts.explicit carries that bit (an override registered
   // for this URI). Explicit disables the tail sniff and enables delimited-by-declaration, same as local.
@@ -771,7 +774,7 @@ async function openRemoteUri(uri, kind, opts = {}) {
   // A remote archive browses exactly like a local one — archiveLayerSource reads the remote root into a buffer.
   if (k === 'archive') return archiveListingPayload(uri, [], stamp);
 
-  if (k === 'office') return officeBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: OFFICE_PREVIEW_BYTES }), stamp, meta);
+  if (k === 'office') return officeBufferPayload(uri, uri, await transport.remoteReadFile(uri, sized({ maxBytes: OFFICE_PREVIEW_BYTES })), stamp, meta);
 
   if (k === 'table') {
     const delimited = delimitedExts.has(extname(uri)) || (explicit && !workbookExts.has(extname(uri)));
@@ -780,9 +783,9 @@ async function openRemoteUri(uri, kind, opts = {}) {
       return { path: uri, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: TABLE_PAGE_ROWS }) };
     }
     if (delimited && !delimitedExts.has(extname(uri))) {
-      return delimitedTextPayload(uri, uri, await transport.remoteReadText(uri), stamp, meta);
+      return delimitedTextPayload(uri, uri, await transport.remoteReadText(uri, sized()), stamp, meta);
     }
-    return tableBufferPayload(uri, uri, await transport.remoteReadFile(uri, { maxBytes: WORKBOOK_PREVIEW_BYTES }), stamp, meta);
+    return tableBufferPayload(uri, uri, await transport.remoteReadFile(uri, sized({ maxBytes: WORKBOOK_PREVIEW_BYTES })), stamp, meta);
   }
 
   if (k === 'log') {
@@ -790,27 +793,27 @@ async function openRemoteUri(uri, kind, opts = {}) {
       const page = await streamLogPage(await remoteContentStream(uri), 0);   // first page only — large logs stream (E)
       return { path: uri, kind: 'log', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: LOG_PAGE_LINES }) };
     }
-    return logTextPayload(uri, uri, await transport.remoteReadText(uri), stamp, meta);
+    return logTextPayload(uri, uri, await transport.remoteReadText(uri, sized()), stamp, meta);
   }
 
   if (k === 'markdown' || k === 'mermaid' || k === 'org' || k === 'latex' || k === 'diff' || k === 'source') {
-    const payload = { path: uri, kind: k, text: await transport.remoteReadText(uri), stamp, sourceable: true, meta };
+    const payload = { path: uri, kind: k, text: await transport.remoteReadText(uri, sized()), stamp, sourceable: true, meta };
     if (GROUP_KINDS.has(k)) payload.siblings = await remoteSiblingsGroup(uri);   // collocated group → Preview/Source combo
     return payload;
   }
-  if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri)), stamp, meta };
+  if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri, sized())), stamp, meta };
   if (k === 'pdf') {
-    const payload = { path: uri, kind: 'pdf', bytes: await transport.remoteReadFile(uri), stamp, meta };
+    const payload = { path: uri, kind: 'pdf', bytes: await transport.remoteReadFile(uri, sized()), stamp, meta };
     payload.siblings = await remoteSiblingsGroup(uri);   // the PDF's collocated group (its authored sources + itself)
     return payload;
   }
   // Remote HTML is live-rendered in the web view via the vv-remote:// protocol (see main/service.cljs); the
   // `text` is carried too so the terminal (vv-cli/tui) can show the source.
-  if (k === 'html') return { path: uri, kind: 'html', text: await transport.remoteReadText(uri), stamp, sourceable: true, meta, remoteHtml: true };
+  if (k === 'html') return { path: uri, kind: 'html', text: await transport.remoteReadText(uri, sized()), stamp, sourceable: true, meta, remoteHtml: true };
 
   // generic text / unknown → whole-file sniff (log / plain text), like openLocal's tail. An explicit
   // kind threads through as the bufferToPayload override, disabling the sniff (literal by declaration).
-  return bufferToPayload(uri, uri, await transport.remoteReadFile(uri), stamp, meta, explicit ? k : undefined);
+  return bufferToPayload(uri, uri, await transport.remoteReadFile(uri, sized()), stamp, meta, explicit ? k : undefined);
 }
 
 // ── remote URI arithmetic + on-disk-companion resolution (shared by siblings / diff-sources / assets) ──

@@ -44,6 +44,172 @@ async function testNoDelay() {
   await srv.close();
 }
 
+// ADR-0046 E1 — the pipelined, preallocated whole-file reader (remoteOpenFile → readAll), against BOTH server
+// identities (ssh2's own, whose reads are capped at 31 952 bytes, and OpenSSH's, at 260 096): byte-exact results at
+// every chunk boundary, at most D requests in flight, short reads from a capping server, out-of-order replies, a file
+// growing or shrinking mid-read, the size cap enforced before any READ, a drop rejecting promptly, the reaper sparing
+// an open handle, the depth-1 retry, and no leaked server handles.
+async function testPipelinedReader() {
+  const rand = (len) => crypto.randomBytes(len);
+  // the read helpers close their handle in the BACKGROUND (a read resolves a round trip sooner), so a leak check
+  // waits — boundedly — for those closes to land
+  const handlesClosed = async (srv) => {
+    const deadline = Date.now() + 2000;
+    while (srv.openHandles() !== 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    return srv.openHandles();
+  };
+  const configure = (home, pw, extra) => transport.configure(Object.assign({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => pw, onError: () => {},
+  }, extra || {}));
+  for (const ident of [undefined, 'OpenSSH_9.6']) {
+    const label = ident || 'ssh2-ident';
+    const L = ident ? 260096 : 31952;
+    const sizes = [0, 1, L - 1, L, L + 1, 3 * L + 17, 8 * 1024 * 1024];
+    const files = {};
+    for (const size of sizes) files[`f-${size}.bin`] = rand(size);
+    const srv = await startSftpServer({ password: 'pr-pw', ident, files });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-pr-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    configure(home, 'pr-pw');
+    const url = (name) => srv.url(`/${name}`);
+    await transport.remoteStat(url('f-1.bin'));            // connect + open the SFTP channel
+    // white-box guard: the reader sizes its requests from ssh2's PRIVATE _maxReadLen — fail loudly if it moves
+    const { sftp } = await transport._resolvePath(url('f-1.bin'));
+    eq(sftp._maxReadLen, L, `${label}: ssh2 still exposes _maxReadLen (= ${L}) — the reader's chunk size depends on it`);
+    eq(transport._maxReadLenOf(sftp), L, `${label}: the reader reads that cap`);
+    const shape = transport._pipelineShape(sftp);
+    eq(shape, { chunk: L, depth: Math.min(64, Math.max(4, Math.ceil(2 * 1024 * 1024 / L))) },
+      `${label}: chunk = L, depth = clamp(ceil(2 MiB / L), 4, 64)`);
+
+    for (const size of sizes) {
+      const want = files[`f-${size}.bin`];
+      srv.resetStats();
+      const got = await transport.remoteReadFile(url(`f-${size}.bin`));   // no size hint → fstat
+      ok(got.equals(want), `${label}: a ${size}-byte file reads byte-exact (fstat-sized)`);
+      const hinted = await transport.remoteReadFile(url(`f-${size}.bin`), { size });
+      ok(hinted.equals(want), `${label}: a ${size}-byte file reads byte-exact (size hint)`);
+      ok(srv.stats.maxInFlightReads <= shape.depth,
+        `${label}: never more than D = ${shape.depth} READs in flight (${srv.stats.maxInFlightReads}) for ${size} bytes`);
+      eq(await handlesClosed(srv), 0, `${label}: every handle is closed after a ${size}-byte read`);
+      // with its size known, an exact file costs its body's requests plus ONE end-of-file probe — no re-request
+      srv.resetStats();
+      await transport.remoteReadFile(url(`f-${size}.bin`), { size });
+      eq((srv.stats.byPath[`/f-${size}.bin`] || { reads: 0 }).reads, Math.ceil(size / L) + 1,
+        `${label}: a ${size}-byte file reads in ⌈S/C⌉ + 1 requests (body + probe)`);
+    }
+    // a file 10 bytes SHORTER than its size hint: its last body request comes back short at end-of-file, one
+    // re-request confirms the end — and that short read must not shrink the pipeline into a burst of tiny requests
+    srv.resetStats();
+    const shortish = `f-${3 * L + 17}.bin`;
+    const hinted10 = await transport.remoteReadFile(url(shortish), { size: 3 * L + 27 });
+    ok(hinted10.equals(files[shortish]), `${label}: a stale (too large) size hint still reads exactly the file`);
+    ok(srv.stats.byPath[`/${shortish}`].reads <= Math.ceil((3 * L + 27) / L) + 2,
+      `${label}: end-of-file inside the body costs one re-request, not a shrunken pipeline (${srv.stats.byPath[`/${shortish}`].reads} READs)`);
+    srv.resetStats();
+    await transport.remoteReadFile(url(`f-${8 * 1024 * 1024}.bin`));
+    ok(srv.stats.maxInFlightReads > 1, `${label}: an 8 MiB read is actually pipelined (${srv.stats.maxInFlightReads} in flight)`);
+
+    // replies out of order: every third chunk's reply is held back 25 ms
+    srv.setDelay((req) => (req.op === 'READ' && Math.floor(req.offset / L) % 3 === 0 ? 25 : 0));
+    ok((await transport.remoteReadFile(url(`f-${3 * L + 17}.bin`))).equals(files[`f-${3 * L + 17}.bin`]),
+      `${label}: replies arriving out of order still assemble byte-exact`);
+    srv.setDelay(null);
+
+    // a file that GROWS between the stat and the read (by more than the probe chunk) is read to its real end
+    const growName = 'grow.bin';
+    const grow0 = rand(L + 5);
+    const growMore = rand(3 * L + 11);
+    fs.writeFileSync(path.join(srv.dir, growName), grow0);
+    let grown = false;
+    srv.onRequest(async (req) => {
+      if (!grown && req.op === 'READ' && req.path.endsWith(growName)) { grown = true; fs.appendFileSync(path.join(srv.dir, growName), growMore); }
+    });
+    const afterGrowth = await transport.remoteReadFile(url(growName), { size: grow0.length });   // a stale size hint
+    srv.onRequest(null);
+    ok(afterGrowth.equals(Buffer.concat([grow0, growMore])), `${label}: a file that grew mid-read is read to its new end`);
+
+    // …and one that SHRINKS returns exactly its new content — no byte past its end, none uninitialised
+    const shrinkName = 'shrink.bin';
+    const big = rand(4 * L + 3);
+    fs.writeFileSync(path.join(srv.dir, shrinkName), big);
+    let shrunk = false;
+    srv.onRequest(async (req) => {
+      if (!shrunk && req.op === 'READ' && req.path.endsWith(shrinkName)) { shrunk = true; fs.truncateSync(path.join(srv.dir, shrinkName), L + 7); }
+    });
+    const afterShrink = await transport.remoteReadFile(url(shrinkName), { size: big.length });
+    srv.onRequest(null);
+    ok(afterShrink.equals(big.subarray(0, L + 7)), `${label}: a file that shrank mid-read returns exactly its new content`);
+
+    // the size cap is enforced BEFORE any READ
+    srv.resetStats();
+    await assert.rejects(transport.remoteReadFile(url(`f-${3 * L + 17}.bin`), { maxBytes: 1000 }), /exceeds the 1000-byte read limit/);
+    eq((srv.stats.byPath[`/f-${3 * L + 17}.bin`] || { reads: 0 }).reads, 0, `${label}: an over-cap file is refused with 0 READs`);
+
+    // a server that fails when it is asked for several reads at once: the reader retries once at depth 1
+    let refused = 0;
+    srv.setFault((req) => (req.op === 'READ' && srv.stats.inFlightReads > 1 ? (refused++, srv.STATUS_CODE.FAILURE) : null));
+    ok((await transport.remoteReadFile(url(`f-${3 * L + 17}.bin`))).equals(files[`f-${3 * L + 17}.bin`]),
+      `${label}: a server that refuses concurrent reads still delivers, at depth 1`);
+    ok(refused > 0, `${label}: (the fault really fired: ${refused} refused)`);
+    srv.setFault(null);
+
+    // the idle reaper never closes a connection under an open handle
+    configure(home, 'pr-pw', { idleMs: 1 });
+    srv.setDelay((req) => (req.op === 'READ' ? 150 : 0));
+    const slow = transport.remoteReadFile(url(`f-${3 * L + 17}.bin`));
+    await new Promise((r) => setTimeout(r, 60));
+    transport._reapIdle(Date.now() + 60000);
+    // guarded like the drop test below: a reaper that closed the connection under the read would leave it pending
+    const stuck = new Promise((_, reject) => setTimeout(() => reject(new Error('the read never settled after the reaper ran')), 5000).unref());
+    ok((await Promise.race([slow, stuck])).equals(files[`f-${3 * L + 17}.bin`]),
+      `${label}: the reaper running mid-read leaves the read alone`);
+    srv.setDelay(null);
+    // the read resolved before its handle's CLOSE (that lands in the background, the handle registered until then):
+    // the reaper spares the connection until the close lands, then reaps it
+    const reapBy = Date.now() + 2000;
+    do transport._reapIdle(Date.now() + 60000);
+    while (transport.connectionCount() !== 0 && Date.now() < reapBy && await new Promise((r) => setTimeout(r, 10)) === undefined);
+    eq(transport.connectionCount(), 0, `${label}: once the handle is closed, the idle connection is reaped`);
+    configure(home, 'pr-pw', { idleMs: 5 * 60 * 1000 });
+
+    // a connection DROP mid-read rejects promptly (ssh2 alone would leave requests pending on the dead channel)
+    srv.setDelay((req) => (req.op === 'READ' ? 400 : 0));
+    const doomed = transport.remoteReadFile(url(`f-${8 * 1024 * 1024}.bin`));
+    await new Promise((r) => setTimeout(r, 80));
+    const t0 = Date.now();
+    srv.destroyConnections();
+    // (whichever surfaces first: the transport's own drop error, or the socket's — EPIPE / ECONNRESET). Guarded:
+    // a regression that left requests pending on the dead channel must FAIL here, not hang the suite.
+    const hung = new Promise((_, reject) => setTimeout(() => reject(new Error('the read never settled after the drop')), 5000).unref());
+    await assert.rejects(Promise.race([doomed, hung]), /SSH connection lost|EPIPE|ECONNRESET|closed|socket/i);
+    const rejectMs = Date.now() - t0;
+    ok(rejectMs < 1000, `${label}: a drop mid-read rejects within 1 s (${rejectMs} ms)`);
+    srv.setDelay(null);
+
+    transport.closeAll();
+    await srv.close();
+  }
+
+  // a server that CAPS its reads below ours (some servers answer at most N bytes per READ): every short read is
+  // re-requested from where it stopped, later requests shrink to the cap, and the result is still byte-exact
+  const capped = rand(3 * 260096 + 17);
+  const csrv = await startSftpServer({ password: 'cap-pw', ident: 'OpenSSH_9.6', maxReadLen: 10000, files: { 'capped.bin': capped } });
+  const chome = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-cap-'));
+  fs.mkdirSync(path.join(chome, '.ssh'), { recursive: true });
+  configure(chome, 'cap-pw');
+  csrv.resetStats();
+  ok((await transport.remoteReadFile(csrv.url('/capped.bin'))).equals(capped),
+    'a server capping READs at 10 000 bytes (below our 260 096): short reads are re-requested, byte-exact');
+  const { sftp: csftp } = await transport._resolvePath(csrv.url('/capped.bin'));
+  ok(csrv.stats.maxInFlightReads <= transport._pipelineShape(csftp).depth, 'and never more than D in flight');
+  ok(csrv.stats.byPath['/capped.bin'].reads >= Math.ceil(capped.length / 10000),
+    `it took at least ⌈S / 10 000⌉ READs (${csrv.stats.byPath['/capped.bin'].reads})`);
+  eq(await handlesClosed(csrv), 0, 'and closed its handle');
+  transport.closeAll();
+  await csrv.close();
+}
+
 async function main() {
   // 0. pure-JS crypto: ssh2's CRYPTO is Node's built-in crypto — its optional native crypto addon (sshcrypto.node)
   // is never built, so ssh2 imposes no hard native-build requirement and stays portable. (cpu-features, a small
@@ -138,6 +304,9 @@ async function main() {
 
   // 9f. TCP_NODELAY on the client (docs/scientific/11 H0/E0) — a timing guard against the Nagle/delayed-ACK stall.
   await testNoDelay();
+
+  // 9g. the pipelined, preallocated whole-file reader (ADR-0046 E1)
+  await testPipelinedReader();
 
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);

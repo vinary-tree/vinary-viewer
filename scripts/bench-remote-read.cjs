@@ -175,11 +175,15 @@ function startServer(ident, o) {
 // ---------------------------------------------------------------------------------------------------------
 function makeReaders(transport) {
   const viaSftp = async (uri, fn) => { const { sftp, path: p } = await transport._resolvePath(uri); return fn(sftp, p); };
-  const legacyStream = (uri) => viaSftp(uri, (sftp, p) => new Promise((resolve, reject) => {
-    const chunks = [];
-    const s = sftp.createReadStream(p);
-    s.on('data', (c) => chunks.push(c)); s.on('error', reject); s.on('end', () => resolve(Buffer.concat(chunks)));
-  }));
+  // the pre-ADR-0046 reader, as the transport keeps it (ssh2 createReadStream + concat); an inline copy of the same
+  // algorithm when measuring a transport that predates _readFileStream
+  const legacyStream = typeof transport._readFileStream === 'function'
+    ? (uri) => transport._readFileStream(uri)
+    : (uri) => viaSftp(uri, (sftp, p) => new Promise((resolve, reject) => {
+      const chunks = [];
+      const s = sftp.createReadStream(p);
+      s.on('data', (c) => chunks.push(c)); s.on('error', reject); s.on('end', () => resolve(Buffer.concat(chunks)));
+    }));
   const readers = {
     stream: (uri) => transport.remoteReadFile(uri),
     'stream-legacy': legacyStream,

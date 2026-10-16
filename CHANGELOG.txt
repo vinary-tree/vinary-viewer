@@ -566,6 +566,14 @@ Fixed
       host 10 ms away took 0.93 s instead of 0.19 s, and over loopback 2 s
       instead of 14 ms. Hosts 50 ms or more away are unchanged. See
       docs/scientific/11-remote-read-and-reload-safety-experiments.md.
+    - Remote files (ssh:// and sftp://) download many times faster. A read
+      used to have one 64 KiB request in flight at a time; it now keeps up to
+      2 MiB of requests in flight, straight into a buffer sized up front. On a
+      host 50 ms away a 1 MiB file arrives in 0.16 s instead of 0.9 s (an
+      OpenSSH server) or 2.5 s (other servers), and a 32 MiB deck in 1.7-1.8 s
+      instead of 26-78 s; small files are no slower. A dropped connection now
+      fails a read at once instead of leaving it hanging, and the idle-
+      connection reaper no longer closes a connection under a read in progress.
     - A changed file is read ONCE and delivered to every window showing it,
       instead of once per window: a remote (ssh:// / sftp://) document open in
       three windows now costs one download per change, not three, and a burst

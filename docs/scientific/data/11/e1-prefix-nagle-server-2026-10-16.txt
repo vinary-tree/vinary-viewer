@@ -1,0 +1,41 @@
+# bench-remote-read 2026-10-16T23:13:49.813Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4291819kHz max=4561833kHz  pid 3445619's current affinity list: 2-5
+# sizes=64K,1M,32M rtts=0,50 idents=ssh2,openssh readers=stream,stream-legacy,fastGet runs≤7 budget=40s warmup=2 TCP_NODELAY overrides: server=false client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms
+ssh2       0   64K  stream                7       167.4     208.8   178.4±20.2         0.37     6.2         2.7         1.4      0
+ssh2       0   64K  stream-legacy         7       206.9     208.0    206.7±1.3         0.30     3.9         5.1         1.3      0
+ssh2       0   64K  fastGet               7       206.8     206.9    206.3±0.8         0.30     4.1         7.4         1.3      0
+ssh2       0    1M  stream                7       209.2     215.3   193.6±21.6         4.78     6.9        15.4         1.4      0
+ssh2       0    1M  stream-legacy         7      2062.4    2071.3   2061.7±6.0         0.48    34.0        10.2         1.3      0
+ssh2       0    1M  fastGet               7       169.3     170.8    169.2±1.1         5.90     8.1        15.9         1.5      0
+ssh2       0   32M  stream                7       254.9     297.9   261.0±16.7       125.53   102.2       145.7         7.4      0
+ssh2       0   32M  stream-legacy         3     63370.2   63380.6 63369.6±11.3         0.50   995.3       164.2         1.3      0
+ssh2       0   32M  fastGet               7       262.7     303.2   273.0±20.5       121.81   175.0       164.4         5.3      0
+ssh2      50   64K  stream                7       296.5     297.2   285.2±19.5         0.21     5.4        74.1         1.2    250
+ssh2      50   64K  stream-legacy         7       253.7     254.6    253.8±0.5         0.25     3.8        68.6         1.2    250
+ssh2      50   64K  fastGet               7       254.0     254.4    254.0±0.2         0.25     4.3        70.0         1.3    250
+ssh2      50    1M  stream                7       336.4     339.2   315.6±37.6         2.97     8.1        80.8         1.4   2500
+ssh2      50    1M  stream-legacy         7      2571.6    2612.4  2561.7±30.7         0.39    35.8        82.7         1.2   2500
+ssh2      50    1M  fastGet               7       299.1     300.5   293.6±15.4         3.34     9.1        81.2         1.6   2500
+ssh2      50   32M  stream                7      1890.7    1963.3  1905.2±29.2        16.93   112.1       147.5         2.8  76900
+ssh2      50   32M  stream-legacy         3     78024.6   78048.1 78027.5±19.3         0.41  1028.9       169.6         1.3  76900
+ssh2      50   32M  fastGet               7      2016.8    2066.2  2022.9±27.3        15.87   201.4       166.0         1.8  76900
+openssh    0   64K  stream                7       208.8     209.6   202.0±16.0         0.30     3.7        81.6         1.4      0
+openssh    0   64K  stream-legacy         7       123.8     124.0   117.9±15.4         0.50     2.1        70.1         1.5      0
+openssh    0   64K  fastGet               7       163.9     166.9   159.6±14.5         0.38     2.9        72.8         1.4      0
+openssh    0    1M  stream                7       209.2     212.3   198.3±20.2         4.78     5.2        90.3         1.3      0
+openssh    0    1M  stream-legacy         7       668.0     708.3  645.9±104.5         1.50    11.6        92.5         1.4      0
+openssh    0    1M  fastGet               7       167.3     169.1   162.0±14.8         5.98     5.6        89.0         1.4      0
+openssh    0   32M  stream                7       219.9     221.7    218.1±3.2       145.55    60.5       149.6         4.7      0
+openssh    0   32M  stream-legacy         3     19730.5   19795.2 19639.3±216.4         1.62   400.9       168.9         1.4      0
+openssh    0   32M  fastGet               7       259.6     265.6   238.3±33.2       123.26   116.7       177.8         4.8      0
+openssh   50   64K  stream                7       253.8     254.4    253.9±0.2         0.25     4.3        83.5         1.2    150
+openssh   50   64K  stream-legacy         7       152.4     152.7    152.4±0.2         0.41     2.7        86.6         1.2    150
+openssh   50   64K  fastGet               7       203.0     203.5    203.0±0.2         0.31     3.8        89.0         1.3    150
+openssh   50    1M  stream                7       257.0     298.3   268.3±20.1         3.89     5.8        97.2         1.3    900
+openssh   50    1M  stream-legacy         7       955.3     995.1   954.6±23.7         1.05    16.1        98.0         1.4    900
+openssh   50    1M  fastGet               7       206.9     287.3   229.6±39.0         4.83     6.6        96.4         1.5    900
+openssh   50   32M  stream                7      1880.4    1914.9  1889.0±20.7        17.02    78.8       135.1         1.9  25700
+openssh   50   32M  stream-legacy         3     26152.2   26158.3 26147.3±14.2         1.22   468.6       172.7         1.2  25700
+openssh   50   32M  fastGet               7      1854.4    1872.4   1857.9±6.9        17.26   147.2       180.1         1.8  25700
+# wrote <scratch>/e1-quick.json
