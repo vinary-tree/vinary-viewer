@@ -13,6 +13,8 @@
             [vinary.app.uri :as uri]
             [vinary.search.config :as search-config]
             [vinary.app.zoom :as zoom]
+            [vinary.app.slides :as slides]
+            [vinary.slides.deck :as deck]
             [vinary.input.keymaps-registry :as registry]))
 
 (rf/reg-sub :ds/rev         (fn [db _] (:ds/rev db)))
@@ -233,6 +235,21 @@
 
 ;; the shown PDF's slide-deck classification {:deck? :tier :source :pages :frame-count} | nil (ADR-0045)
 (rf/reg-sub :doc/deck :<- [:doc/active] (fn [doc _] (:doc/deck doc)))
+
+;; ---- slides layout (ADR-0045) — built on :doc/active + app-db slices, never a DataScript query per app-db write
+(rf/reg-sub ::slides-inputs
+            (fn [db _] {:explicit    (nav/pdf-layout db)
+                        :open-as     (slides/open-as db)
+                        :presenting? (slides/presenting? db)}))
+;; what the pdf-view hands the engine besides zoom/fit/invert
+(rf/reg-sub :pdf/layout-request :<- [::slides-inputs] (fn [inputs _] inputs))
+;; is the shown PDF in the slides layout? (the same rule the engine applies to the doc's deck classification)
+(rf/reg-sub :slides/view?
+            :<- [:view/pdf-active?] :<- [::slides-inputs] :<- [:doc/deck]
+            (fn [[pdf? inputs d] _]
+              (boolean (and pdf? (= :slides (deck/effective-layout (assoc inputs :deck? (boolean (:deck? d)))))))))
+;; the mounted slide show's position mirror ([:ui :slides]) or nil
+(rf/reg-sub :slides/state (fn [db _] (get-in db [:ui :slides])))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.

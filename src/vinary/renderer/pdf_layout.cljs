@@ -95,6 +95,49 @@
        (max 0.25 (js/Math.sqrt (/ max-pixels area)))
        dpr))))
 
+;; ---- slides layout (ADR-0045) ----------------------------------------------------------------------------
+;; In the slides layout every page owns a SLOT exactly one viewport (sw × sh) tall, stacked with no gap, and the
+;; page — its sheet — is centred in the slot at its own fit scale. Navigation sets scrollTop to a slot top, so
+;; exactly one slide is ever in view, while the pages stay in the DOM: in-page find, the text layer, links, and
+;; the Contents scroll-spy (which looks 100 px below the top — inside the current slot) keep working unchanged.
+
+(def slides-max-zoom
+  "Upper clamp for a slide's fit scale. Higher than the document layout's max-zoom (8.0) because a 16:9 Beamer
+   page (453.5 bp wide) needs ≈ 8.47 to fill a 3840-px-wide fullscreen display; the device-pixel budget
+   (budget-dpr) still bounds the canvas."
+  16.0)
+
+(defn slide-scale
+  "The scale that fits a page of intrinsic size [pw ph] into a sw × sh slot with `margin` px on every side
+   (0 when presenting fullscreen), clamped to [min-zoom, slides-max-zoom]. Guards zero sizes."
+  [[pw ph] sw sh margin]
+  (if (or (<= pw 0) (<= ph 0))
+    1.0
+    (let [m  (or margin 0)
+          aw (max 1 (- sw (* 2 m)))
+          ah (max 1 (- sh (* 2 m)))]
+      (-> (min (/ aw pw) (/ ah ph)) (max min-zoom) (min slides-max-zoom)))))
+
+(defn slide-scales
+  "Per-page slide scales for pages of intrinsic `sizes` in a sw × sh slot (one per page — a portrait title page
+   must not shrink every landscape slide to its fit)."
+  [sizes sw sh margin]
+  (mapv #(slide-scale % sw sh margin) sizes))
+
+(defn slot-rects
+  "Rects for `n` slots of sw × sh stacked with no gap: [{:top (i·sh) :height sh :width sw}…] — the same shape as
+   page-rects, so visible-range / anchors / the observer band work on slots unchanged."
+  [n sw sh]
+  (vl/stack (repeat n {:height sh :width sw}) 0))
+
+(defn slot-at
+  "The slot index whose top is nearest `scroll-top` (round(scroll-top / sh)), clamped into [0, n-1]. After find
+   centres a match, the viewport CENTRE lies in the match's slot, so rounding the top lands on that slot."
+  [scroll-top sh n]
+  (if (or (<= n 0) (<= sh 0))
+    0
+    (-> (js/Math.round (/ scroll-top sh)) (max 0) (min (dec n)))))
+
 (defn outline->toc
   "Flatten a pdf.js getOutline() tree [{:title :dest :items [...]}…] into the app's :doc/toc shape
    [{:level :text :id \"vv-pdf-page-N\"}…], using `dest->page` (dest → 1-based page number, or nil).

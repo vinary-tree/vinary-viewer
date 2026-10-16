@@ -40,3 +40,28 @@
   (testing "never below 0.25, and degenerate sizes keep the screen DPR"
     (is (= 0.25 (layout/budget-dpr 1e6 1e6 2)))
     (is (= 2 (layout/budget-dpr 0 100 2)))))
+
+(deftest slides-geometry
+  (testing "per-page fit inside a slot, with a margin, clamped"
+    (is (approx= 2.0 (layout/slide-scale [400 225] 800 600 0)) "width-bound")
+    (is (approx= 1.0 (layout/slide-scale [400 600] 800 600 0)) "height-bound portrait")
+    (is (approx= (/ 568 400) (layout/slide-scale [400 225] 600 600 16)) "the margin is taken from both sides")
+    (is (= 16.0 (layout/slide-scale [10 10] 10000 10000 0)) "clamped at slides-max-zoom")
+    (is (= 1.0 (layout/slide-scale [0 0] 800 600 0)) "zero guard"))
+  (testing "a 16:9 Beamer page fills a 3840-px fullscreen (needs > the document max zoom of 8)"
+    (is (> (layout/slide-scale [453.543 255.118] 3840 2160 0) 8)))
+  (testing "slide-scales is per page"
+    (is (= 2 (count (layout/slide-scales [[400 225] [300 600]] 800 600 0))))
+    (is (not= (first (layout/slide-scales [[400 225] [300 600]] 800 600 0))
+              (second (layout/slide-scales [[400 225] [300 600]] 800 600 0)))))
+  (testing "slots stack one viewport apart with no gap"
+    (is (= [{:top 0 :height 600 :width 800} {:top 600 :height 600 :width 800} {:top 1200 :height 600 :width 800}]
+           (layout/slot-rects 3 800 600))))
+  (testing "slot-at rounds to the nearest slot top and clamps"
+    (is (= 0 (layout/slot-at 0 600 3)))
+    (is (= 1 (layout/slot-at 600 600 3)))
+    (is (= 1 (layout/slot-at 899 600 3)) "within half a slot → that slot")
+    (is (= 2 (layout/slot-at 901 600 3)))
+    (is (= 2 (layout/slot-at 99999 600 3)))
+    (is (= 0 (layout/slot-at -50 600 3)))
+    (is (= 0 (layout/slot-at 100 0 3)) "degenerate slot height")))

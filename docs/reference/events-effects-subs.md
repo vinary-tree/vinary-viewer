@@ -656,6 +656,25 @@ read cannot displace the last version that rendered.
 | `:doc/refresh-retry` | fx | `path` (the shown file) | — | — | `[:vv/open path]` — the banner's **Retry**: main re-reads and re-sends the file through the ordinary open flow |
 | `:doc/refresh-note-dismiss` | fx | `path` | DataScript `doc-attr :doc/refresh-note` | — | retracts `:doc/refresh-note` — the banner's **×** |
 
+### 1.32 Slides layout (ADR-0045)
+
+The PDF engine (`vinary.renderer.pdf`) owns the slide show: in the **slides layout** every page is a
+full-viewport slot showing one page at a time at its own fit, navigated by slide (`command!` — any
+`vinary.slides.deck/step` op), with the wheel flipping slides and a snap at scroll end. app-db holds only the
+document view's explicit layout choice (`nav :pdf-layout`, on the tab **and** its current history entry, cleared
+for a new document — like `:facet`) and a mirror of the mounted slide show's position, `[:ui :slides]`. The
+**effective** layout is `vinary.slides.deck/effective-layout` — presenting → slides; else the explicit choice;
+else a detected deck (`:doc/deck`) opens as slides unless `:slides-open-as` is `:document` — applied identically
+by the engine and by `vinary.app.slides` (menus, subscriptions), so the two never disagree.
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:pdf/layout-toggle` | fx | — | `slides/pdf-shown?`, `slides/effective-layout` | — | `[:dispatch [:pdf/set-layout :document\|:slides]]` — the OPPOSITE of the effective layout (View ▸ View as Slide Show ↔ View as Document); no-op unless a PDF is shown |
+| `:pdf/set-layout` | fx | `:slides` \| `:document` \| `nil` | `slides/pdf-shown?` | active tab `:pdf-layout` + its current history entry's (`nav/set-pdf-layout`; `nil` clears → follow detection again) | — ; the pdf-view's `:pdf/layout-request` sub re-drives the engine (`pdf/update!` → `set-layout!`, keeping the page) |
+| `:slides/changed` | db | `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` | — | `[:ui :slides]` ← the map | — — the engine's position report (`deck/position` + layout), at most one per animation frame; feeds the slide counter, menus and tests (`__vvdb().ui.slides`) |
+| `:slides/unmounted` | db | `path` | `[:ui :slides :path]` | dissoc `[:ui :slides]` when it belongs to `path` | — — dispatched by the pdf-view's unmount (tab switch, navigation, Reflow) |
+| `:slides/command` | fx | `op` — a `vinary.slides.deck/step` op (`:next :prev :next-frame :prev-frame :first :last [:goto i] [:goto-label s] [:jump i] :back :forward`) | — | — | `[:slides/command op]` |
+
 ## 2. Effects
 
 `reg-fx` handlers receive the effect's argument and perform IO/async, often re-dispatching back into
@@ -715,6 +734,7 @@ request/reply effects, to their on-error path — rather than throwing.
 | `:vv/save-keymap` | EDN string | `window.vv.saveKeymap(edn)` → `vv:keymap-save` IPC (immediate; the editor's bulk writes use the debounced `:keymap/persist`, §2.2) | — |
 | `:vv/save-ext-config` | EDN string | **debounced 300 ms** (toggles can fire rapidly), then `window.vv.saveExtConfig(edn)` → `vv:ext-config-save` (ad-block + extension prefs → `extensions.edn`) | — |
 | `:pdf/cache-bytes` | `{:path :bytes :stamp}` | `pdf-cache/put-bytes!` — caches the bytes as the path's **candidate** version (promoted to the good version by `pdf-view` once pdf.js opens it, rejected if it does not — keep-last-good, §1.31); the renderer-side PDF byte cache keyed by `:doc/path`, never DataScript ([ADR-0010](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)); emitted by `:content/received` for every kind-`pdf` payload, including a PDF facet loaded by `:facet/ensure-loaded` | — |
+| `:slides/command` | `op` | `pdf-cache/slides-command!` — runs the op on the mounted slide show through the pdf.js-free hook the engine registers (`set-slides!`); a no-op when no PDF is in the slides layout (ADR-0045) | — (the engine reports the new position via `:slides/changed`) |
 | `:pdf/evict` | `retained` (the retained path vector) | `pdf-cache/evict-keep!` — drop the cached bytes of every PDF no tab retains any more (emitted by each retention pass) | — |
 | `:render-cache/invalidate` | `{:path :stamp}` | `warm-cache/invalidate-path!` — retire `path`'s renderer preparation artifacts for any OTHER stamp (a live refresh superseded them; a leased artifact is disposed when its view releases it) — emitted by every `:content/received` | — |
 | `:render-cache/retain-only` | `retained` (path vector) | `warm-cache/retain-only!` — invalidate every warm-cache artifact whose path is no longer retained (the bounded cache of DOM-free parse/load artifacts that a tab revisit reuses) — emitted by each retention pass | — |
@@ -902,6 +922,10 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:doc/streaming?` | `:<- [:doc/active]` | bool — the active document renders **incrementally** as a stream (§1.28) rather than whole |
 | `:doc/stream-progress` | `:<- [:doc/active]` | the stream's completion, a fraction in $`[0,1]`$ (nil until the first batch) — the progress strip |
 | `:doc/stream-note` | `:<- [:doc/active]` | a non-fatal note for the progress strip (e.g. a remote SSH connection dropped mid-stream — `:stream/interrupted`) \| nil |
+| `::slides-inputs` | `app-db` | `{:explicit :open-as :presenting?}` — the active document view's explicit PDF layout (`nav/pdf-layout`), the `:slides-open-as` preference (default `:slides`), and whether a slide show is presenting (ADR-0045) |
+| `:pdf/layout-request` | `:<- [::slides-inputs]` | the layout request the pdf-view merges into the engine's view-state (the engine combines it with the document's own deck classification) |
+| `:slides/view?` | `:<- [:view/pdf-active?]` `:<- [::slides-inputs]` `:<- [:doc/deck]` | bool — the shown PDF is in the slides layout (`vinary.slides.deck/effective-layout`, the engine's own rule) |
+| `:slides/state` | `app-db` | `[:ui :slides]` — the mounted slide show's position mirror (`:slides/changed`) \| nil |
 | `:doc/deck` | `:<- [:doc/active]` | the shown PDF's slide-deck classification `{:deck? :tier :source :pages :frame-count}` \| nil (ADR-0045) |
 | `:doc/refresh-note` | `:<- [:doc/active]` | the shown document's non-fatal live-refresh note `{:kind :message :stamp :at}` \| nil — rendered by `ui/refresh-note` over the last good version (§1.31) |
 

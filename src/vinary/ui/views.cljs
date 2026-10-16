@@ -955,12 +955,15 @@
 
                                     :else
                                     (pdf/update! @ctrl @vstate))))           ; zoom/fit/invert
-      :component-will-unmount (fn [_]
+      :component-will-unmount (fn [this]
                                 (swap! gen* inc)
                                 (when @node (.removeEventListener @node "contextmenu" on-ctx))
-                                (unmount-doc!))
+                                (unmount-doc!)
+                                (rf/dispatch [:slides/unmounted (second (r/argv this))]))
       :reagent-render         (fn [_path _stamp]
-                                (reset! vstate @(rf/subscribe [:pdf/view-state]))  ; reactive → did-update
+                                ;; reactive → did-update: zoom/fit/invert + the layout request (ADR-0045)
+                                (reset! vstate (merge @(rf/subscribe [:pdf/view-state])
+                                                      @(rf/subscribe [:pdf/layout-request])))
                                 [:div.vv-pdf-doc {:ref (fn [el] (reset! node el))}])})))
 
 (defn- content-page [path kind stamp page meta]

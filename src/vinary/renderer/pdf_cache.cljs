@@ -65,6 +65,39 @@
   (let [keep (set keep-paths)]
     (swap! bytes-cache (fn [m] (into {} (filter (fn [[k _]] (contains? keep k)) m))))))
 
+;; ---- the slides hook (ADR-0045) ---------------------------------------------------------------------------
+;; The mounted PDF engine registers {:command! :slides? :position :snapshot}; re-frame effects, the scroll
+;; delegate and the overview grid reach the slide show through these pdf.js-free functions. Identity-checked like
+;; the find ensurer, so an unmounting controller never clears a newer one's registration.
+(defonce ^:private slides-hook (atom nil))
+
+(defn set-slides!   [hook] (reset! slides-hook hook))
+(defn clear-slides! [hook] (when (and hook (identical? @slides-hook hook)) (reset! slides-hook nil)))
+
+(defn slides-active?
+  "Is a PDF mounted in the slides layout right now?"
+  []
+  (boolean (when-let [f (:slides? @slides-hook)] (f))))
+
+(defn slides-command!
+  "Run slide-navigation `op` (vinary.slides.deck/step ops) on the mounted slide show. Returns true when a slides
+   view took it."
+  [op]
+  (if (slides-active?)
+    (do ((:command! @slides-hook) op) true)
+    false))
+
+(defn slides-position
+  "The current slide (0-based page) of the mounted slide show, or nil."
+  []
+  (when (slides-active?) ((:position @slides-hook))))
+
+(defn slides-snapshot
+  "{:doc :sizes :deck :current :doc-gen :path :layout} of the mounted PDF controller (borrowed by the overview
+   grid — never a second PDFDocumentProxy), or nil."
+  []
+  (when-let [f (:snapshot @slides-hook)] (f)))
+
 (defn set-ensurer!   [f] (reset! ensurer f))
 (defn clear-ensurer! [f] (when (identical? @ensurer f) (reset! ensurer nil)))
 

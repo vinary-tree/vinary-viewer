@@ -16,10 +16,15 @@
             [re-frame.core :as rf]))
 
 (def ^:const gap 16)        ; px between pages
-(def ^:const overscan 1.5)  ; viewport-heights of canvas-render overscan each side
+(def ^:const overscan 1.5)  ; viewport-heights of canvas-render overscan each side (document layout)
+;; slides layout (ADR-0045): half a viewport of overscan keeps exactly the neighbouring slots rendered — the next
+;; and previous slide are ready for an instant flip — while slot ±2 (a full viewport away) is released. The 1.5
+;; of the document layout would keep ~5 fullscreen-sized canvases alive.
+(def ^:const slides-overscan 0.5)
+(def ^:const slides-margin 16)   ; px around a slide in the in-tab slides layout (0 when presenting)
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
-         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr!)
+         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command!)
 
 ;; ---- pdf.js module + worker bootstrap -----------------------------------------------------------
 ;; pdfjs-dist uses dynamic import() internally, which Closure :simple cannot bundle — so we do NOT
@@ -99,23 +104,64 @@
   ^js [state idx]
   (nth (:sheet-divs @state) idx nil))
 
-(defn- apply-layout!
-  "Size each page placeholder div to the current scale (preallocates exact height → no scroll jank), then
-   re-measure the scroll-spy offsets for the outline anchors at the new scale. Heights are preallocated here
-   and the offset formula is scroll-invariant, so measurement is correct even before canvases paint. This one
-   hook covers mount (via build-placeholders!, :toc-ids still empty → measures nothing) and zoom/resize (via
-   rescale!, re-measures the retained ids)."
+(defn- slides? [state] (= :slides (:layout @state)))
+
+(defn- page-scale
+  "The render scale of page `idx`: the document scale, or — in the slides layout — that page's own slide fit."
+  [state idx]
+  (if (slides? state)
+    (nth (:scales @state) idx (:scale @state))
+    (:scale @state)))
+
+(defn- apply-document-layout!
+  "Continuous layout: placeholders sized to the pages at the document :scale, stacked with `gap` (preallocates
+   exact heights → no scroll jank); the sheets fill them (their inline sizes cleared)."
   [state]
-  (let [{:keys [sizes scale page-divs container toc-ids]} @state
+  (let [{:keys [sizes scale page-divs sheet-divs]} @state
         rects (layout/page-rects sizes scale gap)]
     (swap! state assoc :rects rects)
     (dotimes [i (count page-divs)]
-      (let [^js div (nth page-divs i)
+      (let [^js div   (nth page-divs i)
+            ^js sheet (nth sheet-divs i)
             {:keys [height width]} (nth rects i)]
         (set! (.. div -style -height) (str height "px"))
-        (set! (.. div -style -width) (str width "px"))))
-    (when-let [^js scroller (scroller-of container)]
-      (toc/refresh! scroller toc-ids))))
+        (set! (.. div -style -width) (str width "px"))
+        (set! (.. sheet -style -height) "")
+        (set! (.. sheet -style -width) "")))))
+
+(defn- apply-slides-layout!
+  "Slides layout (ADR-0045): every placeholder is a SLOT exactly the scroller's client size, the slots stack
+   with no gap, and each sheet is sized to its page at that page's own fit (pdf-layout/slide-scale; no margin
+   when presenting) and centred by CSS. Measured after the vv-pdf-slides class is on, so the hidden scrollbar is
+   already excluded from the client size."
+  [state]
+  (let [{:keys [container sizes page-divs sheet-divs presenting?]} @state
+        ^js scroller (scroller-of container)
+        sw     (max 1 (if scroller (.-clientWidth scroller) 1))
+        sh     (max 1 (if scroller (.-clientHeight scroller) 1))
+        scales (layout/slide-scales sizes sw sh (if presenting? 0 slides-margin))
+        rects  (layout/slot-rects (count sizes) sw sh)]
+    (swap! state assoc :rects rects :scales scales :slot [sw sh])
+    (dotimes [i (count page-divs)]
+      (let [^js div   (nth page-divs i)
+            ^js sheet (nth sheet-divs i)
+            [pw ph]   (nth sizes i)
+            sc        (nth scales i)]
+        (set! (.. div -style -width) (str sw "px"))
+        (set! (.. div -style -height) (str sh "px"))
+        (set! (.. sheet -style -width) (str (* pw sc) "px"))
+        (set! (.. sheet -style -height) (str (* ph sc) "px"))))))
+
+(defn- apply-layout!
+  "Size every placeholder (and, in the slides layout, every sheet) for the current layout, then re-measure the
+   scroll-spy offsets of the outline anchors. Heights are preallocated here and the offset formula is
+   scroll-invariant, so measurement is correct even before canvases paint. This one hook covers mount (via
+   build-placeholders!, :toc-ids still empty → measures nothing), zoom/resize/layout switches (via relayout!) and
+   live refresh (replace-doc!)."
+  [state]
+  (if (slides? state) (apply-slides-layout! state) (apply-document-layout! state))
+  (when-let [^js scroller (scroller-of (:container @state))]
+    (toc/refresh! scroller (:toc-ids @state))))
 
 (defn- make-page!
   "One page placeholder `.vv-pdf-page#vv-pdf-page-<i+1>[data-pdf-idx=i]` with its inner `.vv-pdf-sheet`.
@@ -169,7 +215,7 @@
                    ;; was in flight — a stale resolve would otherwise delete the canvas a re-render just made
                    (when (and (not (:destroyed? @state)) (= gen (:gen @state)))
                      (let [^js div (sheet-of state idx)
-                           scale   (:scale @state)
+                           scale   (page-scale state idx)
                            vp      (.getViewport pg #js {:scale scale})
                            ;; the screen's DPR, capped by the per-canvas device-pixel budget (an extreme zoom
                            ;; or a fullscreen slide on a HiDPI display must not allocate a gigapixel canvas)
@@ -263,8 +309,8 @@
       ;; left/top→auto), so the transparent spans land at the wrong boxes and ::highlight(vv-find) paints over
       ;; them in the wrong place. Set the name pdf.js 5.x actually reads; keep the old --scale-factor for back-compat.
       (doto (.-style tdiv)
-        (.setProperty "--total-scale-factor" (str (:scale @state)))
-        (.setProperty "--scale-factor"       (str (:scale @state))))
+        (.setProperty "--total-scale-factor" (str (page-scale state idx)))
+        (.setProperty "--scale-factor"       (str (page-scale state idx))))
       (.appendChild div tdiv)
       (let [p (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
                                                  #js [#js {:textContentSource (.streamTextContent pg)
@@ -284,7 +330,7 @@
         (-> (.getPage ^js (:doc @state) (inc idx))
             (.then (fn [^js pg]
                      (when-not (:destroyed? @state)
-                       (build-text-layer! state idx pg (.getViewport pg #js {:scale (:scale @state)})))))
+                       (build-text-layer! state idx pg (.getViewport pg #js {:scale (page-scale state idx)})))))
             (.catch (fn [_] nil))))))
 
 (defn- place! [^js el ^js vp rect]
@@ -349,12 +395,17 @@
                      (.then (fn [idx] (inc idx)))))))
       (.catch (fn [_] nil))))
 
-(defn- scroll-to-page! [state page]
-  (let [{:keys [rects container]} @state
-        scroller (scroller-of container)
-        idx      (dec page)]
-    (when (and scroller (<= 0 idx) (< idx (count rects)))
-      (set! (.-scrollTop scroller) (+ (.-offsetTop container) (:top (nth rects idx)))))))
+(defn- scroll-to-page!
+  "Show 1-based `page`: in the slides layout a JUMP (recorded in the GoBack/GoForward history), else scroll its
+   top to the viewport top."
+  [state page]
+  (if (slides? state)
+    (command! state [:jump (dec page)])
+    (let [{:keys [rects container]} @state
+          scroller (scroller-of container)
+          idx      (dec page)]
+      (when (and scroller (<= 0 idx) (< idx (count rects)))
+        (set! (.-scrollTop scroller) (+ (.-offsetTop container) (:top (nth rects idx))))))))
 
 ;; ---- outline → :doc/toc (async dest resolution, then dispatch) ----------------------------------
 (defn- walk-outline [^js doc items level]
@@ -416,10 +467,15 @@
       (.catch (fn [_] nil))))
 
 ;; ---- IntersectionObserver: render visible, release offscreen ------------------------------------
+(defn- overscan-of
+  "Viewport-heights of render overscan for the current layout (slides: exactly the neighbouring slots)."
+  [state]
+  (if (slides? state) slides-overscan overscan))
+
 (defn- observe! [state]
   (let [{:keys [container page-divs]} @state
         scroller (scroller-of container)
-        margin   (str (js/Math.round (* overscan 100)) "% 0px")
+        margin   (str (js/Math.round (* (overscan-of state) 100)) "% 0px")
         obs (js/IntersectionObserver.
              (fn [entries _]
                (doseq [^js e (array-seq entries)]
@@ -456,7 +512,7 @@
     (when (and scroller (seq rects))
       (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
             vh      (.-clientHeight scroller)
-            [lo hi] (layout/visible-range rects doc-top vh (* overscan vh))]
+            [lo hi] (layout/visible-range rects doc-top vh (* (overscan-of state) vh))]
         (when (<= 0 lo)
           (doseq [idx (range lo (inc hi))] (render-page! state idx)))))))
 
@@ -477,20 +533,37 @@
     (when (and scroller (seq rects))
       (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
             vh      (.-clientHeight scroller)
-            [lo hi] (layout/visible-range rects doc-top vh (* overscan vh))]
+            [lo hi] (layout/visible-range rects doc-top vh (* (overscan-of state) vh))]
         (dotimes [i (count sheet-divs)]
           (when (or (neg? lo) (< i lo) (> i hi))
             (when-let [^js c (.querySelector (nth sheet-divs i) "canvas.vv-pdf-canvas")] (.remove c))))))))
 
-(defn- rescale!
-  "Re-layout placeholders + re-render visible pages at the current :scale, preserving the reading anchor —
-   the page at the viewport top AND how far down it the reader was (pdf-layout/anchor-of), so a zoom, a re-fit
-   or a DPR change keeps the same line in view rather than snapping to the page top. Visible pages keep their
-   (stretched) canvases until the double-buffered re-render swaps fresh ones in."
+(defn- current-anchor
+  "Where the reader is: in the slides layout the current slide's top, else the page at the viewport top plus how
+   far down it the viewport top sits (pdf-layout/anchor-of)."
   [state]
-  (let [{:keys [observer container rects]} @state
-        scroller (scroller-of container)
-        anchor   (when scroller (layout/anchor-of rects (- (.-scrollTop scroller) (.-offsetTop container))))]
+  (let [{:keys [container rects]} @state
+        ^js scroller (scroller-of container)]
+    (cond
+      (slides? state) {:idx (:current @state 0) :frac 0}
+      (and scroller (seq rects)) (layout/anchor-of rects (- (.-scrollTop scroller) (.-offsetTop container)))
+      :else nil)))
+
+(defn- reobserve!
+  "Recreate the IntersectionObserver over the current placeholders (its rootMargin depends on the layout, and a
+   fresh observer reports every target's initial state)."
+  [state]
+  (when-let [^js o (:observer @state)] (.disconnect o))
+  (observe! state))
+
+(defn- relayout!
+  "Re-layout placeholders + re-render the visible pages for the current layout/scale, putting `anchor`
+   ({:idx :frac}, see current-anchor) back at the viewport top — so a zoom, a re-fit, a DPR change, a resize or
+   a layout switch keeps the same line (or slide) in view. Visible pages keep their (stretched) canvases until
+   the double-buffered re-render swaps fresh ones in; off-screen canvases are dropped."
+  [state anchor]
+  (let [{:keys [container]} @state
+        ^js scroller (scroller-of container)]
     (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
     ;; bump :gen so any in-flight getPage/render from the OLD layout bails instead of clobbering the new one
     (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built {}) (update :gen inc)))
@@ -499,10 +572,13 @@
     (when (and scroller anchor)
       (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor))))
     (drop-offscreen-canvases! state)
-    (when observer
-      (.disconnect observer)
-      (doseq [^js div (:page-divs @state)] (.observe observer div)))
+    (reobserve! state)
     (render-visible! state)))   ; deterministic re-render — don't rely on the IO re-fire after re-observe
+
+(defn- rescale!
+  "relayout! at the reader's current anchor (zoom / re-fit / DPR change)."
+  [state]
+  (relayout! state (current-anchor state)))
 
 (defn- watch-dpr!
   "Re-render when the device-pixel ratio changes — the window moved to a display with a different scale (a
@@ -519,11 +595,148 @@
       (.addEventListener mq "change" handler #js {:once true})
       (swap! state assoc :dpr-watch [mq handler]))))
 
+;; ---- slides layout: current slide, navigation, listeners (ADR-0045) ------------------------------------
+(defn- report!
+  "Tell app-db where the slide show stands — [:ui :slides] via :slides/changed: the deck position of the current
+   page plus the layout — coalesced to one dispatch per animation frame however many scroll events arrive."
+  [state]
+  (when-not (:report-raf @state)
+    (swap! state assoc :report-raf
+           (js/requestAnimationFrame
+            (fn [_]
+              (swap! state assoc :report-raf nil)
+              (when-not (:destroyed? @state)
+                (let [{:keys [deck path layout current doc-gen]} @state]
+                  (rf/dispatch [:slides/changed (assoc (deck/position deck (or current 0))
+                                                       :path path :layout layout :doc-gen (or doc-gen 0))]))))))))
+
+(defn- slot-height [state] (second (:slot @state [1 1])))
+
+(defn- go-to-page!
+  "Show slide `idx` (clamped) at once: its slot's top at the scroller top. Instant by design — a slide show
+   flips, it does not glide — and the neighbouring slots are already rendered (slides-overscan)."
+  [state idx]
+  (let [{:keys [container deck]} @state
+        ^js scroller (scroller-of container)
+        idx (deck/clamp-page deck idx)]
+    (when scroller
+      (set! (.-scrollTop scroller) (+ (.-offsetTop container) (* idx (slot-height state)))))
+    (swap! state assoc :current idx)
+    (report! state)))
+
+(defn command!
+  "Apply a slide-navigation `op` (any vinary.slides.deck/step op: :next :prev :next-frame :prev-frame :first
+   :last [:goto i] [:goto-label s] [:jump i] :back :forward) in the slides layout. Jumps are recorded in the
+   GoBack/GoForward history; sequential steps are not. No-op in the document layout."
+  [state op]
+  (when (and (slides? state) (not (:destroyed? @state)))
+    (let [nav  {:page (:current @state 0) :back (:back @state []) :fwd (:fwd @state [])}
+          nav' (deck/step (:deck @state) nav op)]
+      (swap! state assoc :back (:back nav') :fwd (:fwd nav'))
+      (go-to-page! state (:page nav')))))
+
+(defn- track-current!
+  "As the scroller moves (find centring a match, a Contents click, keyboard), keep :current = the slot at the
+   top — rAF-coalesced so a scroll burst costs one measurement per frame."
+  [state]
+  (when-not (:scroll-raf @state)
+    (swap! state assoc :scroll-raf
+           (js/requestAnimationFrame
+            (fn [_]
+              (swap! state assoc :scroll-raf nil)
+              (when (and (slides? state) (not (:destroyed? @state)))
+                (let [{:keys [container sizes]} @state
+                      ^js scroller (scroller-of container)
+                      idx (layout/slot-at (- (.-scrollTop scroller) (.-offsetTop container))
+                                          (slot-height state) (count sizes))]
+                  (when (not= idx (:current @state))
+                    (swap! state assoc :current idx)
+                    (report! state)))))))))
+
+(defn- snap!
+  "At the END of a scroll (a smooth Contents jump, find's centring, a stray pixel scroll) settle exactly on the
+   slot nearest the top. Never mid-scroll: snapping during a smooth scroll would fight it and land on the wrong
+   slide."
+  [state]
+  (when (and (slides? state) (not (:destroyed? @state)))
+    (let [{:keys [container sizes]} @state
+          ^js scroller (scroller-of container)
+          idx    (layout/slot-at (- (.-scrollTop scroller) (.-offsetTop container)) (slot-height state) (count sizes))
+          target (+ (.-offsetTop container) (* idx (slot-height state)))]
+      (when (> (js/Math.abs (- (.-scrollTop scroller) target)) 0.5)
+        (set! (.-scrollTop scroller) target))
+      (swap! state assoc :current idx)
+      (report! state))))
+
+(defn- normalize-wheel
+  "pdf.js's normalizeWheelEventDelta, signed TOWARDS THE NEXT SLIDE: the length of the (dx, dy) vector, positive
+   when scrolling down/right, in notch units — pixel deltas ÷ 1200 (30 px per line × 40 lines), line deltas ÷ 30."
+  [^js e]
+  (let [dx    (.-deltaX e)
+        dy    (.-deltaY e)
+        len   (js/Math.hypot dx dy)
+        angle (js/Math.atan2 dy dx)
+        d     (if (and (< (* -0.25 js/Math.PI) angle) (< angle (* 0.75 js/Math.PI))) len (- len))]
+    (case (.-deltaMode e)
+      0 (/ d 1200)
+      1 (/ d 30)
+      d)))
+
+(defn- on-wheel! [state ^js e]
+  ;; Ctrl/Meta+wheel is zoom elsewhere in the app — leave it alone
+  (when (and (slides? state) (not (.-ctrlKey e)) (not (.-metaKey e)))
+    (let [{st :state op :op} (deck/wheel-step (:wheel @state) (normalize-wheel e) (js/performance.now))]
+      (swap! state assoc :wheel st)
+      (when op (command! state op)))))
+
+(defn- attach-slides-listeners!
+  "While the slides layout is active: track the current slot on scroll, snap at scroll end (`scrollend`, plus a
+   150 ms quiet-period fallback), and turn the wheel into slide flips (the scroller itself is overflow:hidden in
+   this layout, so the wheel never scrolls it natively)."
+  [state]
+  (when-not (:slides-listeners @state)
+    (when-let [^js scroller (scroller-of (:container @state))]
+      (let [on-scroll (fn [_]
+                        (track-current! state)
+                        (when-let [t (:snap-timer @state)] (js/clearTimeout t))
+                        (swap! state assoc :snap-timer (js/setTimeout #(snap! state) 150)))
+            on-end    (fn [_] (snap! state))
+            on-wheel  (fn [e] (on-wheel! state e))]
+        (.addEventListener scroller "scroll" on-scroll #js {:passive true})
+        (.addEventListener scroller "scrollend" on-end)
+        (.addEventListener scroller "wheel" on-wheel #js {:passive true})
+        (swap! state assoc :slides-listeners [scroller on-scroll on-end on-wheel])))))
+
+(defn- detach-slides-listeners! [state]
+  (when-let [[^js scroller on-scroll on-end on-wheel] (:slides-listeners @state)]
+    (.removeEventListener scroller "scroll" on-scroll)
+    (.removeEventListener scroller "scrollend" on-end)
+    (.removeEventListener scroller "wheel" on-wheel))
+  (when-let [t (:snap-timer @state)] (js/clearTimeout t))
+  (swap! state assoc :slides-listeners nil :snap-timer nil))
+
+(defn- set-layout!
+  "Switch between the continuous document layout and the slides layout, keeping the reader's page: entering
+   slides shows the page that was at the viewport top; leaving shows the current slide's page at the top."
+  [state layout]
+  (when (not= layout (:layout @state))
+    (let [page (or (:idx (current-anchor state)) 0)]
+      (swap! state assoc :layout layout :current page)
+      ;; the class goes on FIRST: CSS hides the scroller's scrollbar in the slides layout, and the slot geometry
+      ;; must be measured without it
+      (toggle-class! (:container @state) "vv-pdf-slides" (= layout :slides))
+      (if (= layout :slides)
+        (attach-slides-listeners! state)
+        (do (detach-slides-listeners! state)
+            (when-let [mode (:fit @state)] (apply-fit! state mode))))
+      (relayout! state {:idx page :frac 0})
+      (report! state))))
+
 (defn- refit!
   "Re-resolve a fit-mode scale against the (resized) scroller and re-render only if it changed. No-op for
-   manual-zoom PDFs (no :fit)."
+   manual-zoom PDFs (no :fit) and in the slides layout (slides fit themselves)."
   [state]
-  (when-let [mode (:fit @state)]
+  (when-let [mode (when-not (slides? state) (:fit @state))]
     (let [old (:scale @state)]
       (apply-fit! state mode)
       (when (not= (:scale @state) old) (rescale! state)))))
@@ -538,7 +751,21 @@
             obs   (js/ResizeObserver.
                    (fn [_]
                      (when-let [t @timer] (js/clearTimeout t))
-                     (reset! timer (js/setTimeout (fn [] (when-not (:destroyed? @state) (refit! state) (render-visible! state))) 120))))]
+                     ;; slides: resize the slots NOW (cheap style writes; the canvases CSS-stretch), so the next
+                     ;; slide never peeks in while a window grows or enters fullscreen — the sharp re-render waits
+                     ;; for the debounce below
+                     (when (and (slides? state) (not (:destroyed? @state)))
+                       (apply-layout! state)
+                       (when-let [^js sc (scroller-of (:container @state))]
+                         (set! (.-scrollTop sc) (+ (.-offsetTop (:container @state))
+                                                   (* (:current @state 0) (slot-height state))))))
+                     (reset! timer (js/setTimeout
+                                    (fn []
+                                      (when-not (:destroyed? @state)
+                                        (if (slides? state)
+                                          (relayout! state (current-anchor state))
+                                          (do (refit! state) (render-visible! state)))))
+                                    120))))]
         (.observe obs scroller)
         (swap! state assoc :resize-observer obs)))))
 
@@ -621,28 +848,60 @@
 (defn dispose-prepared! [{:keys [doc]}]
   (when doc (try (.destroy ^js doc) (catch :default _ nil))))
 
+(defn- wanted-layout
+  "The layout `view-state` asks for, given this document's deck classification (vinary.slides.deck/
+   effective-layout: presenting → slides; else the document view's explicit choice; else a detected deck opens as
+   slides unless the preference says :document)."
+  [deck view-state]
+  (deck/effective-layout {:presenting? (boolean (:presenting? view-state))
+                          :explicit    (:explicit view-state)
+                          :deck?       (boolean (:deck? deck))
+                          :open-as     (:open-as view-state)}))
+
+(defn- slides-hook
+  "The slides controls this controller registers with pdf-cache (a pdf.js-free seam): re-frame effects and the
+   scroll delegate drive navigation through it without requiring this namespace."
+  [state]
+  {:command!  (fn [op] (command! state op))
+   :slides?   (fn [] (and (slides? state) (not (:destroyed? @state))))
+   :position  (fn [] (when (slides? state) (:current @state 0)))
+   :snapshot  (fn [] (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout]))})
+
 (defn mount-prepared!
-  "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface. Per-mount canvases,
-   observers, tasks, and text/link layers are still recreated and torn down normally."
+  "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface, in the layout `view-state` asks for
+   ({:scale :fit :invert? :explicit :open-as :presenting? :page}). Per-mount canvases, observers, tasks, and
+   text/link layers are still recreated and torn down normally. A slides-layout mount opens on `:page` (a
+   restored slide, ADR-0045 §Remembering the slide) or the first page."
   [container {:keys [doc sizes] :as prepared} path view-state]
-  (let [state (atom {:container container :path path :doc doc :owns-doc? false
-                     :deck (:deck prepared) :doc-gen 0
-                     :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
-                     :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
-                     :fit (:fit view-state) :invert? (boolean (:invert? view-state))
-                     :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
-        ensure-fn (fn [] (ensure-all-text! state))]
-    (swap! state assoc :ensure-fn ensure-fn)
+  (let [d      (:deck prepared)
+        layout (wanted-layout d view-state)
+        state  (atom {:container container :path path :doc doc :owns-doc? false
+                      :deck d :doc-gen 0 :layout layout
+                      :presenting? (boolean (:presenting? view-state))
+                      :current (deck/clamp-page d (or (:page view-state) 0))
+                      :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
+                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
+                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
+                      :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
+        ensure-fn (fn [] (ensure-all-text! state))
+        hook      (slides-hook state)]
+    (swap! state assoc :ensure-fn ensure-fn :hook hook)
     (cache/set-ensurer! ensure-fn)
+    (cache/set-slides! hook)
     (toggle-class! container "vv-pdf-invert" (:invert? view-state))
-    (mark-deck! container (:deck prepared))
+    (toggle-class! container "vv-pdf-slides" (= layout :slides))   ; before any measurement (hides the scrollbar)
+    (mark-deck! container d)
     (reset! current-doc {:doc doc :path path})
-    (when (:fit view-state) (apply-fit! state (:fit view-state)))
+    (when (and (:fit view-state) (not= layout :slides)) (apply-fit! state (:fit view-state)))
     (build-placeholders! state)
+    (when (= layout :slides)
+      (go-to-page! state (:current @state))
+      (attach-slides-listeners! state))
     (observe! state)
     (observe-resize! state)
     (watch-dpr! state)
     (extract-outline! state doc path)
+    (report! state)
     state))
 
 (defn mount!
@@ -691,9 +950,9 @@
    destroys the old PDFDocumentProxy, never this function."
   [state {:keys [doc sizes] :as prepared}]
   (when-not (:destroyed? @state)
-    (let [{:keys [container rects observer path]} @state
+    (let [{:keys [container path]} @state
           scroller (scroller-of container)
-          anchor   (when scroller (layout/anchor-of rects (- (.-scrollTop scroller) (.-offsetTop container))))]
+          anchor   (current-anchor state)]
       (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
       ;; :gen fences in-flight work against the OLD document; :doc-gen counts document swaps (observers that
       ;; borrow the proxy — the overview grid — rebuild when it moves)
@@ -704,34 +963,50 @@
                         (update :doc-gen (fnil inc 0))))
       (mark-deck! container (:deck prepared))
       (reconcile-pages! state (count sizes))
+      (swap! state update :current #(deck/clamp-page (:deck prepared) (or % 0)))
       (doseq [^js sheet (:sheet-divs @state)] (strip-layers! sheet))
-      (when-let [mode (:fit @state)] (apply-fit! state mode))
+      (when-let [mode (when-not (slides? state) (:fit @state))] (apply-fit! state mode))
       (apply-layout! state)
       (when (and scroller anchor)
         (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor))))
       (drop-offscreen-canvases! state)
-      (when observer
-        (.disconnect observer)
-        (doseq [^js div (:page-divs @state)] (.observe observer div)))
+      (reobserve! state)
       (render-visible! state)
+      (report! state)
       (reset! current-doc {:doc doc :path path})
       (cache/set-ensurer! (:ensure-fn @state))
       (extract-outline! state doc path)
       state)))
 
 (defn update!
-  "Apply a new view-state (zoom / fit / invert) to a mounted controller."
+  "Apply a new view-state to a mounted controller: dark-invert always; then a LAYOUT change (document ↔ slides,
+   ADR-0045) if the effective layout moved; in the slides layout a presenting change (its margin: none when
+   presenting); in the document layout zoom/fit as before. Slides fit themselves, so zoom/fit never apply there."
   [state view-state]
   (when-not (:destroyed? @state)
-    (let [container (:container @state)
-          old-scale (:scale @state)]
+    (let [container   (:container @state)
+          old-scale   (:scale @state)
+          layout      (wanted-layout (:deck @state) view-state)
+          presenting? (boolean (:presenting? view-state))]
       (toggle-class! container "vv-pdf-invert" (:invert? view-state))
       (swap! state assoc :invert? (boolean (:invert? view-state)))
-      (if (:fit view-state)
-        (apply-fit! state (:fit view-state))
-        (swap! state assoc :scale (layout/clamp-zoom (or (:scale view-state) old-scale)) :fit nil))
-      (when (not= (:scale @state) old-scale)
-        (rescale! state)))))
+      (cond
+        (not= layout (:layout @state))
+        (do (swap! state assoc :presenting? presenting? :fit (:fit view-state)
+                   :scale (layout/clamp-zoom (or (:scale view-state) old-scale)))
+            (set-layout! state layout))
+
+        (slides? state)
+        (when (not= presenting? (:presenting? @state))
+          (swap! state assoc :presenting? presenting?)
+          (relayout! state (current-anchor state)))
+
+        :else
+        (do (if (:fit view-state)
+              (apply-fit! state (:fit view-state))
+              (swap! state assoc :scale (layout/clamp-zoom (or (:scale view-state) old-scale)) :fit nil))
+            (when (not= (:scale @state) old-scale)
+              (rescale! state)))))))
 
 (defn ensure-all-text!
   "Materialize text layers for every page (so in-page find covers the whole document, not just the
@@ -745,6 +1020,9 @@
 
 (defn unmount! [state]
   (cache/clear-ensurer! (:ensure-fn @state))
+  (cache/clear-slides! (:hook @state))
+  (detach-slides-listeners! state)
+  (doseq [k [:report-raf :scroll-raf]] (when-let [r (k @state)] (js/cancelAnimationFrame r)))
   (swap! state assoc :destroyed? true)
   (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
   (when-let [^js obs (:observer @state)] (.disconnect obs))

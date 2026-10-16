@@ -434,6 +434,13 @@
   (set! (.-__vvopen js/window) (fn [p] (rf/dispatch [:doc/open p])))   ; DEV/test: open a path in the active tab
   (set! (.-__vvsource js/window) (fn [] (rf/dispatch [:tab/toggle-source])))   ; DEV/test: flip the active tab's facet to source
   (set! (.-__vvblame js/window) (fn [] (rf/dispatch [:blame/toggle])))   ; DEV/test: toggle the blame gutter (ADR-0040)
+  ;; DEV/test: drive the slide-deck mode (ADR-0045) — __vvslides('next'), __vvslides('goto', 3), and
+  ;; __vvslides('layout', 'slides' | 'document' | null) for the document view's explicit layout
+  (set! (.-__vvslides js/window)
+        (fn [op arg]
+          (case op
+            "layout" (rf/dispatch [:pdf/set-layout (some-> arg keyword)])
+            (rf/dispatch [:slides/command (if (some? arg) [(keyword op) arg] (keyword op))]))))
   (set! (.-__vvfindtoggle js/window) (fn [] (rf/dispatch [:find/toggle])))   ; DEV/test: open/close the find bar
   ;; DEV/test: what find actually matched — the matched TEXT, each match's geometry, whether it is on
   ;; screen, and how many Ranges are painted. The counter alone cannot tell "found 7 matches" apart from

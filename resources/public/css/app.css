@@ -100,6 +100,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    work, since neither needs pointer events, which is why this hid). Only the actual links opt back in. */
 .vv-pdf-anno { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .vv-pdf-anno a.vv-pdf-link { position: absolute; pointer-events: auto; }
+/* SLIDES layout (ADR-0045): every page is a full-viewport SLOT (sized by the engine) with its sheet centred in
+   it at the page's own fit. The scroller is navigated by slide, never by pixel, so it shows no scrollbar — keyed on
+   the engine's own element via :has(), because React owns .vv-content's class list (and the engine measures the
+   slot only after this rule has removed the scrollbar). */
+.vv-content:has(> .vv-pdf-doc.vv-pdf-slides) { overflow: hidden; }
+.vv-pdf-doc.vv-pdf-slides { padding: 0; }
+.vv-pdf-slides .vv-pdf-page { margin: 0; display: flex; align-items: center; justify-content: center; }
+.vv-pdf-slides .vv-pdf-sheet { flex: 0 0 auto; }
 /* optional dark-invert: invert the CANVAS only, so text/selection/find highlights stay normal */
 .vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
 /* per-page status chip: a "rendering…" hint while a slow (heavy) page rasterizes on the main thread, or a

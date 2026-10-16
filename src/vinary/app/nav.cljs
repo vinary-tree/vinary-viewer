@@ -147,8 +147,10 @@
             ;; a new destination is a new document → clear the in-place facet so it gets a fresh default,
             ;; and the diff collapsed set (its vv-diff-file-N ids are POSITIONAL — a set from diff A must
             ;; not collapse arbitrary files of diff B; ADR-0037)
+            ;; …and the explicit PDF layout (slides/document — ADR-0045): the choice belongs to the document
+            ;; view it was made on, so a new document opens per detection + preference again
             (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
-                (dissoc :facet :facet-mru :diff-collapsed))))))))
+                (dissoc :facet :facet-mru :diff-collapsed :pdf-layout))))))))
 
 (defn nav-tab
   "Point the tab with `id` at uri, pushing a history entry (a repeat just refreshes the uri) — like
@@ -166,7 +168,7 @@
                                (assoc t :uri uri)
                                (let [stack' (conj (vec (take (inc idx) stack)) {:uri uri :scroll 0 :facet nil})]
                                  (-> (assoc t :uri uri :hist {:stack stack' :idx (dec (count stack'))})
-                                     (dissoc :facet :facet-mru :diff-collapsed)))))   ; positional ids — see nav-active
+                                     (dissoc :facet :facet-mru :diff-collapsed :pdf-layout)))))   ; see nav-active
                            t))
                        ts)))
     db))
@@ -188,6 +190,9 @@
                                             (assoc :facet f))          ; mirror the entry's facet onto the tab
                                   (nil? f)  (dissoc :facet-mru)         ; default view → forget the per-doc mru
                                   (some? f) (assoc-in [:facet-mru (:type f)] (:path f))
+                                  ;; the entry's explicit PDF layout comes back with it (ADR-0045)
+                                  (some? (:pdf-layout entry)) (assoc :pdf-layout (:pdf-layout entry))
+                                  (nil? (:pdf-layout entry))  (dissoc :pdf-layout)
                                   ;; Back/Forward onto a DIFFERENT uri drops the diff collapsed set (positional
                                   ;; ids — see nav-active); same-uri steps (facet flips, anchors) keep it
                                   (not= (:uri entry) (:uri t)) (dissoc :diff-collapsed))))
@@ -260,7 +265,9 @@
                                {:keys [stack idx]} (:hist t)
                                entry (cond-> {:uri (:uri t) :scroll (or (:scroll target) 0)
                                               :facet {:path path :type type}}
-                                       (:line target) (assoc :line (:line target)))
+                                       (:line target) (assoc :line (:line target))
+                                       ;; same document group → the explicit PDF layout carries over
+                                       (:pdf-layout t) (assoc :pdf-layout (:pdf-layout t)))
                                stack' (conj (vec (take (inc idx) stack)) entry)]
                            (-> t
                                (assoc :facet {:path path :type type})
@@ -268,6 +275,27 @@
                                (assoc :hist {:stack stack' :idx (dec (count stack'))})))
                          t))
                      ts))))
+
+;; ---- PDF layout: continuous document vs slides (ADR-0045) ----
+;; A document view's EXPLICIT layout choice (:slides / :document; nil = follow deck detection + the
+;; :slides-open-as preference). It lives on the tab AND its current history entry — like :facet — so Back/Forward
+;; restores it, a facet switch within the document group keeps it, and navigating to a different document (a new
+;; entry) starts from the default again (D14: an explicit "slides" on deck A must not force paper B into slides).
+(defn pdf-layout [db] (:pdf-layout (active-tab db)))
+
+(defn set-pdf-layout
+  "Record (or with nil clear) the explicit PDF layout on tab `id` (default: the active tab) and its current entry."
+  ([db layout] (set-pdf-layout db (active-id db) layout))
+  ([db id layout]
+   (update-in db [:ui :tabs]
+              (fn [ts]
+                (mapv #(if (= (:id %) id)
+                         (let [idx (get-in % [:hist :idx])]
+                           (if layout
+                             (-> % (assoc :pdf-layout layout) (assoc-in [:hist :stack idx :pdf-layout] layout))
+                             (-> % (dissoc :pdf-layout) (update-in [:hist :stack idx] dissoc :pdf-layout))))
+                         %)
+                      ts)))))
 
 ;; ---- Diff unified⇄split view (per-tab; only meaningful for a .diff/.patch doc) ----
 ;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the

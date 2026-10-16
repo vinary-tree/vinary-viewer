@@ -155,6 +155,7 @@ Important slices:
 | `[:ui :input]` | Modal/chord resolver display state. |
 | `[:ui :kbedit]` | Keybinding editor state and undo/redo stacks. |
 | `[:ui :hints]` | Vimium-style link hint state. |
+| `[:ui :slides]` | The mounted slide show's position mirror `{:path :layout :page :pages :frame :frames :overlay :overlays :label :doc-gen}` (from `:slides/changed`, ≤ 1 per frame); dissoc'd when the PDF view unmounts (ADR-0045). |
 
 ---
 
@@ -172,7 +173,9 @@ Important slices:
  :facet-mru {:preview "/abs/path/paper.pdf"            ; the last file chosen per facet type — a combo
              :source  "/abs/path/paper.tex"}           ;   button's MAIN region re-activates it
  :diff-view nil                                        ; nil (width-adaptive default) | :unified | :split
- :diff-collapsed #{"vv-diff-file-0"}}                  ; collapsed per-file diff previews (ADR-0037)
+ :diff-collapsed #{"vv-diff-file-0"}                   ; collapsed per-file diff previews (ADR-0037)
+ :pdf-layout :slides}                                  ; explicit PDF layout of THIS document view (ADR-0045):
+                                                       ;   :slides | :document; absent = detection + preference
 ```
 
 The tab's current `:uri` mirrors the current history entry, and may be a **virtual
@@ -181,8 +184,10 @@ paths are also the retained paths used for watcher/cache ownership. A history en
 `{:uri :scroll :line :facet}`: `:scroll` is the preview's pixel `scrollTop`, `:line` the Source view's top line
 (CodeMirror scrolls internally), and `:facet` the entry's facet. The per-tab `:facet` `{:path :type}` selects *which
 file of the collocated group* is shown and *as which type* (`:preview`/`:source`) — it replaced the retired
-`:view-source?` and `:representation` axes (`vinary.app.facet`). `:facet`, `:facet-mru` and `:diff-collapsed` are
-**cleared when the tab navigates to a different URI** (`nav-active`, `nav-tab`, `step`); `:diff-view` is sticky
+`:view-source?` and `:representation` axes (`vinary.app.facet`). `:facet`, `:facet-mru`, `:diff-collapsed` and `:pdf-layout` are
+**cleared when the tab navigates to a different URI** (`nav-active`, `nav-tab`, `step`). `:pdf-layout` is also
+written onto the current history entry (like `:facet`), so Back/Forward restores it and a facet switch within the
+document group carries it over (ADR-0045 D14); `:diff-view` is sticky
 (an explicit Unified/Split pick survives navigation; `nil` follows the width-adaptive default of
 [ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)).
 

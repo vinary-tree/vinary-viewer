@@ -14,6 +14,18 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Slide decks open as slides (ADR-0045): a PDF recognized as a deck -- a Beamer
+      deck (its Creator tag, or Beamer paper + a TeX producer), a PDF that asks to
+      open in full-screen mode, or a PowerPoint / Google Slides export (their exact
+      page canvas) -- opens in a SLIDES layout: one slide per screen at its own
+      fit, centred, with no scrollbar. The wheel flips one slide per notch, Beamer
+      overlays are grouped into frames from the deck's page labels, and links jump
+      with a Back/Forward history. Find, the Contents outline, text selection and
+      links keep working (every page stays in the document). Any PDF can switch
+      between the Slides and Document layouts, the choice is remembered for that
+      document view (Back/Forward restores it; a new document starts fresh), and a
+      live refresh keeps the slide being shown. Zoom is inert in the Slides layout
+      (slides fit themselves). Landscape pages alone never make a deck.
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a

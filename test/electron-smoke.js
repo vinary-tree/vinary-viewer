@@ -1761,6 +1761,88 @@ async function main() {
     console.log('[ok] PDF slide-deck detection: Beamer / slide export / FullScreen page mode / landscape non-deck');
   }
 
+  // ── SLIDES LAYOUT (ADR-0045): a detected deck opens one slide per viewport slot; navigation is by slide ──
+  {
+    const { makeDeckPdf, pageColour } = require('./fixtures/pdf-gen');
+    // the last fixture of the detection arm is the landscape non-deck: it must stay in the document layout
+    assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`), false,
+      'a PDF that is not a deck stays in the continuous document layout');
+    const deckPath = path.join(ROOT, 'test', 'fixtures', 'slides-deck.pdf');   // virtual path; bytes below
+    const frames = [1, 3, 1, 2];                                                // 7 pages, 4 frames (beamer labels)
+    state.contentByPath.set(deckPath, { path: deckPath, kind: 'pdf', bytes: new Uint8Array(makeDeckPdf({ frames })), stamp: Date.now() });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(deckPath)})`);
+    await waitCalm(win, `(() => { const d = document.querySelector('.vv-pdf-doc.vv-pdf-slides');
+      return Boolean(d && d.dataset.deck === 'beamer' && d.querySelector('#vv-pdf-page-1 canvas.vv-pdf-canvas'))
+        && (window.__vvdb().ui.slides || {}).page === 0; })()`,
+      'a Beamer deck opens in the slides layout on its first slide', 15000);
+    const geom = await evalIn(win, `(() => { const c = document.querySelector('.vv-content');
+      const slots = [...document.querySelectorAll('.vv-pdf-doc .vv-pdf-page')];
+      return { cw: c.clientWidth, ch: c.clientHeight, overflow: getComputedStyle(c).overflowY,
+               sizes: slots.map((s) => [s.offsetWidth, s.offsetHeight]),
+               sheet: (() => { const r = slots[0].querySelector('.vv-pdf-sheet').getBoundingClientRect(),
+                                     q = slots[0].getBoundingClientRect();
+                               return { dx: Math.abs((r.left - q.left) - (q.right - r.right)),
+                                        dy: Math.abs((r.top - q.top) - (q.bottom - r.bottom)) }; })(),
+               slides: window.__vvdb().ui.slides }; })()`);
+    assert.strictEqual(geom.overflow, 'hidden', 'the slides layout hides the scroller\'s scrollbar');
+    assert.ok(geom.sizes.length === 7 && geom.sizes.every(([w, h]) => w === geom.cw && h === geom.ch),
+      `every slot is exactly the pane (${geom.cw}×${geom.ch}): ${JSON.stringify(geom.sizes)}`);
+    assert.ok(geom.sheet.dx <= 1 && geom.sheet.dy <= 1, `each slide is centred in its slot (${JSON.stringify(geom.sheet)})`);
+    assert.deepStrictEqual([geom.slides.pages, geom.slides.frames, String(geom.slides.layout)], [7, 4, 'slides']);
+
+    const at = async (label) => {
+      await waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {}; const c = document.querySelector('.vv-content');
+        const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+      return evalIn(win, `window.__vvdb().ui.slides`);
+    };
+    await evalIn(win, `window.__vvslides('next')`);
+    let s = await at('next → slide 2');
+    assert.deepStrictEqual([s.page, s.frame, s.overlay, s.overlays, s.label], [1, 1, 0, 3, '2'],
+      'the second page is overlay 1/3 of frame 2');
+    await evalIn(win, `window.__vvslides('next-frame')`);
+    s = await at('next-frame skips the remaining overlays');
+    assert.strictEqual(s.page, 4, 'next-frame lands on frame 3 (page 5)');
+    await evalIn(win, `window.__vvslides('prev-frame')`);
+    s = await at('prev-frame shows the previous frame fully built');
+    assert.strictEqual(s.page, 3, 'prev-frame lands on the LAST overlay of frame 2 (page 4)');
+    // the wheel: one notch-sized flick flips exactly one slide (pdf.js presentation-mode accumulation)
+    await evalIn(win, `document.querySelector('.vv-content').dispatchEvent(new WheelEvent('wheel', { deltaY: 240, deltaMode: 0, bubbles: true })); true`);
+    s = await at('a wheel notch flips one slide');
+    assert.strictEqual(s.page, 4, 'the wheel advanced one slide');
+    await evalIn(win, `window.__vvslides('last')`);
+    s = await at('last');
+    assert.strictEqual(s.page, 6);
+    await evalIn(win, `window.__vvslides('back')`);
+    s = await at('back returns to where the jump came from');
+    assert.strictEqual(s.page, 4, 'GoBack history after a jump');
+    // the SHOWN slide is really that page: its canvas centre has page 5's fill colour
+    await waitCalm(win, `Boolean(document.querySelector('#vv-pdf-page-5 canvas.vv-pdf-canvas'))`, 'slide 5 rendered', 8000);
+    const px = await evalIn(win, `(() => { const cv = document.querySelector('#vv-pdf-page-5 canvas.vv-pdf-canvas');
+      const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+      return [d[0], d[1], d[2]]; })()`);
+    const want = pageColour(4);
+    assert.ok(px.every((v, i) => Math.abs(v - want[i]) <= 8), `slide 5's centre pixel ${px} ≈ its fill ${want}`);
+
+    // View as Document keeps the page: the current slide's page sits at the top of the continuous layout
+    await evalIn(win, `window.__vvslides('layout', 'document')`);
+    // (the continuous layout keeps its 16 px gutter above a page — the same alignment scroll-to-page! gives links)
+    await waitCalm(win, `(() => { const c = document.querySelector('.vv-content'); const p = document.getElementById('vv-pdf-page-5');
+      const dy = p.getBoundingClientRect().top - c.getBoundingClientRect().top;
+      return !document.querySelector('.vv-pdf-slides') && getComputedStyle(c).overflowY !== 'hidden'
+        && dy >= -1 && dy <= 24; })()`, 'View as Document keeps page 5 at the top', 8000);
+    await evalIn(win, `window.__vvslides('layout', null)`);
+    s = await (async () => { await waitCalm(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`, 'back to slides', 8000); return at('back on slide 5'); })();
+    assert.strictEqual(s.page, 4, 'returning to the slides layout keeps the page');
+
+    // a live refresh (one more frame appended) keeps the slide
+    win.webContents.send('vv:content', { path: deckPath, kind: 'pdf', bytes: new Uint8Array(makeDeckPdf({ frames: [...frames, 1] })), stamp: Date.now() + 1 });
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).pages === 8`, 'the refreshed deck (8 pages) is swapped in', 15000);
+    s = await at('the refresh keeps the current slide');
+    assert.strictEqual(s.page, 4, 'a live refresh keeps the slide being shown');
+    console.log('[ok] PDF slides layout: slots fill the pane, page/frame/wheel/jump navigation, layout toggle + refresh keep the slide');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

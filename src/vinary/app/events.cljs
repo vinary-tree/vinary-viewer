@@ -20,6 +20,7 @@
             [vinary.app.tree-state :as tree-state]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
+            [vinary.app.slides :as slides]
             [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.app.fx]
             [vinary.input.fx]))
@@ -1791,9 +1792,11 @@
 (rf/reg-event-fx
  :view/zoom
  (fn [{:keys [db]} [_ dir]]
-   ;; context-aware: PDF → in-renderer pdf scale; web tab → the native web view; else → app window
+   ;; context-aware: PDF → in-renderer pdf scale; web tab → the native web view; else → app window. A PDF in the
+   ;; slides layout fits each slide to the pane, so zoom is a no-op there (and must not clear the window-wide
+   ;; :fit other PDF tabs use — ADR-0045).
    (case (zoom/context db)
-     :pdf    {:fx [[:dispatch [:pdf/zoom (case dir 1 :in -1 :out :reset)]]]}
+     :pdf    (if (slides/slides-view? db) {} {:fx [[:dispatch [:pdf/zoom (case dir 1 :in -1 :out :reset)]]]})
      :web    {:fx [[:vv/http-zoom dir]]}
      :window {:fx [[:vv/zoom dir]]})))
 
@@ -1803,7 +1806,9 @@
    ;; absolute zoom to `pct`% (zoom-bar input / preset), routed to the active surface
    (let [f (/ (max 10 (min 800 pct)) 100.0)]
      (case (zoom/context db)
-       :pdf    {:db (-> db (assoc-in [:ui :pdf :scale] (pdf-layout/clamp-zoom f)) (assoc-in [:ui :pdf :fit] nil))}
+       :pdf    (if (slides/slides-view? db)
+                 {}
+                 {:db (-> db (assoc-in [:ui :pdf :scale] (pdf-layout/clamp-zoom f)) (assoc-in [:ui :pdf :fit] nil))})
        :web    {:fx [[:vv/http-zoom-set f]]}
        :window {:fx [[:vv/zoom-set f]]}))))
 
@@ -1897,6 +1902,43 @@
  (fn [_ [_ path _stamp summary]]
    (let [tx (deck-tx (ds/snapshot) path summary)]
      (when (seq tx) {:fx [[:ds/transact tx]]}))))
+
+;; ---- slides layout (ADR-0045) -------------------------------------------------------------------------------
+;; The engine owns the slide show (vinary.renderer.pdf); app-db holds the document view's explicit layout choice
+;; (nav :pdf-layout) and a mirror of where the mounted slide show stands ([:ui :slides], from :slides/changed).
+(rf/reg-event-fx
+ :pdf/layout-toggle
+ (fn [{:keys [db]} _]
+   ;; View ▸ View as Slide Show ↔ View as Document: flip the EFFECTIVE layout of the shown PDF (self-gates: no-op
+   ;; when no PDF is showing)
+   (when (slides/pdf-shown? db)
+     {:fx [[:dispatch [:pdf/set-layout (if (= :slides (slides/effective-layout db)) :document :slides)]]]})))
+
+(rf/reg-event-fx
+ :pdf/set-layout
+ (fn [{:keys [db]} [_ layout]]
+   ;; record the explicit choice on the active document view (tab + current history entry); nil = follow
+   ;; detection + the :slides-open-as preference again
+   (when (and (slides/pdf-shown? db) (contains? #{:slides :document nil} layout))
+     {:db (nav/set-pdf-layout db layout)})))
+
+(rf/reg-event-db
+ :slides/changed
+ (fn [db [_ m]]
+   ;; the mounted engine's position report {:path :layout :page :pages :frame :frames :overlay :overlays :label
+   ;; :doc-gen} — one per animation frame at most; feeds the slide counter, menus and tests
+   (assoc-in db [:ui :slides] m)))
+
+(rf/reg-event-db
+ :slides/unmounted
+ (fn [db [_ path]]
+   (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)))
+
+(rf/reg-event-fx
+ :slides/command
+ (fn [_ [_ op]]
+   ;; a slide-navigation op (vinary.slides.deck/step) for the mounted slide show — palette, menus, tests
+   {:fx [[:slides/command op]]}))
 
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last

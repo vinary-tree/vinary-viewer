@@ -240,6 +240,8 @@
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
 (rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes stamp]}] (pdf-cache/put-bytes! path bytes stamp)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
+;; drive the mounted slide show (ADR-0045) through pdf-cache's pdf.js-free hook; a no-op without one
+(rf/reg-fx :slides/command  (fn [op] (pdf-cache/slides-command! op)))
 (rf/reg-fx :render-cache/invalidate
            (fn [{:keys [path stamp]}] (warm-cache/invalidate-path! path stamp)))
 (rf/reg-fx :render-cache/retain-only (fn [paths] (warm-cache/retain-only! paths)))
