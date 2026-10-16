@@ -29,6 +29,17 @@
    (when path {:label "Copy file path" :event [:clipboard/copy path]})
    (when path {:label "Copy file name" :event [:clipboard/copy (basename path)]})])
 
+(defn- pdf-slide-items
+  "A PDF's slide-show actions (ADR-0045), appended to its content-pane menu. `pdf` = {:page :layout :presenting?}:
+   the page right-clicked (0-based, or nil), the layout shown, and whether a show is running."
+  [{:keys [page layout presenting?]}]
+  (if presenting?
+    [:sep {:label "End Slide Show" :event [:slides/stop]}]
+    [:sep
+     {:label "Start Slide Show" :event [:slides/present {:from :first}]}
+     (when (some? page) {:label "Start From This Slide" :event [:slides/present {:from page}]})
+     {:label (if (= layout :slides) "View as Document" "View as Slide Show") :event [:pdf/layout-toggle]}]))
+
 (defn items-for
   [{:keys [kind root path uri text source-location source-line math-tex] :as target} vs? previewable?]
   (case kind
@@ -87,12 +98,14 @@
      (when source-line
        {:label "Go to source"       :event [:source/goto-line source-line]})]
     :preview-body
-    [(when (seq math-tex) {:label "Copy LaTeX" :event [:clipboard/copy math-tex]})
-     {:label "Copy"                 :event [:clipboard/copy (or text "")]}
-     (when source-location
-       {:label "Copy source location" :event [:clipboard/copy source-location]})
-     (when source-line
-       {:label "Go to source"       :event [:source/goto-line source-line]})]
+    (cond-> [(when (seq math-tex) {:label "Copy LaTeX" :event [:clipboard/copy math-tex]})
+             {:label "Copy"                 :event [:clipboard/copy (or text "")]}
+             (when source-location
+               {:label "Copy source location" :event [:clipboard/copy source-location]})
+             (when source-line
+               {:label "Go to source"       :event [:source/goto-line source-line]})]
+      ;; a PDF's content pane also offers its slide show (the pdf-view adds :pdf to the target)
+      (:pdf target) (into (pdf-slide-items (:pdf target))))
     :source-body
     [{:label "Copy"                 :event [:clipboard/copy (or text "")]}
      (when source-location

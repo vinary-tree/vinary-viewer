@@ -44,7 +44,12 @@ Settings persist as EDN (the keys below are exactly those the Preferences UI wri
  :code-ligatures? false                               ; Fira Code programming ligatures (default off)
  :sidebar-width 280            ; sidebar width in px
  :sidebar-visible? true        ; sidebar open / closed
- :stream? true}                ; progressive rendering of large documents
+ :stream? true                 ; progressive rendering of large documents
+ ;; slide decks (ADR-0045) — Preferences ▸ Slides
+ :slides-open-as :slides       ; a DETECTED deck opens as :slides (one per screen) or :document
+ :slides-overview-page :last   ; an overview tile shows (and opens) its frame :last (fully built) or :first
+ :slides-fullscreen? true      ; a slide show (F5) makes its window fullscreen
+ :slides-click-advance? true}  ; a click on the slide advances a running show (Shift+click goes back)
 ```
 
 Every font key is optional: an absent key falls back to the built-in default baked into
@@ -52,6 +57,12 @@ Every font key is optional: an absent key falls back to the built-in default bak
 means ligatures are off. Unknown keys are merged into the settings map but only known UI
 settings have visible effects. Beyond fonts and theme, `settings.edn` also remembers the
 **sidebar** width and open/closed state, so the shell reopens the way you left it.
+
+**Slides.** The four `:slides-*` keys are the Preferences dialog's *Slides* section (Alt+O, Alt+W, Alt+U, Alt+K).
+The two checkboxes default **on**: an absent key means on, and only an explicit `false` turns them off. Whether
+a *particular* PDF shows as slides or as a document is not a setting — it is chosen per document view (View ▸
+View as Slide Show / View as Document, the address bar's toggle) and remembered by Back/Forward; the
+`:slides-open-as` preference only decides how a *detected* deck opens the first time.
 
 ---
 
@@ -160,7 +171,8 @@ handled entirely in the main process (`vinary.main.window`):
 
 A saved position that is no longer on any connected display is dropped, so the
 window can never reopen off-screen; the normal (non-maximized) bounds are stored so
-un-maximizing restores the previous size.
+un-maximizing restores the previous size. Nothing is saved while the window is
+fullscreen (a slide show): the bounds from before it stay on disk.
 
 ---
 

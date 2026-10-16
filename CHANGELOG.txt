@@ -55,6 +55,15 @@ Added
       overlay, a click opens a tile, and Escape/Tab/o close it; opening a slide
       is a jump, so Back returns. Thumbnails render lazily near the viewport and
       far ones are released, so a 150-slide deck stays light.
+      Every slide action is also reachable without the keyboard: View ▸ View as
+      Slide Show / View as Document, Start Slide Show (F5), Start from Current
+      Slide (Shift+F5) and Slide Overview; the address bar's slides button;
+      right-click a page ▸ Start From This Slide (or End Slide Show); and in the
+      slides layout the bottom bar shows ◀ page / N ▶, the frame counter, the
+      overview and a Present button in place of the zoom control. Preferences
+      gains a Slides section: how detected decks open, which overlay an
+      overview tile shows, whether a show goes full screen, and whether a click
+      advances it.
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a
@@ -299,6 +308,9 @@ Added
       Markdown and Org too.
 
 Changed
+    - View ▸ Reflow Text's access key moved from R to W: R also belonged to Reset
+      Zoom, so Alt+V R could not reach both. The View menu now has no shared
+      access keys in any state (a test asserts it).
     - A PDF that changes on disk now refreshes IN PLACE: the new version is
       prepared beside the open one and swapped in without remounting the view,
       so there is no blank flash and the reading position (the page and how far

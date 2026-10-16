@@ -183,9 +183,10 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.git-graph` | The Commit Graph document (ADR-0040): a full-pane windowed view over the same `[:ui :commits]` store as the sidebar panel — lanes/refs/author/date columns, its own keyboard model (`[data-vv-keynav]`), shared selection. Geometry lives in `vinary.git.graph-geometry`. |
 | `vinary.ui.text-input` | The one text `<input>` whose DOM value is owned locally, so a re-render can never take a typed character back out of it. Used by the find bar, tree filter, palette, and Preferences fields. |
 | `vinary.ui.context-menu` | The themed right-click context menu: targets and actions. |
-| `vinary.ui.menubar` | The custom, theme-matched menu bar (File / View / Settings / Help), incl. the `View ▸ Fit` radio submenu. |
+| `vinary.ui.menubar` | The custom, theme-matched menu bar (File / View / Settings / Help), incl. the `View ▸ Fit` radio submenu and the PDF slide items (the flipping View as Slide Show ↔ Document, Start Slide Show, Start from Current Slide, Slide Overview); `realized-menu` is the pure filter/realize seam the tests use. |
 | `vinary.ui.menu-focus` | Pure helpers for keyboard focus inside custom menus (skipping separators/disabled rows). |
-| `vinary.ui.zoombar` | The always-visible bottom zoom bar: − / editable % field / preset dropdown / +, dispatching the context-aware `[:view/zoom …]`. |
+| `vinary.ui.zoombar` | The always-visible bottom zoom bar: − / editable % field / preset dropdown / +, dispatching the context-aware `[:view/zoom …]`; in the slides layout it shows the slide bar instead (slides fit themselves). |
+| `vinary.ui.slides-bar` | The slide controls outside the slide (ADR-0045): the bottom bar's ◀ page / N ▶ · frame · Overview · Present (the page field takes physical page numbers) and the address bar's View as Slide Show ↔ Document toggle — both hand the keyboard back to the slides. |
 | `vinary.ui.palette` | Command palette / fuzzy finder: one overlay, three sources (`:command`/`:file`/`:theme`). The overlay only — candidate assembly lives in `vinary.app.palette` behind the `:palette/candidates` sub. |
 | `vinary.ui.settings` | The Preferences dialog: variable + fixed-width fonts, sizes, and view prefs (theme lives here too). |
 | `vinary.ui.extensions` | Settings ▸ Extensions dialog: ad-blocking controls + the Chrome-extension manager. |

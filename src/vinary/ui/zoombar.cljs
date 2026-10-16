@@ -5,7 +5,8 @@
    the native web view, or the app-renderer DOM views). The % reflects the active surface's live zoom."
   (:require [re-frame.core :as rf]
             [reagent.core :as r]
-            [vinary.app.zoom :as zoom]))
+            [vinary.app.zoom :as zoom]
+            [vinary.ui.slides-bar :as slides-bar]))
 
 (defn zoombar []
   (let [open? (r/atom false)         ; preset dropdown open?
@@ -18,6 +19,10 @@
                         (when-not (js/isNaN v) (rf/dispatch [:view/zoom-set v])))
                       (reset! draft nil))]
         [:div.vv-bottombar
+         (if @(rf/subscribe [:slides/view?])
+           ;; a PDF in the slides layout: slides fit themselves (zoom is inert there), so the bar carries the
+           ;; slide controls instead (ADR-0045)
+           [slides-bar/bar]
          [:div.vv-zoom {:on-mouse-leave #(reset! open? false)}
           [:button.vv-zoom-btn {:title "Zoom out (Ctrl+-)" :on-click #(rf/dispatch [:view/zoom -1])} "−"]
           [:div.vv-zoom-field
@@ -44,4 +49,4 @@
                                    :on-mouse-down (fn [^js e] (.preventDefault e)
                                                     (rf/dispatch [:view/zoom-set p]) (reset! open? false))}
                   (str (if (= p pct) "✓ " "") p "%")]))])]
-          [:button.vv-zoom-btn {:title "Zoom in (Ctrl++)" :on-click #(rf/dispatch [:view/zoom 1])} "+"]]]))))
+          [:button.vv-zoom-btn {:title "Zoom in (Ctrl++)" :on-click #(rf/dispatch [:view/zoom 1])} "+"]])]))))

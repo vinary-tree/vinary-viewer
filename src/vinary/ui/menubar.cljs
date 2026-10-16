@@ -7,6 +7,7 @@
             [re-frame.db :as rfdb]
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
+            [vinary.app.slides :as slides]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
             [vinary.file-type :as file-type]
@@ -38,9 +39,21 @@
             {:label "Zoom Out"       :access-key "o" :accel "Ctrl+-" :event [:view/zoom -1]}
             {:label "Reset Zoom"     :access-key "r" :accel "Ctrl+0" :event [:view/zoom 0]}
             :sep
-            {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-only true}
+            ;; Fit applies to the continuous document layout only (slides fit themselves, ADR-0045)
+            {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-doc-only true}
             {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle] :pdf-only true}
-            {:label "Reflow Text"       :access-key "r" :event [:pdf/reflow-toggle] :pdf-only true}
+            ;; w (Reflo-w), not r: r is Reset Zoom's, and two visible items must never share an access key
+            {:label "Reflow Text"       :access-key "w" :event [:pdf/reflow-toggle] :pdf-only true}
+            ;; slide shows (ADR-0045) — ONE flipping layout item (realize-item turns it into "View as Document",
+            ;; key m, while the slides layout shows), then the show itself and, in the slides layout, the overview
+            {:label "View as Slide Show" :dyn-label :slides-layout-toggle :access-key "l"
+             :event [:pdf/layout-toggle] :pdf-only true}
+            {:label "Start Slide Show"         :access-key "h" :accel "F5"
+             :event [:slides/present {:from :first}] :pdf-only true}
+            {:label "Start from Current Slide" :access-key "u" :accel "Shift+F5"
+             :event [:slides/present {:from :current}] :pdf-only true}
+            {:label "Slide Overview"           :access-key "e" :accel "Tab"
+             :event [:slides/overview {:open? true}] :slides-only true}
             ;; diff-only (ADR-0037): ONE toggling item — realize-item flips its label to "Expand All
             ;; Files" once every file is collapsed; the static :event picks the right direction itself.
             {:label "Collapse All Files" :dyn-label :diff-collapse-toggle :access-key "a"
@@ -135,6 +148,7 @@
 (defn- menu-ctx-now []
   (let [db @rfdb/app-db]
     {:pdf?  (= :pdf (zoom/context db))
+     :slides? (slides/slides-view? db)
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
@@ -142,6 +156,10 @@
   (cond
     (not (map? item)) true                     ; :sep — kept here, tidied by clean-seps
     (:pdf-only item)  (:pdf? ctx)
+    ;; a PDF in the continuous document layout (Fit has no meaning in the slides layout)
+    (:pdf-doc-only item) (and (:pdf? ctx) (not (:slides? ctx)))
+    ;; a PDF in the slides layout (the overview grid)
+    (:slides-only item)  (and (:pdf? ctx) (:slides? ctx))
     (:diff-only item) (:diff? ctx)
     (:dev-only item)  ^boolean js/goog.DEBUG    ; false in :release → re-frame-10x hidden there
     :else             true))
@@ -150,8 +168,13 @@
   "Realize a dynamic item label from the menu ctx. The item keeps a STATIC default :label (raw-`menus`
    readers and tests stay sane) and a static :event — only its displayed name flips."
   [ctx item]
-  (if (and (map? item) (= :diff-collapse-toggle (:dyn-label item)))
+  (case (when (map? item) (:dyn-label item))
+    :diff-collapse-toggle
     (assoc item :label (if (:diff-all-collapsed? ctx) "Expand All Files" "Collapse All Files"))
+    ;; the flipped label carries its own access key: no letter is free in BOTH labels, and an access key must be
+    ;; a letter of the label it underlines
+    :slides-layout-toggle
+    (if (:slides? ctx) (assoc item :label "View as Document" :access-key "m") item)
     item))
 
 (defn- clean-seps
@@ -169,6 +192,12 @@
                               (filterv (partial item-visible? ctx) items))))))
 
 (defn- effective-menus [ctx] (mapv #(filter-items ctx %) menus))
+
+(defn realized-menu
+  "PURE (tests): the menu labelled `label` as it shows for menu context `ctx` ({:pdf? :slides? :diff?
+   :diff-all-collapsed?}) — conditional items filtered, dynamic labels realized."
+  [ctx label]
+  (some (fn [m] (when (= (:label m) label) (filter-items ctx m))) menus))
 
 (defn- menu-index [label]
   (first (keep-indexed (fn [idx m] (when (= (:label m) label) idx)) menus)))
@@ -443,6 +472,7 @@
         access-active? @(rf/subscribe [:ui/access-keys-active?])
         ;; the reactive render-side twin of menu-ctx-now (the keyboard path reads app-db directly)
         ctx {:pdf?  @(rf/subscribe [:view/pdf-active?])
+             :slides? @(rf/subscribe [:slides/view?])
              :diff? @(rf/subscribe [:view/diff-active?])
              :diff-all-collapsed? @(rf/subscribe [:diff/all-collapsed?])}
         root (cond-> [:div.vv-menubar {:role "menubar"}]

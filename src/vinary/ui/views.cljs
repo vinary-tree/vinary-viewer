@@ -39,6 +39,7 @@
             [vinary.ui.ssh :as ssh-ui]
             [vinary.ui.refresh-note :as refresh-note]
             [vinary.ui.slides-hud :as slides-hud]
+            [vinary.ui.slides-bar :as slides-bar]
             [vinary.ui.slides-overview :as slides-overview]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
@@ -864,10 +865,20 @@
         gen*    (atom 0)              ; fences a preparation finishing after unmount / supersession
         vstate  (atom nil)            ; latest :pdf/view-state (captured reactively in render)
         on-ctx  (fn [^js e]
-                  (let [{:keys [text]} (selection-or-term @node e)]
+                  (let [{:keys [text]} (selection-or-term @node e)
+                        ;; the page right-clicked (its slot / page div id is vv-pdf-page-N, 1-based) and the view's
+                        ;; slide-show facts — the menu offers Start From This Slide / the layout toggle (ADR-0045)
+                        page-id (some-> (.-target e) (.closest ".vv-pdf-page") .-id)
+                        page    (when-let [[_ n] (and page-id (re-matches #"vv-pdf-page-(\d+)" page-id))]
+                                  (dec (js/parseInt n 10)))
+                        vs      @vstate]
                     (.preventDefault e) (.stopPropagation e)
-                    (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
-                                                      :target {:kind :preview-body :text (or text "")}}])))
+                    (rf/dispatch [:context-menu/show
+                                  {:x (.-clientX e) :y (.-clientY e)
+                                   :target {:kind :preview-body :text (or text "")
+                                            :pdf  {:page        page
+                                                   :layout      (or (some-> @ctrl deref :layout) :document)
+                                                   :presenting? (boolean (:presenting? vs))}}}])))
         release! (fn [lease] (when-let [r (:release! lease)] (r)))
         prepare  (fn [path stamp bytes]
                    (warm-cache/acquire! {:key [:pdf path stamp]
@@ -1733,6 +1744,8 @@
             (when (and completion-current? (:error? uc))
               [:div.vv-uri-errmsg "No matching file or directory"])])
          [view-switch-toolbar]
+         ;; a PDF's View as Slide Show ↔ View as Document toggle (ADR-0045)
+         [slides-bar/toolbar-button]
          [passwords-ui/toolbar-button]
          [ext-toolbar/ext-toolbar]]))))
 

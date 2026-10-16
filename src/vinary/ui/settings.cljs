@@ -55,6 +55,11 @@
             "g" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='g']")
             "t" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='t']")
             "h" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='h']")
+            ;; Slides (ADR-0045)
+            "o" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='o']")
+            "w" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='w']")
+            "u" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='u']")
+            "k" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='k']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
       (access/consume! e))))
@@ -96,4 +101,31 @@
           [:option {:value "approximate"} "Approximate"]
           [:option {:value "fzf"} "FZF"]]]
         [check-field "English sound-alike matches in prose (Approximate)" "h" :find-phonetic?
-         (boolean (:find-phonetic? s)) access-active?]]])))
+         (boolean (:find-phonetic? s)) access-active?]
+        ;; slide decks (ADR-0045). The two checkboxes DEFAULT ON — an unset key reads true (only an explicit
+        ;; false opts out), matching vinary.app.slides/fullscreen-preferred? and click-advance?
+        [:div.vv-pref-section "Slides"]
+        [:div.vv-pref-row
+         [:label.vv-pref-label {:for "vv-slides-open-as"}
+          [access/label "Open detected slide decks as" "o" access-active?]]
+         [:select.vv-pref-input (merge {:id "vv-slides-open-as"
+                                        :value (if (= :document (:slides-open-as s)) "document" "slides")
+                                        :on-change #(rf/dispatch [:settings/set :slides-open-as
+                                                                  (keyword (.. % -target -value))])}
+                                       (access/access-attrs "o"))
+          [:option {:value "slides"} "Slides (one per screen)"]
+          [:option {:value "document"} "Document (continuous pages)"]]]
+        [:div.vv-pref-row
+         [:label.vv-pref-label {:for "vv-slides-overview-page"}
+          [access/label "Overview shows each frame" "w" access-active?]]
+         [:select.vv-pref-input (merge {:id "vv-slides-overview-page"
+                                        :value (if (= :first (:slides-overview-page s)) "first" "last")
+                                        :on-change #(rf/dispatch [:settings/set :slides-overview-page
+                                                                  (keyword (.. % -target -value))])}
+                                       (access/access-attrs "w"))
+          [:option {:value "last"} "Fully built (its last overlay)"]
+          [:option {:value "first"} "At its first overlay"]]]
+        [check-field "Present full screen" "u" :slides-fullscreen?
+         (not= false (:slides-fullscreen? s)) access-active?]
+        [check-field "Click advances the slide show" "k" :slides-click-advance?
+         (not= false (:slides-click-advance? s)) access-active?]]])))

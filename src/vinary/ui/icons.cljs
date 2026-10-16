@@ -42,7 +42,9 @@
    ;; slide shows (ADR-0045): the toolbar's slide-show toggle, the overview grid, presenting
    :slides           "fa-solid fa-person-chalkboard"
    :overview         "fa-solid fa-table-cells"
-   :present          "fa-solid fa-play"})
+   :present          "fa-solid fa-play"
+   :slide-prev       "fa-solid fa-chevron-left"
+   :slide-next       "fa-solid fa-chevron-right"})
 
 (def ^:private code  "fa-solid fa-file-code")
 (def ^:private image "fa-solid fa-file-image")

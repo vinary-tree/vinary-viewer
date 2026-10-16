@@ -126,6 +126,12 @@ the same in every bundled set and can be overridden like a mode, under `:keymaps
 palette's **Slides** commands (Next slide, Next frame, First slide, …) are offered only while a PDF is in the
 slides layout; **View as slide show / document** switches any PDF's layout.
 
+Without the keyboard: **View ▸ View as Slide Show** (or the address bar's slides button) switches any PDF
+between the slides and document layouts; **View ▸ Start Slide Show** / **Start from Current Slide** and
+**Slide Overview** mirror `F5`, `Shift+F5` and `Tab`; right-clicking a page offers **Start From This Slide**;
+and in the slides layout the bottom bar carries ◀ page ▶, the frame counter, the overview and a Present
+button in place of the zoom control (slides fit themselves).
+
 A **slide show** (`F5`) shows the slides layout full-window: the menus, sidebar, tabs, address bar and status
 bar hide, the slide fills the window on black with no margin, and the window goes fullscreen — only the
 window you started it in, and only while the show runs (a window you had already made fullscreen stays

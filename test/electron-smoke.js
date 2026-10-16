@@ -2093,6 +2093,85 @@ async function main() {
       + ` (live canvases ${top.canvases} at the top, ${bottom.canvases} at the end, of 150 tiles; band ${top.near}/${bottom.near})`);
   }
 
+  // ── ENTRY POINTS (ADR-0045 §Entry points): any PDF can become a slide show from the View menu, the address bar's
+  // toggle, the slide bar and the content-pane context menu; Preferences can opt out of fullscreen.
+  {
+    const { makeDeckPdf } = require('./fixtures/pdf-gen');
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && s.layout === 'slides' && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const openMenu = async (menu) => {
+      await evalIn(win, `(() => { const l = Array.from(document.querySelectorAll('.vv-menubar .vv-menu-label'))
+        .find((el) => el.textContent.trim().startsWith(${JSON.stringify(menu)})); l.click(); return true; })()`);
+      await waitCalm(win, `Boolean(document.querySelector('.vv-menu-dropdown'))`, `the ${menu} menu opens`, 4000);
+    };
+    const menuLabels = () => evalIn(win, `Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item'))
+      .map((n) => (n.querySelector('.vv-menu-item-label') || n).textContent.trim())`);
+    const clickMenu = (label) => evalIn(win, `(() => { const it = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item'))
+      .find((n) => (n.querySelector('.vv-menu-item-label') || n).textContent.trim() === ${JSON.stringify(label)});
+      if (!it) return false; it.click(); return true; })()`);
+    // an ordinary (non-deck) PDF: it opens as a document
+    const docPath = path.join(ROOT, 'test', 'fixtures', 'entry-doc.pdf');   // virtual path; bytes below
+    state.contentByPath.set(docPath, { path: docPath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(makeDeckPdf({ pages: 4, sizes: [[612, 792], [612, 792], [612, 792], [612, 792]], labels: null,
+                                          creator: 'Mozilla/5.0 Chrome', producer: 'Skia/PDF m142' })) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(docPath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).pages === 4 && (window.__vvdb().ui.slides || {}).layout === 'document'
+      && !document.querySelector('.vv-pdf-slides')`, 'the non-deck PDF opens as a document', 15000);
+    // View menu: Fit (document layout only), the layout toggle, the show items; no overview yet
+    await openMenu('View');
+    let ls = await menuLabels();
+    for (const want of ['Fit', 'Invert PDF', 'Reflow Text', 'View as Slide Show', 'Start Slide Show', 'Start from Current Slide']) {
+      assert.ok(ls.some((l) => l.startsWith(want)), `View offers "${want}" for a PDF: ${JSON.stringify(ls)}`);
+    }
+    assert.ok(!ls.some((l) => l.startsWith('Slide Overview')), 'no overview outside the slides layout');
+    assert.strictEqual(await clickMenu('View as Slide Show'), true);
+    await slidesAt(0, 'View ▸ View as Slide Show switches any PDF to the slides layout');
+    await openMenu('View');
+    ls = await menuLabels();
+    assert.ok(ls.includes('View as Document') && !ls.some((l) => l.startsWith('Fit')) && ls.some((l) => l.startsWith('Slide Overview')),
+      `in the slides layout the toggle flips, Fit hides and the overview shows: ${JSON.stringify(ls)}`);
+    await evalIn(win, `document.querySelector('.vv-menu-overlay').click(); true`);
+    // the slide bar replaces the zoom control: ▶ advances, the page field goes to a physical page
+    await waitCalm(win, `Boolean(document.querySelector('.vv-bottombar .vv-slides-bar')) && !document.querySelector('.vv-bottombar .vv-zoom')`,
+      'the slide bar replaces the zoom control in the slides layout', 4000);
+    await evalIn(win, `document.querySelector('.vv-slides-bar-btn[aria-label="Next slide"]').click(); true`);
+    await slidesAt(1, '▶ advances');
+    assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+      'the bar hands the keyboard back to the slides');
+    await evalIn(win, `(() => { const i = document.querySelector('.vv-slides-bar-page'); i.focus();
+      const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      set.call(i, '4'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await sendChord(win, 'Enter');
+    await slidesAt(3, 'typing 4 + Enter in the page field goes to page 4');
+    // the address bar's toggle flips back to the document layout (and focus returns to the content)
+    await evalIn(win, `document.querySelector('.vv-slides-toggle').click(); true`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'document' && !document.querySelector('.vv-pdf-slides')
+      && Boolean(document.querySelector('.vv-bottombar .vv-zoom'))`, 'the toolbar toggle returns to the document layout', 8000);
+    assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+      'a focused toolbar button would eat the next Space — focus is back on the content');
+    // the context menu: Start From This Slide on page 3 → a show from page 3 (Preferences: fullscreen OFF)
+    await evalIn(win, `window.__vvdb && true`);
+    win.webContents.send('vv:settings', '{:slides-fullscreen? false}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-fullscreen?'] === false`, 'the fullscreen preference is off', 4000);
+    const fsBefore = (state.fullscreenRequests || []).length;
+    await evalIn(win, `(() => { const p = document.getElementById('vv-pdf-page-3'); p.scrollIntoView(); const r = p.getBoundingClientRect();
+      p.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2,
+        clientX: r.left + r.width / 2, clientY: r.top + Math.min(40, r.height / 2) })); return true; })()`);
+    await waitCalm(win, `Array.from(document.querySelectorAll('.vv-ctx-menu .vv-menu-item')).some((n) => n.textContent.includes('Start From This Slide'))`,
+      'the PDF context menu offers Start From This Slide', 4000);
+    await evalIn(win, `Array.from(document.querySelectorAll('.vv-ctx-menu .vv-menu-item')).find((n) => n.textContent.includes('Start From This Slide')).click(); true`);
+    await waitCalm(win, `Boolean((window.__vvdb().ui.presentation || {})['active?'])`, 'Start From This Slide starts a show', 8000);
+    await slidesAt(2, 'the show starts on the right-clicked page');
+    assert.strictEqual((state.fullscreenRequests || []).length, fsBefore, 'with "Present full screen" off, no fullscreen request');
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!window.__vvdb().ui.presentation`, 'Escape ends it', 4000);
+    // the slide bar's Present button is gone outside the slides layout; the document layout is restored
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'document'`, 'back to the document layout after the show', 8000);
+    win.webContents.send('vv:settings', '{:slides-fullscreen? true}');
+    console.log('[ok] PDF slide entry points: View menu (Fit/flip/show/overview gating), slide bar (▶, page field), toolbar toggle (focus back), context menu Start From This Slide, fullscreen preference');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.
@@ -4037,6 +4116,24 @@ async function main() {
   console.log('[ok] Settings: document-streaming toggle present, default-on, persists on toggle');
   win.webContents.send('vv:settings', '{:stream? true}');   // restore default-on for the rest of the run
   await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['stream?'] === true`), 'streaming restored after the toggle test');
+  // the Slides section (ADR-0045): two dropdowns + two default-ON checkboxes, each with its own Alt key
+  const slidesPrefs = await evalIn(win, `(() => {
+    const q = (sel) => document.querySelector(sel);
+    const sec = Array.from(document.querySelectorAll('.vv-pref-section')).some((n) => n.textContent.trim() === 'Slides');
+    return { sec, openAs: q(".vv-pref-input[data-vv-access-key='o']")?.value, overview: q(".vv-pref-input[data-vv-access-key='w']")?.value,
+             fullscreen: q(".vv-pref-checkbox[data-vv-access-key='u']")?.checked, click: q(".vv-pref-checkbox[data-vv-access-key='k']")?.checked };
+  })()`);
+  assert.deepStrictEqual(slidesPrefs, { sec: true, openAs: 'slides', overview: 'last', fullscreen: true, click: true },
+    'the Slides preferences show their defaults (decks open as slides, overview fully built, fullscreen + click on)');
+  await evalIn(win, `(() => { document.querySelector(".vv-pref-checkbox[data-vv-access-key='k']").click();
+    const sel = document.querySelector(".vv-pref-input[data-vv-access-key='w']");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    set.call(sel, 'first'); sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['slides-click-advance?'] === false
+    && window.__vvdb().ui.settings['slides-overview-page'] === 'first'`), 'the Slides preferences persist');
+  win.webContents.send('vv:settings', '{:slides-click-advance? true :slides-overview-page :last}');
+  await waitFor(() => evalIn(win, `window.__vvdb().ui.settings['slides-click-advance?'] === true`), 'slides preferences restored');
+  console.log('[ok] Settings: the Slides section shows its defaults and persists changes');
   await escModal();
   await waitFor(() => evalIn(win, `!window.__vvdb().ui['settings-open?']`), 'Esc closes the Settings dialog');
   console.log('[ok] Settings: autofocus + modality + focus-trap + live font edit + Esc-close');
