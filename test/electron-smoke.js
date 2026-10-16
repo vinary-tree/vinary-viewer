@@ -3084,14 +3084,23 @@ async function main() {
     assert.ok(!f1sel.selected || f1sel.selected.length === 0,
       `:selected stays empty on a plain click (got ${JSON.stringify(f1sel.selected)})`);
 
-    // 2 — the highlight minds the active TAB: a blank tab clears it, returning restores it
+    // 2 — the highlight minds the active TAB: a blank tab clears it, returning restores it.
+    //     Closing the blank tab reveals its POSITIONAL neighbour (right, else left — nav/close), and by this point
+    //     in the suite earlier arms have left other tabs open (the blank tab is appended after the Office
+    //     document's tab, not next to the diff's), so the arm returns to the diff tab explicitly: what it proves
+    //     is that -open follows the active tab, not which neighbour close-reveal picks (that is pinned by the
+    //     blank-tab arms above).
+    const diffTabId = await evalIn(win, `window.__vvdb().ui['active-tab']`);
     await sendChord(win, 'T', ['control']);
     await waitFor(() => evalIn(win, `!document.querySelector('.vv-commits-row-open')`),
       'a blank tab holds no commit diff → no row is -open', 8000);
     await sendChord(win, 'W', ['control']);
+    await waitFor(() => evalIn(win, `!window.__vvdb().ui.tabs.some((t) => t.uri == null)`),
+      'Ctrl+W closes the blank tab', 8000);
+    await clickTabId(diffTabId, 'return to the commit diff tab');
     await waitFor(() => evalIn(win,
       `Boolean(document.querySelector('.vv-commits-row-open[data-hash=${JSON.stringify(H[0])}]'))`),
-      'closing the blank tab re-activates the diff → its row is -open again', 8000);
+      'returning to the diff tab → its row is -open again', 8000);
 
     // 3 — Ctrl-click marking is STORED state; "Diff selected" opens the PAIR diff whose -open
     //     claims BOTH endpoint rows (range true)
