@@ -519,6 +519,16 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Closing the active tab now brings the revealed tab back where you left it --
+      its scroll position, source line, or slide -- like any other tab switch;
+      before, its view reopened at the top (or on a deck's first slide).
+    - The address bar no longer loses work to a quick tab switch. An address
+      typed and entered right after switching tabs keeps its "No matching file
+      or directory" error instead of having it wiped by the bar's deferred
+      re-sync; an address edit on a loaded document is dropped when you leave
+      the tab even if you come straight back before the next frame; and a
+      Ctrl+L focus request that a tab switch overtook no longer steals the
+      keyboard from the document you switched to.
     - Remote files (ssh:// and sftp://) on a nearby host load about 5x faster.
       The SSH connection now turns off Nagle's algorithm (TCP_NODELAY), as
       OpenSSH's sshd already does on its side. Until now, every SFTP read
