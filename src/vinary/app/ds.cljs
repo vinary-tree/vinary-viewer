@@ -68,4 +68,4 @@
                 :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta
                 :doc/sourceable? :doc/data-url :doc/reflow-html :doc/siblings :doc/diff-split-html :doc/diff-targets
                 :doc/streaming? :doc/stream-progress :doc/stream-note :doc/git-root :doc/git
-                :doc/refresh-note] eid)))
+                :doc/refresh-note :doc/deck] eid)))

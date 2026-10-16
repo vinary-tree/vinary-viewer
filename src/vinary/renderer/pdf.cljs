@@ -7,6 +7,8 @@
    (scripts/sync-pdfjs.mjs). Pure geometry/zoom/outline helpers live in vinary.renderer.pdf-layout."
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
+            [vinary.slides.deck :as deck]
+            [vinary.slides.evidence :as evidence]
             [vinary.renderer.toc :as toc]
             [vinary.ir.node :as node]
             [vinary.ir.frontend.pdf :as pdf-fe]
@@ -594,22 +596,37 @@
 
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------
 (defn prepare!
-  "Load a PDF once and compute its intrinsic page sizes. The returned DOM-free artifact may
-   be leased across view mounts; `dispose-prepared!` owns the eventual pdf.js destruction."
+  "Load a PDF once, measure its intrinsic page sizes, and classify it as a slide deck (ADR-0045) — the evidence
+   (Info/XMP creator, page mode, page labels) is read IN PARALLEL with the page measurement, so detection adds
+   no round trip and the FIRST mount already knows whether to use the slides layout. Returns the DOM-free
+   artifact {:doc :sizes :deck}, which may be leased across view mounts; `dispose-prepared!` owns the eventual
+   pdf.js destruction. Detection runs here, in the renderer, on the loaded document — so it behaves identically
+   for a local file, an ssh:// / sftp:// URI, an archive member or a web-linked PDF."
   [bytes]
   (-> (get-document bytes)
       (.then (fn [^js doc]
-               (-> (page-sizes doc)
-                   (.then (fn [sizes] {:doc doc :sizes sizes})))))))
+               (-> (js/Promise.all #js [(page-sizes doc) (evidence/gather doc)])
+                   (.then (fn [^js results]
+                            (let [sizes (aget results 0)]
+                              {:doc   doc
+                               :sizes sizes
+                               :deck  (deck/deck (assoc (aget results 1) :sizes sizes))}))))))))
+
+(defn- mark-deck!
+  "Expose the classification on the view element (data-deck = source, or empty): CSS and DOM-level tests
+   (incl. release builds, which hide re-frame) can read it."
+  [^js container d]
+  (set! (.. container -dataset -deck) (if (:deck? d) (name (:source d)) "")))
 
 (defn dispose-prepared! [{:keys [doc]}]
   (when doc (try (.destroy ^js doc) (catch :default _ nil))))
 
 (defn mount-prepared!
-  "Mount a leased `{doc sizes}` artifact into a fresh DOM surface. Per-mount canvases,
+  "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface. Per-mount canvases,
    observers, tasks, and text/link layers are still recreated and torn down normally."
-  [container {:keys [doc sizes]} path view-state]
+  [container {:keys [doc sizes] :as prepared} path view-state]
   (let [state (atom {:container container :path path :doc doc :owns-doc? false
+                     :deck (:deck prepared) :doc-gen 0
                      :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
@@ -618,6 +635,7 @@
     (swap! state assoc :ensure-fn ensure-fn)
     (cache/set-ensurer! ensure-fn)
     (toggle-class! container "vv-pdf-invert" (:invert? view-state))
+    (mark-deck! container (:deck prepared))
     (reset! current-doc {:doc doc :path path})
     (when (:fit view-state) (apply-fit! state (:fit view-state)))
     (build-placeholders! state)
@@ -628,37 +646,17 @@
     state))
 
 (defn mount!
-  "Render `bytes` (a PDF) into `container` (a .vv-pdf-doc div inside .vv-content). Returns a controller
-   atom — pass it to update!/unmount!/ensure-all-text!. `view-state` = {:scale n :fit kw :invert? b}.
-   Dispatches [:pdf/outline path toc] when the document outline resolves."
+  "Render `bytes` (a PDF) into `container` (a .vv-pdf-doc div inside .vv-content): `prepare!` followed by
+   `mount-prepared!`, with the controller OWNING the prepared document (destroyed on unmount). Returns a Promise
+   of the controller atom — pass it to update!/unmount!/ensure-all-text!. `view-state` = {:scale n :fit kw
+   :invert? b}. (The pdf-view leases prepared artifacts through the warm cache instead; routing this entry
+   point through the same two functions keeps the paths from drifting — it used to duplicate them and missed
+   every later addition, e.g. deck detection.)"
   [container bytes path view-state]
-  (let [state (atom {:container container :path path :doc nil
-                     :sizes [] :rects [] :page-divs [] :sheet-divs [] :toc-ids []
-                     :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
-                     :fit (:fit view-state) :invert? (boolean (:invert? view-state))
-                     :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
-        ensure-fn (fn [] (ensure-all-text! state))]
-    (swap! state assoc :ensure-fn ensure-fn)
-    (cache/set-ensurer! ensure-fn)
-    (toggle-class! container "vv-pdf-invert" (:invert? view-state))
-    (-> (get-document bytes)
-        (.then (fn [^js doc]
-                 (if (:destroyed? @state)
-                   (try (.destroy doc) (catch :default _ nil))
-                   (do (swap! state assoc :doc doc)
-                       (reset! current-doc {:doc doc :path path})   ; for opt-in reflow-html!
-                       (-> (page-sizes doc)
-                           (.then (fn [sizes]
-                                    (when-not (:destroyed? @state)
-                                      (swap! state assoc :sizes sizes)
-                                      (when (:fit view-state) (apply-fit! state (:fit view-state)))
-                                      (build-placeholders! state)
-                                      (observe! state)
-                                      (observe-resize! state)
-                                      (watch-dpr! state)
-                                      (extract-outline! state doc path)))))))))
-        (.catch (fn [e] (js/console.error "[pdf] load failed" e))))
-    state))
+  (-> (prepare! bytes)
+      (.then (fn [prepared]
+               (doto (mount-prepared! container prepared path view-state)
+                 (swap! assoc :owns-doc? true))))))
 
 (defn- reconcile-pages!
   "Grow or shrink the placeholder/sheet vectors (and the DOM) to `n` pages — a refreshed document may have
@@ -691,7 +689,7 @@
    double-buffered re-render swaps in, grows/shrinks the placeholders when the page count changed, and
    re-extracts the outline. The CALLER releases the previous artifact's lease afterwards — that is what
    destroys the old PDFDocumentProxy, never this function."
-  [state {:keys [doc sizes]}]
+  [state {:keys [doc sizes] :as prepared}]
   (when-not (:destroyed? @state)
     (let [{:keys [container rects observer path]} @state
           scroller (scroller-of container)
@@ -700,9 +698,11 @@
       ;; :gen fences in-flight work against the OLD document; :doc-gen counts document swaps (observers that
       ;; borrow the proxy — the overview grid — rebuild when it moves)
       (swap! state #(-> %
-                        (assoc :doc doc :sizes sizes :tasks {} :rendered #{} :text-built {} :toc-ids [])
+                        (assoc :doc doc :sizes sizes :deck (:deck prepared)
+                               :tasks {} :rendered #{} :text-built {} :toc-ids [])
                         (update :gen inc)
                         (update :doc-gen (fnil inc 0))))
+      (mark-deck! container (:deck prepared))
       (reconcile-pages! state (count sizes))
       (doseq [^js sheet (:sheet-divs @state)] (strip-layers! sheet))
       (when-let [mode (:fit @state)] (apply-fit! state mode))

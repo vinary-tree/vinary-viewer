@@ -1878,6 +1878,26 @@
    (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
      {:fx [[:ds/transact [[:db/add eid :doc/toc (vec toc)]]]]})))
 
+;; ---- slide-deck detection (ADR-0045) -------------------------------------------------------------------------
+;; The pdf engine classifies every PDF when it prepares it (vinary.slides.deck/classify over the evidence from
+;; vinary.slides.evidence) and the pdf-view reports the SUMMARY {:deck? :tier :source :pages :frame-count} here:
+;; it lands on the doc entity as :doc/deck for menus, the toolbar and the slide counter. The per-page vectors
+;; (frames, labels) stay in the prepared artifact — DataScript keeps lean entities (ADR-0010).
+(defn deck-tx
+  "Transaction storing `summary` as `path`'s :doc/deck — [] when the doc is gone or the value is unchanged (a
+   refresh that re-detects the same deck writes nothing, so it causes no re-render)."
+  [snap path summary]
+  (let [eid (ds/eid-for-path snap path)]
+    (if (and eid (map? summary) (not= summary (ds/doc-attr snap path :doc/deck)))
+      [[:db/add eid :doc/deck summary]]
+      [])))
+
+(rf/reg-event-fx
+ :pdf/deck-detected
+ (fn [_ [_ path _stamp summary]]
+   (let [tx (deck-tx (ds/snapshot) path summary)]
+     (when (seq tx) {:fx [[:ds/transact tx]]}))))
+
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last
 ;; good version and the doc carries a non-fatal :doc/refresh-note {:kind :message :stamp :at}, shown as a small

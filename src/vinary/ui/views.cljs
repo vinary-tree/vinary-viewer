@@ -16,6 +16,7 @@
             [vinary.renderer.pdf :as pdf]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.warm-cache :as warm-cache]
+            [vinary.slides.deck :as deck]
             [vinary.ui.tabs :as tabs]
             [vinary.ui.content-route :as content-route]
             [vinary.ui.text-input :as text-input]
@@ -890,6 +891,7 @@
                                       (reset! ctrl (pdf/mount-prepared! @node prepared path @vstate))
                                       (reset! shown [path stamp])
                                       (pdf-cache/promote! path stamp)
+                                      (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
                                       (rf/dispatch [:pdf/refreshed path stamp])
                                       (scroll/apply! @node))))
                            (.catch (fn [e]
@@ -917,6 +919,7 @@
                                         (reset! pending nil)
                                         (reset! shown [path s])
                                         (pdf-cache/promote! path s)
+                                        (rf/dispatch [:pdf/deck-detected path s (deck/summary (:deck prepared))])
                                         (rf/dispatch [:pdf/refreshed path s]))))
                              (.catch (fn [e]
                                        (when (= gen @gen*)

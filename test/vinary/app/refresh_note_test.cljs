@@ -23,3 +23,18 @@
             "after the retraction the attribute is absent (DataScript nil-as-absence)"))
       (is (= [] (events/clear-refresh-note-tx snap "/d/talk.pdf")))
       (is (= [] (events/clear-refresh-note-tx snap "/d/missing.pdf"))))))
+
+(deftest deck-summary-transactions
+  (let [summary {:deck? true :tier :definite :source :beamer :pages 12 :frame-count 7}
+        snap    (db-with {:doc/path "/d/talk.pdf" :doc/kind "pdf"})
+        eid     (ds/eid-for-path snap "/d/talk.pdf")]
+    (testing "a new classification is written onto the doc entity"
+      (is (= [[:db/add eid :doc/deck summary]] (events/deck-tx snap "/d/talk.pdf" summary))))
+    (testing "an unchanged classification (a refresh of the same deck) writes nothing"
+      (let [stored (d/db-with snap [[:db/add eid :doc/deck summary]])]
+        (is (= [] (events/deck-tx stored "/d/talk.pdf" summary)))
+        (is (= [[:db/add eid :doc/deck (assoc summary :pages 13)]]
+               (events/deck-tx stored "/d/talk.pdf" (assoc summary :pages 13))))))
+    (testing "no entity, or no summary, → no transaction"
+      (is (= [] (events/deck-tx snap "/d/missing.pdf" summary)))
+      (is (= [] (events/deck-tx snap "/d/talk.pdf" nil))))))

@@ -1735,6 +1735,32 @@ async function main() {
     console.log('[ok] PDF live refresh swaps in place (position kept); a torn refresh keeps the last good render behind a note');
   }
 
+  // ── slide-deck DETECTION on prepare (ADR-0045): every PDF is classified from its own evidence, in the
+  //    renderer, before the first mount — exposed as .vv-pdf-doc[data-deck] (DOM-level, release-safe) ──
+  {
+    const { makeDeckPdf } = require('./fixtures/pdf-gen');
+    const fixtures = [
+      ['deck-beamer.pdf', makeDeckPdf({ frames: [1, 3, 1, 2] }), 'beamer'],                               // Beamer Creator
+      ['deck-pptx.pdf', makeDeckPdf({ pages: 4, size: 'powerpoint-169', labels: null, creator: null,
+                                      producer: null, text: false }), 'slide-export'],                    // exact export canvas
+      ['deck-fullscreen.pdf', makeDeckPdf({ pages: 3, sizes: [[612, 792], [612, 792], [612, 792]], labels: null,
+                                            creator: 'Some authoring tool', producer: 'x', pageMode: 'FullScreen' }),
+       'fullscreen-mode'],
+      ['not-a-deck.pdf', makeDeckPdf({ pages: 3, sizes: [[792, 612], [792, 612], [792, 612]], labels: null,
+                                       creator: 'Mozilla/5.0 Chrome', producer: 'Skia/PDF m142' }), ''],   // landscape Letter
+    ];
+    for (const [name, bytes, expected] of fixtures) {
+      const p = path.join(ROOT, 'test', 'fixtures', name);   // virtual path; bytes served by the stub main
+      state.contentByPath.set(p, { path: p, kind: 'pdf', bytes: new Uint8Array(bytes), stamp: Date.now() });
+      await evalIn(win, `window.__vvopen(${JSON.stringify(p)})`);
+      await waitCalm(win, `(() => { const d = document.querySelector('.vv-pdf-doc');
+        return Boolean(d) && d.dataset.deck === ${JSON.stringify(expected)}
+          && Boolean(d.querySelector('canvas.vv-pdf-canvas')); })()`,
+        `${name} is classified as ${JSON.stringify(expected || 'not a deck')}`, 15000);
+    }
+    console.log('[ok] PDF slide-deck detection: Beamer / slide export / FullScreen page mode / landscape non-deck');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.
