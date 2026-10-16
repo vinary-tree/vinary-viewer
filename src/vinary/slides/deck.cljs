@@ -73,6 +73,71 @@
   [size]
   (some (fn [[k v]] (when (same-size? size v) k)) export-canvases))
 
+;; ---- second-screen pages ---------------------------------------------------------------------------------
+;; Beamer's two-screen options — `show notes on second screen=<side>` (and the rarer `previous slide on second
+;; screen` / `second mode text on second screen`, beamerbasetwoscreens.sty) — compose every physical page from TWO
+;; paper-sized halves with pgfpages' `two screens with optional second` layout (pgfpages.sty:132-162): the slide is
+;; logical page 1, and <side> names where the SECOND screen (the notes) goes. So the page is twice the paper width
+;; (right / left) or height (top / bottom); `right` is Beamer's default (beamerbasenotes.sty:33). Measured on
+;; LuaLaTeX output (docs/scientific/data/12/second-screen-2026-10-16.txt): a 4:3 deck's 362.835 × 272.126 bp paper
+;; becomes 725.669 × 272.126 (right / left) and 362.835 × 544.252 (top / bottom).
+
+(defn second-screen-axis
+  "The axis along which page `size` doubles one of Beamer's papers — :horizontal (2w × h: the second screen is
+   right or left of the slide), :vertical (w × 2h: above or below it) — or nil."
+  [size]
+  (some (fn [[pw ph]]
+          (cond (same-size? size [(* 2 pw) ph]) :horizontal
+                (same-size? size [pw (* 2 ph)]) :vertical))
+        (vals beamer-papers)))
+
+(def notes-positions
+  "The :slides-notes preference — where the SECOND screen (the notes) sits on a second-screen deck's pages, in the
+   words of Beamer's `show notes on second screen=<value>`: :auto (Beamer's own default, right — and bottom for a
+   page doubled vertically, where Beamer has no default), :right, :left, :bottom, :top, or :off (never split: show
+   whole pages, notes included)."
+  #{:auto :right :left :bottom :top :off})
+
+(defn slide-side
+  "Which half of a second-screen page holds the SLIDE, for split `axis` (:horizontal, :vertical or nil) under the
+   :slides-notes preference `notes`: :left :right :top :bottom, or nil for the whole page (no second screen, or the
+   preference is :off). The slide sits opposite the notes — notes right → slide left. A preference naming the
+   other axis's side (:left on a vertically doubled page) means that axis's default; an unknown value means :auto."
+  [axis notes]
+  (let [notes (if (contains? notes-positions notes) notes :auto)]
+    (when-not (= notes :off)
+      (case axis
+        :horizontal (if (= notes :left) :right :left)
+        :vertical   (if (= notes :top) :bottom :top)
+        nil))))
+
+(defn half-rect
+  "The part of a page of size [w h] that `side` shows, in page units with y DOWN from the top edge (pdf.js viewport
+   space): {:x :y :w :h} — the slide half for :left :right :top :bottom, the whole page for nil."
+  [[w h] side]
+  (case side
+    :left   {:x 0       :y 0       :w (/ w 2) :h h}
+    :right  {:x (/ w 2) :y 0       :w (/ w 2) :h h}
+    :top    {:x 0       :y 0       :w w       :h (/ h 2)}
+    :bottom {:x 0       :y (/ h 2) :w w       :h (/ h 2)}
+    {:x 0 :y 0 :w w :h h}))
+
+(defn display-size
+  "The size [w h] at which a page of size `size` is shown when `side` is its slide half (nil: the whole page)."
+  [size side]
+  (let [{:keys [w h]} (half-rect size side)] [w h]))
+
+(defn on-slide-half?
+  "Does a text run whose top-left corner sits at (`left-pct`, `top-pct`) — percent of the FULL page, y down — lie on
+   slide half `side`? A run starting exactly on the midline belongs to the second half; nil side → always."
+  [side left-pct top-pct]
+  (case side
+    :left   (< left-pct 50)
+    :right  (>= left-pct 50)
+    :top    (< top-pct 50)
+    :bottom (>= top-pct 50)
+    true))
+
 ;; ---- classification -------------------------------------------------------------------------------------
 
 (defn classify
@@ -80,13 +145,15 @@
    Returns {:deck? bool :tier :definite|:probable|nil :source kw|nil}. Rules, first match wins:
 
      definite  :beamer           Creator or XMP CreatorTool names Beamer (beamer.cls sets pdfcreator=\"LaTeX with
-                                 Beamer class\"), and the document has ≥ 2 pages or a Beamer paper size — a
-                                 one-page beamerposter carries the same Creator but is not a deck
+                                 Beamer class\"), and the document has ≥ 2 pages or a Beamer paper size (or one
+                                 doubled for a second screen) — a one-page beamerposter carries the same Creator but
+                                 is not a deck
      definite  :fullscreen-mode  the catalog asks to open in full-screen mode (/PageMode /FullScreen, PDF 32000-1
                                  §7.7.2) — authored for presenting
      probable  :slide-export     ≥ 2 pages, all one size, and that size is a slide tool's exact export canvas
-     probable  :beamer-geometry  ≥ 2 pages, all one Beamer paper size, produced by a TeX engine (a Beamer deck
-                                 whose \\hypersetup{pdfcreator=…} was overridden)
+     probable  :beamer-geometry  ≥ 2 pages, all one Beamer paper size — or one doubled for a second screen
+                                 (second-screen-axis) — produced by a TeX engine (a Beamer deck whose
+                                 \\hypersetup{pdfcreator=…} was overridden)
      —         not a deck        everything else; in particular landscape pages alone never qualify"
   [{:keys [creator producer creator-tool page-mode sizes]}]
   (let [n           (count sizes)
@@ -94,7 +161,8 @@
         beamer-tag? (boolean (or (and (string? creator) (re-find beamer-re creator))
                                  (and (string? creator-tool) (re-find beamer-re creator-tool))))]
     (cond
-      (and beamer-tag? (or (>= n 2) (and (= n 1) (beamer-paper? (first sizes)))))
+      (and beamer-tag? (or (>= n 2) (and (= n 1) (or (beamer-paper? (first sizes))
+                                                    (second-screen-axis (first sizes))))))
       {:deck? true :tier :definite :source :beamer}
 
       (= "FullScreen" page-mode)
@@ -103,7 +171,8 @@
       (and (>= n 2) uniform (export-canvas uniform))
       {:deck? true :tier :probable :source :slide-export}
 
-      (and (>= n 2) uniform (beamer-paper? uniform) (string? producer) (re-find tex-producer-re producer))
+      (and (>= n 2) uniform (or (beamer-paper? uniform) (second-screen-axis uniform))
+           (string? producer) (re-find tex-producer-re producer))
       {:deck? true :tier :probable :source :beamer-geometry}
 
       :else
@@ -145,27 +214,38 @@
   "Assemble the deck model from evidence `{:creator :producer :creator-tool :page-mode :labels :sizes}`. Frames
    are grouped by page labels only for Beamer sources (:beamer, :beamer-geometry) — other producers' labels are
    ordinary page numbers. Works for ANY PDF: a non-deck gets {:deck? false} and one page per frame, which is what
-   \"View as Slide Show\" on an arbitrary PDF navigates."
+   \"View as Slide Show\" on an arbitrary PDF navigates.
+
+   :second-screen is the axis (second-screen-axis) when EVERY page doubles one Beamer paper, else nil. Such a deck
+   gets one frame per page and NO labels: pgfpages' two-screen shipout corrupts Beamer's page labels, and the
+   corruption is not detectable — measured on LuaLaTeX output, five single-overlay frames with notes are labelled
+   1 1 2 2 3 3 (not 1 2 3 4 5 5), a well-formed sequence that would merge frames 1+2 and 3+4. (The `previous slide`
+   variant keeps correct labels, but its pages are indistinguishable by geometry, so it is treated alike.) The page
+   number is always right; a corrupt label would make the counter, typed-number goto and frame steps lie."
   [evidence]
-  (let [cls    (classify evidence)
-        n      (count (:sizes evidence))
-        labels (some-> (:labels evidence) vec)
-        group? (contains? #{:beamer :beamer-geometry} (:source cls))
-        frames (frames-from-labels n labels group?)]
+  (let [cls     (classify evidence)
+        n       (count (:sizes evidence))
+        uniform (uniform-size (:sizes evidence))
+        axis    (when uniform (second-screen-axis uniform))
+        labels  (when-not axis (some-> (:labels evidence) vec))
+        group?  (and (not axis) (contains? #{:beamer :beamer-geometry} (:source cls)))
+        frames  (frames-from-labels n labels group?)]
     (assoc cls
-           :pages    n
-           :frames   frames
-           :frame-of (frame-index frames)
-           :labels   (when (= n (count labels)) labels))))
+           :pages         n
+           :frames        frames
+           :frame-of      (frame-index frames)
+           :labels        (when (= n (count labels)) labels)
+           :second-screen axis)))
 
 (defn summary
   "The small, serializable part of a deck for app state (:doc/deck): no per-page vectors."
   [d]
-  {:deck?       (boolean (:deck? d))
-   :tier        (:tier d)
-   :source      (:source d)
-   :pages       (:pages d 0)
-   :frame-count (count (:frames d))})
+  {:deck?         (boolean (:deck? d))
+   :tier          (:tier d)
+   :source        (:source d)
+   :pages         (:pages d 0)
+   :frame-count   (count (:frames d))
+   :second-screen (:second-screen d)})
 
 ;; ---- positions ------------------------------------------------------------------------------------------
 

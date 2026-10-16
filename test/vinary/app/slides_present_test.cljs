@@ -27,7 +27,8 @@
       (let [{:keys [db fx]} (events/slides-present-fx shown-db :first)]
         (is (= {:active? true :tab-id 1 :path talk :from :first :fullscreen? true} (slides/presentation db)))
         (is (= [[:dom/focus :content] [:vv/set-fullscreen {:on true}]] fx))
-        (is (= {:explicit nil :open-as :slides :presenting? true :present-from :first :transition :none} (slides/layout-request db))
+        (is (= {:explicit nil :open-as :slides :presenting? true :present-from :first :transition :none :notes :auto}
+               (slides/layout-request db))
             "the engine sees :presenting? and where to start through the layout request")))
     (testing "nil means :first; Shift+F5 starts from the current slide"
       (is (= :first (slides/present-from (:db (events/slides-present-fx shown-db nil)))))

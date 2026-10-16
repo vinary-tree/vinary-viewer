@@ -49,6 +49,7 @@ Settings persist as EDN (the keys below are exactly those the Preferences UI wri
  :slides-open-as :slides       ; a DETECTED deck opens as :slides (one per screen) or :document
  :slides-overview-page :last   ; an overview tile shows (and opens) its frame :last (fully built) or :first
  :slides-transition :none      ; how a slide flip animates: :none (instant), :fade or :push
+ :slides-notes :auto           ; a second-screen deck's NOTES side: :auto :right :left :bottom :top, or :off
  :slides-fullscreen? true      ; a slide show (F5) makes its window fullscreen
  :slides-click-advance? true}  ; a click on the slide advances a running show (Shift+click goes back)
 ```
@@ -59,13 +60,23 @@ means ligatures are off. Unknown keys are merged into the settings map but only 
 settings have visible effects. Beyond fonts and theme, `settings.edn` also remembers the
 **sidebar** width and open/closed state, so the shell reopens the way you left it.
 
-**Slides.** The five `:slides-*` keys are the Preferences dialog's *Slides* section (Alt+O, Alt+W, Alt+R, Alt+U,
-Alt+K). The two checkboxes default **on**: an absent key means on, and only an explicit `false` turns them off.
+**Slides.** The six `:slides-*` keys are the Preferences dialog's *Slides* section (Alt+O, Alt+W, Alt+R, Alt+N,
+Alt+U, Alt+K). The two checkboxes default **on**: an absent key means on, and only an explicit `false` turns them off.
 `:slides-transition` animates only the flips you ask for — keys, the wheel, clicks, swipes, the slide bar, links and
 the overview: `:fade` dissolves the outgoing slide over the incoming one (220 ms) and `:push` slides it off while the
 incoming one slides in from the side the deck moves toward (260 ms). Find and the Contents outline still jump
 instantly, a flip during a transition ends it at once, and the operating system's *reduce motion* setting
-(`prefers-reduced-motion`) turns transitions off whatever the preference says. Whether
+(`prefers-reduced-motion`) turns transitions off whatever the preference says.
+`:slides-notes` is for decks built with Beamer's `\setbeameroption{show notes on second screen=<side>}`, whose every
+page is the slide and its speaker notes side by side — twice the paper wide (`right`, `left`) or tall (`bottom`,
+`top`). The value names where the **notes** are, exactly as in that option, and the slides layout, the overview and
+a running show display the other half — the slide — with the notes' text kept out of find. `:auto` (the default)
+assumes Beamer's own default, notes on the right (and notes below on a page doubled in height, where Beamer has
+none); if your deck shows its notes instead of its slides, pick the side you wrote in the option. `:off` shows whole
+pages. The document layout (View ▸ View as Document) always shows whole pages, so the notes stay readable and
+searchable there. Such a deck steps one page at a time: pgfpages corrupts Beamer's page labels on these pages in a
+way no check can detect, so overlays are not grouped into frames and slides are numbered by page
+([measurements](../scientific/data/12/second-screen-2026-10-16.txt)). Whether
 a *particular* PDF shows as slides or as a document is not a setting — it is chosen per document view (View ▸
 View as Slide Show / View as Document, the address bar's toggle) and remembered by Back/Forward; the
 `:slides-open-as` preference only decides how a *detected* deck opens the first time.

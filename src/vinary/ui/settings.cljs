@@ -6,7 +6,8 @@
             [vinary.ui.access-keys :as access]
             [vinary.stream.flag :as stream-flag]
             [vinary.ui.text-input :as text-input]
-            [vinary.ui.modal :as modal]))
+            [vinary.ui.modal :as modal]
+            [vinary.slides.deck :as deck]))
 
 ;; async-input for both editable fields: applying a font change re-measures every figure and Mermaid
 ;; diagram on screen, and doing that between two keystrokes is what let a re-render commit a stale value
@@ -61,6 +62,7 @@
             "u" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='u']")
             "k" (access/focus-selector! (.-currentTarget e) ".vv-pref-checkbox[data-vv-access-key='k']")
             "r" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='r']")
+            "n" (access/focus-selector! (.-currentTarget e) ".vv-pref-input[data-vv-access-key='n']")
             "c" (do (rf/dispatch [:settings/close]) true)
             false)
       (access/consume! e))))
@@ -137,6 +139,24 @@
           [:option {:value "none"} "None (instant)"]
           [:option {:value "fade"} "Fade"]
           [:option {:value "push"} "Push"]]]
+        ;; a Beamer deck built with \setbeameroption{show notes on second screen=<side>}: every page is a slide
+        ;; plus its notes, side by side; the slides show the slide half (vinary.slides.deck/slide-side)
+        [:div.vv-pref-row
+         [:label.vv-pref-label {:for "vv-slides-notes"}
+          [access/label "Notes on a second screen" "n" access-active?]]
+         [:select.vv-pref-input (merge {:id "vv-slides-notes"
+                                        :value (name (if (contains? deck/notes-positions (:slides-notes s))
+                                                       (:slides-notes s)
+                                                       :auto))
+                                        :on-change #(rf/dispatch [:settings/set :slides-notes
+                                                                  (keyword (.. % -target -value))])}
+                                       (access/access-attrs "n"))
+          [:option {:value "auto"} "Auto (notes on the right, or below)"]
+          [:option {:value "right"} "Notes on the right"]
+          [:option {:value "left"} "Notes on the left"]
+          [:option {:value "bottom"} "Notes below"]
+          [:option {:value "top"} "Notes above"]
+          [:option {:value "off"} "Show whole pages"]]]
         [check-field "Present full screen" "u" :slides-fullscreen?
          (not= false (:slides-fullscreen? s)) access-active?]
         [check-field "Click advances the slide show" "k" :slides-click-advance?

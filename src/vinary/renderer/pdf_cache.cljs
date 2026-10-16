@@ -93,8 +93,9 @@
   (when (slides-active?) ((:position @slides-hook))))
 
 (defn slides-snapshot
-  "{:doc :sizes :deck :current :doc-gen :path :layout} of the mounted PDF controller (borrowed by the overview
-   grid — never a second PDFDocumentProxy), or nil."
+  "{:doc :sizes :deck :current :doc-gen :path :layout :side} of the mounted PDF controller (borrowed by the
+   overview grid — never a second PDFDocumentProxy), or nil. :side is the slide half a second-screen deck's pages
+   show (vinary.slides.deck/slide-side), or nil for whole pages."
   []
   (when-let [f (:snapshot @slides-hook)] (f)))
 

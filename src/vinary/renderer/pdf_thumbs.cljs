@@ -16,7 +16,8 @@
        document that was destroyed meanwhile rejects into a swallowed catch.
 
    Free of any pdfjs-dist require: it only calls methods on the borrowed document."
-  (:require [vinary.renderer.pdf-layout :as layout]))
+  (:require [vinary.renderer.pdf-layout :as layout]
+            [vinary.slides.deck :as deck]))
 
 (def ^:const concurrency 2)      ; pdf.js renders in flight at once
 (def ^:const root-margin "50%")  ; the band (beyond the visible area) in which thumbnails stay rendered
@@ -43,16 +44,19 @@
         (.then (fn [^js pg]
                  (when (and (live? ctrl gen) (.-isConnected box) (contains? (:near @ctrl) el))
                    (let [vp1   (.getViewport pg #js {:scale 1})
+                         ;; the part of the page the slides show: a second-screen deck's slide half (:side),
+                         ;; else the whole page — rasterized alone through a shifted viewport, as the engine does
+                         {:keys [x y w h]} (deck/half-rect [(.-width vp1) (.-height vp1)] (:side @ctrl))
                          css-w (max 1 (.-clientWidth box))
-                         scale (/ css-w (.-width vp1))
-                         vp    (.getViewport pg #js {:scale scale})
-                         dpr   (layout/budget-dpr (.-width vp) (.-height vp) (or (.-devicePixelRatio js/window) 1)
+                         scale (/ css-w w)
+                         vp    (.getViewport pg #js {:scale scale :offsetX (- (* x scale)) :offsetY (- (* y scale))})
+                         dpr   (layout/budget-dpr (* w scale) (* h scale) (or (.-devicePixelRatio js/window) 1)
                                                   (:thumb-max-pixels layout/overview-defaults))
                          cv    (js/document.createElement "canvas")
                          ctx   (.getContext cv "2d" #js {:willReadFrequently true})]
                      (set! (.-className cv) "vv-slides-tile-canvas")
-                     (set! (.-width cv) (js/Math.max 1 (js/Math.round (* (.-width vp) dpr))))
-                     (set! (.-height cv) (js/Math.max 1 (js/Math.round (* (.-height vp) dpr))))
+                     (set! (.-width cv) (js/Math.max 1 (js/Math.round (* w scale dpr))))
+                     (set! (.-height cv) (js/Math.max 1 (js/Math.round (* h scale dpr))))
                      (-> (.-promise (.render pg #js {:canvasContext ctx :viewport vp :transform #js [dpr 0 0 dpr 0 0]}))
                          (.then (fn []
                                   (if (and (live? ctrl gen) (.-isConnected box) (contains? (:near @ctrl) el))
@@ -92,10 +96,12 @@
 
 (defn attach!
   "Render thumbnails of `doc` (a pdf.js PDFDocumentProxy, borrowed) into the tiles under `scroller` (each a
-   `[data-page]` element containing a `.vv-slides-tile-thumb` box). Returns the controller; pass it to rebuild!
-   and detach!."
-  [^js scroller doc]
-  (let [ctrl (atom {:doc doc :gen 0 :near #{} :queue [] :active 0 :inflight #{} :destroyed? false :observer nil})
+   `[data-page]` element containing a `.vv-slides-tile-thumb` box), showing `side` of every page — a second-screen
+   deck's slide half (vinary.slides.deck/slide-side), or nil for whole pages. Returns the controller; pass it to
+   rebuild! and detach!."
+  [^js scroller doc side]
+  (let [ctrl (atom {:doc doc :side side :gen 0 :near #{} :queue [] :active 0 :inflight #{} :destroyed? false
+                    :observer nil})
         obs  (js/IntersectionObserver. (fn [entries _] (on-intersect ctrl entries))
                                        #js {:root scroller :rootMargin (str root-margin " 0px")})]
     (swap! ctrl assoc :observer obs :scroller scroller)
@@ -103,14 +109,15 @@
     ctrl))
 
 (defn rebuild!
-  "The document changed (a live refresh swapped a new proxy in) or the tiles were re-rendered: drop every
-   thumbnail, bump the generation (in-flight renders discard themselves), and observe the current tiles again."
-  [ctrl doc]
+  "The document changed (a live refresh swapped a new proxy in — perhaps with a different `side`) or the tiles
+   were re-rendered: drop every thumbnail, bump the generation (in-flight renders discard themselves), and observe
+   the current tiles again."
+  [ctrl doc side]
   (when (and ctrl (not (:destroyed? @ctrl)))
     (let [{:keys [^js observer ^js scroller]} @ctrl]
       (.disconnect observer)
       (doseq [el (array-seq (.querySelectorAll scroller "[data-page]"))] (release! el))
-      (swap! ctrl (fn [c] (-> c (assoc :doc doc :near #{} :queue []) (update :gen inc))))
+      (swap! ctrl (fn [c] (-> c (assoc :doc doc :side side :near #{} :queue []) (update :gen inc))))
       (doseq [el (array-seq (.querySelectorAll scroller "[data-page]"))] (.observe observer el)))))
 
 (defn detach!

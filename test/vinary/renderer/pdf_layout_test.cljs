@@ -65,3 +65,18 @@
     (is (= 2 (layout/slot-at 99999 600 3)))
     (is (= 0 (layout/slot-at -50 600 3)))
     (is (= 0 (layout/slot-at 100 0 3)) "degenerate slot height")))
+
+(deftest text-run-positions
+  (testing "a root run: a percent of the page"
+    (is (= 52.31 (layout/run-percent "52.31%" 725.669)))
+    (is (= -0.5 (layout/run-percent "-0.50%" 100))))
+  (testing "a marked-content run: page units, as pdf.js writes them (no space after the *) and as a
+            re-serialization might space them"
+    (is (< (js/Math.abs (- (layout/run-percent "calc(var(--total-scale-factor) *391.19px)" 725.669) 53.9071)) 1e-3))
+    (is (< (js/Math.abs (- (layout/run-percent "calc(var(--total-scale-factor) * 391.19px)" 725.669) 53.9071)) 1e-3))
+    (is (= 50 (layout/run-percent " calc( var(--total-scale-factor)*100px ) " 200))))
+  (testing "anything else is unknown (the run then stays visible)"
+    (is (nil? (layout/run-percent "391.19px" 725.669)))
+    (is (nil? (layout/run-percent "" 725.669)))
+    (is (nil? (layout/run-percent nil 725.669)))
+    (is (nil? (layout/run-percent "calc(var(--total-scale-factor) *10px)" 0)) "no extent → no percent")))

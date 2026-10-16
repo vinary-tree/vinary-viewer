@@ -138,6 +138,22 @@
     0
     (-> (js/Math.round (/ scroll-top sh)) (max 0) (min (dec n)))))
 
+(defn run-percent
+  "PURE. Where a pdf.js text run starts along one axis, as a percent of the full page `extent` (its width for a
+   `left`, its height for a `top`), from the run's inline style value — or nil for a format this does not know.
+   pdf.js 5.x's TextLayer writes one of two forms, both relative to the page's top-left corner and independent of
+   any viewport offset: `52.31%` for a run in the layer's root, and `calc(var(--total-scale-factor) *391.19px)` —
+   page units — for a run inside a marked-content group (pdf.js writes no space after the `*`; whitespace is
+   accepted anywhere a re-serialization might put it)."
+  [style-value extent]
+  (when (string? style-value)
+    (if-let [[_ pct] (re-matches #"\s*(-?\d+(?:\.\d+)?)%\s*" style-value)]
+      (js/parseFloat pct)
+      (when-let [[_ units] (re-matches #"\s*calc\(\s*var\(--total-scale-factor\)\s*\*\s*(-?\d+(?:\.\d+)?)px\s*\)\s*"
+                                       style-value)]
+        (when (and (number? extent) (pos? extent))
+          (/ (* 100 (js/parseFloat units)) extent))))))
+
 ;; ---- the slide overview grid (ADR-0045 §Overview) ------------------------------------------------------------
 (def overview-defaults
   "The overview grid's geometry knobs: tiles at least :min-tile CSS px wide, :gap between and around them, at most

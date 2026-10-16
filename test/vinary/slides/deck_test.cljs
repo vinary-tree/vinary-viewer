@@ -95,7 +95,7 @@
     (is (= 3 (:frame-count (deck/summary beamer))))
     (is (= [[0 0] [1 1] [2 2] [3 3]] (:frames other)) "non-Beamer labels are page numbers, never overlay groups")
     (is (false? (:deck? other)) "…and the document is still navigable as slides")
-    (is (= {:deck? false :tier nil :source nil :pages 4 :frame-count 4} (deck/summary other)))))
+    (is (= {:deck? false :tier nil :source nil :pages 4 :frame-count 4 :second-screen nil} (deck/summary other)))))
 
 ;; ---- positions + navigation -----------------------------------------------------------------------------
 
@@ -277,3 +277,80 @@
   (is (nil? (deck/transition-plan {:transition :fade :from 0 :to 1 :reduced-motion? true}))
       "prefers-reduced-motion wins")
   (is (nil? (deck/transition-plan {:transition :spin :from 0 :to 1})) "an unknown kind is ignored"))
+
+;; ---- second-screen decks (Beamer `show notes on second screen`) — evidence measured on LuaLaTeX 1.24 output,
+;;      docs/scientific/data/12/second-screen-2026-10-16.txt ----
+
+(def ^:private notes-right-evidence
+  "A real 4:3 deck built with \\setbeameroption{show notes on second screen=right}: two frames (2 overlays + 1) whose
+   page labels pgfpages corrupted to 1 1 1 (a plain build of the same source is labelled 1 1 2)."
+  {:creator "LaTeX with Beamer class" :producer "LuaTeX-1.24.0" :creator-tool nil :page-mode nil
+   :labels ["1" "1" "1"] :sizes (vec (repeat 3 [725.669 272.126]))})
+
+(deftest second-screen-pages-double-a-beamer-paper
+  (doseq [[ratio [w h]] deck/beamer-papers]
+    (is (= :horizontal (deck/second-screen-axis [(* 2 w) h])) (str ratio " doubled in width (notes right / left)"))
+    (is (= :vertical (deck/second-screen-axis [w (* 2 h)])) (str ratio " doubled in height (notes above / below)"))
+    (is (nil? (deck/second-screen-axis [w h])) (str ratio " itself is a plain slide"))
+    (is (nil? (deck/second-screen-axis [(* 2 w) (* 2 h)])) (str ratio " doubled both ways is not a second screen")))
+  (testing "the measured LuaLaTeX sizes, within the half-point tolerance"
+    (is (= :horizontal (deck/second-screen-axis [725.669 272.126])))
+    (is (= :vertical (deck/second-screen-axis [362.835 544.252])))
+    (is (nil? (deck/second-screen-axis [726.5 272.126])) "0.83 bp off is not the same paper"))
+  (is (nil? (deck/second-screen-axis [792 612])) "landscape Letter is no doubled Beamer paper")
+  (is (nil? (deck/second-screen-axis nil))))
+
+(deftest a-second-screen-deck-trusts-no-labels
+  (let [d (deck/deck notes-right-evidence)]
+    (is (= {:deck? true :tier :definite :source :beamer} (select-keys d [:deck? :tier :source])))
+    (is (= :horizontal (:second-screen d)))
+    (is (= [[0 0] [1 1] [2 2]] (:frames d)) "one frame per page: the corrupted labels would merge all three")
+    (is (nil? (:labels d)) "no labels: the counter, typed goto and the overview use page numbers")
+    (is (= "3" (deck/label-of d 2)))
+    (is (= 2 (deck/resolve-goto d "3")) "a typed 3 is page 3, not the first page wrongly labelled 3")
+    (is (= :horizontal (:second-screen (deck/summary d)))))
+  (testing "a WELL-FORMED corrupt sequence is still ignored — five single-overlay frames + one two-overlay frame
+            measured as 1 1 2 2 3 3 (truth: 1 2 3 4 5 5), which no consistency check could tell from a real one"
+    (let [d (deck/deck (assoc notes-right-evidence :labels ["1" "1" "2" "2" "3" "3"]
+                              :sizes (vec (repeat 6 [725.669 272.126]))))]
+      (is (= 6 (count (:frames d))))
+      (is (nil? (:labels d)))))
+  (testing "a vertically doubled deck (notes above / below)"
+    (is (= :vertical (:second-screen (deck/deck (assoc notes-right-evidence :sizes (vec (repeat 3 [362.835 544.252])))))))))
+
+(deftest second-screen-geometry-classifies-as-beamer
+  (testing "Beamer geometry doubled for a second screen, from a TeX engine, without the Creator tag"
+    (is (= {:deck? true :tier :probable :source :beamer-geometry}
+           (deck/classify {:producer "pdfTeX-1.40.26" :sizes (vec (repeat 4 [907.086 255.118]))}))))
+  (testing "one doubled page still counts with the Beamer Creator (a one-slide deck with notes)"
+    (is (:deck? (deck/classify {:creator "LaTeX with Beamer class" :sizes [[725.669 272.126]]})))))
+
+(deftest which-half-is-the-slide
+  ;; [axis notes] → the slide side
+  (doseq [[axis notes want] [[:horizontal :auto :left] [:horizontal :right :left] [:horizontal :left :right]
+                             [:horizontal :bottom :left] [:horizontal :top :left] [:horizontal :off nil]
+                             [:horizontal nil :left] [:horizontal :sideways :left]
+                             [:vertical :auto :top] [:vertical :bottom :top] [:vertical :top :bottom]
+                             [:vertical :right :top] [:vertical :left :top] [:vertical :off nil]
+                             [nil :auto nil] [nil :left nil]]]
+    (is (= want (deck/slide-side axis notes)) (str axis " / notes " notes))))
+
+(deftest the-shown-half
+  (let [page [725.669 272.126]]
+    (is (= {:x 0 :y 0 :w 362.8345 :h 272.126} (deck/half-rect page :left)))
+    (is (= {:x 362.8345 :y 0 :w 362.8345 :h 272.126} (deck/half-rect page :right)))
+    (is (= {:x 0 :y 0 :w 725.669 :h 272.126} (deck/half-rect page nil)) "no side: the whole page")
+    (is (= [362.8345 272.126] (deck/display-size page :right))))
+  (let [page [362.835 544.252]]
+    (is (= {:x 0 :y 0 :w 362.835 :h 272.126} (deck/half-rect page :top)))
+    (is (= {:x 0 :y 272.126 :w 362.835 :h 272.126} (deck/half-rect page :bottom)) "y runs DOWN from the top edge")))
+
+(deftest text-runs-on-the-slide-half
+  (is (deck/on-slide-half? :left 1.2 40))
+  (is (not (deck/on-slide-half? :left 53.9 10)) "a notes run (x 391 of 725.7 bp)")
+  (is (not (deck/on-slide-half? :left 50 10)) "the midline belongs to the second half")
+  (is (deck/on-slide-half? :right 51.2 10))
+  (is (deck/on-slide-half? :top 30 1.6))
+  (is (not (deck/on-slide-half? :top 30 50.8)))
+  (is (deck/on-slide-half? :bottom 3 71.2))
+  (is (deck/on-slide-half? nil 99 99) "whole pages hide nothing"))

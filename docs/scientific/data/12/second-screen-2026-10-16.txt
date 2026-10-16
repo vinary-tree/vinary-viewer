@@ -1,0 +1,170 @@
+# Beamer second-screen decks — page geometry, page labels and text placement (measured 2026-10-16)
+#
+# Question: what do Beamer's two-screen options put in the PDF, and can the viewer trust its page labels?
+# Consumers: vinary.slides.deck (second-screen-axis, slide-side, deck), renderer.pdf (split-side), ADR-0045.
+#
+# Environment: This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux); beamer.cls 2026/01/22 v3.77; pgfpages.sty 2011/01/05 v0.02;
+#              pdf.js (pdfjs-dist) 5.4.149 legacy build under Node v26.11.1; pdftotext version 26.08.0; qpdf 12.4.2
+# Method: each source below compiled once with 'lualatex -interaction=nonstopmode -halt-on-error <file>.tex';
+#         sizes + labels read with pdf.js getViewport({scale: 1}) / getPageLabels(); word boxes with
+#         'pdftotext -f 1 -l 1 -bbox' (points, y DOWN from the top edge).
+
+## Sources
+### notes-right.tex
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\begin{document}
+\begin{frame}{FrameOneTitle}
+SlideOneBody \pause SlideOneOverlay
+\note{NotesForFrameOne}
+\end{frame}
+\begin{frame}{FrameTwoTitle}
+SlideTwoBody
+\note{NotesForFrameTwo}
+\end{frame}
+\end{document}
+
+### big-plain.tex
+\documentclass{beamer}
+%NOTES%
+\begin{document}
+\begin{frame}{F1}A \pause B\note{n1}\end{frame}
+\begin{frame}{F2}C\note{n2}\end{frame}
+\begin{frame}{F3}D \pause E \pause F\note{n3}\end{frame}
+\begin{frame}{F4}G\end{frame}
+\begin{frame}{F5}H \pause I\note{n5}\end{frame}
+\end{document}
+
+### big-notes.tex
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\begin{document}
+\begin{frame}{F1}A \pause B\note{n1}\end{frame}
+\begin{frame}{F2}C\note{n2}\end{frame}
+\begin{frame}{F3}D \pause E \pause F\note{n3}\end{frame}
+\begin{frame}{F4}G\end{frame}
+\begin{frame}{F5}H \pause I\note{n5}\end{frame}
+\end{document}
+
+### big-shownotes.tex
+\documentclass{beamer}
+\setbeameroption{show notes}
+\begin{document}
+\begin{frame}{F1}A \pause B\note{n1}\end{frame}
+\begin{frame}{F2}C\note{n2}\end{frame}
+\begin{frame}{F3}D \pause E \pause F\note{n3}\end{frame}
+\begin{frame}{F4}G\end{frame}
+\begin{frame}{F5}H \pause I\note{n5}\end{frame}
+\end{document}
+
+### big-prev.tex
+\documentclass{beamer}
+\setbeameroption{previous slide on second screen=right}
+\begin{document}
+\begin{frame}{F1}A \pause B\note{n1}\end{frame}
+\begin{frame}{F2}C\note{n2}\end{frame}
+\begin{frame}{F3}D \pause E \pause F\note{n3}\end{frame}
+\begin{frame}{F4}G\end{frame}
+\begin{frame}{F5}H \pause I\note{n5}\end{frame}
+\end{document}
+
+### single-notes.tex
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\begin{document}
+\begin{frame}{F1}A\note{n1}\end{frame}
+\begin{frame}{F2}B\note{n2}\end{frame}
+\begin{frame}{F3}C\note{n3}\end{frame}
+\begin{frame}{F4}D\note{n4}\end{frame}
+\begin{frame}{F5}E \pause F\note{n5}\end{frame}
+\end{document}
+
+### nonotes-split.tex
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\begin{document}
+\begin{frame}{F1}A \pause B\end{frame}
+\begin{frame}{F2}C\end{frame}
+\begin{frame}{F3}D \pause E\end{frame}
+\end{document}
+
+(notes-left / notes-top / notes-bottom.tex are notes-right.tex with show notes on second screen=left / top / bottom;
+ plain.tex is notes-right.tex without the \setbeameroption line.)
+
+## pdf.js: page count, page labels, page sizes (bp)
+plain.pdf pages 3 labels ["1","1","2"] sizes [[362.835,272.126],[362.835,272.126],[362.835,272.126]]
+notes-right.pdf pages 3 labels ["1","1","1"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+notes-left.pdf pages 3 labels ["1","1","1"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+notes-top.pdf pages 3 labels ["1","1","1"] sizes [[362.835,544.252],[362.835,544.252],[362.835,544.252]]
+notes-bottom.pdf pages 3 labels ["1","1","1"] sizes [[362.835,544.252],[362.835,544.252],[362.835,544.252]]
+big-plain.pdf pages 9 labels ["1","1","2","3","3","3","4","5","5"] sizes [[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126]]
+big-notes.pdf pages 9 labels ["1","1","1","2","2","3","3","4","3"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+big-shownotes.pdf pages 17 labels ["1","2","1","4","2","6","3","8","3","10","3","12","4","5","15","5","17"] sizes [[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126],[362.835,272.126]]
+big-prev.pdf pages 9 labels ["1","1","2","3","3","3","4","5","5"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+single-notes.pdf pages 6 labels ["1","1","2","2","3","3"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+nonotes-split.pdf pages 5 labels ["1","1","1","2","2"] sizes [[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126],[725.669,272.126]]
+
+## pdfinfo (Creator / Producer / page size) of notes-right.pdf and notes-top.pdf
+### notes-right.pdf
+Creator:         LaTeX with Beamer class
+Producer:        LuaTeX-1.24.0
+Pages:           3
+Page size:       725.669 x 272.126 pts
+### notes-top.pdf
+Creator:         LaTeX with Beamer class
+Producer:        LuaTeX-1.24.0
+Pages:           3
+Page size:       362.835 x 544.252 pts
+
+## Word boxes on page 1 (pdftotext -bbox): which half holds the slide, which the notes
+### notes-right.pdf
+xMin="8.504000" yMin="4.507485" xMax="96.245359" yMax="25.481630">FrameOneTitle
+xMin="637.091400" yMin="1.126621" xMax="659.026740" yMax="6.370157">FrameOneTitle
+xMin="432.232400" yMin="29.350113" xMax="494.628414" yMax="43.925456">FrameOneTitle
+xMin="391.185400" yMin="72.574113" xMax="471.384652" yMax="87.149456">NotesForFrameOne
+xMin="28.346000" yMin="115.582910" xMax="92.327813" yMax="131.542909">SlideOneBody
+xMin="642.052150" yMin="28.895228" xMax="658.047603" yMax="32.885227">SlideOneBody
+### notes-left.pdf
+xMin="274.252000" yMin="1.126621" xMax="296.187340" yMax="6.370157">FrameOneTitle
+xMin="69.393000" yMin="29.350113" xMax="131.789014" yMax="43.925456">FrameOneTitle
+xMin="371.343400" yMin="4.507485" xMax="459.084759" yMax="25.481630">FrameOneTitle
+xMin="279.212750" yMin="28.895228" xMax="295.208203" yMax="32.885227">SlideOneBody
+xMin="28.346000" yMin="72.574113" xMax="108.545252" yMax="87.149456">NotesForFrameOne
+xMin="391.185400" yMin="115.582910" xMax="455.167213" yMax="131.542909">SlideOneBody
+### notes-top.pdf
+xMin="274.252000" yMin="1.122971" xMax="296.187340" yMax="6.366507">FrameOneTitle
+xMin="69.393000" yMin="29.346463" xMax="131.789014" yMax="43.921806">FrameOneTitle
+xMin="28.346000" yMin="72.570463" xMax="108.545252" yMax="87.145806">NotesForFrameOne
+xMin="8.504000" yMin="276.633485" xMax="96.245359" yMax="297.607630">FrameOneTitle
+xMin="28.346000" yMin="387.708910" xMax="92.327813" yMax="403.668909">SlideOneBody
+xMin="279.212750" yMin="28.891578" xMax="295.208203" yMax="32.881577">SlideOneBody
+### notes-bottom.pdf
+xMin="8.504000" yMin="4.503835" xMax="96.245359" yMax="25.477980">FrameOneTitle
+xMin="28.346000" yMin="115.579260" xMax="92.327813" yMax="131.539259">SlideOneBody
+xMin="274.252000" yMin="273.252621" xMax="296.187340" yMax="278.496157">FrameOneTitle
+xMin="69.393000" yMin="301.476113" xMax="131.789014" yMax="316.051456">FrameOneTitle
+xMin="28.346000" yMin="344.700113" xMax="108.545252" yMax="359.275456">NotesForFrameOne
+xMin="279.212750" yMin="301.021228" xMax="295.208203" yMax="305.011227">SlideOneBody
+
+## Findings
+1. Geometry: every page doubles the paper — 4:3 362.835 x 272.126 becomes 725.669 x 272.126 (right / left) and
+   362.835 x 544.252 (top / bottom). The side names where the NOTES go; the slide is the other half
+   (right: slide at x 8.5–96 and 28–92 of 725.7, i.e. the left half; top: slide at y 276–404 of 544.3, the bottom half).
+2. The notes half repeats the slide's own words: the default note template draws a thumbnail of the slide
+   (FrameOneTitle at x 637, SlideOneBody at x 642 in notes-right) — a search over whole pages finds them twice.
+3. Page labels: show notes on second screen CORRUPTS them, undetectably. big-plain is labelled 1 1 2 3 3 3 4 5 5
+   (true frames); big-notes, the same source with notes, 1 1 1 2 2 3 3 4 3. single-notes (true 1 2 3 4 5 5) is
+   labelled 1 1 2 2 3 3 and nonotes-split (true 1 1 2 3 3) 1 1 1 2 2 — WELL-FORMED sequences (start at 1, steps of
+   0 or +1) that are wrong, so no consistency check can tell corrupt labels from real ones.
+4. previous slide on second screen (big-prev) doubles the page the same way but keeps correct labels; geometry
+   cannot tell it from a notes deck.
+5. Plain 'show notes' (big-shownotes) interleaves note pages at the slide size: slide pages carry the frame
+   number, note pages their physical page number (out of scope here: no geometric signal; see the deferred
+   presenter-console feature request).
+
+## Decisions taken from these data (vinary.slides.deck)
+- a uniform page size that doubles one Beamer paper in width or height is a second-screen page (finding 1);
+- the slides layout shows the half opposite the notes, per the :slides-notes preference; auto = Beamer's default,
+  notes right (and notes below for a vertical page);
+- the other half's text is hidden from find in the slides layout (finding 2);
+- a second-screen deck gets one frame per page and no labels (findings 3 and 4).

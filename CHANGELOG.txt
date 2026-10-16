@@ -79,6 +79,17 @@ Added
       bar, links and the overview -- while find and the Contents outline still
       jump instantly; a flip during a transition finishes it at once, and the
       system's reduce-motion setting turns transitions off.
+      Beamer decks built with \setbeameroption{show notes on second screen}
+      -- every page a slide with its speaker notes beside it (or below) -- now
+      show only the slide in the Slides layout, the overview and a slide show:
+      the slide half is fitted and rendered alone, and the notes' words no
+      longer turn up in find there. Preferences > Slides > Notes on a second
+      screen says where the notes are, as in Beamer's option (Auto assumes
+      Beamer's default, notes on the right), or shows whole pages; View as
+      Document always shows whole pages, notes included and searchable. Such a
+      deck steps one page at a time, numbered by page: pgfpages corrupts
+      Beamer's page labels on these pages in a way no check can detect
+      (measured: docs/scientific/data/12/second-screen-2026-10-16.txt).
       A deck remembers its slide: Back/Forward and switching tabs away and back
       reopen the slide you left (a history entry stores the slide itself, since
       a pixel offset would land anywhere once the window size changes).

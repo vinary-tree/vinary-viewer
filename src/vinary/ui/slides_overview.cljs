@@ -30,11 +30,17 @@
 
 (defn- consume! [^js e] (.preventDefault e) (.stopPropagation e))
 
+(defn- shown-size
+  "The size [w h] page `idx` is shown at — a second-screen deck's slide half when `side` is set — or nil."
+  [sizes idx side]
+  (when-let [[w h :as size] (get sizes idx)]
+    (when (and (number? w) (number? h) (pos? w) (pos? h))
+      (deck/display-size size side))))
+
 (defn- page-aspect
-  "height / width of page `idx` from the deck's measured sizes, or 16:9."
-  [sizes idx]
-  (let [[w h] (get sizes idx)]
-    (if (and (number? w) (number? h) (pos? w) (pos? h)) (/ h w) 0.5625)))
+  "height / width of page `idx` as shown (shown-size), or 16:9."
+  [sizes idx side]
+  (if-let [[w h] (shown-size sizes idx side)] (/ h w) 0.5625))
 
 (defn- tile-of-page
   "The tile index (= frame index) showing `page`."
@@ -60,10 +66,10 @@
                      (scroll/scroll-rect-to! @node (.getBoundingClientRect el) {:block :nearest :margin 16})))
         measure! (fn []
                    (when-let [^js n @node]
-                     (let [{:keys [sizes deck]} @snap
+                     (let [{:keys [sizes deck side]} @snap
                            rep (or (some-> deck :frames first second) 0)]
                        (reset! geom (layout/grid-geometry (.-clientWidth n) (.-clientHeight n)
-                                                          (page-aspect sizes rep))))))
+                                                          (page-aspect sizes rep side))))))
         pick!    (fn [tile alt?]
                    (rf/dispatch [:slides/overview-pick (if alt? (:alt tile) (:page tile))]))
         clear-typed! (fn [] (when-let [t (:timer @typed)] (js/clearTimeout t)) (reset! typed nil))
@@ -108,7 +114,7 @@
           (r/after-render
            (fn []
              (when (and @node (:doc @snap))
-               (reset! ctrl (thumbs/attach! @node (:doc @snap))))
+               (reset! ctrl (thumbs/attach! @node (:doc @snap) (:side @snap))))
              (reveal!)))))
       :component-did-update
       (fn [_]
@@ -118,7 +124,7 @@
             (reset! seen-gen gen)
             (reset! snap (pdf-cache/slides-snapshot))
             (swap! sel #(min % (max 0 (dec (count (:frames (:deck @snap)))))))
-            (r/after-render #(when @ctrl (thumbs/rebuild! @ctrl (:doc @snap)))))))
+            (r/after-render #(when @ctrl (thumbs/rebuild! @ctrl (:doc @snap) (:side @snap)))))))
       :component-will-unmount
       (fn [_]
         (clear-typed!)
@@ -130,7 +136,7 @@
         (let [_         (reset! live-gen @(rf/subscribe [:slides/doc-gen]))   ; a refresh re-renders → did-update
               invert?   @(rf/subscribe [:pdf/invert?])
               rep       @(rf/subscribe [:slides/overview-page])
-              {:keys [deck sizes current]} @snap
+              {:keys [deck sizes current side]} @snap
               tiles     (deck/overview-tiles deck rep)
               cur-tile  (tile-of-page deck current)
               ;; deref the selection HERE, eagerly: a deref inside the lazy `for` below is not tracked by
@@ -159,8 +165,9 @@
                                     :data-frame    frame
                                     :data-page     page
                                     :on-click      (fn [^js e] (reset! sel frame) (pick! tile (.-shiftKey e)))}
-               [:div.vv-slides-tile-thumb {:style {:aspect-ratio (let [[w h] (get sizes page)]
-                                                                  (if (and w h) (str w " / " h) "16 / 9"))}}]
+               [:div.vv-slides-tile-thumb {:style {:aspect-ratio (if-let [[w h] (shown-size sizes page side)]
+                                                                  (str w " / " h)
+                                                                  "16 / 9")}}]
                [:div.vv-slides-tile-label (or label (str (inc page)))]])]]))})))
 
 (defn overview

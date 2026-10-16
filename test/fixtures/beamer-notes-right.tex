@@ -1,0 +1,20 @@
+% A REAL Beamer deck with speaker notes on a second screen — the regression fixture for second-screen decks
+% (ADR-0045; vinary.slides.deck/second-screen-axis, renderer.pdf/split-side; test/electron-smoke.js).
+% beamer-notes-right.pdf was compiled from this file ONCE, on 2026-10-16, with
+%   This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux); beamer.cls 2026/01/22 v3.77; pgfpages.sty 2011/01/05 v0.02
+%   lualatex -interaction=nonstopmode -halt-on-error beamer-notes-right.tex
+% and is committed as-is: a frozen sample of real TeX output (embedded fonts, the default note template whose
+% thumbnail repeats the slide's own words, the page labels pgfpages corrupts to 1 1 1). Do not regenerate it to
+% "fix" a test — its value is that it is what a real toolchain produced (docs/scientific/data/12).
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\begin{document}
+\begin{frame}{FrameOneTitle}
+SlideOneBody \pause SlideOneOverlay
+\note{NotesForFrameOne}
+\end{frame}
+\begin{frame}{FrameTwoTitle}
+SlideTwoBody
+\note{NotesForFrameTwo}
+\end{frame}
+\end{document}

@@ -121,7 +121,9 @@ the slide show, in every keymap set.
 A swipe is a quick (≤ 0.7 s), mostly horizontal (≥ 1.5 × its vertical travel) touch or pen gesture of at least 48 px;
 a mouse drag never flips a slide, because it selects text. Each of these flips can animate — Preferences ▸ Slides ▸
 *Slide transition*: None (instant, the default), Fade or Push — while find and the Contents outline always jump
-instantly (the `:slides-transition` key in [Configuration](05-configuration.md)).
+instantly (the `:slides-transition` key in [Configuration](05-configuration.md)). A Beamer deck built with
+`show notes on second screen` shows only its slide half; its pages step one at a time and are numbered by page (the
+`:slides-notes` key there).
 
 The slide keys (`Space`, `Shift+Space`, `Backspace`, `Enter`, `Shift+arrows`, digits) form a `:slides` layer
 that is active only while the slides layout is showing **and** the keyboard is on the document — not in a text

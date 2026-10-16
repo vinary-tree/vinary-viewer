@@ -210,6 +210,9 @@ function pageColour(i) {
   return [r, g, b].map((v) => Math.round((v + m) * 255));
 }
 
+/** The RGB fill (0–255) of a second-screen page's NOTES half: a pale yellow no pageColour(i) comes near. */
+const NOTES_COLOUR = [244, 236, 170];
+
 /** mulberry32 — a tiny seeded PRNG so padding bytes are reproducible. */
 function prng(seed) {
   let a = seed >>> 0;
@@ -240,6 +243,10 @@ function prng(seed) {
  *   pageMode     catalog /PageMode name, e.g. "FullScreen" (optional)
  *   colours      paint each page with pageColour(i) (default true)
  *   text         put "Frame f · overlay k/K" text on each page (default true; real extractable text)
+ *   secondScreen 'right' | 'left' | 'top' | 'bottom' — Beamer's `show notes on second screen=<side>`: every page
+ *                is the paper DOUBLED (2w × h for right/left, w × 2h for top/bottom) with the slide in one half
+ *                (pageColour(i) + the slide text) and the notes in the side named (NOTES_COLOUR + the text
+ *                "Speakernotes for frame f" — a word only the notes carry)
  *   links        [{page, rect:[x0,y0,x1,y1], action:"NextPage"|… | dest:pageIndex | uri:"https://…"}]
  *   outline      [{title, page, children:[…]}] → /Outlines (beamer writes section bookmarks)
  *   padBytes     append an unreferenced stream of this many seeded-random bytes (size the file)
@@ -252,7 +259,11 @@ function makeDeckPdf(opts = {}) {
   const frames = opts.frames || (opts.pages ? Array.from({ length: opts.pages }, () => 1) : [1, 2, 1]);
   const pages = frames.reduce((a, b) => a + b, 0);
   const resolveSize = (s) => (Array.isArray(s) ? s : BEAMER_SIZES[s] || EXPORT_SIZES[s] || BEAMER_SIZES[169]);
-  const sizes = opts.sizes || Array.from({ length: pages }, () => resolveSize(opts.size === undefined ? 169 : opts.size));
+  const second = opts.secondScreen || null;
+  const paper = resolveSize(opts.size === undefined ? 169 : opts.size);
+  const doubled = !second ? paper
+    : (second === 'right' || second === 'left') ? [2 * paper[0], paper[1]] : [paper[0], 2 * paper[1]];
+  const sizes = opts.sizes || Array.from({ length: pages }, () => doubled);
   const frameOf = [];
   const overlayOf = [];
   frames.forEach((k, f) => { for (let j = 0; j < k; j++) { frameOf.push(f); overlayOf.push(j); } });
@@ -283,14 +294,31 @@ function makeDeckPdf(opts = {}) {
   for (let i = 0; i < pages; i++) {
     const [w, h] = sizes[i];
     const ops = [];
+    // the slide's rect [x y w h] in PDF space (y UP): the whole page, or — on a second-screen page — the half
+    // opposite the notes (notes right → slide left; notes top → slide at the BOTTOM, i.e. y ∈ [0, h/2])
+    const half = !second ? [0, 0, w, h]
+      : second === 'right' ? [0, 0, w / 2, h] : second === 'left' ? [w / 2, 0, w / 2, h]
+      : second === 'top' ? [0, 0, w, h / 2] : [0, h / 2, w, h / 2];
+    const notes = !second ? null
+      : second === 'right' ? [w / 2, 0, w / 2, h] : second === 'left' ? [0, 0, w / 2, h]
+      : second === 'top' ? [0, h / 2, w, h / 2] : [0, 0, w, h / 2];
+    const [sx, sy, sw, sh] = half;
     if (colours) {
       const [r, g, b] = pageColour(i).map((v) => num(v / 255));
-      ops.push('q', `${r} ${g} ${b} rg`, `0 0 ${num(w)} ${num(h)} re f`, 'Q');
+      ops.push('q', `${r} ${g} ${b} rg`, `${num(sx)} ${num(sy)} ${num(sw)} ${num(sh)} re f`, 'Q');
+      if (notes) {
+        const [nr, ng, nb] = NOTES_COLOUR.map((v) => num(v / 255));
+        ops.push('q', `${nr} ${ng} ${nb} rg`, `${notes.map(num).join(' ')} re f`, 'Q');
+      }
     }
     if (text) {
       const f = frameOf[i], k = overlayOf[i], K = frames[f];
-      ops.push('BT', '0 0 0 rg', '/F1 18 Tf', `24 ${num(h - 48)} Td`, `(Frame ${f + 1} overlay ${k + 1} of ${K}) Tj`,
-               '0 -26 Td', `(deck page ${i + 1}) Tj`, 'ET');
+      ops.push('BT', '0 0 0 rg', '/F1 18 Tf', `${num(sx + 24)} ${num(sy + sh - 48)} Td`,
+               `(Frame ${f + 1} overlay ${k + 1} of ${K}) Tj`, '0 -26 Td', `(deck page ${i + 1}) Tj`, 'ET');
+      if (notes) {
+        ops.push('BT', '0 0 0 rg', '/F1 14 Tf', `${num(notes[0] + 24)} ${num(notes[1] + notes[3] - 48)} Td`,
+                 `(Speakernotes for frame ${f + 1}) Tj`, 'ET');
+      }
     }
     const body = ops.join('\n');
     objs[contentObjs[i] - 1] = `<< /Length ${body.length} >>\nstream\n${body}\nendstream`;
@@ -373,6 +401,6 @@ function truncatePdf(buf, frac) {
 }
 
 module.exports = {
-  assemblePdf, makeTextPdf, makeOutlinePdf, makeDeckPdf, truncatePdf, pageColour,
+  assemblePdf, makeTextPdf, makeOutlinePdf, makeDeckPdf, truncatePdf, pageColour, NOTES_COLOUR,
   pdfText, pdfName, BEAMER_SIZES, EXPORT_SIZES,
 };

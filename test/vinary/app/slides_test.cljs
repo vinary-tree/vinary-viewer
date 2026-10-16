@@ -54,7 +54,8 @@
                                             {:deck? false}))
         "presenting always shows slides")
     (is (= :slides (slides/open-as db1)) "the default preference")
-    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none} (slides/layout-request db1)))))
+    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none :notes :auto}
+           (slides/layout-request db1)))))
 
 (deftest the-transition-preference
   (is (= :none (slides/transition {})) "the default: an instant flip")
@@ -62,6 +63,14 @@
     (is (= t (slides/transition {:ui {:settings {:slides-transition t}}}))))
   (is (= :none (slides/transition {:ui {:settings {:slides-transition :spin}}})) "an unknown kind reads as none")
   (is (= :push (:transition (slides/layout-request {:ui {:settings {:slides-transition :push}}})))
+      "the engine receives it through the layout request"))
+
+(deftest the-notes-preference
+  (is (= :auto (slides/notes-position {})) "the default: Beamer's own (notes on the right, or below)")
+  (doseq [v [:right :left :bottom :top :off]]
+    (is (= v (slides/notes-position {:ui {:settings {:slides-notes v}}}))))
+  (is (= :auto (slides/notes-position {:ui {:settings {:slides-notes :sideways}}})) "an unknown value reads as auto")
+  (is (= :left (:notes (slides/layout-request {:ui {:settings {:slides-notes :left}}})))
       "the engine receives it through the layout request"))
 
 (deftest the-slide-is-remembered-not-the-pixel-offset

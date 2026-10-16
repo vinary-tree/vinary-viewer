@@ -2500,6 +2500,152 @@ async function main() {
     console.log('[ok] PDF slide transitions: fade (snapshot fades), push (snapshot pushed + incoming slides in), none (instant)');
   }
 
+  // ── SECOND-SCREEN NOTES (S9): Beamer's `show notes on second screen=<side>` builds every page twice the paper — the
+  // slide and its notes side by side (pgfpages). The slides layout shows the SLIDE half — fitted, rasterized alone,
+  // the notes' text hidden from find — per the :slides-notes preference (named, as in Beamer, after where the NOTES
+  // are); the document layout keeps whole pages, notes readable and searchable; the page labels pgfpages corrupts are
+  // ignored, one frame per page (vinary.slides.deck/second-screen-axis, slide-side; renderer.pdf/split-side).
+  {
+    const { makeDeckPdf, pageColour, NOTES_COLOUR } = require('./fixtures/pdf-gen');
+    const notesPath = path.join(ROOT, 'test', 'fixtures', 'second-screen-deck.pdf');   // virtual path; bytes below
+    // 4 pages (frames 2 + 1 + 1) labelled the way pgfpages corrupts them, 1 1 1 2 — a plain build says 1 1 2 3
+    state.contentByPath.set(notesPath, { path: notesPath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(makeDeckPdf({ secondScreen: 'right', size: 43, frames: [2, 1, 1], labels: ['1', '1', '1', '2'] })) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(notesPath)})`);
+    // (the slides mirror's :path names the view that reported it — the previous deck's view, also a Beamer deck in
+    // the slides layout, would satisfy every DOM condition until the new one mounts)
+    await waitCalm(win, `(() => { const d = document.querySelector('.vv-pdf-doc.vv-pdf-slides');
+      const s = window.__vvdb().ui.slides || {};
+      return Boolean(d && d.dataset.deck === 'beamer' && d.querySelector('#vv-pdf-page-1 canvas.vv-pdf-canvas'))
+        && s.path === ${JSON.stringify(notesPath)} && s.page === 0; })()`, 'the second-screen deck opens in the slides layout', 15000);
+    // a preference reaches the engine a frame after app-db (see the transitions arm)
+    const engineHasSettings = () => evalIn(win, `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`);
+    const setNotes = async (v) => {
+      win.webContents.send('vv:settings', `{:slides-notes :${v}}`);
+      await waitCalm(win, `window.__vvdb().ui.settings['slides-notes'] === '${v}'`, `notes = ${v}`, 4000);
+      await engineHasSettings();
+    };
+    const slideAspect = 362.835 / 272.126, pageAspect = 2 * slideAspect;
+    // the first slot as shown — the sheet's aspect, its canvas raster's aspect, the colour at the raster's centre — once
+    // the sheet's split state and aspect are `split` / `aspect` and its centre is `colour` (re-renders are
+    // double-buffered: a stale raster stays until the new one swaps in, so wait for the final one)
+    const shownAs = (split, aspect, colour, label) => waitCalm(win, `(() => {
+      const sheet = document.querySelector('#vv-pdf-page-1 .vv-pdf-sheet');
+      const cv = sheet && sheet.querySelector('canvas.vv-pdf-canvas');
+      if (!cv) return false;
+      const r = sheet.getBoundingClientRect();
+      const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+      const want = ${JSON.stringify(colour)};
+      return sheet.classList.contains('vv-pdf-split') === ${split}
+        && Math.abs(r.width / r.height - ${aspect}) < 0.03 && Math.abs(cv.width / cv.height - ${aspect}) < 0.03
+        && (want === null || [0, 1, 2].every((i) => Math.abs(d[i] - want[i]) <= 10)); })()`, label, 8000);
+    await shownAs(true, slideAspect, pageColour(0),
+      'auto shows the LEFT half — Beamer\'s default notes=right — fitted and rasterized alone');
+
+    let s = await evalIn(win, `window.__vvdb().ui.slides`);
+    assert.deepStrictEqual([s.pages, s.frames, s.label], [4, 4, '1'],
+      'one frame per page: the labels pgfpages corrupted are not trusted');
+    await evalIn(win, `window.__vvslides('next')`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).page === 1`, 'next', 8000);
+    s = await evalIn(win, `window.__vvdb().ui.slides`);
+    assert.strictEqual(s.label, '2', 'page 2 is called 2 — its corrupt label said 1');
+    await evalIn(win, `window.__vvslides('first')`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).page === 0`, 'back on the first slide', 8000);
+
+    // find sees what the eye sees: the slide text on every page, none of the notes
+    const findFor = async (q) => {
+      const setQuery = (v) => evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const ranFor = (v) => waitCalm(win, `(() => { const f = window.__vvfind();
+        return String(f.query || '').trim().toLowerCase() === ${JSON.stringify(v.toLowerCase())}
+          && !window.__vvpending('find/search'); })()`, `find ran for ${v}`, 8000);
+      // the renderer records a query only when its search COMPLETES (with its matches): searching for a sentinel
+      // first makes "the last completed search was q" mean THIS search — never an earlier one for the same words
+      await setQuery('qzxjv sentinel');
+      await ranFor('qzxjv sentinel');
+      await setQuery(q);
+      await ranFor(q);
+      return evalIn(win, `window.__vvfind().count`);
+    };
+    const closeFind = () => evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+      i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'the find bar opens', 8000);
+    assert.strictEqual(await findFor('Frame'), 4, 'find matches the slide text of every page');
+    assert.strictEqual(await findFor('Speakernotes'), 0, 'the notes half is hidden from find in the slides layout');
+    await closeFind();
+
+    // the preference names where the NOTES are: notes=left shows the RIGHT half — on this deck, its notes
+    await setNotes('left');
+    await shownAs(true, slideAspect, NOTES_COLOUR, 'notes=left shows the right half (here, the notes)');
+    await setNotes('off');
+    await shownAs(false, pageAspect, null, 'off shows whole pages');
+    await setNotes('auto');
+    await shownAs(true, slideAspect, pageColour(0), 'auto again shows the slide half');
+
+    // the document layout keeps whole pages: the notes are there to read, and to find
+    await evalIn(win, `window.__vvslides('layout', 'document')`);
+    await waitCalm(win, `(() => { const sheet = document.querySelector('#vv-pdf-page-1 .vv-pdf-sheet'); const r = sheet.getBoundingClientRect();
+      return !document.querySelector('.vv-pdf-slides') && !sheet.classList.contains('vv-pdf-split')
+        && Math.abs(r.width / r.height - ${pageAspect}) < 0.03; })()`, 'the document layout shows whole pages', 8000);
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'the find bar opens again', 8000);
+    assert.strictEqual(await findFor('Speakernotes'), 4, 'the document layout finds the notes of every page');
+    await closeFind();
+    await evalIn(win, `window.__vvslides('layout', null)`);
+    await shownAs(true, slideAspect, pageColour(0), 'back in the slides layout, the slide half again');
+
+    // the overview's tiles are slide halves too
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await sendChord(win, 'o');
+    await waitCalm(win, `document.querySelectorAll('.vv-slides-overview canvas.vv-slides-tile-canvas').length === 4`,
+      'the overview shows 4 frame tiles, each with its thumbnail', 15000);
+    const tile = await evalIn(win, `(() => { const t = document.querySelector('.vv-slides-tile[data-frame="0"]');
+      const box = t.querySelector('.vv-slides-tile-thumb').getBoundingClientRect(); const cv = t.querySelector('canvas');
+      const d = cv.getContext('2d', { willReadFrequently: true }).getImageData(cv.width >> 1, cv.height >> 1, 1, 1).data;
+      return { box: box.width / box.height, canvas: cv.width / cv.height, px: [d[0], d[1], d[2]] }; })()`);
+    assert.ok(Math.abs(tile.box - slideAspect) < 0.03 && Math.abs(tile.canvas - slideAspect) < 0.03,
+      `an overview tile is the slide half (box ${tile.box.toFixed(3)}, canvas ${tile.canvas.toFixed(3)})`);
+    const want0 = pageColour(0);
+    assert.ok(tile.px.every((v, i) => Math.abs(v - want0[i]) <= 12), `the tile shows the slide: ${tile.px} ≈ ${want0}`);
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!document.querySelector('.vv-slides-overview')`, 'the overview closes', 4000);
+
+    // a REAL deck (test/fixtures/beamer-notes-right.tex, compiled once by LuaLaTeX and committed as produced): white
+    // halves, embedded fonts, and a notes half whose default template repeats the slide's own words in a header and a
+    // thumbnail. Whole pages hold FrameOneTitle 6×, SlideOneBody 4×, NotesForFrameOne 2× (pdftotext); the slides
+    // layout must find only the slide half's — the title and body of frame 1's two overlay pages
+    const realPath = path.join(ROOT, 'test', 'fixtures', 'beamer-notes-right.pdf');
+    state.contentByPath.set(realPath, { path: realPath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(fs.readFileSync(realPath)) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(realPath)})`);
+    await waitCalm(win, `(() => { const d = document.querySelector('.vv-pdf-doc.vv-pdf-slides');
+      const s = window.__vvdb().ui.slides || {};
+      return Boolean(d && d.dataset.deck === 'beamer'
+        && d.querySelector('#vv-pdf-page-1 .vv-pdf-sheet.vv-pdf-split canvas.vv-pdf-canvas'))
+        && s.path === ${JSON.stringify(realPath)} && s.page === 0; })()`, 'the real LuaLaTeX notes deck opens on its slide half', 15000);
+    s = await evalIn(win, `window.__vvdb().ui.slides`);
+    assert.deepStrictEqual([s.pages, s.frames], [3, 3], 'the real deck steps page by page (its labels read 1 1 1)');
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find over the real deck', 8000);
+    const inSlides = [await findFor('FrameOneTitle'), await findFor('SlideOneBody'), await findFor('NotesForFrameOne')];
+    await closeFind();
+    assert.deepStrictEqual(inSlides, [2, 2, 0],
+      'the slides layout finds the slide half only — not the notes header, the thumbnail or the notes');
+    await evalIn(win, `window.__vvslides('layout', 'document')`);
+    await waitCalm(win, `!document.querySelector('.vv-pdf-slides')
+      && Boolean(document.querySelector('#vv-pdf-page-1 .vv-pdf-sheet canvas.vv-pdf-canvas'))`, 'the real deck as a document', 8000);
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find over the real document', 8000);
+    const inDocument = [await findFor('FrameOneTitle'), await findFor('SlideOneBody'), await findFor('NotesForFrameOne')];
+    await closeFind();
+    assert.deepStrictEqual(inDocument, [6, 4, 2], 'the document layout finds every word on the page');
+    await evalIn(win, `window.__vvslides('layout', null)`);
+    await waitCalm(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`, 'the real deck back in the slides layout', 8000);
+    console.log('[ok] PDF second-screen notes: the slides show the slide half (auto / notes=left / off), find skips the notes (a real LuaLaTeX deck too), the document layout keeps whole pages, tiles are halves, corrupt labels ignored');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

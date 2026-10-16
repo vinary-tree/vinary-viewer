@@ -64,16 +64,26 @@
   (let [t (get-in db [:ui :settings :slides-transition])]
     (if (#{:fade :push} t) t :none)))
 
+(defn notes-position
+  "The :slides-notes preference — where a second-screen deck's NOTES sit, in the words of Beamer's `show notes on
+   second screen=<value>` (vinary.slides.deck/notes-positions): :auto (the default), :right, :left, :bottom, :top or
+   :off. The slides layout shows the other half — the slide."
+  [db]
+  (let [v (get-in db [:ui :settings :slides-notes])]
+    (if (contains? deck/notes-positions v) v :auto)))
+
 (defn layout-request
   "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from
-   :transition}. The engine combines it with the document's own deck classification, applies :present-from when
-   :presenting? turns on, and animates command-driven flips per :transition."
+   :transition :notes}. The engine combines it with the document's own deck classification, applies :present-from
+   when :presenting? turns on, animates command-driven flips per :transition, and shows a second-screen deck's
+   slide half per :notes."
   [db]
   {:explicit     (explicit-layout db)
    :open-as      (open-as db)
    :presenting?  (presenting? db)
    :present-from (present-from db)
-   :transition   (transition db)})
+   :transition   (transition db)
+   :notes        (notes-position db)})
 
 (defn effective-layout
   "The layout the shown PDF uses: :slides or :document (vinary.slides.deck/effective-layout)."

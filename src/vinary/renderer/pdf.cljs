@@ -116,13 +116,21 @@
     (nth (:scales @state) idx (:scale @state))
     (:scale @state)))
 
+(defn- split-side
+  "The half of every page the view shows: a second-screen deck's SLIDE half — :left :right :top :bottom — or nil for
+   whole pages. Only in the slides layout: the document layout keeps whole pages, so the notes stay readable and
+   searchable there (vinary.slides.deck/slide-side under the :slides-notes preference)."
+  [state]
+  (when (slides? state)
+    (deck/slide-side (:second-screen (:deck @state)) (:notes @state))))
+
 (defn- apply-document-layout!
   "Continuous layout: placeholders sized to the pages at the document :scale, stacked with `gap` (preallocates
    exact heights → no scroll jank); the sheets fill them (their inline sizes cleared)."
   [state]
   (let [{:keys [sizes scale page-divs sheet-divs]} @state
         rects (layout/page-rects sizes scale gap)]
-    (swap! state assoc :rects rects)
+    (swap! state assoc :rects rects :side nil)
     (dotimes [i (count page-divs)]
       (let [^js div   (nth page-divs i)
             ^js sheet (nth sheet-divs i)
@@ -130,30 +138,35 @@
         (set! (.. div -style -height) (str height "px"))
         (set! (.. div -style -width) (str width "px"))
         (set! (.. sheet -style -height) "")
-        (set! (.. sheet -style -width) "")))))
+        (set! (.. sheet -style -width) "")
+        (toggle-class! sheet "vv-pdf-split" false)))))
 
 (defn- apply-slides-layout!
   "Slides layout (ADR-0045): every placeholder is a SLOT exactly the scroller's client size, the slots stack
    with no gap, and each sheet is sized to its page at that page's own fit (pdf-layout/slide-scale; no margin
    when presenting) and centred by CSS. Measured after the vv-pdf-slides class is on, so the hidden scrollbar is
-   already excluded from the client size."
+   already excluded from the client size. On a second-screen deck the page SHOWN is its slide half (split-side):
+   the fit and the sheet follow that half, and the sheet clips the rest (.vv-pdf-split)."
   [state]
   (let [{:keys [container sizes page-divs sheet-divs presenting?]} @state
         ^js scroller (scroller-of container)
+        side   (split-side state)
+        shown  (if side (mapv #(deck/display-size % side) sizes) sizes)
         sw     (max 1 (if scroller (.-clientWidth scroller) 1))
         sh     (max 1 (if scroller (.-clientHeight scroller) 1))
-        scales (layout/slide-scales sizes sw sh (if presenting? 0 slides-margin))
+        scales (layout/slide-scales shown sw sh (if presenting? 0 slides-margin))
         rects  (layout/slot-rects (count sizes) sw sh)]
-    (swap! state assoc :rects rects :scales scales :slot [sw sh])
+    (swap! state assoc :rects rects :scales scales :slot [sw sh] :side side)
     (dotimes [i (count page-divs)]
       (let [^js div   (nth page-divs i)
             ^js sheet (nth sheet-divs i)
-            [pw ph]   (nth sizes i)
+            [pw ph]   (nth shown i)
             sc        (nth scales i)]
         (set! (.. div -style -width) (str sw "px"))
         (set! (.. div -style -height) (str sh "px"))
         (set! (.. sheet -style -width) (str (* pw sc) "px"))
-        (set! (.. sheet -style -height) (str (* ph sc) "px"))))))
+        (set! (.. sheet -style -height) (str (* ph sc) "px"))
+        (toggle-class! sheet "vv-pdf-split" (some? side))))))
 
 (defn- apply-layout!
   "Size every placeholder (and, in the slides layout, every sheet) for the current layout, then re-measure the
@@ -220,10 +233,24 @@
                      (let [^js div (sheet-of state idx)
                            scale   (page-scale state idx)
                            vp      (.getViewport pg #js {:scale scale})
+                           ;; the part of the page this view SHOWS: a second-screen deck's slide half in the slides
+                           ;; layout (split-side), else the whole page. Only that part is rasterized — through a
+                           ;; viewport shifted so its corner is the canvas origin — so the notes half costs no
+                           ;; pixels and a fullscreen slide keeps the whole per-canvas budget. (The text and link
+                           ;; layers keep the full-page viewport `vp`; they are offset and clipped instead.)
+                           side    (:side @state)
+                           {:keys [x y w h]} (deck/half-rect (nth (:sizes @state) idx
+                                                                  [(/ (.-width vp) scale) (/ (.-height vp) scale)])
+                                                             side)
+                           cvp     (if side
+                                     (.getViewport pg #js {:scale scale
+                                                           :offsetX (- (* x scale)) :offsetY (- (* y scale))})
+                                     vp)
+                           css-w   (* w scale)
+                           css-h   (* h scale)
                            ;; the screen's DPR, capped by the per-canvas device-pixel budget (an extreme zoom
                            ;; or a fullscreen slide on a HiDPI display must not allocate a gigapixel canvas)
-                           dpr     (layout/budget-dpr (.-width vp) (.-height vp)
-                                                      (or (.-devicePixelRatio js/window) 1))
+                           dpr     (layout/budget-dpr css-w css-h (or (.-devicePixelRatio js/window) 1))
                            canvas  (js/document.createElement "canvas")
                            ;; willReadFrequently → a CPU-backed 2D surface on the normal raster path; avoids
                            ;; the GPU "blank canvas until a forced repaint" compositing bug (Linux/Electron)
@@ -234,9 +261,9 @@
                        ;; 100% × 100% of its sheet) instead of flashing white while pdf.js paints.
                        (clear-status! div)
                        (set! (.-className canvas) "vv-pdf-canvas")
-                       (set! (.-width canvas) (js/Math.round (* (.-width vp) dpr)))
-                       (set! (.-height canvas) (js/Math.round (* (.-height vp) dpr)))
-                       (let [task (.render pg #js {:canvasContext ctx :viewport vp
+                       (set! (.-width canvas) (js/Math.round (* css-w dpr)))
+                       (set! (.-height canvas) (js/Math.round (* css-h dpr)))
+                       (let [task (.render pg #js {:canvasContext ctx :viewport cvp
                                                    :transform #js [dpr 0 0 dpr 0 0]})
                              ;; a heavy page rasterizes on the main thread for a long time and would look
                              ;; frozen/blank — show a "rendering…" hint, but only once it's slow enough to
@@ -292,6 +319,29 @@
       (when-let [^js canvas (.querySelector sheet "canvas.vv-pdf-canvas")] (.remove canvas)))
     (swap! state update :rendered disj idx)))
 
+(defn- offset-layer!
+  "On a split page (a second-screen deck's slide half — split-side) shift a full-page layer so the shown half's
+   corner sits at the sheet's corner; the sheet (.vv-pdf-split) clips the rest. No-op on whole pages."
+  [state idx ^js layer]
+  (when-let [side (:side @state)]
+    (let [sc            (page-scale state idx)
+          {:keys [x y]} (deck/half-rect (nth (:sizes @state) idx [0 0]) side)]
+      (set! (.. layer -style -left) (str (- (* x sc)) "px"))
+      (set! (.. layer -style -top) (str (- (* y sc)) "px")))))
+
+(defn- hide-offslide-runs!
+  "On a split page, hide the text runs of the half that is not shown (a second-screen deck's notes — which, with
+   Beamer's default note template, also repeat the slide's own words in a thumbnail): find, selection and copy then
+   see what the eye sees. A run's position comes from its own inline style (pdf-layout/run-percent), so this reads
+   no layout; a run in a format it does not know stays visible."
+  [^js tdiv side [pw ph]]
+  (doseq [^js run (array-seq (.querySelectorAll tdiv "span:not(.markedContent)"))]
+    (let [st (.-style run)
+          lp (layout/run-percent (.-left st) pw)
+          tp (layout/run-percent (.-top st) ph)]
+      (when (and (some? lp) (some? tp) (not (deck/on-slide-half? side lp tp)))
+        (.add (.-classList run) "vv-pdf-offslide")))))
+
 ;; :text-built maps page index → the Promise of that page's text-layer render, NOT just the index.
 ;;
 ;; It used to be a set, conj'd SYNCHRONOUSLY here — before .render() resolved. So a second ensure-all-text!
@@ -315,11 +365,16 @@
         (.setProperty "--total-scale-factor" (str (page-scale state idx)))
         (.setProperty "--scale-factor"       (str (page-scale state idx))))
       (.appendChild div tdiv)
-      (let [p (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
-                                                 #js [#js {:textContentSource (.streamTextContent pg)
-                                                           :container tdiv :viewport vp}]))
-                  ;; a failed render must not leave a poisoned entry: drop it so a later ensure retries
-                  (.catch (fn [_] (swap! state update :text-built dissoc idx) nil)))]
+      (offset-layer! state idx tdiv)
+      (let [side (:side @state)
+            size (nth (:sizes @state) idx nil)
+            p    (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
+                                                    #js [#js {:textContentSource (.streamTextContent pg)
+                                                              :container tdiv :viewport vp}]))
+                     ;; part of the render: find awaits this promise, so the notes runs are hidden before it reads
+                     (.then (fn [_] (when (and side size) (hide-offslide-runs! tdiv side size)) nil))
+                     ;; a failed render must not leave a poisoned entry: drop it so a later ensure retries
+                     (.catch (fn [_] (swap! state update :text-built dissoc idx) nil)))]
         (swap! state update :text-built assoc idx p)
         p))))
 
@@ -392,6 +447,7 @@
     (set! (.. adiv -style -width) (str (.-width vp) "px"))
     (set! (.. adiv -style -height) (str (.-height vp) "px"))
     (.appendChild div adiv)
+    (offset-layer! state idx adiv)
     (-> (.getAnnotations pg #js {:intent "display"})
         (.then (fn [annos]
                  (when-not (:destroyed? @state)
@@ -1087,7 +1143,7 @@
   {:command!  (fn [op] (command! state op))
    :slides?   (fn [] (and (slides? state) (not (:destroyed? @state))))
    :position  (fn [] (when (slides? state) (:current @state 0)))
-   :snapshot  (fn [] (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout]))})
+   :snapshot  (fn [] (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout :side]))})
 
 (defn mount-prepared!
   "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface, in the layout `view-state` asks for
@@ -1102,6 +1158,7 @@
                       :deck d :doc-gen 0 :layout layout
                       :presenting? (boolean (:presenting? view-state))
                       :transition (:transition view-state)
+                      :notes (:notes view-state)
                       :current (deck/clamp-page d (or (:page view-state) 0))
                       :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                       :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
@@ -1210,16 +1267,19 @@
 (defn update!
   "Apply a new view-state to a mounted controller: dark-invert always; then a LAYOUT change (document ↔ slides,
    ADR-0045) if the effective layout moved; in the slides layout a presenting change (its margin: none when
-   presenting); in the document layout zoom/fit as before. Slides fit themselves, so zoom/fit never apply there."
+   presenting) or a different second-screen half (the :notes preference — split-side); in the document layout
+   zoom/fit as before. Slides fit themselves, so zoom/fit never apply there."
   [state view-state]
   (when-not (:destroyed? @state)
     (let [container   (:container @state)
           old-scale   (:scale @state)
           layout      (wanted-layout (:deck @state) view-state)
           was-presenting? (boolean (:presenting? @state))
-          presenting? (boolean (:presenting? view-state))]
+          presenting? (boolean (:presenting? view-state))
+          shown-side  (:side @state)]
       (toggle-class! container "vv-pdf-invert" (:invert? view-state))
-      (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state))
+      (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state)
+             :notes (:notes view-state))
       (cond
         (not= layout (:layout @state))
         (do (swap! state assoc :presenting? presenting? :fit (:fit view-state)
@@ -1227,7 +1287,7 @@
             (set-layout! state layout))
 
         (slides? state)
-        (when (not= presenting? was-presenting?)
+        (when (or (not= presenting? was-presenting?) (not= (split-side state) shown-side))
           (swap! state assoc :presenting? presenting?)
           (relayout! state (current-anchor state)))
 
