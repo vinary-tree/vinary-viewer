@@ -410,40 +410,50 @@
                      (.then (fn [idx] (inc idx)))))))
       (.catch (fn [_] nil))))
 
+(defn- scroll-page-top!
+  "Document layout: put 0-based page `idx`'s top at the viewport top (the 16 px gutter above it stays) — a plain
+   positioning, recorded in no history (a restored position, a paging step)."
+  [state idx]
+  (let [{:keys [rects container]} @state
+        scroller (scroller-of container)]
+    (when (and scroller (<= 0 idx) (< idx (count rects)))
+      (set! (.-scrollTop scroller) (+ (.-offsetTop container) (:top (nth rects idx)))))))
+
+(defn- doc-step!
+  "Document layout: run navigation `op` (vinary.slides.deck/step — :next :prev :first :last [:jump i] :back
+   :forward) against the reader's current page and the controller's jump history, then show the resulting page.
+   The SAME model as the slides layout (a non-deck PDF is one page per frame), so a link followed in the document
+   layout is a JUMP that GoBack returns from — and the history survives switching layouts."
+  [state op]
+  (let [cur  (or (:idx (current-anchor state)) 0)
+        nav  {:page cur :back (:back @state []) :fwd (:fwd @state [])}
+        nav' (deck/step (:deck @state) nav op)]
+    (swap! state assoc :back (:back nav') :fwd (:fwd nav'))
+    (when (not= (:page nav') cur)
+      (scroll-page-top! state (:page nav')))))
+
 (defn- scroll-to-page!
-  "Show 1-based `page`: in the slides layout a JUMP (recorded in the GoBack/GoForward history), else scroll its
-   top to the viewport top."
+  "Follow a link / destination to 1-based `page` — a JUMP in either layout, recorded in the GoBack/GoForward
+   history: the slides layout's command!, the document layout's doc-step!."
   [state page]
   (if (slides? state)
     (command! state [:jump (dec page)])
-    (let [{:keys [rects container]} @state
-          scroller (scroller-of container)
-          idx      (dec page)]
-      (when (and scroller (<= 0 idx) (< idx (count rects)))
-        (set! (.-scrollTop scroller) (+ (.-offsetTop container) (:top (nth rects idx))))))))
+    (doc-step! state [:jump (dec page)])))
 
 ;; ---- outline → :doc/toc (async dest resolution, then dispatch) ----------------------------------
 
 (defn- named-action!
   "Run allow-listed PDF named `action` (deck/named-actions). Find opens the find bar. In the slides layout the
    paging ops go through :slides/command — the same path as the keys, so a blanked screen or a typed number sees
-   them first, and GoBack / GoForward walk the jump history. In the continuous document layout Next/Prev/First/
-   LastPage page in place; GoBack / GoForward do nothing there (that layout keeps no jump history)."
+   them first. In the continuous document layout they run doc-step! — the same deck model — so Next/PrevPage page
+   in place, First/LastPage jump, and GoBack / GoForward walk the jump history there too."
   [state action]
   (let [op (deck/named-action-op action)]
     (cond
       (nil? op)       nil
       (= :find op)    (rf/dispatch [:find/open])
       (slides? state) (rf/dispatch [:slides/command op])
-      :else
-      (let [n   (count (:sizes @state))
-            cur (or (:idx (current-anchor state)) 0)]
-        (case op
-          :next  (scroll-to-page! state (inc (min (dec n) (inc cur))))
-          :prev  (scroll-to-page! state (inc (max 0 (dec cur))))
-          :first (scroll-to-page! state 1)
-          :last  (scroll-to-page! state n)
-          nil)))))
+      :else           (doc-step! state op))))
 (defn- walk-outline [^js doc items level]
   (-> (js/Promise.all
        (into-array
@@ -1018,9 +1028,9 @@
       (do (go-to-page! state (:current @state))
           (attach-slides-listeners! state))
       ;; a restored slide (:page) arriving at a document-layout mount (the layout preference changed meanwhile):
-      ;; keep the reader on that page instead of dropping the position
+      ;; keep the reader on that page instead of dropping the position (a restore — no jump recorded)
       (when (some? (:page view-state))
-        (scroll-to-page! state (inc (:current @state)))))
+        (scroll-page-top! state (:current @state))))
     (sync-present-listeners! state)
     (observe! state)
     (observe-resize! state)

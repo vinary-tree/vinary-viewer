@@ -64,11 +64,13 @@ Added
       gains a Slides section: how detected decks open, which overlay an
       overview tile shows, whether a show goes full screen, and whether a click
       advances it.
-      Links inside a deck now work as navigation: a link to another slide is a
-      jump (Back returns), and PDF named-action links page the deck -- Next/
-      Previous/First/Last page, GoBack/GoForward (Beamer's back-find-forward
-      symbol) and Find (opens the find bar). Only those actions are honoured: a
-      document's Print, SaveAs, Quit or FullScreen links stay inert.
+      Links inside a PDF now work as navigation in both layouts: a link to
+      another page is a jump that GoBack returns from, and PDF named-action
+      links page the document -- Next/Previous/First/Last page, GoBack/GoForward
+      (Beamer's back-find-forward symbol) and Find (opens the find bar). The
+      jump history is shared by the slides and document layouts, so switching
+      between them keeps it. Only those actions are honoured: a document's
+      Print, SaveAs, Quit or FullScreen links stay inert.
       A deck remembers its slide: Back/Forward and switching tabs away and back
       reopen the slide you left (a history entry stores the slide itself, since
       a pixel offset would land anywhere once the window size changes).

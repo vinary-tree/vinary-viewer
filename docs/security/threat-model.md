@@ -330,7 +330,7 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
   separate link layer; nothing in the PDF runs. A URI link opens externally through `:shell/open-external`; a
   GoTo destination pages the document; a *named* action (`/S /Named`) gets a link **only** when it is on the
   allow-list `vinary.slides.deck/named-actions` — NextPage, PrevPage, FirstPage, LastPage, GoBack, GoForward
-  (paging, and in the slides layout the jump history) and Find (opens the find bar). Every other named action
+  (paging and the jump history, in both layouts) and Find (opens the find bar). Every other named action
   — Print, SaveAs, Quit, FullScreen, … — produces no element at all, so a document can page itself but cannot
   print, save, quit, or make the window fullscreen (a show goes fullscreen only from F5 or a menu action;
   `/PageMode /FullScreen` is detection evidence, never a trigger).

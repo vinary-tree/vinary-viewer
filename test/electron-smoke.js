@@ -2272,15 +2272,60 @@ async function main() {
     // a tab switch away and back restores it too — and a NEW position replaces the old one
     await evalIn(win, `window.__vvslides('goto', 1)`);
     await slidesAt(1, 'on slide 2 now');
+    // sendInputEvent returns BEFORE the renderer handles the key: wait for each key's effect on the TAB state (and for
+    // the deck's view to actually unmount), never on the slide mirror alone — it still describes the deck until its
+    // view unmounts, so a check against it can pass on a stale value before the key has even landed
+    const deckTab = await evalIn(win, `window.__vvdb().ui['active-tab']`);
+    const tabCount = await evalIn(win, `window.__vvdb().ui.tabs.length`);
     await sendChord(win, 'T', ['control']);
-    await waitCalm(win, `document.activeElement && document.activeElement.classList.contains('vv-uri-input')`, 'a new blank tab', 4000);
+    await waitCalm(win, `window.__vvdb().ui.tabs.length === ${tabCount + 1} && window.__vvdb().ui['active-tab'] !== ${deckTab}
+      && !document.querySelector('.vv-pdf-doc') && document.activeElement && document.activeElement.classList.contains('vv-uri-input')`,
+      'a new blank tab (the deck view unmounted)', 8000);
     await sendChord(win, 'PageUp', ['control']);
-    await slidesAt(1, 'switching back to the deck tab reopens its slide');
+    await waitCalm(win, `window.__vvdb().ui['active-tab'] === ${deckTab}`, 'Ctrl+PageUp is back on the deck tab', 8000);
+    await slidesAt(1, 'switching back to the deck tab reopens its slide (a remount)');
     await sendChord(win, 'PageDown', ['control']);
+    await waitCalm(win, `window.__vvdb().ui['active-tab'] !== ${deckTab}`, 'Ctrl+PageDown moved to the blank tab', 8000);
     await sendChord(win, 'W', ['control']);   // close the blank tab again
-    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'slides'`, 'the blank tab closed; the deck shows', 8000);
+    await waitCalm(win, `window.__vvdb().ui.tabs.length === ${tabCount} && window.__vvdb().ui['active-tab'] === ${deckTab}`,
+      'the blank tab closed; the deck tab is active', 8000);
     await slidesAt(1, 'the deck is still on its slide');
     console.log('[ok] PDF remembered slide: Back and a tab switch reopen the slide (not a pixel offset); a new position replaces the old');
+  }
+
+  // ── DOCUMENT-LAYOUT JUMP HISTORY: the continuous layout runs the same deck model — a followed link is a jump that
+  // GoBack returns from, NextPage pages without recording one (the links deck from the named-actions arm, as a document).
+  {
+    await evalIn(win, `window.__vvslides('layout', 'document')`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'document' && !document.querySelector('.vv-pdf-slides')`,
+      'the links deck in the document layout', 8000);
+    // start at the very top, and measure the continuous layout's gutter there: page 1's top sits that far below it
+    await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); c.scrollTop = 0; c.dispatchEvent(new Event('scroll')); return true; })()`);
+    await waitCalm(win, `document.querySelector('.vv-content').scrollTop === 0`, 'the pane is at the top', 8000);
+    const gutter = await evalIn(win, `document.getElementById('vv-pdf-page-1').getBoundingClientRect().top
+      - document.querySelector('.vv-content').getBoundingClientRect().top`);
+    assert.ok(gutter > 0 && gutter < 40, `the continuous layout keeps a gutter above page 1 (${gutter} px)`);
+    // "page n is shown": the pane scrolled so page n's top sits one gutter below the viewport top — the alignment
+    // every jump uses — or as far as it can, when the document is too short to bring that top up (the deck shows at
+    // 100 % here, so its last page cannot reach the top)
+    const scrolledToPage = (n, label) => waitCalm(win, `(() => { const c = document.querySelector('.vv-content');
+        const p = document.getElementById('vv-pdf-page-${n}'); if (!p) return false;
+        const pageTop = p.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop;
+        const target = Math.min(Math.max(0, pageTop - ${gutter}), Math.max(0, c.scrollHeight - c.clientHeight));
+        return Math.abs(c.scrollTop - target) <= 1; })()`, label, 8000);
+    const link = (page, sel) => `document.querySelector('#vv-pdf-page-${page} .vv-pdf-anno ${sel}')`;
+    await waitCalm(win, `Boolean(${link(1, '.vv-pdf-link:not([title])')})`, 'the GoTo link is built in the document layout', 8000);
+    await evalIn(win, `${link(1, '.vv-pdf-link:not([title])')}.click(); true`);
+    await scrolledToPage(4, 'a followed GoTo link shows page 4');
+    await waitCalm(win, `Boolean(${link(4, '.vv-pdf-link[title="GoBack"]')})`, 'the GoBack link is built', 8000);
+    await evalIn(win, `${link(4, '.vv-pdf-link[title="GoBack"]')}.click(); true`);
+    await scrolledToPage(1, 'GoBack returns to page 1 in the document layout too');
+    await evalIn(win, `${link(1, '.vv-pdf-link[title="NextPage"]')}.click(); true`);
+    await scrolledToPage(2, 'NextPage pages to page 2');
+    // NextPage recorded no jump: GoBack from page 2 returns nowhere new (the history holds only the GoTo, already undone)
+    await evalIn(win, `window.__vvslides('layout', null)`);
+    await waitCalm(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`, 'back to the slides layout', 8000);
+    console.log('[ok] PDF document-layout jump history: a GoTo link is a jump, GoBack returns, NextPage pages');
   }
 
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
