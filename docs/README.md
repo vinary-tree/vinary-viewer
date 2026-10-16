@@ -134,7 +134,7 @@ Then read the **architecture pillar** for the concrete realisation:
   streaming pipeline, the terminal second-renderer, Org/LaTeX/diff, and remote SSH.
 - [`scientific/`](scientific/00-overview.md) — how correctness is *verified*: byte-parity,
   bounded-memory validation, semiring laws, sanitizer context-freedom, and the recorded
-  experiments (`00`…`10`).
+  experiments (`00`…`11`).
 - [`security/threat-model.md`](security/threat-model.md) — the Electron security
   posture and recommended hardenings.
 
@@ -167,7 +167,7 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`architecture/07-common-ir-streaming-and-terminal.md`](architecture/07-common-ir-streaming-and-terminal.md) | architecture | Concrete IR / streaming / terminal component realization |
 | [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0044` | design | Why each pivotal choice was made (ADRs) |
 | [`engineering/00..10`](engineering/00-overview.md) | engineering | Build system, asset vendoring, test strategy, lint, release, CI, contribution, bounded-memory |
-| [`scientific/00..10`](scientific/00-overview.md) | scientific | Byte-parity, bounded-memory validation, semiring laws, sanitizer context-freedom, experiments, methodology, in-page find & scroll ownership, text-input latency |
+| [`scientific/00..11`](scientific/00-overview.md) | scientific | Byte-parity, bounded-memory validation, semiring laws, sanitizer context-freedom, experiments, methodology, in-page find & scroll ownership, text-input latency, remote reads & reload safety |
 | [`usage/01..08`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting, terminal CLI/TUI, remote SSH |
 | [`features/README.md`](features/README.md) + `01`…`34` | features | One page per feature (live refresh … LaTeX, diff, remote SSH, terminal preview) |
 | [`reference/events-effects-subs.md`](reference/events-effects-subs.md) | reference | Every re-frame event, effect, subscription |
