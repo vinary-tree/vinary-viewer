@@ -104,8 +104,8 @@ the slide show, in every keymap set.
 
 | Keys | Slides action |
 |------|---------------|
-| `→` `↓` `PgDn`, Vim `j` `l` `Ctrl+D` `Ctrl+F`, Emacs `C-v` `C-n`, `Space`, the mouse wheel | next slide (one overlay page) |
-| `←` `↑` `PgUp`, Vim `k` `h` `Ctrl+U` `Ctrl+B`, Emacs `M-v` `C-p`, `Shift+Space`, `Backspace` | previous slide |
+| `→` `↓` `PgDn`, Vim `j` `l` `Ctrl+D` `Ctrl+F`, Emacs `C-v` `C-n`, `Space`, the mouse wheel, a leftward touch / pen swipe | next slide (one overlay page) |
+| `←` `↑` `PgUp`, Vim `k` `h` `Ctrl+U` `Ctrl+B`, Emacs `M-v` `C-p`, `Shift+Space`, `Backspace`, a rightward swipe | previous slide |
 | `Shift+→` `Shift+↓` `Shift+PgDn` | next **frame** — skips the rest of this Beamer slide's overlays |
 | `Shift+←` `Shift+↑` `Shift+PgUp` | previous frame, shown fully built |
 | `Home` / `End`, Vim `g g` / `G` | first / last slide |
@@ -117,6 +117,9 @@ the slide show, in every keymap set.
 | click / `Shift`+click | during a show: next / previous slide (not on a link, not the end of a text selection or a drag) |
 | `Tab` / `o` | the **overview** grid: one tile per frame, each showing the frame fully built. Arrows, PgUp/PgDn and Home/End move; digits pick a frame by the number on its slide; `Enter` opens it fully built and `Shift+Enter` at its first overlay; a click opens a tile (`Shift`+click the other end); `Escape`, `Tab` or `o` close it. Opening a slide from the overview is a jump, so Back returns. |
 | `Escape` during a show | unwinds one step at a time: the overview, a typed number, a blanked screen, then the show itself |
+
+A swipe is a quick (≤ 0.7 s), mostly horizontal (≥ 1.5 × its vertical travel) touch or pen gesture of at least 48 px;
+a mouse drag never flips a slide, because it selects text.
 
 The slide keys (`Space`, `Shift+Space`, `Backspace`, `Enter`, `Shift+arrows`, digits) form a `:slides` layer
 that is active only while the slides layout is showing **and** the keyboard is on the document — not in a text

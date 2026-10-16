@@ -2328,6 +2328,35 @@ async function main() {
     console.log('[ok] PDF document-layout jump history: a GoTo link is a jump, GoBack returns, NextPage pages');
   }
 
+  // ── SWIPE (S10): a quick horizontal touch / pen swipe flips a slide; a slow drag, a vertical drag and a MOUSE drag
+  // (text selection) do not (vinary.slides.deck/swipe-op)
+  {
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && s.layout === 'slides' && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const gesture = (type, dx, dy, ms) => evalIn(win, `new Promise((done) => {
+      const c = document.querySelector('.vv-content'); const r = c.getBoundingClientRect();
+      const x0 = r.left + r.width / 2, y0 = r.top + r.height / 2;
+      const ev = (name, x, y) => c.dispatchEvent(new PointerEvent(name, { pointerId: 11, pointerType: ${JSON.stringify(type)},
+        isPrimary: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      ev('pointerdown', x0, y0);
+      setTimeout(() => { ev('pointerup', x0 + (${dx}), y0 + (${dy})); done(true); }, ${ms});
+    })`);
+    await evalIn(win, `window.__vvslides('first')`);
+    await slidesAt(0, 'on the first slide');
+    await gesture('touch', -160, 12, 120);
+    await slidesAt(1, 'a leftward touch swipe → the next slide');
+    await gesture('pen', 150, -8, 120);
+    await slidesAt(0, 'a rightward pen swipe → the previous slide');
+    await gesture('touch', -160, 0, 1100);
+    await gesture('touch', -60, 200, 120);
+    await gesture('mouse', -200, 0, 100);
+    await delay(300);
+    assert.strictEqual(await evalIn(win, `window.__vvdb().ui.slides.page`), 0,
+      'a slow drag, a mostly vertical drag and a mouse drag (text selection) flip nothing');
+    console.log('[ok] PDF swipe: touch/pen swipes flip slides; slow, vertical and mouse drags do not');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

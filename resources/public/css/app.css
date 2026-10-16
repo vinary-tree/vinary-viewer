@@ -326,6 +326,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   border: 1px solid var(--vv-border); border-radius: 10px; padding: 1px 9px; cursor: pointer; }
 .vv-refresh-note button:hover { border-color: var(--vv-head1); color: var(--vv-head1); }
 .vv-refresh-note-dismiss { border: none !important; padding: 1px 5px !important; font-size: 14px; line-height: 1; }
+/* the slides layout takes horizontal touch gestures itself (a swipe flips a slide — deck/swipe-op); vertical pans
+   and pinch-zoom stay the browser's */
+.vv-pdf-doc.vv-pdf-slides { touch-action: pan-y pinch-zoom; }
 /* the slide show's "Go to 12" chip (ADR-0045): shown while a slide number is typed in the slides layout; floats
    over the bottom of the content area inside .vv-content-wrap (never inside the scroller, so it cannot move a
    slide), and ignores the pointer so a click still reaches the slide beneath */

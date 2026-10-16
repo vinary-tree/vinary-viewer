@@ -254,3 +254,15 @@
     (let [d (deck/deck {:creator "LaTeX with Beamer class" :sizes [[453.5 255.1] [453.5 255.1] [453.5 255.1]]})]
       (doseq [[a op] deck/named-actions :when (not= op :find)]
         (is (map? (deck/step d {:page 1 :back [0] :fwd [2]} op)) a)))))
+
+(deftest swipes-turn-pages
+  (testing "a quick, mostly horizontal swipe flips one slide — leftward forward, rightward back"
+    (is (= :next (deck/swipe-op {:dx -120 :dy 10 :dt 250})))
+    (is (= :prev (deck/swipe-op {:dx 120 :dy -20 :dt 250})))
+    (is (= :next (deck/swipe-op {:dx (- deck/swipe-min-px) :dy 0 :dt deck/swipe-max-ms})) "the thresholds are inclusive"))
+  (testing "too short, too slow, too vertical, or malformed → nothing"
+    (is (nil? (deck/swipe-op {:dx -30 :dy 0 :dt 100})) "a tap / jitter")
+    (is (nil? (deck/swipe-op {:dx -200 :dy 0 :dt 1200})) "a slow drag")
+    (is (nil? (deck/swipe-op {:dx -100 :dy 80 :dt 200})) "a diagonal mostly-vertical drag (100 < 1.5 × 80)")
+    (is (nil? (deck/swipe-op {:dx nil :dy 0 :dt 100})))
+    (is (nil? (deck/swipe-op {})))))

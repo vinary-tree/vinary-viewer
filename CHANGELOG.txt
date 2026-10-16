@@ -71,6 +71,8 @@ Added
       jump history is shared by the slides and document layouts, so switching
       between them keeps it. Only those actions are honoured: a document's
       Print, SaveAs, Quit or FullScreen links stay inert.
+      On a touch screen or with a pen, a quick horizontal swipe flips a slide
+      (leftward forward, rightward back); a mouse drag still selects text.
       A deck remembers its slide: Back/Forward and switching tabs away and back
       reopen the slide you left (a history entry stores the slide itself, since
       a pixel offset would land anywhere once the window size changes).

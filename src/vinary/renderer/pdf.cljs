@@ -761,18 +761,38 @@
                         (swap! state assoc :snap-timer (js/setTimeout #(snap! state) 150)))
             on-end    (fn [_] (snap! state))
             on-wheel  (fn [e] (on-wheel! state e))
-            delegate  (scroll-delegate state)]
+            delegate  (scroll-delegate state)
+            ;; a SWIPE (touch / pen — a mouse drag selects text): press → release, classified by deck/swipe-op and
+            ;; run through :slides/command like the keys (so a blanked screen sees it first)
+            swipe     (atom nil)
+            on-pdown  (fn [^js e]
+                        (reset! swipe (when (and (.-isPrimary e) (#{"touch" "pen"} (.-pointerType e)))
+                                        {:id (.-pointerId e) :x (.-clientX e) :y (.-clientY e) :t (js/performance.now)})))
+            on-pup    (fn [^js e]
+                        (when-let [{:keys [id x y t]} @swipe]
+                          (reset! swipe nil)
+                          (when (= id (.-pointerId e))
+                            (when-let [op (deck/swipe-op {:dx (- (.-clientX e) x) :dy (- (.-clientY e) y)
+                                                          :dt (- (js/performance.now) t)})]
+                              (rf/dispatch [:slides/command op])))))
+            on-pcancel (fn [_] (reset! swipe nil))]
         (.addEventListener scroller "scroll" on-scroll #js {:passive true})
         (.addEventListener scroller "scrollend" on-end)
         (.addEventListener scroller "wheel" on-wheel #js {:passive true})
+        (.addEventListener scroller "pointerdown" on-pdown #js {:passive true})
+        (.addEventListener scroller "pointerup" on-pup #js {:passive true})
+        (.addEventListener scroller "pointercancel" on-pcancel #js {:passive true})
         (scroll/set-delegate! delegate)
-        (swap! state assoc :slides-listeners [scroller on-scroll on-end on-wheel delegate])))))
+        (swap! state assoc :slides-listeners [scroller on-scroll on-end on-wheel delegate on-pdown on-pup on-pcancel])))))
 
 (defn- detach-slides-listeners! [state]
-  (when-let [[^js scroller on-scroll on-end on-wheel delegate] (:slides-listeners @state)]
+  (when-let [[^js scroller on-scroll on-end on-wheel delegate on-pdown on-pup on-pcancel] (:slides-listeners @state)]
     (.removeEventListener scroller "scroll" on-scroll)
     (.removeEventListener scroller "scrollend" on-end)
     (.removeEventListener scroller "wheel" on-wheel)
+    (.removeEventListener scroller "pointerdown" on-pdown)
+    (.removeEventListener scroller "pointerup" on-pup)
+    (.removeEventListener scroller "pointercancel" on-pcancel)
     (scroll/clear-delegate! delegate))
   (when-let [t (:snap-timer @state)] (js/clearTimeout t))
   (swap! state assoc :slides-listeners nil :snap-timer nil))

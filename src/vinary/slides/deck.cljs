@@ -333,6 +333,29 @@
         {:state {:acc 0 :last now} :op (if (pos? acc) :next :prev)}
         {:state {:acc acc :last last} :op nil}))))
 
+(def swipe-min-px
+  "A swipe must travel at least this far horizontally (CSS px) to flip a slide."
+  48)
+
+(def swipe-max-ms
+  "…within this long (a slow drag is not a swipe)."
+  700)
+
+(def swipe-ratio
+  "…and at least this many times as far horizontally as vertically (a vertical drag is not a page turn)."
+  1.5)
+
+(defn swipe-op
+  "The slide op of one touch / pen gesture from press to release: `dx` `dy` (CSS px, release minus press) over `dt`
+   (ms). A quick, mostly horizontal swipe flips one slide — leftward (dx < 0) to the next, rightward to the previous,
+   like turning a page; anything else is nil."
+  [{:keys [dx dy dt]}]
+  (when (and (number? dx) (number? dy) (number? dt)
+             (<= dt swipe-max-ms)
+             (>= (js/Math.abs dx) swipe-min-px)
+             (>= (js/Math.abs dx) (* swipe-ratio (js/Math.abs dy))))
+    (if (neg? dx) :next :prev)))
+
 ;; ---- overview grid --------------------------------------------------------------------------------------
 
 (defn overview-tiles
