@@ -113,6 +113,15 @@ async function run() {
   assert.ok(second, 'a distinct second BrowserWindow must be visible');
   await waitForText(second, 'version-one', 'second window initial content');
 
+  // Record the read number (`seq`, ADR-0046) of every payload each window receives for DOC: one read per change,
+  // fanned out, gives both windows the SAME number; the old per-window reads gave each its own (and no number).
+  const recordSeqs = (win) => evalIn(win, `(() => { window.__vvSeqs = [];
+    window.vv.onContent((p) => { if (p.path === ${JSON.stringify(DOC)}) window.__vvSeqs.push(p.seq); });
+    return true; })()`);
+  const seqsOf = (win) => evalIn(win, `window.__vvSeqs.slice()`);
+  await recordSeqs(first);
+  await recordSeqs(second);
+
   // Give chokidar time to report ready before the first write. Initial content delivery proves vv:open, not that
   // the async native watcher has installed its backend subscription yet.
   await sleep(300);
@@ -121,7 +130,30 @@ async function run() {
     waitForText(first, 'version-two', 'watch change fan-out to the first window'),
     waitForText(second, 'version-two', 'watch change fan-out to the second window')
   ]);
-  console.log('[ok] one file change refreshes every retaining renderer window');
+  const [s1, s2] = await Promise.all([seqsOf(first), seqsOf(second)]);
+  assert.ok(s1.length >= 1 && s1.every((n) => Number.isInteger(n)), `the first window received numbered reads: ${s1}`);
+  assert.strictEqual(s1[s1.length - 1], s2[s2.length - 1],
+    `one read, delivered to both windows: the same read number (${s1} / ${s2})`);
+  console.log('[ok] one file change is read once and delivered to every retaining renderer window');
+
+  // A burst of writes: every window ends on the LAST version, from the same read, and never sees the read
+  // numbers go backwards (an older read can no longer overwrite a newer one)
+  for (let i = 1; i <= 6; i += 1) {
+    fs.writeFileSync(DOC, `# Shared watch\n\nburst-${i}${i === 6 ? ' burst-final' : ''}\n`);
+    await sleep(15);
+  }
+  await Promise.all([
+    waitForText(first, 'burst-final', 'the burst ends on its last version in the first window'),
+    waitForText(second, 'burst-final', 'the burst ends on its last version in the second window')
+  ]);
+  await sleep(400);   // let any trailing read land before reading the record
+  const [b1, b2] = await Promise.all([seqsOf(first), seqsOf(second)]);
+  const increasing = (xs) => xs.every((n, i) => i === 0 || n > xs[i - 1]);
+  assert.ok(increasing(b1) && increasing(b2), `read numbers only increase: ${b1} / ${b2}`);
+  assert.strictEqual(b1[b1.length - 1], b2[b2.length - 1], `both windows end on the same read (${b1} / ${b2})`);
+  assert.ok((await renderedText(first)).includes('burst-final') && (await renderedText(second)).includes('burst-final'),
+    'and that read is the last version');
+  console.log(`[ok] a burst of ${6} writes ends on the last version in both windows (reads ${b1.slice(s1.length).join(' ')})`);
 
   // Tree watchers have separate ownership: one shared depth-0 watcher per expanded directory, with the
   // owner set reconciled from each mounted Files view. A structural add must fan out to both windows.

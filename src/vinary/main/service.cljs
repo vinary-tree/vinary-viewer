@@ -16,6 +16,7 @@
             [cljs.reader :as reader]
             [clojure.set :as set]
             [clojure.string :as str]
+            [vinary.main.content-flight :as flight]
             [vinary.main.dir-walk :as dir-walk]
             [vinary.main.doc-overrides :as doc-overrides]
             [vinary.main.diff-source :as diff-source]
@@ -321,27 +322,33 @@
                                                 :to    (:to g)
                                                 :range (boolean (:range? g))}))))
 
-(defn- send-parsed-content! [^js wc path kind ov]
+;; ---- content producers ------------------------------------------------------------------------------------
+;; A producer reads `path` ONCE and returns the result — {:payload js} (a vv:content payload) or {:error message}
+;; — synchronously for the local kinds, so an open's vv:content still goes out BEFORE its vv:tree, or as a Promise
+;; of one for the parsed and remote reads. Producers never send: the content-flight driver below delivers each
+;; result to every window that asked for it (ADR-0046), stamping it on the way out.
+
+(defn- parsed-payload [path kind ov]
   ;; `kind` is passed to openUri ONLY when an override exists — for openLocal/openArchiveUri, presence of
   ;; the argument means "explicit, skip classifyName and every content sniff".
   (-> (.openUri content-service path
                 (when (:kind ov) kind)
                 (clj->js (cond-> {} (:delimiter ov) (assoc :delimiter (:delimiter ov)))))
-      (.then (fn [payload] (.send wc "vv:content" (decorate-js-payload! payload ov))))
-      (.catch (fn [e] (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))
+      (.then (fn [payload] {:payload (decorate-js-payload! payload ov)}))
+      (.catch (fn [e] {:error (.-message e)}))))
 
 ;; A remote (ssh://sftp://) URI is read ASYNCHRONOUSLY by the transport-backed content service. The grammar-aware
 ;; `kind-of` (behind any explicit override) is threaded in so a remote `.rs` renders as highlighted source (not
 ;; sniffed text); openRemoteUri stats internally to decide list-vs-read and to fill meta.size (the streaming
 ;; gate). Because that kind argument is ALWAYS passed, remote explicitness travels separately as opts.explicit.
-(defn- send-remote-content! [^js wc uri]
+(defn- remote-payload [uri]
   (let [ov (doc-overrides/for-path uri)]
     (-> (.openRemoteUri content-service uri (doc-overrides/effective-kind kind-of uri)
                         (clj->js (cond-> {}
                                    (:kind ov)      (assoc :explicit true)
                                    (:delimiter ov) (assoc :delimiter (:delimiter ov)))))
-        (.then  (fn [payload] (.send wc "vv:content" (decorate-js-payload! payload ov))))
-        (.catch (fn [e] (.send wc "vv:error" (clj->js {:path uri :message (.-message e)})))))))
+        (.then  (fn [payload] {:payload (decorate-js-payload! payload ov)}))
+        (.catch (fn [e] {:error (.-message e)})))))
 
 (defn- conf-dir []
   (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
@@ -358,14 +365,11 @@
       (:remote m))
     (catch :default _ nil)))
 
-(defn- send-content! [^js wc path]
-  (if (file-kind/remote-uri? path)
-    (send-remote-content! wc path)
-    (let [ov    (doc-overrides/for-path path)
-          ;; the effective kind — an explicit type (CLI `-t`, Settings ▸ File Type) beats classification on
-          ;; EVERY send, including every watcher live-refresh, so the override can never silently revert.
-          kind  (doc-overrides/effective-kind kind-of path)
-          stamp (js/Date.now)]
+(defn- local-payload [path]
+  (let [ov    (doc-overrides/for-path path)
+        ;; the effective kind — an explicit type (CLI `-t`, Settings ▸ File Type) beats classification on
+        ;; EVERY read, including every watcher live-refresh, so the override can never silently revert.
+        kind  (doc-overrides/effective-kind kind-of path)]
     (case (service-util/route {:git-graph? (file-kind/git-graph-uri? path)
                                :directory? (directory? path)
                                :archive?   (archive-uri? path)
@@ -377,29 +381,30 @@
       (let [req-root (subs path (count "vv-git-graph://"))
             root     (git ["rev-parse" "--show-toplevel"] req-root)]
         (if (and root (not (str/blank? root)))
-          (.send wc "vv:content" (clj->js {:path path :kind "git-graph" :git {:root root} :stamp stamp}))
-          (.send wc "vv:error" (clj->js {:path path :message "Not a git repository"}))))
+          {:payload (clj->js {:path path :kind "git-graph" :git {:root root}})}
+          {:error "Not a git repository"}))
 
       ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
       ;; Routed FIRST (in service-util/route) so a real directory lists even when its extensionless name
       ;; classifies as "text" — otherwise the parser fs.readSyncs a directory fd → EISDIR.
       :directory
-      (.send wc "vv:content" (clj->js {:path path :kind "directory" :entries (list-dir path) :stamp stamp}))
+      (try {:payload (clj->js {:path path :kind "directory" :entries (list-dir path)})}
+           (catch :default e {:error (.-message e)}))
 
       ;; archive URI or parser-owned local kind — main streams/parses and returns a bounded preview payload.
       ;; Plain text routes through the parser for the LOG sniff (extensionless syslogs) before falling back
       ;; to escaped text — the delimiter sniff is disabled (plain text renders literally; ADR-0036).
       :parsed
-      (send-parsed-content! wc path kind ov)
+      (parsed-payload path kind ov)
 
       ;; image — render by file:// path (binary, not read as text)
       :image
-      (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "image" :stamp stamp} ov)))
+      {:payload (clj->js (decorate-payload {:path path :kind "image"} ov))}
 
       ;; html — render live in the web view (loaded by its file:// URL), not shown as escaped source.
       ;; Live-refresh re-sends with a new stamp → content-view remounts the web host → the page reloads.
       :html
-      (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "html" :stamp stamp} ov)))
+      {:payload (clj->js (decorate-payload {:path path :kind "html"} ov))}
 
       ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
@@ -410,8 +415,8 @@
                  ;; the Preview/Source combo over every representation (paper.pdf ↔ paper.tex/paper.org). A lone
                  ;; PDF's group is size 1 → the renderer shows no toggle.
                  grp   (siblings-group path)]
-             (.send wc "vv:content" (clj->js (decorate-payload {:path path :kind "pdf" :bytes bytes :stamp stamp :siblings grp} ov))))
-           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))
+             {:payload (clj->js (decorate-payload {:path path :kind "pdf" :bytes bytes :siblings grp} ov))})
+           (catch :default e {:error (.-message e)}))
 
       ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
       ;; :meta {:size} is REQUIRED, not decorative: stream-flag/enabled? gates on it, so without it a large
@@ -424,12 +429,17 @@
                  ;; (its exported PDF + any sibling sources), so the renderer offers the Preview/Source combo over
                  ;; every representation. Non-group text kinds (source/text) carry no group → no toggle.
                  grp  (when (contains? file-kind/group-kinds kind) (siblings-group path))]
-             (.send wc "vv:content" (clj->js (decorate-payload
-                                              (cond-> {:path path :kind kind :text text :stamp stamp}
-                                                size (assoc :meta {:size size})
-                                                grp  (assoc :siblings grp))
-                                              ov))))
-           (catch :default e (.send wc "vv:error" (clj->js {:path path :message (.-message e)}))))))))
+             {:payload (clj->js (decorate-payload
+                                 (cond-> {:path path :kind kind :text text}
+                                   size (assoc :meta {:size size})
+                                   grp  (assoc :siblings grp))
+                                 ov))})
+           (catch :default e {:error (.-message e)})))))
+
+(defn- produce
+  "Read `path` once: a result map, or a Promise of one (see the producers above)."
+  [path]
+  (if (file-kind/remote-uri? path) (remote-payload path) (local-payload path)))
 
 (declare unwatch-file!)
 
@@ -451,6 +461,73 @@
                 (let [wc (get-in @window-owners [id :wc])]
                   (when (live-webcontents? wc) wc))))
         (retention/owner-ids-for @window-owners path)))
+
+;; ---- content delivery: one read per path, delivered to everyone who asked (ADR-0046) ------------------------
+;; Every reason to read a document — a window opening it, a watcher / poller / daemon event, a File Type re-type —
+;; becomes a REQUEST to the pure content-flight model, which runs at most one read per path, lets an open join the
+;; running read, collapses a burst of changes into one trailing read, and numbers every read. A finished read is
+;; DELIVERED once: decorated with its read number (`seq`, the renderer's ordering guard) and a stamp, then sent to
+;; the windows that asked for it explicitly (a window can open a path before its retention sync arrives) and,
+;; when it fanned out, to every window retaining the path — each window once.
+
+(defonce ^:private flights (atom flight/empty-flights))
+(defonce ^:private requester-wcs (atom {}))   ; window id → the webContents of a window that asked for a read
+(defonce ^:private last-stamp (atom 0))
+
+(defn- next-stamp!
+  "A content stamp strictly greater than every stamp issued before in this process (max(now, last + 1)): stamps
+   key the renderer's warm cache and its documents, and two reads in one millisecond must never share one."
+  []
+  (swap! last-stamp (fn [last] (max (js/Date.now) (inc last)))))
+
+(defn- deliver!
+  "Send read `read-n`'s `result` ({:payload} or {:error}) to its explicit `requesters` and — when it fanned out —
+   to every window retaining `path`, each live window once. (The read number is never bound as `seq`: that would
+   shadow cljs.core/seq, which this body calls.)"
+  [path {read-n :seq :keys [requesters fanout?]} {:keys [payload error]}]
+  (let [explicit (keep (fn [id] (let [wc (get @requester-wcs id)] (when (live-webcontents? wc) wc))) requesters)
+        targets  (vals (into {} (map (juxt owner-id identity)) (concat explicit (when fanout? (webcontents-for path)))))]
+    (when (seq targets)
+      (if payload
+        (do (set! (.-seq ^js payload) read-n)
+            (set! (.-stamp ^js payload) (next-stamp!))
+            (doseq [^js wc targets] (.send wc "vv:content" payload)))
+        ;; `refresh`: a fanned-out read (a change, not an open) — the renderer keeps a document it already shows
+        (let [msg (clj->js {:path path :message (or error "Unknown content error") :seq read-n
+                            :refresh (boolean fanout?)})]
+          (doseq [^js wc targets] (.send wc "vv:error" msg)))))))
+
+(declare start-read!)
+
+(defn- run-flight-effects!
+  "Interpret content-flight effects: deliver `result` (the read that just finished), start reads."
+  [effects result]
+  (doseq [[op path x] effects]
+    (case op
+      :deliver (deliver! path x result)
+      :read    (start-read! path x))))
+
+(defn- finish-read! [path read-n result]
+  (let [[f effects] (flight/complete @flights path read-n (if (:pending result) :pending :delivered))]
+    (reset! flights f)
+    (run-flight-effects! effects result)))
+
+(defn- start-read! [path read-n]
+  (let [result (produce path)]
+    (if (instance? js/Promise result)
+      (-> result
+          (.then (fn [r] (finish-read! path read-n r)))
+          ;; producers never reject (they resolve {:error}); this catches a delivery that throws — a window
+          ;; destroyed between its liveness check and its .send — so the flight state is already advanced
+          (.catch (fn [e] (js/console.error "[content] delivering" path "failed:" e))))
+      (finish-read! path read-n result))))
+
+(defn- request-content!
+  "Ask for `path` to be read: {:requester window-id} for an open, {:fanout? true} for a change."
+  [path opts]
+  (let [[f effects] (flight/request @flights path opts)]
+    (reset! flights f)
+    (run-flight-effects! effects nil)))
 
 ;; ---- expansion-scoped Files-tree watchers ----------------------------------------------------------
 (declare refresh-watched-tree! ensure-window!)
@@ -682,6 +759,9 @@
     (doseq [[remote-owner-id {:keys [uri]}] remote-owners]
       (swap! remote-owner-windows dissoc remote-owner-id)
       (ignore-remote-error! (.releaseOwner daemon-events uri remote-owner-id)))
+    ;; a closed window is owed nothing: drop it from running reads and carried debts
+    (swap! flights flight/forget-requester id)
+    (swap! requester-wcs dissoc id)
     (doseq [path paths]
       (when-not (retained? path) (unwatch-file! path)))))
 
@@ -761,10 +841,10 @@
 
 (defn- send-open-content! [path]
   ;; the single choke point for every watcher/poller-driven re-send (local file watch, asset watch, remote
-  ;; poll). The doc's window may have CLOSED since it was retained — under the resident daemon the watcher
-  ;; outlives it — so skip a destroyed webContents (else `.send` throws "Object has been destroyed").
-  (doseq [wc (webcontents-for path)]
-    (send-content! wc path))
+  ;; poll, File Type re-type): ONE fanned-out read, delivered to every window retaining the path (destroyed ones
+  ;; skipped — under the resident daemon a watcher outlives its window). A change during a running read only
+  ;; marks it dirty: a burst costs at most one more read (vinary.main.content-flight).
+  (request-content! path {:fanout? true})
   ;; Authenticated source daemons receive only an invalidation.  They re-read through their own SFTP
   ;; connection, so target file bytes never travel over the event protocol and existing content limits apply.
   (doseq [invalidate (vals (get @remote-content-owners path {}))]
@@ -955,6 +1035,7 @@
   (when (contains? @remote-event-subs path)
     (swap! remote-event-subs disj path)
     (ignore-remote-error! (.unsubscribeContent daemon-events path path)))
+  (swap! flights flight/release path)        ; nobody retains it: a read still running lands in nothing
   (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
   ;; a piped-stdin document's spilled snapshot dies with its last retaining tab: unlink the temp file and
   ;; its per-invocation uuid dir (rmdirSync only removes it when empty — exactly the contract we want).
@@ -985,7 +1066,9 @@
    editors land an atomic save that way)."
   [^js wc path]
   (ensure-window! wc)
-  (send-content! wc path)
+  ;; this window asked: it receives the read even before its retention sync arrives (joining a running read)
+  (swap! requester-wcs assoc (owner-id wc) wc)
+  (request-content! path {:requester (owner-id wc)})
   (if (file-kind/remote-uri? path)
     (open-remote-tree! wc path)
     (cond

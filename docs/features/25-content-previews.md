@@ -74,9 +74,9 @@ Open the file the way you open any document — a command-line argument
 
 - **Classification.** `src/vinary/main/content_service.js` `classifyName` maps the
   extension (and `sniffLog` / `sniffDelimited` for extensionless files) to a kind.
-  `src/vinary/main/service.cljs` `send-content!` routes *parsed* kinds through
-  `send-parsed-content!` → `content-service/openUri`, which returns the bounded
-  preview payload sent as `vv:content`.
+  `src/vinary/main/service.cljs` `local-payload` routes *parsed* kinds through
+  `parsed-payload` → `content-service/openUri`, which returns the bounded
+  preview payload delivered as `vv:content`.
 - **office.** `officeBufferPayload` runs `mammoth.convertToHtml` for `.docx`
   (with `mammoth.extractRawText` for find/copy text) and an OpenDocument
   `content.xml` → heading/paragraph pass for `.odt`/`.odp`; the HTML is passed

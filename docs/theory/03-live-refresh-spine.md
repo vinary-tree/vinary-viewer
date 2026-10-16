@@ -9,8 +9,10 @@ The live-refresh spine is the causal chain from a file save to updated pixels.
 ```text
 editor save
   -> chokidar change/add
-  -> main send-content!
-  -> vv:content
+  -> main send-open-content! -> request-content! {:fanout? true}
+  -> content-flight: ONE read of the path (a running read is marked dirty instead → one trailing read)
+  -> local-payload / remote-payload (the read), numbered seq n
+  -> deliver!: vv:content {… :seq n :stamp} to every window retaining the path
   -> renderer bridge
   -> [:content/received]
   -> DataScript content transaction
@@ -21,8 +23,13 @@ editor save
   -> content view repaint
 ```
 
-For PDFs, the chain includes a main-owned native PDF reload. For Markdown, the
-chain includes render metadata and asset watcher sync.
+For PDFs, the chain ends in the renderer's pdf.js view, which prepares the new
+bytes beside the shown document and swaps them in place (ADR-0045 §Live refresh —
+the slide, scroll position and DOM survive; bytes that do not open leave the last
+good version on screen behind a note). For Markdown, the chain includes render
+metadata and asset watcher sync. Every read is numbered (`seq`) and fanned out once
+to all retaining windows (ADR-0046): a burst of
+saves during one read costs one more read, not one per save per window.
 
 ---
 

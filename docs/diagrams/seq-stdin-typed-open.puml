@@ -11,7 +11,7 @@ participant "terminal\n(git diff | …)" as Term FS_TINT
 participant "vv-open.mjs\n(GUI client)" as Client IPC_TINT
 participant "daemon socket\n+ startup/socket-specs" as Daemon MAIN_TINT
 participant "doc-overrides\nregistry (main)" as Reg DATASCRIPT_TINT
-participant "service.cljs\nsend-content!" as Svc MAIN_TINT
+participant "service.cljs\nlocal-payload" as Svc MAIN_TINT
 participant "renderer\n(:content/received)" as R RENDERER_TINT
 
 == drain + spill (client side — the resident daemon cannot see this terminal's pipe) ==
@@ -52,7 +52,7 @@ legend right
   |<#3A5BA0>&#160;&#160;&#160;&#160;| main-process services |
   |<#A45BAD>&#160;&#160;&#160;&#160;| doc-overrides registry (per-path facts) |
   |<#2D9574>&#160;&#160;&#160;&#160;| renderer |
-  The registry is why the type can never silently revert: send-content!
-  consults it on EVERY send, including watcher live-refreshes.
+  The registry is why the type can never silently revert: local-payload
+  consults it on EVERY read, including watcher live-refreshes.
 endlegend
 @enduml

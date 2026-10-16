@@ -185,7 +185,7 @@ is built so nothing it contains gains execution or option-injection power:
 
 ## 4. Filesystem exposure
 
-The main process reads **any path it is given** (`service/send-content!` →
+The main process reads **any path it is given** (`service/local-payload` →
 `content_service.openUri` or the legacy text/source path), and runs `git` in the
 **directory of the open file** (`service/repo-tree`). It performs no allow-listing
 or path confinement.

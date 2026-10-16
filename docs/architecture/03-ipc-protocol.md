@@ -220,7 +220,7 @@ metadata must be read together. Supported office-style document previews are
 text where available.
 
 **Directories reuse `vv:content`** — no dedicated channel. When the opened path is a
-directory, `vinary.main.service/send-content!` sends a listing instead of file text:
+directory, `vinary.main.service/local-payload` produces a listing instead of file text:
 
 ```clojure
 {:path "/abs/path/dir"

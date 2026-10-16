@@ -73,7 +73,7 @@ No new IPC channel was added — directories reuse the existing
    `:tab/navigate`) with the folder's path, which emits `[:vv/open path]`.
 2. The main process (`vinary.main.service`) inspects the path. The pure predicate
    `directory?` calls `fs.statSync(path).isDirectory()`.
-3. For a directory, `send-content!` builds the listing with `list-dir` and sends:
+3. For a directory, `local-payload` builds the listing with `list-dir`, and the read is delivered as:
 
    ```clojure
    {:path    "/home/me/docs"

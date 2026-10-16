@@ -146,7 +146,7 @@ plumbing (no new IPC). The flow also maintains the persisted **trail** that powe
 1. User opens a directory: a CLI arg, a folder in the Files tree, a breadcrumb
    segment, a directory link, or `Alt+Up` to a parent. Navigation updates app-db
    tabs/history (a folder is an ordinary history entry) and emits `[:vv/open path]`.
-2. Main `service/send-content!` detects a directory with `directory?`, lists the
+2. Main `service/local-payload` detects a directory with `directory?`, lists the
    immediate children with `list-dir` (each `Dirent` mapped through `entry->map`,
    which flags symlinks and resolves their target), and sends `vv:content` with
    `:kind "directory"` and an `:entries` vector. A **depth-0** chokidar watcher is

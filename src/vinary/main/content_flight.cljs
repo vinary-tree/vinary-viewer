@@ -63,7 +63,7 @@
        [[:read path s]]])))
 
 (defn complete
-  "Read `seq` of `path` finished: `outcome` is :delivered (a payload or an error to send) or :pending (nothing to
+  "Read `read-n` of `path` finished: `outcome` is :delivered (a payload or an error to send) or :pending (nothing to
    send yet — a PDF still being written; a change notification is on its way). Returns [flights effects].
 
    :delivered → its requesters (and, when it fanned out, every retaining window) receive it. If a change arrived
@@ -72,9 +72,9 @@
    the fan-out) are carried to the next read, which starts at once when a change already arrived, else with the
    next notification. A completion that is not the path's running read (the path was released, or the number is
    stale) changes nothing."
-  [flights path seq outcome]
+  [flights path read-n outcome]
   (let [{:keys [inflight dirty?]} (get-in flights [:paths path])]
-    (if (not= seq (:seq inflight))
+    (if (not= read-n (:seq inflight))
       [flights []]
       (let [delivered? (= outcome :delivered)
             deliver    (when delivered? [:deliver path (select-keys inflight [:seq :requesters :fanout?])])

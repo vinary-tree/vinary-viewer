@@ -19,8 +19,10 @@ vv README.md
 
 Edit and save it in any editor. The preview updates in place. For Markdown,
 rendered HTML, table-of-contents metadata, and embedded-asset metadata are
-updated together; for PDFs, the main-owned PDF view reloads; for images and
-source/text files, the content strategy refreshes from the retained path.
+updated together; a PDF is swapped in place in its pdf.js view (the page or slide
+you were on stays; bytes that do not open keep the last good version on screen
+behind a note); for images and source/text files, the content strategy refreshes
+from the retained path. Every window showing the file updates from the same read.
 
 ---
 
@@ -54,15 +56,33 @@ This avoids two failure modes:
 
 ## 3. Main-process watcher flow
 
-`vinary.main.service/open!` is idempotent. It sends current content and starts a
-watcher only if the path is not already watched:
+`vinary.main.service/open!` is idempotent. It asks for the current content,
+sends the Files tree, and starts a watcher only if the path is not already
+watched:
 
 ```clojure
 (defn open! [wc path]
-  (send-content! wc path)
-  (send-tree! wc path)
-  (start-watch! wc path))
+  (ensure-window! wc)
+  (swap! requester-wcs assoc (owner-id wc) wc)        ; this window asked (before its retention sync)
+  (request-content! path {:requester (owner-id wc)})  ; join a running read, or start one
+  (send-tree! wc path)                                ; (local files; remote / archive / stdin differ)
+  (ensure-content-watcher! path))                     ; once per path, however many windows
 ```
+
+Every reason to read a path — an open, a watcher `change`/`add`/`unlink`, a
+remote poll or daemon event, a File Type re-type — is a **request** to the pure
+`vinary.main.content-flight` model (ADR-0046):
+
+| Request while… | Effect |
+|----------------|--------|
+| no read of the path is running | one read starts, numbered `seq` n (process-wide, strictly increasing) |
+| a read is running — an **open** | the window joins it: the running read is delivered to it too |
+| a read is running — a **change** | the read is marked dirty: exactly one trailing read follows it, however many changes arrive |
+
+A finished read is delivered once — `vv:content` (or `vv:error`) carrying its
+`seq` and a strictly increasing `stamp` — to the windows that asked for it and,
+for a change, to every window retaining the path. The local kinds read
+synchronously, so an open's `vv:content` still precedes its `vv:tree`.
 
 The watcher uses `chokidar` with:
 
@@ -74,7 +94,8 @@ The watcher uses `chokidar` with:
 | `add` | Handles common atomic-save rename patterns. |
 
 Image and PDF content is not read as UTF-8. Images are displayed from the local
-file URL; PDFs are reloaded through the main-owned `WebContentsView`.
+file URL; PDF bytes are delivered on `vv:content` and refreshed in place by the
+renderer's pdf.js view.
 
 ---
 

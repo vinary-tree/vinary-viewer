@@ -26,8 +26,9 @@ ED -> ED : save README.md
 CK -> CK : awaitWriteFinish\n(stabilityThreshold 80ms)
 CK -[#9F8766]-> SVC : "change" event (path)
 activate SVC
-SVC -> SVC : kind-of path → "markdown"\nfs.readFileSync utf8
-SVC -[#B1951D]-> PL : webContents.send\n**vv:content** {:path :kind "markdown" :text}
+SVC -> SVC : send-open-content! → request-content! {:fanout? true}\ncontent-flight: ONE read of the path, numbered seq n\n(a read already running → marked dirty → one trailing read)
+SVC -> SVC : local-payload: kind-of path → "markdown"\nfs.readFileSync utf8
+SVC -[#B1951D]-> PL : deliver! → webContents.send to EVERY retaining window\n**vv:content** {:path :kind "markdown" :text :seq n :stamp}
 deactivate SVC
 activate PL
 PL -[#B1951D]-> BR : ipcRenderer.on("vv:content")\n→ window.vv.onContent(cb)

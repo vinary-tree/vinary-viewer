@@ -566,6 +566,12 @@ Fixed
       host 10 ms away took 0.93 s instead of 0.19 s, and over loopback 2 s
       instead of 14 ms. Hosts 50 ms or more away are unchanged. See
       docs/scientific/11-remote-read-and-reload-safety-experiments.md.
+    - A changed file is read ONCE and delivered to every window showing it,
+      instead of once per window: a remote (ssh:// / sftp://) document open in
+      three windows now costs one download per change, not three, and a burst
+      of saves arriving while a read is still running costs one more read, not
+      one per save. Every delivery carries its read number, so a window can
+      tell an older read from a newer one.
     - A PDF view no longer loses a view change made while a new version of the
       document is loading. Turning dark-invert on, starting a slide show or
       switching between the slides and document layouts during a live refresh

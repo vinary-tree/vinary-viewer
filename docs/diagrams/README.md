@@ -39,6 +39,27 @@ and embeds cleanly in Markdown.
 unless a `.puml` actually changed; a different PlantUML may re-flow layouts or reject syntax this suite
 relies on (see the syntax notes in §2).
 
+> **When the system PlantUML moves on.** Distribution packages upgrade (Arch shipped `1.2026.8` by October
+> 2026), and a newer PlantUML serializes SVG differently even for an unchanged diagram (attribute order,
+> hoisted fonts, a real `<?plantuml 1.2026.8?>` marker where `1.2026.5` writes `$version$`). Render with the
+> pinned jar instead — Maven Central's `net.sourceforge.plantuml:plantuml:1.2026.5`, checked against its
+> published SHA-1 (`795a591f79276539eed92652a4faec68dcc88eb7`):
+>
+> ```bash
+> T=$(mktemp -d)
+> curl -sfL -o "$T/plantuml-1.2026.5.jar" \
+>   https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml/1.2026.5/plantuml-1.2026.5.jar
+> echo "795a591f79276539eed92652a4faec68dcc88eb7  $T/plantuml-1.2026.5.jar" | sha1sum -c -
+> # LaTeX in labels (<latex>/<math>) needs PlantUML's optional typesetting jars NEXT TO the jar; without them
+> # the render prints a ClassNotFoundException (org.apache.batik…) and still exits 0 with the formula missing
+> cp /usr/share/java/plantuml/{batik-all-1.7,jlatexmath-minimal-1.0.3,jlm_cyrillic,jlm_greek}.jar "$T/"
+> (cd docs/diagrams && java -jar "$T/plantuml-1.2026.5.jar" -tsvg seq-live-refresh.puml 2>&1 | grep -c Exception)
+> ```
+>
+> Before trusting a toolchain, prove it: render an UNCHANGED sequence diagram (no Graphviz involved) — one
+> with a LaTeX label, like `seq-stdin-typed-open.puml` — and `cmp` the result with the committed SVG; it must
+> match byte for byte. And treat a stack trace on stderr as a failed render, alongside the two greps below.
+
 > **Toolchain-version caveat.** Only **Graphviz-laid** kinds (component, class, state) depend on the
 > Graphviz version; **sequence, activity, and deployment** diagrams do not use Graphviz and re-render
 > byte-identically on any Graphviz. A workstation with a *different* Graphviz (e.g. `15.x`) will re-flow the
