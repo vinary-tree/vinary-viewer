@@ -88,6 +88,15 @@
 (defn- toggle-class! [^js el cls on?]
   (if on? (.add (.-classList el) cls) (.remove (.-classList el) cls)))
 
+(defn- sheet-of
+  "Page `idx`'s SHEET: the page-sized box that hosts its canvas, text, link and status layers. The placeholder
+   `.vv-pdf-page#vv-pdf-page-N` around it carries the layout (and the Contents anchor id); in the continuous
+   document layout the sheet fills it exactly, while in the slides layout (ADR-0045) the placeholder becomes a
+   full-viewport slot and the sheet sits centred inside it — which is why the layers never attach to the
+   placeholder itself."
+  ^js [state idx]
+  (nth (:sheet-divs @state) idx nil))
+
 (defn- apply-layout!
   "Size each page placeholder div to the current scale (preallocates exact height → no scroll jank), then
    re-measure the scroll-spy offsets for the outline anchors at the new scale. Heights are preallocated here
@@ -106,17 +115,32 @@
     (when-let [^js scroller (scroller-of container)]
       (toc/refresh! scroller toc-ids))))
 
-(defn- build-placeholders! [state]
+(defn- make-page!
+  "One page placeholder `.vv-pdf-page#vv-pdf-page-<i+1>[data-pdf-idx=i]` with its inner `.vv-pdf-sheet`.
+   Returns [page sheet]."
+  [i]
+  (let [div   (js/document.createElement "div")
+        sheet (js/document.createElement "div")]
+    (set! (.-className div) "vv-pdf-page")
+    (set! (.-id div) (str "vv-pdf-page-" (inc i)))
+    (set! (.. div -dataset -pdfIdx) (str i))
+    (set! (.-className sheet) "vv-pdf-sheet")
+    (.appendChild div sheet)
+    [div sheet]))
+
+(defn- build-placeholders!
+  "Create every page's placeholder + sheet (one DocumentFragment append → one layout), then size them."
+  [state]
   (let [{:keys [container sizes]} @state
-        divs (mapv (fn [i]
-                     (let [div (js/document.createElement "div")]
-                       (set! (.-className div) "vv-pdf-page")
-                       (set! (.-id div) (str "vv-pdf-page-" (inc i)))
-                       (set! (.. div -dataset -pdfIdx) (str i))
-                       (.appendChild container div)
-                       div))
-                   (range (count sizes)))]
-    (swap! state assoc :page-divs divs)
+        frag (js/document.createDocumentFragment)
+        n    (count sizes)]
+    (loop [i 0, pages (transient []), sheets (transient [])]
+      (if (< i n)
+        (let [[div sheet] (make-page! i)]
+          (.appendChild frag div)
+          (recur (inc i) (conj! pages div) (conj! sheets sheet)))
+        (do (.appendChild container frag)
+            (swap! state assoc :page-divs (persistent! pages) :sheet-divs (persistent! sheets)))))
     (apply-layout! state)))
 
 ;; ---- per-page render: canvas + text + link layers ----------------------------------------------
@@ -142,7 +166,7 @@
                    ;; bail if the controller was torn down OR a rescale bumped the generation while getPage
                    ;; was in flight — a stale resolve would otherwise delete the canvas a re-render just made
                    (when (and (not (:destroyed? @state)) (= gen (:gen @state)))
-                     (let [^js div (nth (:page-divs @state) idx)
+                     (let [^js div (sheet-of state idx)
                            scale   (:scale @state)
                            vp      (.getViewport pg #js {:scale scale})
                            dpr     (or (.-devicePixelRatio js/window) 1)
@@ -195,7 +219,7 @@
                     (when (= gen (:gen @state)) (swap! state update :rendered disj idx))
                     (js/console.error "[pdf] page" (inc idx) "load failed:" err)
                     (when (and (= gen (:gen @state)) (not (:destroyed? @state)))
-                      (when-let [^js div (nth (:page-divs @state) idx nil)]
+                      (when-let [^js div (sheet-of state idx)]
                         (show-status! div "vv-pdf-status-error" "⚠ failed to load — click to retry"
                                       (fn [] (clear-status! div) (render-page! state idx)))))))))))
 
@@ -207,8 +231,8 @@
     (when-let [task (get-in @state [:tasks idx])]
       (try (.cancel task) (catch :default _ nil))
       (swap! state update :tasks dissoc idx))
-    (when-let [^js div (nth (:page-divs @state) idx nil)]
-      (when-let [^js canvas (.querySelector div "canvas.vv-pdf-canvas")] (.remove canvas)))
+    (when-let [^js sheet (sheet-of state idx)]
+      (when-let [^js canvas (.querySelector sheet "canvas.vv-pdf-canvas")] (.remove canvas)))
     (swap! state update :rendered disj idx)))
 
 ;; :text-built maps page index → the Promise of that page's text-layer render, NOT just the index.
@@ -221,7 +245,7 @@
 (defn- build-text-layer! [state idx ^js pg ^js vp]
   (if-let [p (get (:text-built @state) idx)]
     p
-    (let [^js div (nth (:page-divs @state) idx)
+    (let [^js div (sheet-of state idx)
           tdiv    (js/document.createElement "div")]
       (set! (.-className tdiv) "vv-pdf-text")
       (set! (.. tdiv -style -width) (str (.-width vp) "px"))
@@ -290,7 +314,7 @@
       :else nil)))
 
 (defn- build-link-layer! [state idx ^js pg ^js vp]
-  (let [^js div (nth (:page-divs @state) idx)
+  (let [^js div (sheet-of state idx)
         adiv    (js/document.createElement "div")]
     (set! (.-className adiv) "vv-pdf-anno")
     (set! (.. adiv -style -width) (str (.-width vp) "px"))
@@ -439,7 +463,7 @@
     (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
     ;; bump :gen so any in-flight getPage/render from the OLD layout bails instead of clobbering the new one
     (swap! state #(-> % (assoc :tasks {} :rendered #{} :text-built {}) (update :gen inc)))
-    (doseq [^js div page-divs] (set! (.-innerHTML div) ""))
+    (doseq [^js sheet (:sheet-divs @state)] (set! (.-innerHTML sheet) ""))
     (apply-layout! state)
     (when (and scroller anchor-idx) (scroll-to-page! state (inc anchor-idx)))
     (when observer
@@ -540,7 +564,7 @@
    observers, tasks, and text/link layers are still recreated and torn down normally."
   [container {:keys [doc sizes]} path view-state]
   (let [state (atom {:container container :path path :doc doc :owns-doc? false
-                     :sizes sizes :rects [] :page-divs [] :toc-ids []
+                     :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
                      :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
@@ -562,7 +586,7 @@
    Dispatches [:pdf/outline path toc] when the document outline resolves."
   [container bytes path view-state]
   (let [state (atom {:container container :path path :doc nil
-                     :sizes [] :rects [] :page-divs [] :toc-ids []
+                     :sizes [] :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                      :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                      :fit (:fit view-state) :invert? (boolean (:invert? view-state))
                      :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})

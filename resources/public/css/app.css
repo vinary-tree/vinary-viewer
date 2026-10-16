@@ -77,7 +77,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 /* in-renderer PDF view (pdf.js): pages render to <canvas> inside the scrolling .vv-content, with a
    transparent text layer (real selection/find/copy) + a link layer overlaid — parity with markdown. */
 .vv-pdf-doc { background: var(--vv-pdf-gutter); padding: 16px 0; min-height: 100%; }
-.vv-pdf-page { position: relative; margin: 0 auto 16px; background: #fff;
+/* .vv-pdf-page is the LAYOUT box (sized by the engine; the Contents anchor id lives on it); .vv-pdf-sheet is
+   the page itself — paper, shadow, and the canvas/text/link/status layers. In the continuous document layout
+   the sheet fills its placeholder exactly; the slides layout (ADR-0045) turns the placeholder into a
+   full-viewport slot with the sheet centred in it. */
+.vv-pdf-page { position: relative; margin: 0 auto 16px; }
+.vv-pdf-sheet { position: relative; width: 100%; height: 100%; background: #fff;
   box-shadow: 0 1px 6px var(--vv-pdf-page-shadow); }
 .vv-pdf-canvas { display: block; }
 /* pdf.js text layer — canonical rules (from pdf_viewer.css), scoped: transparent, selectable spans */
@@ -97,7 +102,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
 /* per-page status chip: a "rendering…" hint while a slow (heavy) page rasterizes on the main thread, or a
    click-to-retry note if a page fails to render — so a slow page never looks frozen/blank or silently
-   broken (anchored to .vv-pdf-page, which is position:relative) */
+   broken (anchored to .vv-pdf-sheet, which is position:relative) */
 .vv-pdf-status { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3;
   display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 14px;
   background: var(--vv-bg2); color: var(--vv-fg-dim); border: 1px solid var(--vv-border);
