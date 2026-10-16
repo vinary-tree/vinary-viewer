@@ -79,42 +79,10 @@ const BIG_PDF = path.join(SCRATCH, 'big.pdf');
 
 // A multi-page PDF with real extractable text (the same construction test/find-e2e.js uses, at a size
 // where the text-layer materialization cost is visible).
-function makeTextPdf(pageCount) {
-  const content = (i) => [
-    'BT', '/F1 14 Tf', '72 720 Td',
-    `(Page ${i} paragraph text for the input-latency benchmark) Tj`,
-    '0 -28 Td', '(quick ) Tj', '(brown fox jumps over the lazy dog) Tj',
-    '0 -28 Td', `(needle phrase ${i}) Tj`,
-    'ET'
-  ].join('\n');
-
-  const objs = [];
-  const kids = [];
-  const pageObjFirst = 3;
-  for (let i = 0; i < pageCount; i++) kids.push(`${pageObjFirst + i * 2} 0 R`);
-  objs.push('<< /Type /Catalog /Pages 2 0 R >>');
-  objs.push(`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pageCount} >>`);
-  for (let i = 0; i < pageCount; i++) {
-    const streamObj = pageObjFirst + i * 2 + 1;
-    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${streamObj} 0 R ` +
-              `/Resources << /Font << /F1 ${pageObjFirst + pageCount * 2} 0 R >> >> >>`);
-    const body = content(i);
-    objs.push(`<< /Length ${body.length} >>\nstream\n${body}\nendstream`);
-  }
-  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-
-  let pdf = '%PDF-1.4\n';
-  const offsets = [];
-  objs.forEach((body, i) => {
-    offsets[i] = Buffer.byteLength(pdf, 'latin1');
-    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
-  });
-  const xrefStart = Buffer.byteLength(pdf, 'latin1');
-  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
-  offsets.forEach((off) => { pdf += `${String(off).padStart(10, '0')} 00000 n \n`; });
-  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return Buffer.from(pdf, 'latin1');
-}
+// The benchmark's PDF fixture comes from the shared builder with its own first-line wording, so the bytes — and
+// therefore the measurements recorded in docs/scientific/10 — stay identical to the historical inline copy.
+const { makeTextPdf: makeSharedTextPdf } = require('../test/fixtures/pdf-gen');
+const makeTextPdf = (pageCount) => makeSharedTextPdf(pageCount, 'input-latency benchmark');
 
 function writeFixtures() {
   const small = ['# Small fixture\n'];

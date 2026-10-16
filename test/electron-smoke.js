@@ -376,28 +376,9 @@ function firstDiff(a, b) {
   return a.length === b.length ? -1 : n;
 }
 
-function makeOutlinePdf() {
-  const content = 'q 0 0 1 rg 20 20 120 120 re f Q';
-  const objs = [
-    '<< /Type /Catalog /Pages 2 0 R /Outlines 6 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 800] /Contents 5 0 R /Resources << >> >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 800] /Contents 5 0 R /Resources << >> >>',
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
-    '<< /Type /Outlines /First 7 0 R /Last 8 0 R /Count 2 >>',
-    '<< /Title (Section One) /Parent 6 0 R /Next 8 0 R /First 9 0 R /Last 9 0 R /Count 1 /Dest [3 0 R /XYZ 0 800 0] >>',
-    '<< /Title (Section Two) /Parent 6 0 R /Prev 7 0 R /Dest [4 0 R /XYZ 0 800 0] >>',
-    '<< /Title (Subsection A) /Parent 7 0 R /Dest [3 0 R /XYZ 0 400 0] >>'   // nested under Section One → 1.1
-  ];
-  let pdf = '%PDF-1.4\n';
-  const offsets = [];
-  objs.forEach((body, i) => { offsets[i] = Buffer.byteLength(pdf, 'latin1'); pdf += `${i + 1} 0 obj\n${body}\nendobj\n`; });
-  const xrefStart = Buffer.byteLength(pdf, 'latin1');
-  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
-  offsets.forEach((off) => { pdf += `${String(off).padStart(10, '0')} 00000 n \n`; });
-  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return Buffer.from(pdf, 'latin1');
-}
+// makeOutlinePdf() (two portrait pages + a nested outline) and the slide-deck builder live in the shared,
+// deterministic fixture module.
+const { makeOutlinePdf } = require('./fixtures/pdf-gen');
 
 async function waitFor(predicate, label, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;

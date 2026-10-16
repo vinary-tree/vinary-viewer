@@ -27,6 +27,8 @@ const jsFiles = [
   'test/git-tree-smoke.js', 'test/git-log-smoke.js', 'test/git-blame-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
   'test/tui-smoke.js', 'test/daemon-smoke.js', 'test/daemon-events-smoke.js',
   'test/headless-window.js', 'test/headless-runner-smoke.mjs',
+  // shared, deterministic test fixtures: the in-process SFTP server, the TCP latency proxy, the PDF builders
+  'test/fixtures/ssh-server.js', 'test/fixtures/latency-proxy.js', 'test/fixtures/pdf-gen.js',
   'test/remote-daemon-events-e2e-runner.js', 'test/remote-daemon-events-e2e.js',
   // the in-page-find / typist-latency gate, and the benchmark that produced its threshold (ADR-0033)
   'test/find-e2e.js', 'test/find-worker-smoke.js', 'scripts/bench-input-latency.cjs',

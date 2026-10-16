@@ -7,6 +7,20 @@
 //   const srv = startSftpServer({ password: 'pw', files: { 'notes.md': '# hi', 'sub/a.txt': 'x' } });
 //   // → { host:'127.0.0.1', port, user:'tester', password, dir, url(p), close() }
 //
+// Experiment / fault-injection knobs (all OFF by default, so existing tests see the historical behaviour):
+//   config.ident        the server's SSH software-version string (e.g. 'OpenSSH_9.6'). ssh2 clients size their
+//                       SFTP reads from it: an OpenSSH/dropbear ident unlocks 260 096-byte reads, anything else
+//                       (incl. ssh2's own default ident) caps a read at 31 952 bytes — docs/scientific/11.
+//   config.maxReadLen   answer READs with at most this many bytes (a server that caps reads; short reads)
+//   config.noDelay      true → TCP_NODELAY on the server side of every connection (Nagle off). Default: Nagle ON,
+//                       which is what ssh2's Server does unless told otherwise — docs/scientific/11 H0
+//   srv.setDelay(fn)    fn(req) → ms to hold each request's reply (req = {op, path, offset?, length?})
+//   srv.onRequest(fn)   fn(req) → (Promise) run BEFORE a request is served — e.g. rewrite a file mid-read
+//   srv.setFault(fn)    fn(req) → an SFTP STATUS_CODE to answer with instead of serving (null → serve)
+//   srv.stats           { byPath: {path: {opens, reads, readBytes, stats}}, requests, inFlightReads,
+//                         maxInFlightReads, inFlightStats, maxInFlightStats }; srv.resetStats()
+//   srv.openHandles()   live SFTP handles across every session (a leak check)
+//
 // Requires ssh-keygen (openssh) to mint an OpenSSH-format host key (the format ssh2.utils.parseKey accepts).
 
 const fs = require('fs');
@@ -92,9 +106,47 @@ function startSftpServer(config) {
     return path.join(dir, '.' + norm);
   };
 
+  // ---- instrumentation (see the header) ----
+  const hooks = { delay: null, onRequest: null, fault: null };
+  const freshStats = () => ({ byPath: {}, requests: 0, inFlightReads: 0, maxInFlightReads: 0,
+                              inFlightStats: 0, maxInFlightStats: 0 });
+  let stats = freshStats();
+  const liveHandles = new Set();
+  const pathStats = (p) => (stats.byPath[p] = stats.byPath[p] || { opens: 0, reads: 0, readBytes: 0, stats: 0 });
+  const remoteKey = (p) => path.posix.normalize('/' + String(p == null ? '' : p));
+  // Serve one request through the hooks: count it, run onRequest, then answer with an injected fault or run
+  // `serve(done)` after the configured delay. `done` must be called exactly once when the reply has been sent;
+  // it balances the in-flight counters the experiment reads (max concurrent READs = the reader's pipeline depth).
+  const instrumented = (sftp, reqid, req, serve) => {
+    stats.requests++;
+    const isRead = req.op === 'READ';
+    const isStat = req.op === 'STAT' || req.op === 'LSTAT' || req.op === 'FSTAT';
+    if (isRead) { stats.inFlightReads++; stats.maxInFlightReads = Math.max(stats.maxInFlightReads, stats.inFlightReads); }
+    if (isStat) { stats.inFlightStats++; stats.maxInFlightStats = Math.max(stats.maxInFlightStats, stats.inFlightStats); }
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      if (isRead) stats.inFlightReads--;
+      if (isStat) stats.inFlightStats--;
+    };
+    const go = () => {
+      const fault = hooks.fault ? hooks.fault(req) : null;
+      if (fault !== null && fault !== undefined) { done(); return sftp.status(reqid, fault); }
+      serve(done);
+    };
+    Promise.resolve(hooks.onRequest ? hooks.onRequest(req) : null).catch(() => null).then(() => {
+      const ms = hooks.delay ? Number(hooks.delay(req)) || 0 : 0;
+      if (ms > 0) setTimeout(go, ms); else go();
+    });
+  };
+
   const clients = new Set();
-  const server = new Server({ hostKeys: [hostKey] }, (client) => {
+  const serverOpts = { hostKeys: [hostKey] };
+  if (config.ident) serverOpts.ident = config.ident;
+  const server = new Server(serverOpts, (client) => {
     clients.add(client);
+    if (config.noDelay) client.setNoDelay(true);
     client.on('close', () => clients.delete(client));
     client.on('authentication', (ctx) => {
       const allow = ['password', 'publickey'];
@@ -150,9 +202,14 @@ function startSftpServer(config) {
           const sftp = acceptSftp();
           const handles = new Map();
           let nextHandle = 0;
-          const alloc = (obj) => { const id = nextHandle++; handles.set(id, obj); const h = Buffer.alloc(4); h.writeUInt32BE(id, 0); return h; };
+          const alloc = (obj) => { const id = nextHandle++; handles.set(id, obj); liveHandles.add(obj); const h = Buffer.alloc(4); h.writeUInt32BE(id, 0); return h; };
           const get = (h) => handles.get(h.readUInt32BE(0));
-          const drop = (h) => handles.delete(h.readUInt32BE(0));
+          const drop = (h) => { liveHandles.delete(handles.get(h.readUInt32BE(0))); handles.delete(h.readUInt32BE(0)); };
+          // a session that dies with handles open (dropped connection) must not leak them in openHandles()
+          // (ssh2's server-side SFTP emits 'end' when the channel closes; 'close' is listened for too, defensively)
+          const reapHandles = () => { for (const obj of handles.values()) { liveHandles.delete(obj); if (obj.fd !== undefined) fs.close(obj.fd, () => {}); } handles.clear(); };
+          sftp.on('end', reapHandles);
+          sftp.on('close', reapHandles);
 
           sftp.on('REALPATH', (reqid, p) => {
             const abs = exposedRoot ? remoteAbsolute(p)
@@ -160,31 +217,51 @@ function startSftpServer(config) {
             sftp.name(reqid, [{ filename: abs, longname: abs, attrs: {} }]);
           });
           const onStat = (useLstat) => (reqid, p) => {
-            const fn = useLstat ? fs.lstat : fs.stat;
-            fn(mapPath(p), (err, st) => err ? sftp.status(reqid, errStatus(err)) : sftp.attrs(reqid, statToAttrs(st)));
+            const key = remoteKey(p);
+            pathStats(key).stats++;
+            instrumented(sftp, reqid, { op: useLstat ? 'LSTAT' : 'STAT', path: key }, (done) => {
+              const fn = useLstat ? fs.lstat : fs.stat;
+              fn(mapPath(p), (err, st) => { done(); err ? sftp.status(reqid, errStatus(err)) : sftp.attrs(reqid, statToAttrs(st)); });
+            });
           };
           sftp.on('STAT', onStat(false));
           sftp.on('LSTAT', onStat(true));
           sftp.on('FSTAT', (reqid, h) => {
             const st = get(h);
-            if (st && st.type === 'file') return fs.fstat(st.fd, (err, s) => err ? sftp.status(reqid, errStatus(err)) : sftp.attrs(reqid, statToAttrs(s)));
-            if (st && st.type === 'dir') return fs.stat(st.path, (err, s) => err ? sftp.status(reqid, errStatus(err)) : sftp.attrs(reqid, statToAttrs(s)));
-            sftp.status(reqid, STATUS_CODE.FAILURE);
+            if (st && st.remote) pathStats(st.remote).stats++;
+            instrumented(sftp, reqid, { op: 'FSTAT', path: st && st.remote }, (done) => {
+              const reply = (err, s) => { done(); err ? sftp.status(reqid, errStatus(err)) : sftp.attrs(reqid, statToAttrs(s)); };
+              if (st && st.type === 'file') return fs.fstat(st.fd, reply);
+              if (st && st.type === 'dir') return fs.stat(st.path, reply);
+              done(); sftp.status(reqid, STATUS_CODE.FAILURE);
+            });
           });
           sftp.on('OPEN', (reqid, filename, flags, _attrs) => {
-            fs.open(mapPath(filename), flagsToString(flags) || 'r', (err, fd) => {
-              if (err) return sftp.status(reqid, errStatus(err));
-              sftp.handle(reqid, alloc({ type: 'file', fd, path: mapPath(filename) }));
+            const key = remoteKey(filename);
+            pathStats(key).opens++;
+            instrumented(sftp, reqid, { op: 'OPEN', path: key }, (done) => {
+              fs.open(mapPath(filename), flagsToString(flags) || 'r', (err, fd) => {
+                done();
+                if (err) return sftp.status(reqid, errStatus(err));
+                sftp.handle(reqid, alloc({ type: 'file', fd, path: mapPath(filename), remote: key }));
+              });
             });
           });
           sftp.on('READ', (reqid, h, offset, length) => {
             const st = get(h);
             if (!st || st.type !== 'file') return sftp.status(reqid, STATUS_CODE.FAILURE);
-            const buf = Buffer.alloc(length);
-            fs.read(st.fd, buf, 0, length, offset, (err, n) => {
-              if (err) return sftp.status(reqid, errStatus(err));
-              if (n === 0) return sftp.status(reqid, STATUS_CODE.EOF);
-              sftp.data(reqid, buf.slice(0, n));
+            const ps = pathStats(st.remote);
+            ps.reads++;
+            instrumented(sftp, reqid, { op: 'READ', path: st.remote, offset, length }, (done) => {
+              const want = config.maxReadLen ? Math.min(length, config.maxReadLen) : length;
+              const buf = Buffer.alloc(want);
+              fs.read(st.fd, buf, 0, want, offset, (err, n) => {
+                done();
+                if (err) return sftp.status(reqid, errStatus(err));
+                if (n === 0) return sftp.status(reqid, STATUS_CODE.EOF);
+                ps.readBytes += n;
+                sftp.data(reqid, buf.slice(0, n));
+              });
             });
           });
           sftp.on('WRITE', (reqid, h, offset, data) => {
@@ -236,6 +313,13 @@ function startSftpServer(config) {
         // Abruptly destroy every live connection's socket (ECONNRESET) — simulates a mid-stream network drop so
         // an in-flight SFTP read errors deterministically (server.close() alone leaves active connections open).
         destroyConnections: () => { for (const c of clients) { try { c._sock.destroy(); } catch (_e) {} } },
+        setDelay: (fn) => { hooks.delay = fn || null; },
+        onRequest: (fn) => { hooks.onRequest = fn || null; },
+        setFault: (fn) => { hooks.fault = fn || null; },
+        get stats() { return stats; },
+        resetStats: () => { stats = freshStats(); },
+        openHandles: () => liveHandles.size,
+        STATUS_CODE,
         server,
       });
     });
