@@ -238,7 +238,7 @@
      (set! (.-href link) (str "css/themes/" theme ".css")))))
 
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
-(rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes]}] (pdf-cache/put-bytes! path bytes)))
+(rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes stamp]}] (pdf-cache/put-bytes! path bytes stamp)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
 (rf/reg-fx :render-cache/invalidate
            (fn [{:keys [path stamp]}] (warm-cache/invalidate-path! path stamp)))

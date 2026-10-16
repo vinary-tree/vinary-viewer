@@ -3,13 +3,61 @@
    effects (vinary.app.fx, transitively required by the tested vinary.app.events) can reference it
    without pulling pdf.js — which touches DOMMatrix/Worker — into the node :test build. The pdf.js
    engine (vinary.renderer.pdf) registers the text-ensurer; the pdf-view reads bytes; effects write
-   bytes + trigger the ensurer. Bytes live here (keyed by :doc/path), never in DataScript (ADR-0010).")
+   bytes + trigger the ensurer. Bytes live here (keyed by :doc/path), never in DataScript (ADR-0010).
 
-(defonce ^:private bytes-cache (atom {}))   ; :doc/path → Uint8Array
+   KEEP-LAST-GOOD (ADR-0045 §Live refresh). Arriving bytes are a CANDIDATE, not a replacement: each path holds
+   {:good {:bytes :stamp} :candidate {:bytes :stamp}}. The pdf-view prepares the candidate and PROMOTES it on a
+   successful parse, or REJECTS it (dropping it, keeping :good) when pdf.js cannot open it — a refresh read
+   while pdflatex was still writing, a corrupt file. So a torn reload never displaces the last version that
+   rendered, and a later remount (a tab switch back) still finds bytes that open.")
+
+(defonce ^:private bytes-cache (atom {}))   ; :doc/path → {:good {:bytes :stamp}|nil :candidate {:bytes :stamp}|nil}
 (defonce ^:private ensurer (atom nil))      ; 0-arg fn → Promise materializing the active PDF's text
 
-(defn put-bytes! [path bytes] (swap! bytes-cache assoc path bytes))
-(defn get-bytes  [path] (get @bytes-cache path))
+(defn put-bytes!
+  "Cache newly arrived `bytes` for `path` (stamped `stamp`) as the CANDIDATE version."
+  ([path bytes] (put-bytes! path bytes nil))
+  ([path bytes stamp]
+   (swap! bytes-cache update path assoc :candidate {:bytes bytes :stamp stamp})))
+
+(defn bytes-for
+  "The newest version to try for `path`: the candidate when one is pending, else the last good one — as
+   {:bytes :stamp}, or nil when nothing is cached."
+  [path]
+  (let [{:keys [good candidate]} (get @bytes-cache path)]
+    (or candidate good)))
+
+(defn get-bytes
+  "The newest cached bytes for `path` (candidate, else good), or nil."
+  [path]
+  (:bytes (bytes-for path)))
+
+(defn good-version
+  "The last version of `path` that rendered successfully, {:bytes :stamp}, or nil."
+  [path]
+  (:good (get @bytes-cache path)))
+
+(defn promote!
+  "The candidate stamped `stamp` rendered: it becomes the good version. A stale stamp (a newer candidate has
+   arrived since) is ignored."
+  [path stamp]
+  (swap! bytes-cache update path
+         (fn [{:keys [candidate] :as entry}]
+           (if (and candidate (= stamp (:stamp candidate)))
+             (assoc entry :good candidate :candidate nil)
+             entry))))
+
+(defn reject!
+  "The candidate stamped `stamp` failed to open: drop it, keeping the good version. Returns true when a good
+   version remains to fall back to."
+  [path stamp]
+  (let [entry (get (swap! bytes-cache update path
+                          (fn [{:keys [candidate] :as entry}]
+                            (if (and candidate (= stamp (:stamp candidate)))
+                              (assoc entry :candidate nil)
+                              entry)))
+                   path)]
+    (boolean (:good entry))))
 
 (defn evict-keep!
   "Drop cached bytes for paths not in `keep-paths` (piggy-backs on the retention sweep)."

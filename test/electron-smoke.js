@@ -1679,6 +1679,62 @@ async function main() {
   assert.strictEqual(chrome.rootScroll, 0, 'the document root must not scroll either');
   console.log('[ok] PDF Contents click scrolls the pane, not the chrome — menu bar stays put even with #app scroll-range');
 
+  // ── PDF live refresh IN PLACE (ADR-0045 §Live refresh) ──
+  // content-view keys the pdf-view by tab + path, so a re-sent PDF (a watcher / daemon refresh) swaps the
+  // document INSIDE the mounted view: the .vv-pdf-doc element survives (no remount → no blank flash), the
+  // reading position is kept, and the placeholders grow with the new page count. A refresh whose bytes do not
+  // open (read while pdflatex was still writing) keeps the last good render behind a non-fatal note; the next
+  // good refresh replaces it and clears the note.
+  {
+    const { makeDeckPdf, truncatePdf } = require('./fixtures/pdf-gen');
+    const livePath = path.join(ROOT, 'test', 'fixtures', 'live-refresh.pdf');   // virtual path; bytes below
+    // tall portrait pages, a non-Beamer producer → an ordinary document (never the slides layout)
+    const version = (pages) => makeDeckPdf({ pages, sizes: Array.from({ length: pages }, () => [300, 800]),
+      labels: null, creator: 'live-refresh smoke', producer: 'smoke' });
+    const t0 = Date.now();
+    state.contentByPath.set(livePath, { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(6)), stamp: t0 });
+    win.webContents.send('vv:open-files', { paths: [livePath] });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 6
+      && Boolean(document.querySelector('.vv-pdf-doc .vv-pdf-sheet canvas.vv-pdf-canvas'))`,
+      'the 6-page live-refresh fixture renders', 15000);
+    await evalIn(win, `(() => { const c = document.querySelector('.vv-content');
+      document.querySelector('.vv-pdf-doc').__vvLiveMark = 'mounted-once';
+      c.scrollTop = 1200; c.dispatchEvent(new Event('scroll', { bubbles: true })); return true; })()`);
+    await delay(300);
+    const before = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
+
+    // 1 — a good refresh with one more page swaps in place
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(7)), stamp: t0 + 1 });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 7`,
+      'the refreshed document (7 pages) is swapped in', 15000);
+    const afterGood = await evalIn(win, `(() => ({
+      same: document.querySelector('.vv-pdf-doc').__vvLiveMark === 'mounted-once',
+      top: document.querySelector('.vv-content').scrollTop,
+      note: Boolean(document.querySelector('.vv-refresh-note')) }))()`);
+    assert.strictEqual(afterGood.same, true, 'a live refresh must update the mounted PDF view in place (no remount)');
+    assert.ok(Math.abs(afterGood.top - before) <= 2, `the reading position survives the refresh (${before} → ${afterGood.top})`);
+    assert.strictEqual(afterGood.note, false, 'a good refresh shows no note');
+
+    // 2 — a torn refresh (half a file) keeps the last good render + raises the non-fatal note
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(truncatePdf(version(8), 0.5)), stamp: t0 + 2 });
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-refresh-note[data-kind="render-failed"]'))`),
+      'a refresh that cannot be opened raises the render-failed note', 10000);
+    const afterTorn = await evalIn(win, `(() => ({
+      pages: document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length,
+      canvas: Boolean(document.querySelector('.vv-pdf-doc canvas.vv-pdf-canvas')),
+      same: document.querySelector('.vv-pdf-doc').__vvLiveMark === 'mounted-once',
+      error: Boolean(document.querySelector('.vv-content .vv-error')) }))()`);
+    assert.deepStrictEqual(afterTorn, { pages: 7, canvas: true, same: true, error: false },
+      'a torn refresh keeps the last good document on screen (no error page, no remount)');
+
+    // 3 — the next good refresh replaces it and clears the note
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(8)), stamp: t0 + 3 });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 8
+      && !document.querySelector('.vv-refresh-note')`,
+      'the next good refresh is shown and clears the note', 15000);
+    console.log('[ok] PDF live refresh swaps in place (position kept); a torn refresh keeps the last good render behind a note');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

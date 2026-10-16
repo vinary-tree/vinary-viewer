@@ -637,6 +637,24 @@ bar shows `:view/zoom-percent`. See [features/22-zoom-and-fit.md](../features/22
 
 ---
 
+### 1.31 Live-refresh notes (ADR-0045 / ADR-0046)
+
+A refresh of a document that already rendered never blanks it: when the new version cannot be **shown**, the
+view keeps the last good version and the doc entity carries a non-fatal `:doc/refresh-note`
+`{:kind :message :stamp :at}` — `"render-failed"` (the new PDF bytes did not open in pdf.js, typically read while
+`pdflatex` was still writing; raised by the pdf-view's in-place refresh), `"refresh-failed"` (main could not
+re-read the file) or `"incomplete"` (main delivered a PDF whose trailer is missing). `ui/refresh-note` floats a
+banner over the content with **Retry** and **×**; a successful refresh clears it. PDF bytes are cached as a
+**candidate** (`pdf-cache/put-bytes!`) and promoted to the good version only once pdf.js opens them, so a torn
+read cannot displace the last version that rendered.
+
+| Event | Kind | Payload | Reads | Writes | Effects |
+| --- | --- | --- | --- | --- | --- |
+| `:pdf/refresh-failed` | fx | `path stamp message` | DataScript `eid-for-path` | — | `[:ds/transact …]` `:doc/refresh-note` ← `{:kind "render-failed" :message :stamp :at}` — dispatched by `pdf-view` when a refreshed (or first) PDF candidate fails to open; the last good document stays mounted |
+| `:pdf/refreshed` | fx | `path stamp` | DataScript `doc-attr :doc/refresh-note` | — | retracts `:doc/refresh-note` when present — a PDF version opened successfully (first mount or in-place refresh) |
+| `:doc/refresh-retry` | fx | `path` (the shown file) | — | — | `[:vv/open path]` — the banner's **Retry**: main re-reads and re-sends the file through the ordinary open flow |
+| `:doc/refresh-note-dismiss` | fx | `path` | DataScript `doc-attr :doc/refresh-note` | — | retracts `:doc/refresh-note` — the banner's **×** |
+
 ## 2. Effects
 
 `reg-fx` handlers receive the effect's argument and perform IO/async, often re-dispatching back into
@@ -695,7 +713,7 @@ request/reply effects, to their on-error path — rather than throwing.
 | `:vv/save-settings` | EDN string | **debounced 300 ms** (the shared scheduler — the sidebar splitter writes per mousemove, a font field per keystroke), then `window.vv.saveSettings(edn)` → `vv:settings-save` IPC | — |
 | `:vv/save-keymap` | EDN string | `window.vv.saveKeymap(edn)` → `vv:keymap-save` IPC (immediate; the editor's bulk writes use the debounced `:keymap/persist`, §2.2) | — |
 | `:vv/save-ext-config` | EDN string | **debounced 300 ms** (toggles can fire rapidly), then `window.vv.saveExtConfig(edn)` → `vv:ext-config-save` (ad-block + extension prefs → `extensions.edn`) | — |
-| `:pdf/cache-bytes` | `{:path :bytes}` | `pdf-cache/put-bytes!` — the renderer-side PDF byte cache keyed by `:doc/path`, never DataScript ([ADR-0010](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)); emitted by `:content/received` for every kind-`pdf` payload, including a PDF facet loaded by `:facet/ensure-loaded` | — |
+| `:pdf/cache-bytes` | `{:path :bytes :stamp}` | `pdf-cache/put-bytes!` — caches the bytes as the path's **candidate** version (promoted to the good version by `pdf-view` once pdf.js opens it, rejected if it does not — keep-last-good, §1.31); the renderer-side PDF byte cache keyed by `:doc/path`, never DataScript ([ADR-0010](../design-decisions/0010-bounded-content-retention-and-render-metadata.md)); emitted by `:content/received` for every kind-`pdf` payload, including a PDF facet loaded by `:facet/ensure-loaded` | — |
 | `:pdf/evict` | `retained` (the retained path vector) | `pdf-cache/evict-keep!` — drop the cached bytes of every PDF no tab retains any more (emitted by each retention pass) | — |
 | `:render-cache/invalidate` | `{:path :stamp}` | `warm-cache/invalidate-path!` — retire `path`'s renderer preparation artifacts for any OTHER stamp (a live refresh superseded them; a leased artifact is disposed when its view releases it) — emitted by every `:content/received` | — |
 | `:render-cache/retain-only` | `retained` (path vector) | `warm-cache/retain-only!` — invalidate every warm-cache artifact whose path is no longer retained (the bounded cache of DOM-free parse/load artifacts that a tab revisit reuses) — emitted by each retention pass | — |
@@ -876,13 +894,14 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:ui/active-content-path` | `:<- [:facet/active]` `:<- [:ui/active-path]` `:<- [:ui/active-uri]` | the path of the file the active tab is SHOWING — the facet's `:path`, else the primary path, else the raw active URI (so a PDF keyed by an http(s) URL, opened from a web-view link, still resolves). The pane, Contents, find and zoom operate on it |
 | `:facet/type` | `:<- [:facet/active]` | the shown facet's type, `:preview` \| `:source` |
 | `:view/switch` | `:<- [::facet-inputs]` `:<- [:doc/group]` | the `[Preview ▾ \| Source ▾]` toolbar model (`facet/view-model`: `:show?`, `:active-type`, `:active-path`, and per button its `:mode` — `:hidden` / `:plain` / `:combo` — `:main-path` and `:options`). Layered for the same reason as `:facet/active` |
-| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-content-path]` | `ds/active-doc` → the pulled doc entity of the **shown** file \| nil. **The `d/pull` vector in `vinary.app.ds/active-doc` is authoritative:** `:doc/path :doc/kind :doc/language :doc/base-dir :doc/text :doc/html :doc/toc :doc/source-toc :doc/assets :doc/entries :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta :doc/sourceable? :doc/data-url :doc/reflow-html :doc/siblings :doc/diff-split-html :doc/diff-targets :doc/streaming? :doc/stream-progress :doc/stream-note :doc/git-root :doc/git`. A **new `:doc/*` attribute is invisible to views until it is added there.** |
+| `:doc/active` | `:<- [:ds/rev]` `:<- [:ui/active-content-path]` | `ds/active-doc` → the pulled doc entity of the **shown** file \| nil. **The `d/pull` vector in `vinary.app.ds/active-doc` is authoritative:** `:doc/path :doc/kind :doc/language :doc/base-dir :doc/text :doc/html :doc/toc :doc/source-toc :doc/assets :doc/entries :doc/error :doc/stamp :doc/sheets :doc/page :doc/paged? :doc/meta :doc/sourceable? :doc/data-url :doc/reflow-html :doc/siblings :doc/diff-split-html :doc/diff-targets :doc/streaming? :doc/stream-progress :doc/stream-note :doc/git-root :doc/git :doc/refresh-note`. A **new `:doc/*` attribute is invisible to views until it is added there.** |
 | `:doc/kind` | `:<- [:doc/active]` | the active document's kind — selects the `content-view` Strategy |
 | `:doc/git` | `:<- [:doc/active]` | the active document's commit-diff facts `{:root :from :to :range?}` — nil unless the shown doc is a git-produced diff (kind-guarded so a stale attr can never leak). Feeds `:commits/open-set` ([ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) |
 | `:doc/toc` | `:<- [:ui/active-uri]` `:<- [:doc/active]` `:<- [:ui/web-toc]` `:<- [:ui/active-view-source?]` | the Contents outline for the active view (`subs/active-toc`): an http(s) page → the web view's headings (`:ui/web-toc`); the **Source** view with a source outline present → `:doc/source-toc` (`L<line>` ids for CodeMirror navigation, from `:toc/set`); otherwise the preview outline `:doc/toc` (slug ids — Markdown/Org/LaTeX/office headings, a diff's per-file list, a PDF outline, a streamed log's error/warning records). Keeping the two id-spaces in separate attrs means neither view's Contents clobbers the other's |
 | `:doc/streaming?` | `:<- [:doc/active]` | bool — the active document renders **incrementally** as a stream (§1.28) rather than whole |
 | `:doc/stream-progress` | `:<- [:doc/active]` | the stream's completion, a fraction in $`[0,1]`$ (nil until the first batch) — the progress strip |
 | `:doc/stream-note` | `:<- [:doc/active]` | a non-fatal note for the progress strip (e.g. a remote SSH connection dropped mid-stream — `:stream/interrupted`) \| nil |
+| `:doc/refresh-note` | `:<- [:doc/active]` | the shown document's non-fatal live-refresh note `{:kind :message :stamp :at}` \| nil — rendered by `ui/refresh-note` over the last good version (§1.31) |
 
 > Markdown TOC metadata is captured during rendering and stored on the document entity. Scroll-spy
 > active-heading detection uses a measured offset cache rather than reparsing the HTML during scroll.

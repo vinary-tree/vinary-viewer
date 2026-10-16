@@ -227,6 +227,10 @@
 ;; the active document's kind ("markdown" / "org" / "latex" / "source" / "pdf" / …) — gates the "Go to preview" jump item
 (rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
 
+;; the shown document's non-fatal live-refresh note ({:kind :message :stamp :at}) — the last good version stays
+;; on screen; ui/refresh-note shows this over it (ADR-0045 / ADR-0046)
+(rf/reg-sub :doc/refresh-note :<- [:doc/active] (fn [doc _] (:doc/refresh-note doc)))
+
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.
 (rf/reg-sub :doc/git :<- [:doc/active]

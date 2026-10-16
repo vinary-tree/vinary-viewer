@@ -691,7 +691,8 @@
               (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
               (conj [:diff/build-split {:path path :text text :stamp stamp}])
               ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
-              (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes}])
+              ;; …as the CANDIDATE version: the pdf-view promotes it once pdf.js opens it (keep-last-good)
+              (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes :stamp stamp}])
               ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
               ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
               (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))
@@ -1876,6 +1877,48 @@
  (fn [_ [_ path toc]]
    (when-let [eid (ds/eid-for-path (ds/snapshot) path)]
      {:fx [[:ds/transact [[:db/add eid :doc/toc (vec toc)]]]]})))
+
+;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
+;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last
+;; good version and the doc carries a non-fatal :doc/refresh-note {:kind :message :stamp :at}, shown as a small
+;; banner over the content (ui/refresh-note). Kinds: "render-failed" (the new bytes did not open in pdf.js —
+;; typically read while pdflatex was still writing), "refresh-failed" (main could not re-read the file) and
+;; "incomplete" (main delivered a PDF whose trailer is missing). A successful refresh clears it.
+(defn refresh-note-tx
+  "Transaction setting `path`'s :doc/refresh-note to `note` ([] when no doc entity exists)."
+  [snap path note]
+  (if-let [eid (ds/eid-for-path snap path)] [[:db/add eid :doc/refresh-note note]] []))
+
+(defn clear-refresh-note-tx
+  "Transaction retracting `path`'s :doc/refresh-note ([] when there is none)."
+  [snap path]
+  (let [eid (ds/eid-for-path snap path)
+        cur (when eid (ds/doc-attr snap path :doc/refresh-note))]
+    (if cur [[:db/retract eid :doc/refresh-note cur]] [])))
+
+(rf/reg-event-fx
+ :pdf/refresh-failed
+ (fn [_ [_ path stamp message]]
+   (let [tx (refresh-note-tx (ds/snapshot) path {:kind "render-failed" :message (str message)
+                                                 :stamp stamp :at (js/Date.now)})]
+     (when (seq tx) {:fx [[:ds/transact tx]]}))))
+
+(rf/reg-event-fx
+ :pdf/refreshed
+ (fn [_ [_ path _stamp]]
+   (let [tx (clear-refresh-note-tx (ds/snapshot) path)]
+     (when (seq tx) {:fx [[:ds/transact tx]]}))))
+
+;; the banner's Retry: re-request the shown file through the ordinary open flow (main re-reads + re-sends it)
+(rf/reg-event-fx
+ :doc/refresh-retry
+ (fn [_ [_ path]] (when path {:fx [[:vv/open path]]})))
+
+(rf/reg-event-fx
+ :doc/refresh-note-dismiss
+ (fn [_ [_ path]]
+   (let [tx (clear-refresh-note-tx (ds/snapshot) path)]
+     (when (seq tx) {:fx [[:ds/transact tx]]}))))
 (rf/reg-event-fx
  :view/re-frame-10x
  (fn [{:keys [db]} _]

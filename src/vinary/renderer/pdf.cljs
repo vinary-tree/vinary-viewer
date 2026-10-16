@@ -660,6 +660,65 @@
         (.catch (fn [e] (js/console.error "[pdf] load failed" e))))
     state))
 
+(defn- reconcile-pages!
+  "Grow or shrink the placeholder/sheet vectors (and the DOM) to `n` pages — a refreshed document may have
+   gained or lost pages. Existing placeholders are kept, so their stretched canvases stay visible."
+  [state n]
+  (let [{:keys [container page-divs sheet-divs]} @state
+        have (count page-divs)]
+    (cond
+      (< have n)
+      (let [frag (js/document.createDocumentFragment)
+            [pages sheets] (loop [i have, pages (transient page-divs), sheets (transient sheet-divs)]
+                             (if (< i n)
+                               (let [[div sheet] (make-page! i)]
+                                 (.appendChild frag div)
+                                 (recur (inc i) (conj! pages div) (conj! sheets sheet)))
+                               [(persistent! pages) (persistent! sheets)]))]
+        (.appendChild container frag)
+        (swap! state assoc :page-divs pages :sheet-divs sheets))
+
+      (> have n)
+      (do (doseq [^js div (subvec page-divs n)] (.remove div))
+          (swap! state assoc :page-divs (subvec page-divs 0 n) :sheet-divs (subvec sheet-divs 0 n)))
+
+      :else nil)))
+
+(defn replace-doc!
+  "Swap a freshly prepared {:doc :sizes} into a MOUNTED controller in place — a live refresh (ADR-0045
+   §Live refresh): no unmount, no DOM teardown, no scroll reset. Keeps the reading anchor (page + in-page
+   fraction, clamped if the document shrank), keeps the visible canvases (CSS-stretched) until their
+   double-buffered re-render swaps in, grows/shrinks the placeholders when the page count changed, and
+   re-extracts the outline. The CALLER releases the previous artifact's lease afterwards — that is what
+   destroys the old PDFDocumentProxy, never this function."
+  [state {:keys [doc sizes]}]
+  (when-not (:destroyed? @state)
+    (let [{:keys [container rects observer path]} @state
+          scroller (scroller-of container)
+          anchor   (when scroller (layout/anchor-of rects (- (.-scrollTop scroller) (.-offsetTop container))))]
+      (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
+      ;; :gen fences in-flight work against the OLD document; :doc-gen counts document swaps (observers that
+      ;; borrow the proxy — the overview grid — rebuild when it moves)
+      (swap! state #(-> %
+                        (assoc :doc doc :sizes sizes :tasks {} :rendered #{} :text-built {} :toc-ids [])
+                        (update :gen inc)
+                        (update :doc-gen (fnil inc 0))))
+      (reconcile-pages! state (count sizes))
+      (doseq [^js sheet (:sheet-divs @state)] (strip-layers! sheet))
+      (when-let [mode (:fit @state)] (apply-fit! state mode))
+      (apply-layout! state)
+      (when (and scroller anchor)
+        (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor))))
+      (drop-offscreen-canvases! state)
+      (when observer
+        (.disconnect observer)
+        (doseq [^js div (:page-divs @state)] (.observe observer div)))
+      (render-visible! state)
+      (reset! current-doc {:doc doc :path path})
+      (cache/set-ensurer! (:ensure-fn @state))
+      (extract-outline! state doc path)
+      state)))
+
 (defn update!
   "Apply a new view-state (zoom / fit / invert) to a mounted controller."
   [state view-state]

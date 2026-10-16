@@ -258,6 +258,15 @@ Added
       Markdown and Org too.
 
 Changed
+    - A PDF that changes on disk now refreshes IN PLACE: the new version is
+      prepared beside the open one and swapped in without remounting the view,
+      so there is no blank flash and the reading position (the page and how far
+      down it) is kept, even when pages were added or removed. Pages render into
+      a detached canvas and swap in when complete (no white flash on zoom,
+      re-fit or refresh), the reading anchor survives zoom/re-fit, and pages
+      re-render when the window moves to a display with a different pixel
+      ratio (a projector). A canvas is capped at pdf.js's 2^25-pixel budget.
+      See docs/features/11-native-pdf.md.
     - npm test now starts with npm run lint (a new script for test/lint.js), and
       lint gains a documentation gate: every re-frame registration must have a
       row in the right section of docs/reference/events-effects-subs.md (events,
@@ -449,6 +458,11 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A live refresh whose PDF bytes cannot be opened (read while pdflatex was
+      still writing the file) no longer leaves a blank pane: the last good
+      version stays on screen with a non-fatal banner (Retry / dismiss), and the
+      byte cache keeps that version so switching tabs away and back still
+      renders it. A re-rendered page no longer stacks a second link layer.
     - Reference documentation drift: events-effects-subs.md gained rows for the
       159 registrations it lacked and lost the 7 retired Document<->PDF
       representation ids; ipc-channels.md documents vv:clipboard-read,

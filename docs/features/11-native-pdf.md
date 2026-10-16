@@ -45,7 +45,15 @@ Open a `.pdf` file (CLI `vv report.pdf`, the file tree, or a link). Then:
 | Copy selection | `Ctrl+C` or right-click ▸ Copy |
 | Jump to a bookmark | **Contents** sidebar tab |
 
-Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on disk live-refreshes it.
+Fit-mode and invert persist across sessions (`settings.edn`).
+
+**Live refresh, in place.** Editing a PDF on disk (or recompiling it — `latexmk -pvc`) refreshes it **inside
+the open view**: the new version is prepared beside the current one and swapped in without a remount, so there
+is no blank flash and your reading position (the page *and* how far down it you were) is kept, even when the
+document gained or lost pages. If the new bytes cannot be opened — typically a file read while `pdflatex` was
+still writing it — the **last good version stays on screen** and a small banner says so, with **Retry** and
+**×**; the next successful refresh replaces it and clears the banner. (A remote `ssh://` / `sftp://` PDF
+behaves the same; see [feature 29](29-remote-files-over-ssh.md).)
 
 ## 3 · Internals
 
@@ -58,7 +66,14 @@ Fit-mode and invert persist across sessions (`settings.edn`). Editing a PDF on d
 | `pdf-view` Reagent component (mounts inside `.vv-content`) | `vinary.ui.views/pdf-view` |
 | Edge-to-edge layout (`.vv-content-pdf-flush` drops the `.vv-content` gutter, keeping the scroller) | `vinary.ui.views/content-view` + `resources/public/css/app.css` |
 | Window-resize re-fit (`ResizeObserver` on the scroller → debounced `refit!`; fit-mode PDFs only) | `vinary.renderer.pdf/observe-resize!` |
-| Per-mount byte clone (no blank PDF after switching tabs away and back) | `vinary.renderer.pdf/mount!` (`(.slice bytes 0)`) |
+| Per-mount byte clone (no blank PDF after switching tabs away and back) | `vinary.renderer.pdf/get-document` (`(.slice bytes 0)`) |
+| Keep-last-good byte cache: arriving bytes are a **candidate**, promoted once pdf.js opens them, rejected (keeping the good version) when it cannot | `vinary.renderer.pdf-cache` (`put-bytes!` / `bytes-for` / `promote!` / `reject!`) |
+| In-place live refresh: the view is keyed by tab + path (not the content stamp); a new stamp is prepared beside the mounted document and swapped in | `vinary.ui.views/pdf-view` (`refresh!`) + `vinary.renderer.pdf/replace-doc!` |
+| Double-buffered page canvases (render detached, swap on completion) + the stale raster CSS-stretched meanwhile | `vinary.renderer.pdf/render-page!` + `.vv-pdf-canvas { width:100%; height:100% }` |
+| Reading anchor = page + in-page fraction across zoom / re-fit / refresh | `vinary.renderer.pdf-layout/anchor-of` / `anchor-top` |
+| Re-render on a device-pixel-ratio change (window moved to a projector / another monitor) | `vinary.renderer.pdf/watch-dpr!` (`(resolution: Xdppx)` media query) |
+| Per-canvas device-pixel budget (pdf.js's `maxCanvasPixels` default, 2²⁵) | `vinary.renderer.pdf-layout/budget-dpr` |
+| Non-fatal refresh banner (Retry / dismiss) over the last good version | `vinary.ui.refresh-note` + `:doc/refresh-note` |
 | Per-page status chip ("rendering…" while a `RenderTask` is in flight; click-to-retry on a real render error, distinguished from a cancellation) | `vinary.renderer.pdf/render-page!` (`show-status!`/`clear-status!`) + `.vv-pdf-status*` in `app.css` |
 | CPU-backed page canvas (`willReadFrequently`) + `backgroundThrottling false` — avoids a blank/stale GPU canvas that only paints on a forced repaint | `vinary.renderer.pdf/render-page!` + `vinary.main.core` renderer `webPreferences` |
 | Generation epoch + deterministic visible-page re-render on resize/rescale (not reliant on an IntersectionObserver re-fire) | `vinary.renderer.pdf` (`:gen` guards, `render-visible!` via `pdf-layout/visible-range`) |
@@ -75,8 +90,8 @@ copy + find).
 **Robustness — surviving a tab switch.** pdf.js *transfers* (detaches) the input byte buffer to its
 worker on first load, which empties the renderer's copy. So re-mounting the same PDF — e.g. after
 switching to another tab and back — handed the engine an empty buffer and rendered nothing (a blank
-page). `mount!` now passes a fresh copy each time (`(.slice bytes 0)`), keeping the path-keyed cached
-original pristine for every re-mount; the byte cache itself is untouched.
+page). The engine now passes pdf.js a fresh copy each time (`(.slice bytes 0)` in `get-document`), keeping the
+path-keyed cached original pristine for every re-mount; the byte cache itself is untouched.
 
 **Performance — heavy pages.** pdf.js parses on a worker but **rasterizes the page on the main thread**, so a
 figure-dense page (mesh/Coons shadings, transparency groups, tens of thousands of path fills — common in

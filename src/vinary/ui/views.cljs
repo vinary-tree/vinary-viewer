@@ -36,6 +36,7 @@
             [vinary.ui.extensions :as extensions-ui]
             [vinary.ui.passwords :as passwords-ui]
             [vinary.ui.ssh :as ssh-ui]
+            [vinary.ui.refresh-note :as refresh-note]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -840,60 +841,121 @@
   "Renders a PDF in-DOM via pdf.js (bytes from the renderer cache, keyed by :doc/path). The .vv-pdf-doc
    div is the scroll-restore / find / selection / context-menu root and lives inside the scrolling
    .vv-content, so PDFs inherit the app's in-page find, copy, themed context menu, and smooth-scroll —
-   parity with the Markdown/source previews. A new [path stamp] remounts; zoom/fit/invert re-drive
-   pdf/update!. Right-click reuses the markdown :preview-body context menu (Copy)."
+   parity with the Markdown/source previews. Right-click reuses the markdown :preview-body context menu (Copy).
+
+   LIVE REFRESH IN PLACE (ADR-0045). content-view keys this component by tab + path — NOT the content stamp — so
+   a live refresh arrives here as a new `stamp` prop on the SAME instance. The new bytes (a pdf-cache CANDIDATE)
+   are prepared off to the side while the current document stays on screen; on success the engine swaps the
+   document in place (pdf/replace-doc! — anchor, canvases and DOM kept), the previous artifact's lease is
+   released (destroying its PDFDocumentProxy), and the candidate is promoted to the cache's good version. On
+   failure — pdf.js cannot open bytes read while pdflatex was still writing — the candidate is rejected, the
+   last good document stays, and :pdf/refresh-failed raises the non-fatal refresh note. At most one refresh is
+   in preparation; a newer stamp supersedes it. Zoom/fit/invert changes re-drive pdf/update! as before."
   [_path _stamp]
-  (let [node   (atom nil)
-        ctrl   (atom nil)            ; the per-DOM pdf engine controller
-        lease* (atom nil)            ; shared PDFDocumentProxy + page-size artifact
-        gen*   (atom 0)              ; fences a preparation finishing after navigation
-        cur    (atom nil)            ; [path stamp] currently mounted
-        vstate (atom nil)            ; latest :pdf/view-state (captured reactively in render)
-        on-ctx (fn [^js e]
-                 (let [{:keys [text]} (selection-or-term @node e)]
-                   (.preventDefault e) (.stopPropagation e)
-                   (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
-                                                     :target {:kind :preview-body :text (or text "")}}])))
-        remount! (fn [path stamp]
-                   (let [gen (swap! gen* inc)]
-                     (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
-                     (when-let [release! (:release! @lease*)]
-                       (release!)
-                       (reset! lease* nil))
-                     (when @node (set! (.-innerHTML @node) ""))
-                     (when-let [bytes (pdf-cache/get-bytes path)]
-                       (let [lease (warm-cache/acquire!
-                                    {:key [:pdf path stamp]
-                                     :path path :stamp stamp
-                                     :weight (or (.-byteLength ^js bytes) 0)
-                                     :build #(pdf/prepare! bytes)
-                                     :dispose pdf/dispose-prepared!})]
-                         (reset! lease* lease)
+  (let [node    (atom nil)
+        ctrl    (atom nil)            ; the per-DOM pdf engine controller (nil until a document has mounted)
+        lease*  (atom nil)            ; the MOUNTED document's warm-cache lease
+        shown   (atom nil)            ; [path stamp] of the mounted document
+        pending (atom nil)            ; {:stamp :lease} — the one refresh being prepared
+        failed  (atom nil)            ; the last stamp whose bytes failed to open (not retried on re-render)
+        gen*    (atom 0)              ; fences a preparation finishing after unmount / supersession
+        vstate  (atom nil)            ; latest :pdf/view-state (captured reactively in render)
+        on-ctx  (fn [^js e]
+                  (let [{:keys [text]} (selection-or-term @node e)]
+                    (.preventDefault e) (.stopPropagation e)
+                    (rf/dispatch [:context-menu/show {:x (.-clientX e) :y (.-clientY e)
+                                                      :target {:kind :preview-body :text (or text "")}}])))
+        release! (fn [lease] (when-let [r (:release! lease)] (r)))
+        prepare  (fn [path stamp bytes]
+                   (warm-cache/acquire! {:key [:pdf path stamp]
+                                         :path path :stamp stamp
+                                         :weight (or (.-byteLength ^js bytes) 0)
+                                         :build #(pdf/prepare! bytes)
+                                         :dispose pdf/dispose-prepared!}))
+        unmount-doc! (fn []
+                       (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
+                       (release! @lease*) (reset! lease* nil)
+                       (when-let [p @pending] (release! (:lease p)) (reset! pending nil))
+                       (reset! shown nil))
+        mount!   (fn mount! [path]
+                   ;; a FRESH mount: the newest cached version (a pending candidate, else the last good one). A
+                   ;; candidate that fails to open falls back to the good version when there is one.
+                   (when-let [{:keys [bytes stamp]} (pdf-cache/bytes-for path)]
+                     (let [gen   (swap! gen* inc)
+                           lease (prepare path stamp bytes)]
+                       (reset! lease* lease)
+                       (-> (:promise lease)
+                           (.then (fn [prepared]
+                                    (when (and (= gen @gen*) @node)
+                                      (reset! ctrl (pdf/mount-prepared! @node prepared path @vstate))
+                                      (reset! shown [path stamp])
+                                      (pdf-cache/promote! path stamp)
+                                      (rf/dispatch [:pdf/refreshed path stamp])
+                                      (scroll/apply! @node))))
+                           (.catch (fn [e]
+                                     (when (= gen @gen*)
+                                       (js/console.error "[pdf] prepare failed" e)
+                                       (release! lease) (reset! lease* nil)
+                                       (reset! failed stamp)
+                                       (if (pdf-cache/reject! path stamp)
+                                         (mount! path)          ; the last good version opens instead
+                                         (rf/dispatch [:pdf/refresh-failed path stamp (or (.-message e) (str e))])))))))))
+        refresh! (fn [path stamp]
+                   ;; a newer version of the MOUNTED document: prepare it beside the live one, then swap in place
+                   (when-let [{:keys [bytes] s :stamp} (pdf-cache/bytes-for path)]
+                     (when (and (= s stamp) (not= s (:stamp @pending)))
+                       (when-let [p @pending] (release! (:lease p)))      ; superseded by this newer stamp
+                       (let [gen   (swap! gen* inc)
+                             lease (prepare path s bytes)]
+                         (reset! pending {:stamp s :lease lease})
                          (-> (:promise lease)
                              (.then (fn [prepared]
-                                      (when (and (= gen @gen*) @node)
-                                        (reset! ctrl (pdf/mount-prepared! @node prepared path @vstate))
-                                        (scroll/apply! @node))))
-                             (.catch (fn [e] (js/console.error "[pdf] prepare failed" e)))))
-                       (reset! cur [path stamp]))))]
+                                      (when (and (= gen @gen*) @ctrl)
+                                        (pdf/replace-doc! @ctrl prepared)
+                                        (release! @lease*)               ; destroys the previous proxy
+                                        (reset! lease* lease)
+                                        (reset! pending nil)
+                                        (reset! shown [path s])
+                                        (pdf-cache/promote! path s)
+                                        (rf/dispatch [:pdf/refreshed path s]))))
+                             (.catch (fn [e]
+                                       (when (= gen @gen*)
+                                         (js/console.error "[pdf] refresh failed — keeping the last good version" e)
+                                         (release! lease)
+                                         (reset! pending nil)
+                                         (reset! failed s)
+                                         (pdf-cache/reject! path s)
+                                         (rf/dispatch [:pdf/refresh-failed path s (or (.-message e) (str e))])))))))))]
     (r/create-class
      {:display-name "vv-pdf-view"
       :component-did-mount    (fn [this]
-                                (let [[_ path stamp] (r/argv this)]
+                                (let [[_ path _stamp] (r/argv this)]
                                   (.addEventListener @node "contextmenu" on-ctx)
-                                  (remount! path stamp)))
+                                  (mount! path)))
       :component-did-update   (fn [this]
-                                (let [[_ path stamp] (r/argv this)]
-                                  (if (not= [path stamp] @cur)
-                                    (remount! path stamp)             ; new doc / live-refresh → reload
-                                    (when @ctrl (pdf/update! @ctrl @vstate)))))  ; zoom/fit/invert
+                                (let [[_ path stamp] (r/argv this)
+                                      [shown-path shown-stamp] @shown]
+                                  (cond
+                                    ;; a different document in this slot (not expected — content-view keys by
+                                    ;; path — but never show one file's pages under another's name)
+                                    (and shown-path (not= path shown-path))
+                                    (do (swap! gen* inc) (unmount-doc!) (set! (.-innerHTML @node) "") (mount! path))
+
+                                    ;; nothing mounted yet (first prepare still running or failed): try again
+                                    ;; only when a NEW stamp arrived
+                                    (nil? @ctrl)
+                                    (when (and (not= stamp @failed) (nil? @lease*)) (mount! path))
+
+                                    ;; a live refresh of the shown document
+                                    (and (not= stamp shown-stamp) (not= stamp @failed))
+                                    (refresh! path stamp)
+
+                                    :else
+                                    (pdf/update! @ctrl @vstate))))           ; zoom/fit/invert
       :component-will-unmount (fn [_]
                                 (swap! gen* inc)
                                 (when @node (.removeEventListener @node "contextmenu" on-ctx))
-                                (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
-                                (when-let [release! (:release! @lease*)]
-                                  (release!)
-                                  (reset! lease* nil)))
+                                (unmount-doc!))
       :reagent-render         (fn [_path _stamp]
                                 (reset! vstate @(rf/subscribe [:pdf/view-state]))  ; reactive → did-update
                                 [:div.vv-pdf-doc {:ref (fn [el] (reset! node el))}])})))
@@ -1195,6 +1257,7 @@
   []
   (let [doc     @(rf/subscribe [:doc/active])
         tabs    @(rf/subscribe [:ui/tabs])
+        tab-id  @(rf/subscribe [:ui/active-tab-id])
         uri     @(rf/subscribe [:ui/active-uri])
         vs?     @(rf/subscribe [:ui/active-view-source?])      ; showing the active facet as source? (facet type = :source)
         dv      @(rf/subscribe [:ui/active-diff-view])         ; :unified | :split (diff docs only)
@@ -1242,8 +1305,9 @@
        :empty                      [:div.vv-empty "New Tab"]
        ;; a PDF opened from a web-view link (main downloaded its bytes into the cache under the URL) → the app's
        ;; pdf.js, NOT the web view — the web view would re-trigger Chromium's inline pdfium plugin (the bug fixed).
+       ;; keyed by tab + path, NOT the stamp: a live refresh updates the mounted view in place (ADR-0045)
        :http-pdf
-       ^{:key (str "http-pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
+       ^{:key (str "http-pdf:" tab-id ":" (:doc/path doc))}
        [post-paint-surface [pdf-view (:doc/path doc) (:doc/stamp doc)]]
        :http                       [web-host uri]
        ;; .html → render live in the web view (keyed by stamp so a live-refresh remounts the host and reloads),
@@ -1280,7 +1344,9 @@
                                    [ir-stream-body (:doc/path doc) "pdf-reflow" nil (:doc/stamp doc)]
        :pdf-reflow                 ^{:key (str "pdf-reflow:" (:doc/path doc))}
                                    [markdown-body (:doc/reflow-html doc) nil (:doc/path doc) nil]
-       :pdf                        ^{:key (str "pdf:" (:doc/path doc) ":" (:doc/stamp doc))}
+       ;; keyed by tab + path, NOT the stamp: a live refresh swaps the document in place — no blank flash, the
+       ;; reading position kept, and a refresh that fails to open never replaces the last good render (ADR-0045)
+       :pdf                        ^{:key (str "pdf:" tab-id ":" (:doc/path doc))}
                                    [post-paint-surface [pdf-view (:doc/path doc) (:doc/stamp doc)]]
        :image                      ^{:key (str (:doc/path doc) ":" (:doc/stamp doc))}
                                    [image-view (:doc/path doc) (:doc/stamp doc) (:doc/data-url doc)]
@@ -1812,6 +1878,8 @@
      ;; so the find bar floats over the document (not over the tab strip / address bar)
      [:div.vv-content-wrap
       [content-view]
+      ;; the non-fatal live-refresh banner (the last good version stays on screen beneath it)
+      [refresh-note/refresh-note]
       [find-bar]
       ;; the hover-URL status bar lives INSIDE this wrap, so its bottom:0 floats above the zoom bar (the
       ;; wrap ends above the bar) instead of overlapping it

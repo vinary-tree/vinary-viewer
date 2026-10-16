@@ -36,7 +36,13 @@
    :folder-open      "fa-solid fa-folder-open"
    :folder-up        "fa-solid fa-turn-up"
    :globe            "fa-solid fa-globe"
-   :file             "fa-solid fa-file"})
+   :file             "fa-solid fa-file"
+   ;; non-fatal live-refresh banner (ADR-0045 / ADR-0046)
+   :warning          "fa-solid fa-triangle-exclamation"
+   ;; slide shows (ADR-0045): the toolbar's slide-show toggle, the overview grid, presenting
+   :slides           "fa-solid fa-person-chalkboard"
+   :overview         "fa-solid fa-table-cells"
+   :present          "fa-solid fa-play"})
 
 (def ^:private code  "fa-solid fa-file-code")
 (def ^:private image "fa-solid fa-file-image")
