@@ -43,8 +43,12 @@ are scalar cardinality-one fields.
 | `:doc/page` / `:doc/paged?` | number / boolean | Current page, and whether a large log/table is served in pages. |
 | `:doc/data-url` | string | A `data:` URL for a raster/remote image rendered inline. |
 | `:doc/reflow-html` | string | Reflowed-prose HTML of a PDF's extracted text (View ▸ Reflow Text). |
-| `:doc/sourceable?` / `:doc/source-sibling` | boolean / string | Whether a Preview↔Source toggle exists, and the collocated source path a PDF can switch to. |
-| `:doc/pdf-sibling` | string | Path of a collocated same-stem `.pdf` a document can switch to (Document↔PDF switch, [ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)/[0026](../design-decisions/0026-diff-rendering-side-by-side-and-repo-filetypes.md)). |
+| `:doc/sourceable?` | boolean | Whether the document can show a **Source** facet (its raw text) besides its preview. |
+| `:doc/siblings` | vector | The **collocated document group** `[{:path :kind}…]` (a `paper.tex` + `paper.pdf` + `paper.org` sharing a stem) carried by `vv:content` — the options of the `[Preview ▾ \| Source ▾]` facet combo (`vinary.app.facet`). It replaced the retired `:doc/pdf-sibling` / `:doc/source-sibling` pair of the binary Document↔PDF switch ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md), amended). |
+| `:doc/source-toc` | vector | The **Source** view's Contents outline (`L<line>` ids, markup-aware per grammar), kept separate from the preview's `:doc/toc` (slug ids); `subs/active-toc` picks one per shown view. |
+| `:doc/language` | string | An explicit source grammar for the document (CLI `-t`/Settings ▸ File Type, [ADR-0036](../design-decisions/0036-stdin-documents-and-explicit-file-types.md)); retracted when a re-send no longer carries one. |
+| `:doc/base-dir` | string | A piped (stdin) document's invoking cwd — the base its relative assets and diff sources resolve against (ADR-0036). |
+| `:doc/diff-targets` | map | A diff's resolved, navigable file-header targets (stamp-scoped; reset to `{}` on every re-send so a now-missing path is never clickable). |
 | `:doc/diff-split-html` | string | The GUI-only, on-disk-enriched side-by-side (split) rendering of a diff. |
 | `:doc/git-root` | string | The validated repository root of a **Commit Graph** virtual document (`:doc/kind = "git-graph"`, `vv-git-graph://` — [ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)). The entity is deliberately tiny: the commit data lives in `[:ui :commits]`, not DataScript. Added to the `active-doc` pull list per the rule below. |
 | `:doc/git` | map | A **commit diff**'s facts `{:root :from :to :range?}` ([ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) — present only on kind-`diff` docs whose `vv:content` payload carried the doc-overrides `git` field (git-produced spills), retracted when a re-send no longer carries it or the doc is re-typed. `:range?` = "highlight both endpoint rows" (true only for an explicit user-chosen FROM; a parent diff — incl. the empty-tree root-commit case — claims only `:to`). Feeds the derived `:commits/open-set` highlight; also on the pull list per the rule below. |
@@ -156,22 +160,29 @@ Important slices:
 
 ```clojure
 {:id 1
- :uri "/abs/path/current.md"
- :hist {:stack [{:uri "/abs/path/previous.md" :scroll 220}
-                {:uri "/abs/path/current.md" :scroll 0}]
+ :uri "/abs/path/paper.tex"
+ :hist {:stack [{:uri "/abs/path/notes.md" :scroll 220 :line nil :facet nil}
+                {:uri "/abs/path/paper.tex" :scroll 0 :line nil
+                 :facet {:path "/abs/path/paper.pdf" :type :preview}}]
         :idx 1}
- :view-source? false        ; Preview (false) vs Source (true) — the Ctrl+Shift+S / Ctrl+Shift+D toggle
- :representation :document  ; :document vs :pdf — the Document↔PDF switch (initial value per the
-                            ;   :collocated-default preference when a same-stem sibling .pdf exists)
- :diff-view :unified}       ; :unified vs :split — the [Unified | Split] toggle (diff documents only)
+ :facet {:path "/abs/path/paper.pdf" :type :preview}   ; the shown facet of the collocated group (nil = default);
+                                                       ;   mirrors the current history entry's :facet
+ :facet-mru {:preview "/abs/path/paper.pdf"            ; the last file chosen per facet type — a combo
+             :source  "/abs/path/paper.tex"}           ;   button's MAIN region re-activates it
+ :diff-view nil                                        ; nil (width-adaptive default) | :unified | :split
+ :diff-collapsed #{"vv-diff-file-0"}}                  ; collapsed per-file diff previews (ADR-0037)
 ```
 
 The tab's current `:uri` mirrors the current history entry, and may be a **virtual
 URI** (`ssh://`, `sftp://`, `vv-archive://`) as well as a local path; local URI
-paths are also the retained paths used for watcher/cache ownership. The per-tab
-`:view-source?`, `:representation`, and `:diff-view` keys select *which face* of the
-same document is shown — preview vs. source, rendered document vs. exported PDF, and
-unified vs. side-by-side diff, respectively.
+paths are also the retained paths used for watcher/cache ownership. A history entry is
+`{:uri :scroll :line :facet}`: `:scroll` is the preview's pixel `scrollTop`, `:line` the Source view's top line
+(CodeMirror scrolls internally), and `:facet` the entry's facet. The per-tab `:facet` `{:path :type}` selects *which
+file of the collocated group* is shown and *as which type* (`:preview`/`:source`) — it replaced the retired
+`:view-source?` and `:representation` axes (`vinary.app.facet`). `:facet`, `:facet-mru` and `:diff-collapsed` are
+**cleared when the tab navigates to a different URI** (`nav-active`, `nav-tab`, `step`); `:diff-view` is sticky
+(an explicit Unified/Split pick survives navigation; `nil` follows the width-adaptive default of
+[ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)).
 
 ---
 

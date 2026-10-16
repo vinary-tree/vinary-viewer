@@ -1,9 +1,12 @@
 'use strict';
-// vinary-viewer lint (run by `npm run lint`). Three checks:
+// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Four checks:
 //   1. every JS source parses (node --check)
-//   2. style.css braces balance
-//   3. every --vv-* variable referenced by style.css is defined by EVERY theme in src/themes/
-// Exits non-zero on any failure, so it gates CI / `npm run check`.
+//   2. app.css / style.css braces balance
+//   3. every --vv-* variable referenced by a stylesheet is defined by EVERY theme of that surface
+//   4. the exhaustive reference catalogs match the code in both directions:
+//        a. docs/reference/events-effects-subs.md ↔ every re-frame registration (per section)
+//        b. docs/reference/ipc-channels.md ↔ every vv:* IPC channel in the preloads + main
+// Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -75,6 +78,75 @@ for (const t of cssTargets) {
     log(missing.length === 0,
       `${t.themes}/${tf} defines all ${themed.length} themed vars used by ${t.css}` + (missing.length ? ` — MISSING: ${missing.join(', ')}` : ''));
   }
+}
+
+// 4. Reference docs ↔ code, both directions — the two exhaustive catalogs drift silently otherwise (before this
+//    gate existed, 159 re-frame registrations had no reference row — 99 were never mentioned at all — 7 retired ids
+//    still had rows, 3 IPC channels were uncatalogued and a removed one was still listed; see CHANGELOG 0.3.0-dev).
+//    A deliberate exception is declared in the doc itself with `<!-- lint:allow <id-or-channel> -->`.
+const walkFiles = (dir, exts, out = []) => {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walkFiles(p, exts, out);
+    else if (exts.some((x) => p.endsWith(x))) out.push(p);
+  }
+  return out;
+};
+const allowed = (doc) => new Set([...doc.matchAll(/<!--\s*lint:allow\s+(\S+)\s*-->/g)].map((m) => m[1]));
+const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+${ids.length - 40} more)` : '');
+
+//  4a. re-frame: every (rf/reg-<kind> <id> in src/vinary must have a FIRST-COLUMN table row in the doc section for
+//      its kind (§1 events, §2 effects/cofx, §3 subscriptions); every first-column row there must be registered.
+//      Ids are matched literally, so `::local` subscriptions are written `::name` in the doc as in the source.
+{
+  const KW = '::?[A-Za-z0-9_.\\-?!*+<>=]+(?:/[A-Za-z0-9_.\\-?!*+<>=]+)?';
+  const regRe = new RegExp('\\(rf/reg-(event-db|event-fx|event-ctx|fx|sub|cofx)\\s+(' + KW + ')', 'g');
+  const rowRe = new RegExp('^\\|\\s*`(' + KW + ')`');
+  const sectionFor = { 'event-db': '1', 'event-fx': '1', 'event-ctx': '1', fx: '2', cofx: '2', sub: '3' };
+  const sectionName = { 1: '§1 Events', 2: '§2 Effects', 3: '§3 Subscriptions' };
+  const registered = { 1: new Set(), 2: new Set(), 3: new Set() };
+  for (const f of walkFiles(path.join(root, 'src/vinary'), ['.cljs'])) {
+    for (const m of fs.readFileSync(f, 'utf8').matchAll(regRe)) registered[sectionFor[m[1]]].add(m[2]);
+  }
+  const docPath = 'docs/reference/events-effects-subs.md';
+  const doc = fs.readFileSync(path.join(root, docPath), 'utf8');
+  const allow = allowed(doc);
+  const rows = { 1: new Set(), 2: new Set(), 3: new Set() };
+  let section = '';
+  for (const line of doc.split('\n')) {
+    const h = line.match(/^##\s+(\d+)\./);
+    if (h) section = h[1];
+    const m = line.match(rowRe);
+    if (m && rows[section]) rows[section].add(m[1]);
+  }
+  for (const s of ['1', '2', '3']) {
+    const missing = [...registered[s]].filter((id) => !rows[s].has(id) && !allow.has(id)).sort();
+    const stale = [...rows[s]].filter((id) => !registered[s].has(id) && !allow.has(id)).sort();
+    log(missing.length === 0,
+      `${docPath} ${sectionName[s]} documents all ${registered[s].size} registered ids` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
+    log(stale.length === 0,
+      `${docPath} ${sectionName[s]} has no retired rows` + (stale.length ? ` — NOT REGISTERED: ${show(stale)}` : ''));
+  }
+}
+
+//  4b. IPC: every `vv:*` channel literal in the two preloads and in main must be catalogued, and every channel the
+//      catalog names (as `vv:…` code spans) must still exist in code.
+{
+  const chanRe = /["'](vv:[a-z0-9][a-z0-9:\-]*)["']/g;
+  const sources = [path.join(root, 'resources/preload.js'), path.join(root, 'resources/web-preload.js'),
+                   ...walkFiles(path.join(root, 'src/vinary/main'), ['.cljs', '.js'])];
+  const inCode = new Set();
+  for (const f of sources) for (const m of fs.readFileSync(f, 'utf8').matchAll(chanRe)) inCode.add(m[1]);
+  const docPath = 'docs/reference/ipc-channels.md';
+  const doc = fs.readFileSync(path.join(root, docPath), 'utf8');
+  const allow = allowed(doc);
+  const inDoc = new Set([...doc.matchAll(/`(vv:[a-z0-9][a-z0-9:\-]*)`/g)].map((m) => m[1]));
+  const missing = [...inCode].filter((c) => !inDoc.has(c) && !allow.has(c)).sort();
+  const stale = [...inDoc].filter((c) => !inCode.has(c) && !allow.has(c)).sort();
+  log(missing.length === 0,
+    `${docPath} documents all ${inCode.size} IPC channels used by the preloads + main` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
+  log(stale.length === 0,
+    `${docPath} names no removed channel` + (stale.length ? ` — NOT IN CODE: ${show(stale)}` : ''));
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');

@@ -6,7 +6,7 @@
 > [architecture/03-ipc-protocol.md](../architecture/03-ipc-protocol.md). The
 > concrete renderer-facing API is `window.vv`, exposed by
 > [`resources/preload.js`](../../resources/preload.js), which is the
-> **authoritative** source for this catalog (95 distinct `vv:*` channels).
+> **authoritative** source for this catalog (103 distinct `vv:*` channels; the web-view preload adds its own — §2.1). `test/lint.js` checks this catalog against the code in both directions: every `vv:*` channel literal in the two preloads and in main must be documented here, and every channel documented here must still exist.
 
 All renderer code talks to main through `window.vv`. The renderer never imports
 `ipcRenderer`, `fs`, or `child_process` directly. A separate isolated preload,
@@ -39,7 +39,6 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:stream-pull` ⮐ | `streamPull(req)` | `{sessionId}` → `{seq, done, progress, lines?\|text?, error?, partial?}` | `content_service.streamPull` | Pull the next batch (credit-1). `partial` flags a mid-stream drop (e.g. dropped SSH). |
 | `vv:stream-close` ⮐ | `streamClose(req)` | `{sessionId}` → `{ok}` | `content_service.streamClose` | Close/destroy a stream session (also reaped on idle). |
 | `vv:complete-path` ⮐ | `completePath(input)` | string → completion data | `service` (`complete` / `complete-remote`) | Path-completion for the URI bar: directory children + exact-match info (SFTP-aware). |
-| `vv:load-pdf-bytes` ⮐ | `loadPdfBytes(path)` | `path` string → Buffer \| nil | `service` | Read a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch) — **no** new tab. A remote sibling reads over SFTP. |
 | `vv:load-diff-sources` ⮐ | `loadDiffSources(req)` | `{diffPath, files, includePaths?, includeContent?}` → legacy `{rel → content}` or structured `{rel → {path, content?}}` | `service` (`diff-source/load-local` / `loadRemoteDiffSources`) | Resolve a diff's referenced files (absolute paths directly; relative paths by walking ancestors). The opt-in structured response supports an eager path-only existence lookup for navigable headers and a lazy full-content lookup for Split enrichment; omitted options preserve the legacy content map. Remote diffs resolve over SFTP with canonical percent-encoded URIs. A **local structured request additionally triggers the ADR-0038 adoption push** — a second `vv:tree` send with the diff attached via `extras` — when the resolved targets prove a repository (`adopt-diff-project!`; guarded per window/diff, skipped for commit diffs carrying `:git`). |
 | `vv:load-remote-asset` ⮐ | `loadRemoteAsset(req)` | `{uri, relativeTo}` → `data:` URL | `content_service.loadRemoteAsset` | Fetch a remote asset's bytes → a `data:` URL so a remote Markdown/Office doc's relative images render (the renderer cannot reach the host). |
 | `vv:git-log` ⮐ | `gitLog(req)` | `{root, ref?, skip, limit, file?, follow?, lineRange?}` → `{commits: [{hash, parents, author-name, author-email, author-date, committer-date, refs, subject, body}], exhausted, empty?}` \| `{error}` | `git/handle-log` | One page of history (250/page; `--date-order` so children precede parents — the lane invariant). A given ref is rev-parse-verified before any log argv runs; an empty repository answers `empty: true`; `lineRange` is reserved for line-range history's own `-L` record discipline (an explicit error until that lands). ADR-0039. |
@@ -47,6 +46,8 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:git-open-diff` ⮐ | `gitOpenDiff(req)` | `{root, from?, to, parent?, dots?, paths?}` → `{path, title}` \| `{error}` | `git/handle-open-diff` | Produce a commit diff as a spilled `.diff` document: both sides rev-parse-verified (a nil/`parent?` `from` resolves `to^`, root commits fall back to the empty tree — one plain `git diff` path), the text spilled to a private `$XDG_RUNTIME_DIR/vinary-viewer/git-diff/…/<shortA..shortB>.diff` registered in doc-overrides as `{:kind "diff" :stdin? true :cwd root :git {…}}` (MRU-excluded, unlinked with retention, tree-adoption opt-out, rev-aware enrichment). The **renderer** opens the returned path (`[:tab/navigate]` — main never creates tabs); re-activating the same range returns the existing spill. |
 | `vv:git-watch` | `gitWatch(roots)` | root string array | `git/sync-owner-roots!` | Replace the sending window's watched-repo set (the Commits panel syncs on mount/root-change/unmount; `[]` releases). Last owner out closes that repo's `.git` watcher. |
 | `vv:git-blame` ⮐ | `gitBlame(req)` | `{file, root?}` → `{root, hunks: [{hash, orig-line, final-line, count, author-name, author-email, author-date, summary, boundary?, uncommitted}]}` \| `{error}` | `git/handle-blame` | Blame the WORKING TREE of one local file (`blame --line-porcelain`, parsed and coalesced main-side — hunks are ~100× smaller than porcelain). The repo is re-derived from the file's own directory; uncommitted lines arrive as the zero hash; a non-repo file answers with an honest error. ADR-0040. |
+
+> **Removed:** the former `loadPdfBytes(path)` invoke channel (vv:load-pdf-bytes) was removed in commit 7015251. A collocated sibling PDF now loads through the ordinary open flow — the renderer's `:facet/ensure-loaded` effect calls `window.vv.open` → `vv:open`, and the bytes arrive on `vv:content` like any document (no tab is created).
 
 ### 1.2 Config & persistence
 
@@ -112,12 +113,14 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 |---------|----------------|---------|---------------|---------|
 | `vv:open-dialog` | `openDialog(defaultPaths)` | candidate paths (`string[]`) | `shell` | Open the multi-file native dialog, seeded to the active/most-recent folder — main's `seeds->dir` opens in the first candidate that resolves (`seed-dir`: file → its parent, dir → itself; else the OS home dir). |
 | `vv:clipboard-write` | `copyText(text)` | string | `shell` | Copy text to the OS clipboard. |
+| `vv:clipboard-read` ⮐ | `readText()` | none → string | `shell` | Read the OS clipboard text for the themed text-input context menu's **Paste** (`vinary.renderer.text-edit`). Chromium blocks `navigator.clipboard.readText` in Electron, so the renderer asks main. |
 | `vv:open-path` | `openPath(path)` | string | `shell` | Ask the OS to reveal/open a local path. |
 | `vv:open-external` | `openExternal(url)` | string | `shell` | Ask the OS to open an external URL. |
 | `vv:app-info-request` | `requestAppInfo()` | none | `shell` | Request app metadata for the About UI. |
 | `vv:quit` | `quit()` | none | `shell` | Quit the Electron app. |
 | `vv:devtools` | `toggleDevtools()` | none | `shell` | Toggle renderer devtools. |
 | `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | direction / factor | `shell` | Adjust the app-window zoom (DOM views); reports the new factor on `vv:zoom-changed`. |
+| `vv:zoom-request` | `requestZoom()` | none | `shell` | Boot pull: once its listener is attached the renderer asks for the (Chromium-restored) window zoom, and main answers on `vv:zoom-changed` `{context "window" factor}` so the zoom bar seeds from the true factor instead of app-db's default 1.0. Every main→renderer state channel needs a listener **and** a boot pull. |
 
 ### 1.8 Retired native-PDF seam
 
@@ -155,6 +158,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 | Channel | Preload subscription | Payload | Renderer event/effect | Purpose |
 |---------|----------------------|---------|-----------------------|---------|
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url, tab}` | `[:http/navigated …]` | Record in-app HTTP navigation onto the **owner** tab's history (`tab` may not be the active tab — a slow page can finish after the user switches away). |
+| `vv:http-open-pdf` | `onHttpOpenPdf(cb)` | `{url, tab}` | `[:doc/open-new url]` | A PDF link clicked in the web view: main intercepted the navigation (`web/route-pdf!`) and — for a non-`file:` URL — already delivered the bytes on `vv:content` keyed by the URL (sent **first**, so the pdf doc entity exists when the tab mounts). The renderer opens the URL in a tab, where the `:http-pdf` route renders it with the app's pdf.js instead of Chromium's inline pdfium plugin. |
 | `vv:web-open-tab` | `onWebOpenTab(cb)` | `{url, mode}` | `[:web/open-tab …]` | A link inside the web view asked for a popup (`target=_blank`, `window.open`, middle-/Ctrl-click). Main **denies every native window** and relays http(s) targets here; `mode` is `"background"` for Chromium's `background-tab` disposition, else `"focused"` ([ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)). |
 | `vv:http-snapshot-ready` | `onHttpSnapshotReady(cb)` | JPEG data-URL | `web-host` (`pre-snap`) | Push a fresh page raster (captured after load + on scroll-settle) so opening any overlay freezes the page instantly. |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc …]` | Deliver the heading outline from the HTTP web view (relayed from its preload). |

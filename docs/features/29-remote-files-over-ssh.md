@@ -71,8 +71,8 @@ threaded from CLJS so a remote `.rs` renders as highlighted source, not sniffed 
 `open!` never tries to Chokidar-watch a URI locally. It asks a compatible target daemon for content/tree
 ownership and the target runs the ordinary local git/synthetic-tree and watcher logic there; when discovery or
 authentication is unavailable, the file still opens and optional content polling remains available, but no
-client-recursive Files tree is fabricated. URI-bar completion has an async remote-directory branch, and
-`vv:load-pdf-bytes` / `vv:load-diff-sources` have remote branches over SFTP.
+client-recursive Files tree is fabricated. URI-bar completion has an async remote-directory branch, a remote document group's sibling PDF loads
+through the ordinary `vv:open` flow (so over SFTP), and `vv:load-diff-sources` has a remote branch over SFTP.
 
 ### Authentication, host-key trust, and `~/.ssh/config`
 
@@ -192,7 +192,7 @@ password-bridge doctrine.
 `vv:ssh-prompt-reply` (renderer→main, the one secret channel), `vv:ssh-error`, `vv:ssh-status`,
 `vv:ssh-close-connection`, `vv:connections-request` / `vv:connections-save` / `vv:connections`, and
 `vv:load-remote-asset`; plus the reused `vv:content`, `vv:content-page`, `vv:stream-open` / `vv:stream-pull` /
-`vv:stream-close`, `vv:tree` / `vv:tree-*`, `vv:load-pdf-bytes`, and `vv:load-diff-sources`. The raw
+`vv:stream-close`, `vv:tree` / `vv:tree-*`, and `vv:load-diff-sources`. The raw
 daemon-event channel is main-process to main-process and is never exposed through preload.
 
 ## Configuration

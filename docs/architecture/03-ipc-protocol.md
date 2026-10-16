@@ -58,9 +58,13 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 | `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every visible local and authenticated remote project root. |
 | `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
 | `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
-| `vv:load-pdf-bytes` *(invoke)* | `loadPdfBytes(path)` | string path | `content_service` | Load a collocated sibling PDF's bytes into the renderer's pdf-cache (Document↔PDF switch; no new tab). |
 | `vv:load-diff-sources` *(invoke)* | `loadDiffSources(req)` | `{diffPath, files, includePaths?, includeContent?}` | `content_service` | Resolve existing referenced files from disk/SFTP (absolute directly, relative by ancestor walk). Structured opt-in returns `{rel → {path, content?}}` for eager path-only header links or lazy Split enrichment; the optionless legacy response remains `{rel → content}`. |
 | `vv:load-remote-asset` *(invoke)* | `loadRemoteAsset(req)` | `{uri, relativeTo}` | `content_service` | Fetch a remote asset's bytes over SFTP → a `data:` URL (remote Markdown/Office relative images). |
+
+A collocated sibling PDF (the PDF facet of a `.tex`/`.org`/`.md` group) has **no channel of its own**: the renderer's
+`:facet/ensure-loaded` effect calls `window.vv.open` → `vv:open`, and the bytes arrive on `vv:content` like any document's,
+without creating a tab. (The byte-only `loadPdfBytes` invoke channel that ADR-0025 introduced was removed in commit
+`7015251` when the per-tab facet model superseded the binary Document↔PDF representation.)
 
 ### 2.2 Document streaming (credit-1 pull cursor)
 

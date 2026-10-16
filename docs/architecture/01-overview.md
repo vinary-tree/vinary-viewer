@@ -80,7 +80,7 @@ renderer-to-main API is `window.vv`, exposed by the preload mediator.
 | State | Owner | Examples |
 |-------|-------|----------|
 | UI and navigation | re-frame `app-db` | Tabs, active tab id, tab histories, saved scroll entries, sidebar state, find state, settings UI, keybinding UI. |
-| Loaded content | DataScript | `:doc/path`, `:doc/kind`, `:doc/text`, `:doc/html`, `:doc/toc`, `:doc/assets`, `:doc/entries`, `:doc/error`, `:doc/stamp`, plus representation-switch / reflow / streaming fields (`:doc/pdf-sibling`, `:doc/source-sibling`, `:doc/reflow-html`, `:doc/diff-split-html`, `:doc/streaming?`, …). |
+| Loaded content | DataScript | `:doc/path`, `:doc/kind`, `:doc/text`, `:doc/html`, `:doc/toc`, `:doc/assets`, `:doc/entries`, `:doc/error`, `:doc/stamp`, plus collocated-group / reflow / streaming fields (`:doc/siblings`, `:doc/source-toc`, `:doc/reflow-html`, `:doc/diff-split-html`, `:doc/streaming?`, …) — the full list is the `active-doc` pull vector ([state schema §3](04-state-schema-reference.md#3-document-attributes)). |
 | OS/native resources | Main process | Chokidar content/tree/asset watchers, the authenticated daemon-event endpoint and tunnels, the HTTP web view, the SSH/SFTP connection pool and fallback remote pollers, config file watchers. (The native PDF `WebContentsView` is retired — PDFs render in-renderer via pdf.js; ADR-0013.) |
 
 The `:ds/rev` bridge connects DataScript to re-frame subscriptions. Each

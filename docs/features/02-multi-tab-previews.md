@@ -18,11 +18,14 @@ Tabs live in re-frame `app-db` under `[:ui :tabs]`:
 ```clojure
 {:id 4
  :uri "/abs/path/to/current.md"
- :hist {:stack [{:uri "/abs/path/to/a.md" :scroll 180}
-                {:uri "/abs/path/to/current.md" :scroll 0}]
+ :hist {:stack [{:uri "/abs/path/to/a.md" :scroll 180 :line nil :facet nil}
+                {:uri "/abs/path/to/current.md" :scroll 0 :line nil :facet nil}]
         :idx 1}
- :view-source? false}
+ :facet nil}           ; the shown facet {:path :type} of a collocated group; nil = the default view
 ```
+
+The full tab shape (facet MRU, diff layout, collapsed diff files) is in the
+[state schema reference](../architecture/04-state-schema-reference.md#5-tab-shape).
 
 The active tab id lives at `[:ui :active-tab]`.
 

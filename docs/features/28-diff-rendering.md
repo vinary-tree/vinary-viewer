@@ -208,8 +208,9 @@ paths without letting spaces, `#`, `?`, or Unicode filename bytes become URL syn
 
 ### The Unified ⇄ Split choice — the Preview combo's caret menu
 
-A per-tab `:diff-view` (`:unified` | `:split`; nil = no explicit choice) mirrors LaTeX's per-tab
-`:representation` ([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md)). An
+A per-tab `:diff-view` (`:unified` | `:split`; nil = no explicit choice) is the same tier of per-tab view state
+as the facet `{:path :type}` that replaced ADR-0025's per-tab `:representation`
+([ADR-0025](../design-decisions/0025-latex-rendering-via-unified-latex.md), amended). An
 **unchosen** diff follows the **width-adaptive default**
 ([ADR-0043](../design-decisions/0043-width-adaptive-split-default.md)): **Split** when the content
 pane is at least 1000 CSS px wide (each side then keeps ~53 monospace columns), **Unified** below —

@@ -197,7 +197,8 @@ the sanitizer because it renders untrusted *markup*; a diff has no such surface.
 
 - **Reuse maximised.** No new rendering component: unified and split both render through `markdown-body`; the
   unified terminal view reuses the ANSI back-end; the PDF↔source switch reuses the representation machinery; the
-  split-source fetch reuses the `vv:load-pdf-bytes` IPC pattern; the async split HTML reuses the reflow pattern.
+  split-source fetch reuses the `vv:load-pdf-bytes` IPC pattern (*amended 2026-10-16:* that channel was later
+  removed in `7015251`; the byte-only invoke pattern lives on in `vv:load-diff-sources`); the async split HTML reuses the reflow pattern.
 - **The gutter trick.** Unified line numbers are `data-old`/`data-new` attributes drawn by CSS `::before`/`::after`
   (grid-ordered ahead of a `.vv-diff-code` span). They appear in the GUI yet, being pseudo-content rather than
   text nodes, stay **invisible to the terminal's text-reading ANSI back-end** — one IR, correct in both media.

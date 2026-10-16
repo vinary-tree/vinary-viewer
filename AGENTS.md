@@ -11,7 +11,10 @@
 - `npm run release`: produce release builds using the configured `:simple` optimizations.
 - `npm run compile:cli` / `compile:tui`: build the `vv --cli` / `vv --tui` terminal renderers.
 - `npm test`: compile the `test` build and run it, then the ssh-config / ssh-transport / content-service / git-tree / cli / tui smokes. `npm run test:electron` (and `test:electron:release`) drive the app end-to-end.
-- `node test/lint.js`: run JS parse checks, CSS brace balance, and `--vv-*` theme-variable checks.
+- `npm run lint` (`node test/lint.js`; also the first step of `npm test`): JS parse checks, CSS brace balance,
+  `--vv-*` theme-variable checks, and the reference-catalog gate — every re-frame registration must have a row in
+  `docs/reference/events-effects-subs.md` and every `vv:*` IPC channel a row in `docs/reference/ipc-channels.md`
+  (both directions), so document new events/effects/subs/channels in the same commit.
 - `npm run test:find-e2e`: the in-page-find + **typist-latency** gate — types real keys at 150 ms/char over
   a 1.1 MB document and the repository's own file tree, and asserts every character survives, that no
   re-render takes one back out of the field, that the renderer stays responsive, and that find's flattened

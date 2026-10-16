@@ -139,7 +139,10 @@ Preview↔Source toggle, giving each document up to three views:
   The *effective* representation is resolved by the pure `nav/effective-representation`: `:pdf` only when a
   sibling exists **and** either the tab chose it or the persisted `collocated-default` preference is `:pdf`
   (**default `:pdf`** — the faithful PDF — user-configurable).
-- **The sibling PDF loads byte-only.** A new `vv:load-pdf-bytes` invoke channel reads the file into `pdf-cache`
+- **The sibling PDF loads byte-only.** *(Amended 2026-10-16: the channel below was removed in commit `7015251`
+  when the per-tab facet model superseded this binary representation switch; a sibling PDF now loads through
+  `:facet/ensure-loaded` → `vv:open` like any document, still without opening a tab.)* A new `vv:load-pdf-bytes`
+  invoke channel reads the file into `pdf-cache`
   **without opening a tab**; `content-view` then mounts the existing `pdf-view` for it in place. It renders
   through the same in-renderer pdf.js viewer as any PDF tab, with that viewer's existing view-state: fit /
   dark-invert / reflow are **persisted user preferences** (`:pdf-fit` / `:pdf-invert?` / `:pdf-reflow?` in

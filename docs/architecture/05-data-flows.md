@@ -97,7 +97,7 @@ uses a main-owned native web view layered over a renderer host element.
 
 | Kind | Renderer role | Main role |
 |------|---------------|-----------|
-| PDF | Render pdf.js (canvas + text/link layers) directly in the DOM; when switching to a collocated sibling PDF, load its bytes over `vv:load-pdf-bytes` into the pdf-cache. | Read PDF bytes on request; watch a retained local PDF and re-send on change. |
+| PDF | Render pdf.js (canvas + text/link layers) directly in the DOM; a collocated sibling PDF facet loads through the ordinary open flow (`:facet/ensure-loaded` → `vv:open` → `vv:content`), so its bytes reach the pdf-cache like any document's — no tab is created. | Read PDF bytes on request; watch a retained local PDF and re-send on change. |
 | HTTP/HTTPS · local `.html` | Mount a web host, send show/hide/bounds/toc-goto messages. | Own the native web view; report navigation, headings, and active heading. |
 
 The renderer owns tabs and history; the web view owns its own document scrolling.

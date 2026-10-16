@@ -90,7 +90,9 @@ text. Directory overrides `kind`.
 [ADR-0035](0035-authenticated-remote-daemon-events.md), a compatible target daemon can offer its local git
 or synthetic tree and own the corresponding expansion-scoped watchers; otherwise the remote document still
 opens without a Files tree. `complete` gains an async remote-directory branch for URI-bar completion;
-`vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (over SFTP).
+`vv:load-pdf-bytes` / `vv:load-diff-sources` gain remote branches (over SFTP). *(Amended 2026-10-16:
+`vv:load-pdf-bytes` was later removed in `7015251`; a remote group's sibling PDF now loads through the ordinary
+`vv:open` flow, which reads it over SFTP.)*
 
 ### 4. Streaming, paging, and polling live-refresh
 
@@ -153,6 +155,9 @@ Everything the local path does, a remote path now does:
   filePath` archive seam does the rest).
 - **Terminal parity**: `vv-cli`/`vv-tui` route remote URIs through `openRemoteUri` too, with TTY-gated
   terminal auth prompts (non-interactive runs rely on the agent/keys).
+  *(Amended 2026-10-16: true for `vv-cli` only. `vv-tui`'s `load-doc` still reads PDFs and text with
+  `fs.readFileSync` before any remote branch and never configures the transport's TTY prompts — tracked as the
+  pgmcp feature request `vinary-viewer-vv-tui-cannot-open-remote-ssh-sftp-pdfs-or-text-bf3ed7`.)*
 
 ### 7. Secrets and configuration
 

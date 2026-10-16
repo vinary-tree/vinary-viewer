@@ -37,7 +37,7 @@ window/view work. Renderer code never imports these namespaces.
 | `vinary.main.service` | Main-process IO service: reads/content pushes, retained-document and asset watchers, git/synthetic trees, expansion-scoped shallow tree-watcher ownership, and sibling-PDF/source detection. Registers the file/stream/tree refresh/retention `vv:*` handlers. |
 | `vinary.main.service-util` | Pure, electron/DOM-free routing helpers for the IO service (so the node `:test` build can assert routing without Electron). |
 | `vinary.main.content_service.js` | *(JS)* Electron-free content engine: bounded paged reads for large logs / delimited tables, office (docx via mammoth, ODF) + workbook parsing, log sniffing, byte/line **streaming sessions** (`streamOpen`/`Pull`/`Close`), remote SFTP reads, and diff-source + remote-asset resolution. Reused verbatim by vv-cli/vv-tui. |
-| `vinary.main.file-kind` | Pure file-kind classifier (extension → `kind`) shared by the service and tests; also `remote-uri?` / `archive-uri?` / `pdf-sibling-path` / `source-sibling-paths`. |
+| `vinary.main.file-kind` | Pure file-kind classifier (extension → `kind`) shared by the service and tests; also `remote-uri?` / `archive-uri?` / `git-graph-uri?`, `stem` + `group-candidate-paths` (the collocated document group's candidate siblings) and `well-known-kind` (grammar-independent repo filetypes, ADR-0026). |
 | `vinary.main.config` | `keybindings.edn` load/save/watch; pushes raw EDN **text** over `vv:keymap` (clj→js would flatten keyword command-ids). |
 | `vinary.main.settings` | `settings.edn` load/save/watch: theme + fonts + view prefs. |
 | `vinary.main.recent` | `recent.edn` load/save/watch: the dir→last-child `:trail`, the `:recent-files` MRU (File ▸ Open Recent), and the `:web-history` URL MRU. |
@@ -90,7 +90,7 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 |-----------|----------------|
 | `vinary.app.db` | Default app-db: UI/navigation/settings/keybinding state. Tabs/history and ephemeral UI live here; DataScript owns content. |
 | `vinary.app.ds` | DataScript content cache keyed by `:doc/path`, the `:ds/rev` bridge, and content-cache helpers (`snapshot`, `eid-for-path`, `doc-attr`, `active-doc`, retention). |
-| `vinary.app.nav` | Pure browser-tab + per-tab-history transforms over app-db. A tab is a view `{:id :uri :hist … :representation :diff-view …}`. |
+| `vinary.app.nav` | Pure browser-tab + per-tab-history transforms over app-db. A tab is a view `{:id :uri :hist … :facet :facet-mru :diff-view :diff-collapsed …}` (see the [state schema §5](../architecture/04-state-schema-reference.md#5-tab-shape)). |
 | `vinary.app.uri` | URI/path normalization and local-vs-HTTP-vs-remote predicates (`file-path`, `http?`, `remote?`, `dirname`, `segments`). |
 | `vinary.app.zoom` | Pure context-aware zoom helpers (`context` → `:pdf`/`:web`/`:window`, `percent`, `presets`) shared by the zoom events and the `:view/zoom-percent` sub. |
 | `vinary.app.link` | One source of truth for "what does following this rendered-document link do" — classify + route a preview/link activation. |

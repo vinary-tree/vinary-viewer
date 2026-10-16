@@ -13,7 +13,7 @@ Use `Settings > Key Bindings` to select the active set.
 | Set | Intent |
 |-----|--------|
 | Standard | Browser-like defaults for users who do not want modal editing keys. |
-| Vim | Vimium-style navigation, normal/insert mode behavior, counts, leader-style sequences, and link hints. |
+| Vim | Vimium-style navigation, normal/insert mode behavior, leader-style sequences, and link hints. (Numeric count prefixes such as `5j` are **not** implemented: the `[:ui :input :count]` slot is reserved and cleared, never set.) |
 | Emacs | Emacs-style chords and command navigation. |
 | Custom sets | User-created sets that extend a bundled set and override bindings. |
 
@@ -44,8 +44,9 @@ The resolver can:
 | `:pass` | Let the browser/input element handle the key. |
 | `:retry` | Reset the pending sequence and try the current token from the root. |
 
-Transient resolver state such as mode, pending sequence, count prefix, and input
-focus lives in `app-db` for display and inspection. The active keymap data lives
+Transient resolver state such as mode, pending sequence, and input focus lives in
+`app-db` for display and inspection (a `:count` slot exists but is reserved — counts are
+not implemented). The active keymap data lives
 in an atom because it is comparatively static and read synchronously by the
 resolver.
 
@@ -93,7 +94,7 @@ while a menu or modal overlay is open. A single `requestAnimationFrame` animator
 toward an *accumulating* target, so a held key scrolls continuously and smoothly
 (replacing the old per-press jumps); the same animator smooths Vim `j`/`k` and the
 page/half-page commands. Implemented in `vinary.input.fx` (`:dom/scroll`); the
-bare-arrow capture handler is `vinary.renderer.core/arrow-scroll!`.
+bare-arrow / page-key capture handler is `vinary.renderer.core/key-scroll!`.
 
 **Opening files/folders is OS-dependent.** In both the **directory browser** and the
 **git file tree**, a **single click opens on Linux** and a **double click opens on

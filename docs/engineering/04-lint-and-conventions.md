@@ -1,6 +1,6 @@
 # Lint and coding conventions
 
-This page documents the one automated style gate — [`test/lint.js`](../../test/lint.js) —
+This page documents the automated style and documentation gate — [`test/lint.js`](../../test/lint.js) —
 and the human conventions it does not (yet) enforce: the namespace↔file mapping
 rule, the ClojureScript and JavaScript style rules, and the renderer-never-touches-
 the-filesystem discipline that is half compiler-enforced and half review-enforced.
@@ -10,24 +10,23 @@ the-filesystem discipline that is half compiler-enforced and half review-enforce
 
 ---
 
-## 1. `test/lint.js` — the three checks
+## 1. `test/lint.js` — the four checks
 
 `test/lint.js` is a small CommonJS script (`'use strict'`) with **no
-dependencies** beyond Node built-ins. It performs three checks and exits non-zero
-on any failure. Run it directly:
+dependencies** beyond Node built-ins. It performs four checks and exits non-zero
+on any failure. Run it with:
 
 ```bash
-node test/lint.js
+npm run lint          # = node test/lint.js
 ```
 
-> **Naming discrepancy (finding).** The script's own header comment says it is
-> "run by `npm run lint`" and "gates CI / `npm run check`". **Neither `lint` nor
-> `check` exists as an npm script** in `package.json`, and there is no CI config in
-> the repository (see [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
-> The real, working invocation is `node test/lint.js`, as documented in `AGENTS.md`
-> and [`usage/02-installation-and-build.md`](../usage/02-installation-and-build.md).
-> A proposed CI matrix and a convenience `lint` script would make the header
-> accurate; until then, use the direct command.
+`npm test` runs it **first** (`npm run lint && shadow-cljs compile test && …`), so a
+lint failure fails the suite before anything compiles.
+
+> **History.** The header comment long claimed "run by `npm run lint`" while no such
+> script existed (`node test/lint.js` was the only invocation). The `lint` script now
+> exists and `npm test` chains it, so the claim is true. There is still no CI config
+> in the repository (see [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
 
 ### 1.1 Check 1 — every JavaScript source parses
 
@@ -92,6 +91,28 @@ Adding a token means (a) defining it in **every** theme under
 it is a runtime-overridable font default. Lint enforces (a); skipping a theme is a
 hard failure. (That app-surface coverage was previously unchecked — linting the
 shipped surface, not just the legacy one, closed the gap.)
+
+### 1.3 Check 4 — the reference catalogs match the code, in both directions
+
+Two reference pages promise to be **exhaustive**, and both had drifted silently:
+before this check existed, 159 re-frame registrations had no reference row (99 were
+never mentioned anywhere), 7 rows described retired ids, 3 IPC channels were
+uncatalogued, and the removed `vv:load-pdf-bytes` channel was still listed. Check 4
+makes the drift a build failure:
+
+| Sub-check | Code side | Doc side | Fails when |
+|-----------|-----------|----------|------------|
+| **4a** re-frame | every `(rf/reg-event-db\|reg-event-fx\|reg-event-ctx\|reg-fx\|reg-cofx\|reg-sub <id>` in `src/vinary/**/*.cljs` | first-column table rows of [`reference/events-effects-subs.md`](../reference/events-effects-subs.md): events in §1, effects/cofx in §2, subscriptions in §3 | a registration has no row **in its kind's section**, or a row names an id not registered for that kind |
+| **4b** IPC | every `'vv:…'` / `"vv:…"` literal in `resources/preload.js`, `resources/web-preload.js` and `src/vinary/main/**` | every `` `vv:…` `` code span in [`reference/ipc-channels.md`](../reference/ipc-channels.md) | a channel in code is uncatalogued, or the catalog names a channel the code no longer has |
+
+Ids are compared **literally** — `::local` subscriptions are written `::name` in the
+doc, exactly as in the source — and an id registered as two kinds (an event and an
+effect of the same name, e.g. `:find/cycle`) needs a row in **both** sections. A
+deliberate exception is declared in the doc itself with an HTML comment,
+`<!-- lint:allow <id-or-channel> -->`, so the exemption is reviewed with the page.
+
+The rule this enforces: **a commit that registers an event, effect, subscription or
+IPC channel documents it in the same commit.**
 
 ---
 
