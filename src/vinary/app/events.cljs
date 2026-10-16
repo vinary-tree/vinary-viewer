@@ -967,13 +967,22 @@
          db'')
        (not= db' db'') (with-active-tab-focus db'')))))
 
-(rf/reg-event-fx
- :tab/close
- (fn [{:keys [db]} [_ id]]
-   (let [closing-active?       (= id (nav/active-id db))
-         [db' _uri _still?] (nav/close db id)]
-     (cond-> (with-retention {:db db'} db')
-       closing-active? (with-active-tab-focus db')))))
+(defn close-tab-result
+  "Effects of closing tab `id`. When it was the ACTIVE tab, the tab revealed in its place comes back where it was
+   left — its saved scroll, source line or slide (ADR-0045 §Remembering the slide) — exactly like an explicit tab
+   switch (activate-tab-result); without that, its re-mounted view opened at the top / on the first slide."
+  [db id]
+  (let [closing-active?    (= id (nav/active-id db))
+        [db' _uri _still?] (nav/close db id)
+        target             (nav/active-uri db')]
+    (cond-> (with-retention
+              {:db db'
+               :fx (cond-> [] (and closing-active? target (uri/file-path target))
+                     (conj-some (entry-restore-fx (nav/cur-entry db'))))}
+              db')
+      closing-active? (with-active-tab-focus db'))))
+
+(rf/reg-event-fx :tab/close (fn [{:keys [db]} [_ id]] (close-tab-result db id)))
 
 (rf/reg-event-fx
  :tab/close-active

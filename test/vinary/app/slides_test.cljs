@@ -87,3 +87,17 @@
   (is (nil? (pdf-cache/take-want-page! "/d/other.pdf")) "another document's mount does not take it")
   (is (= 5 (pdf-cache/take-want-page! "/d/talk.pdf")))
   (is (nil? (pdf-cache/take-want-page! "/d/talk.pdf")) "taken once"))
+
+(deftest closing-the-active-tab-restores-the-revealed-one
+  (let [deck  (assoc-in (tab 1 "/d/talk.pdf") [:hist :stack 0 :page] 4)
+        blank {:id 2 :uri nil :hist {:stack [{:uri nil :scroll 0 :facet nil}] :idx 0}}
+        db    {:ui {:active-tab 2 :tabs [deck blank]}}
+        {:keys [fx] db' :db} (events/close-tab-result db 2)]
+    (is (= 1 (get-in db' [:ui :active-tab])) "the deck tab is revealed")
+    (is (some #{[:slides/want-page {:path "/d/talk.pdf" :page 4}]} fx)
+        "…on the slide it was left on, like an explicit tab switch"))
+  (testing "closing a BACKGROUND tab restores nothing (the shown view never changed)"
+    (let [deck  (assoc-in (tab 1 "/d/talk.pdf") [:hist :stack 0 :page] 4)
+          other (tab 2 "/d/b.pdf")
+          {:keys [fx]} (events/close-tab-result {:ui {:active-tab 1 :tabs [deck other]}} 2)]
+      (is (not-any? #(= :slides/want-page (first %)) fx)))))
