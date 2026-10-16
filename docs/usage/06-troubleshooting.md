@@ -50,6 +50,8 @@ banner (its tooltip carries the exact error):
 |--------|---------|------------|
 | *Couldn't reload the file — showing the last loaded version* | Main could not read the file: deleted, renamed away, permissions, a dropped SSH connection. | Restore the file (it refreshes by itself when it reappears) or press **Retry**. |
 | *The updated file couldn't be displayed — showing the last good version* | A PDF's new bytes did not open (read while LaTeX was still writing it). | Usually nothing: the next save replaces it. **Retry** re-reads now. |
+| *The file on disk is incomplete (still being written?) — showing the last complete version* | Main caught the PDF half-written and it did not finish within a few seconds (a LaTeX run that stopped with an error, or a writer that is still busy). | Fix and re-run the build: the finished file replaces it in place. |
+| *…incomplete — showing what could be read* | The same, on a first open: pdf.js recovered an earlier finished revision of the file. | As above. If nothing at all can be read, the error page says the PDF will appear once the file is finished. |
 
 **×** dismisses the banner; the next successful refresh removes it. A document
 that never loaded still shows the error page.

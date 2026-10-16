@@ -54,3 +54,32 @@
              (events/refresh-failed-tx snap "/d/notes.md" "ENOENT: no such file" 5 77)))
       (is (= "Unknown content error" (-> (events/refresh-failed-tx snap "/d/notes.md" nil 5 77) first last :message))
           "a failure without a message still says something"))))
+
+(deftest incomplete-pdfs
+  (testing "main's reasons in words"
+    (doseq [[code words] [["no-eof" "it has no end-of-file marker yet"]
+                          ["no-startxref" "its cross-reference pointer is missing"]
+                          ["bad-startxref" "its cross-reference pointer points outside the file"]
+                          ["bad-xref" "its cross-reference pointer does not point at a cross-reference section"]
+                          ["no-header" "it does not start like a PDF"]
+                          ["no-data" "it is empty"]
+                          ["changing" "it kept changing while it was read"]]]
+      (is (= words (events/incomplete-message code)) code))
+    (is (= "unfinished (mystery)" (events/incomplete-message "mystery")) "an unknown reason is still shown"))
+  (testing "the note"
+    (is (= {:kind "incomplete" :message "The PDF on disk is incomplete: it has no end-of-file marker yet."
+            :seq 9 :at 77 :partial? false}
+           (events/incomplete-note "no-eof" 9 77 false))))
+  (let [snap (db-with {:doc/path "/d/talk.pdf" :doc/kind "pdf" :doc/stamp 7 :doc/seq 8})
+        eid  (ds/eid-for-path snap "/d/talk.pdf")]
+    (testing "a document this window shows keeps it: the note and the read number — no stamp, no byte cache"
+      (is (= [[:db/add eid :doc/refresh-note (events/incomplete-note "no-eof" 9 77 false)]
+              [:db/add eid :doc/seq 9]]
+             (events/incomplete-kept-tx snap "/d/talk.pdf" "no-eof" 9 77)))))
+  (testing "a PDF pdf.js could not open: main's 'incomplete' word when it said so, else pdf.js's reason"
+    (is (= "The PDF on disk is incomplete: it has no end-of-file marker yet. It will appear once the file is finished."
+           (events/open-failed-message (events/incomplete-note "no-eof" 9 77 true) "Invalid PDF structure.")))
+    (is (= "This PDF could not be opened: Invalid PDF structure."
+           (events/open-failed-message nil "Invalid PDF structure.")))
+    (is (= "This PDF could not be opened: Invalid PDF structure."
+           (events/open-failed-message {:kind "render-failed" :message "x"} "Invalid PDF structure.")))))

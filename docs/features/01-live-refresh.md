@@ -128,6 +128,15 @@ open flow; the next good read (the file re-created, the connection back) clears 
 note by itself. A document that never loaded, or a renderer-side render failure,
 still shows the error page.
 
+**A PDF caught mid-write never replaces a finished one.** LaTeX rewrites its PDF
+in place, so main verifies every PDF it reads (its tail, its cross-reference
+pointer, its size and time before and after) and waits a few seconds for a torn
+one to finish. One that never does is delivered flagged *incomplete*: a window
+already showing a complete version keeps it, untouched, behind an "incomplete"
+note; a window showing nothing yet gets what pdf.js can recover (an earlier
+finished revision), flagged the same way — or, when pdf.js can read nothing, the
+error page saying the PDF will appear once the file is finished.
+
 ---
 
 ## 5. Why UI state survives

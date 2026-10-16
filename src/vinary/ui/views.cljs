@@ -957,7 +957,9 @@
                                        (reset! failed stamp)
                                        (if (pdf-cache/reject! path stamp)
                                          (mount! path)          ; the last good version opens instead
-                                         (rf/dispatch [:pdf/refresh-failed path stamp (or (.-message e) (str e))])))))))))]
+                                         ;; nothing to fall back to: the error page, not an empty view under a
+                                         ;; note promising a last good version that does not exist
+                                         (rf/dispatch [:pdf/open-failed path stamp (or (.-message e) (str e))])))))))))]
     (r/create-class
      {:display-name "vv-pdf-view"
       :component-did-mount    (fn [this]

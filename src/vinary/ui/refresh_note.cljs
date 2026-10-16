@@ -7,10 +7,12 @@
   (:require [re-frame.core :as rf]
             [vinary.ui.icons :as icons]))
 
-(defn- headline [{:keys [kind]}]
+(defn- headline [{:keys [kind partial?]}]
   (case kind
     "render-failed"  "The updated file couldn't be displayed — showing the last good version."
-    "incomplete"     "The file on disk is incomplete (still being written?) — showing the last complete version."
+    "incomplete"     (if partial?
+                       "The file on disk is incomplete (still being written?) — showing what could be read."
+                       "The file on disk is incomplete (still being written?) — showing the last complete version.")
     "refresh-failed" "Couldn't reload the file — showing the last loaded version."
     "The document couldn't be refreshed — showing the last good version."))
 

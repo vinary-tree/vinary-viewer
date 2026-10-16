@@ -577,12 +577,47 @@
   [snap path read-n]
   (content-guard/stale? read-n (when path (ds/doc-attr snap path :doc/seq))))
 
+(defn keeps-last-good?
+  "Does `path`'s document in DataScript value `snap` hold content this window shows — an entity without :doc/error?
+   (Entities are created only by applied content or by an error, so that is exactly 'has content'.)"
+  [snap path]
+  (boolean (and path (ds/eid-for-path snap path) (nil? (ds/doc-attr snap path :doc/error)))))
+
+(defn incomplete-message
+  "Readable words for main's reason a PDF is incomplete (vinary.main pdf_integrity's verdicts, or settlePdf's
+   \"changing\")."
+  [reason]
+  (case reason
+    "no-eof"        "it has no end-of-file marker yet"
+    "no-startxref"  "its cross-reference pointer is missing"
+    "bad-startxref" "its cross-reference pointer points outside the file"
+    "bad-xref"      "its cross-reference pointer does not point at a cross-reference section"
+    "no-header"     "it does not start like a PDF"
+    "no-data"       "it is empty"
+    "changing"      "it kept changing while it was read"
+    (str "unfinished (" (or reason "unknown") ")")))
+
+(defn incomplete-note
+  "The :doc/refresh-note for an INCOMPLETE PDF delivery (ADR-0046 §Torn reads). `partial?`: nothing complete was
+   shown before, so the view shows what pdf.js could recover from these bytes (the banner says so)."
+  [reason read-n at partial?]
+  {:kind "incomplete" :message (str "The PDF on disk is incomplete: " (incomplete-message reason) ".")
+   :seq read-n :at at :partial? (boolean partial?)})
+
+(defn incomplete-kept-tx
+  "An incomplete PDF for a document this window already shows: the note and the applied read number ONLY — no stamp
+   and no byte-cache candidate, so the last complete version stays exactly as it is."
+  [snap path reason read-n at]
+  (let [eid (ds/eid-for-path snap path)]
+    (cond-> [[:db/add eid :doc/refresh-note (incomplete-note reason read-n at false)]]
+      (number? read-n) (conj [:db/add eid :doc/seq read-n]))))
+
 ;; The effects of an APPLIED vv:content payload — see :content/received, which first drops a read older than
 ;; the one the document already applied (content-guard). `read-n` is the payload's read number (never bound as
 ;; `seq`: this body calls cljs.core/seq).
 (defn- content-received-fx
   [db {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-              sourceable paged siblings language stdin baseDir git] read-n :seq :as payload}]
+              sourceable paged siblings language stdin baseDir git incomplete incompleteReason] read-n :seq :as payload}]
   (let [snap    (ds/snapshot)
         eid     (ds/eid-for-path snap path)
         cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -607,6 +642,9 @@
         ;; directory carries its :doc/entries listing instead.
         attrs   (cond-> {:doc/kind kind :doc/stamp stamp :doc/streaming? (boolean stream?)}
                   (number? read-n)      (assoc :doc/seq read-n)   ; the applied read (content-guard)
+                  ;; an incomplete PDF with nothing complete to keep: shown as pdf.js recovers it, and flagged
+                  incomplete            (assoc :doc/refresh-note (incomplete-note incompleteReason read-n
+                                                                              (js/Date.now) true))
                   text                  (assoc :doc/text text)
                   (and html (not ir-office?)) (assoc :doc/html html)   ; office-IR fills :doc/html via :office/render
                   (#{"directory" "archive"} kind) (assoc :doc/entries (vec entries))
@@ -643,7 +681,7 @@
                   (and cur-lang (nil? language)) (conj [:db/retract eid :doc/language cur-lang])
                   (and cur-git (or (not= kind "diff") (nil? git)))
                   (conj [:db/retract eid :doc/git cur-git])
-                  cur-note (conj [:db/retract eid :doc/refresh-note cur-note]))
+                  (and cur-note (not incomplete)) (conj [:db/retract eid :doc/refresh-note cur-note]))
         ;; the CLI/initial file arrives before any tab exists → it opens the first tab
         opened-first-tab? (empty? (nav/tabs db))
         db'     (if opened-first-tab? (nav/add-tab db path) db)
@@ -718,12 +756,18 @@
       opened-first-tab? (with-active-tab-focus db'))))
 
 ;; the ordering guard (ADR-0046): a read not newer than the one this document last applied is dropped WHOLE — no
-;; DataScript write, no render, no byte-cache candidate — so an older version can never cover a newer one
+;; DataScript write, no render, no byte-cache candidate — so an older version can never cover a newer one. An
+;; INCOMPLETE PDF (main caught it mid-write and it never settled) for a document this window already shows changes
+;; nothing but the note: the last complete version stays on screen (ADR-0046 §Torn reads).
 (rf/reg-event-fx
  :content/received
- (fn [{:keys [db]} [_ {:keys [path] read-n :seq :as payload}]]
-   (when-not (read-stale? (ds/snapshot) path read-n)
-     (content-received-fx db payload))))
+ (fn [{:keys [db]} [_ {:keys [path incomplete incompleteReason] read-n :seq :as payload}]]
+   (let [snap (ds/snapshot)]
+     (cond
+       (read-stale? snap path read-n) nil
+       (and incomplete (keeps-last-good? snap path))
+       {:fx [[:ds/transact (incomplete-kept-tx snap path incompleteReason read-n (js/Date.now))]]}
+       :else (content-received-fx db payload)))))
 
 (rf/reg-event-fx
  :content/rendered
@@ -825,12 +869,6 @@
                    :doc/error message
                    :doc/stamp stamp}
             (number? read-n) (assoc :doc/seq read-n))])))))
-
-(defn keeps-last-good?
-  "Does `path`'s document in DataScript value `snap` hold content this window shows — an entity without :doc/error?
-   (Entities are created only by applied content or by an error, so that is exactly 'has content'.)"
-  [snap path]
-  (boolean (and path (ds/eid-for-path snap path) (nil? (ds/doc-attr snap path :doc/error)))))
 
 (defn refresh-failed-tx
   "A failed main-side read numbered `read-n` of a document this window already shows (ADR-0046): the shared
@@ -2259,10 +2297,34 @@
                                                  :stamp stamp :at (js/Date.now)})]
      (when (seq tx) {:fx [[:ds/transact tx]]}))))
 
+;; a PDF that could not be opened at all, with no earlier version to keep showing (its first open, or a remount whose
+;; good version was evicted): the error page — never an empty view under a banner that promises a last good version
+(defn open-failed-message
+  "The error page's text for a PDF pdf.js could not open: main's own word when it delivered the bytes flagged
+   incomplete (the doc's \"incomplete\" note — the file is being written, and will show once it is finished), else
+   pdf.js's reason."
+  [note message]
+  (if (= "incomplete" (:kind note))
+    (str (:message note) " It will appear once the file is finished.")
+    (str "This PDF could not be opened: " message)))
+
+(rf/reg-event-fx
+ :pdf/open-failed
+ (fn [_ [_ path stamp message]]
+   (let [snap (ds/snapshot)
+         text (open-failed-message (ds/doc-attr snap path :doc/refresh-note) message)
+         tx   (into (vec (content-error-tx snap path text (or stamp (js/Date.now))))
+                    (clear-refresh-note-tx snap path))]
+     (when (seq tx) {:fx [[:ds/transact tx]]}))))
+
 (rf/reg-event-fx
  :pdf/refreshed
+ ;; the bytes OPENED, which settles a "render-failed" note only: an "incomplete" note describes these very bytes (a
+ ;; first open shown as pdf.js recovered it), and a "refresh-failed" note is cleared when new content applies
  (fn [_ [_ path _stamp]]
-   (let [tx (clear-refresh-note-tx (ds/snapshot) path)]
+   (let [snap (ds/snapshot)
+         tx   (when (= "render-failed" (:kind (ds/doc-attr snap path :doc/refresh-note)))
+                (clear-refresh-note-tx snap path))]
      (when (seq tx) {:fx [[:ds/transact tx]]}))))
 
 ;; the banner's Retry: re-request the shown file through the ordinary open flow (main re-reads + re-sends it)

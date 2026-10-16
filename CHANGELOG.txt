@@ -587,6 +587,15 @@ Fixed
       refreshes it and removes the banner. The same holds for a File Type
       re-type that fails and for Reload of a vanished file. A document that
       never loaded still shows the error page.
+    - A PDF still being written (LaTeX mid-run, or a run that died half-way)
+      no longer replaces the finished version you were looking at: the view
+      keeps it behind an "incomplete" banner until the file is complete. On
+      a first open, a half-written PDF shows the finished part when one can be
+      read, flagged the same way, and otherwise an error page saying it will
+      appear once the file is finished.
+    - A PDF that cannot be opened at all no longer leaves an empty view under
+      a banner claiming to show "the last good version" (there was none): it
+      shows the error page with pdf.js's reason.
     - A PDF view no longer loses a view change made while a new version of the
       document is loading. Turning dark-invert on, starting a slide show or
       switching between the slides and document layouts during a live refresh

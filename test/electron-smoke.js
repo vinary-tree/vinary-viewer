@@ -1942,6 +1942,74 @@ async function main() {
     console.log('[ok] a failed read keeps a shown document behind a refresh note (Retry clears it); unnumbered or first-read failures show the error page');
   }
 
+  // ── INCOMPLETE PDFs (ADR-0046 §Torn reads): main delivers a PDF it caught mid-write — and could not wait out —
+  // FLAGGED `incomplete`. A window that shows a complete version keeps it, untouched, behind a note; a window that
+  // shows nothing yet lets pdf.js recover what it can (a torn incremental update opens as its last finished revision),
+  // flagged likewise; and a first open that pdf.js cannot open at all is the error page — never an empty view under a
+  // banner promising a last good version that does not exist.
+  {
+    const { makeDeckPdf, truncatePdf } = require('./fixtures/pdf-gen');
+    const portrait = (pages, extra) => makeDeckPdf(Object.assign({ pages, sizes: Array.from({ length: pages }, () => [300, 800]),
+      labels: null, creator: 'incomplete smoke', producer: 'smoke' }, extra || {}));
+    const pageCount = `document.querySelectorAll('.vv-content .vv-pdf-doc .vv-pdf-page').length`;
+    const note = `(() => { const n = document.querySelector('.vv-refresh-note');
+      return n ? { kind: n.dataset.kind, text: n.textContent, title: n.title } : null; })()`;
+
+    // 1 — a shown PDF: an incomplete delivery changes nothing but the note
+    const keptPath = path.join(ROOT, 'test', 'fixtures', 'incomplete-kept.pdf');   // virtual path; bytes below
+    state.contentByPath.set(keptPath, { path: keptPath, kind: 'pdf', bytes: new Uint8Array(portrait(4)), stamp: Date.now() });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(keptPath)})`);
+    await waitCalm(win, `${pageCount} === 4 && Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas.vv-pdf-canvas'))`,
+      'the complete 4-page version is shown', 15000);
+    await evalIn(win, `(document.querySelector('.vv-content .vv-pdf-doc').__vvIncMark = 'kept', true)`);
+    win.webContents.send('vv:content', { path: keptPath, kind: 'pdf', bytes: new Uint8Array(truncatePdf(portrait(6), 0.5)),
+      stamp: Date.now(), seq: 70, incomplete: true, incompleteReason: 'no-eof' });
+    await waitCalm(win, `(${note} || {}).kind === 'incomplete'`, 'an incomplete delivery raises the incomplete note', 8000);
+    const kept = await evalIn(win, `({ pages: ${pageCount}, same: document.querySelector('.vv-content .vv-pdf-doc').__vvIncMark === 'kept',
+      note: ${note}, error: Boolean(document.querySelector('.vv-content .vv-error')) })`);
+    assert.deepStrictEqual([kept.pages, kept.same, kept.error], [4, true, false],
+      'the last complete version stays exactly as it was (same view, 4 pages, no error page)');
+    assert.ok(/last complete version/.test(kept.note.text) && /end-of-file marker/.test(kept.note.title),
+      `the banner says what is shown and why: ${JSON.stringify(kept.note)}`);
+    win.webContents.send('vv:content', { path: keptPath, kind: 'pdf', bytes: new Uint8Array(portrait(6)), stamp: Date.now(), seq: 71 });
+    await waitCalm(win, `${pageCount} === 6 && !document.querySelector('.vv-refresh-note')`,
+      'the finished file replaces it in place and clears the note', 15000);
+
+    // 2 — a FIRST open of an incomplete PDF that pdf.js can still open (a torn incremental update reads as its last
+    // finished revision): shown, with the banner saying it is what could be read
+    const inc = portrait(3, { incremental: true });
+    const firstEof = inc.indexOf('%%EOF') + 6;
+    const tornIncremental = Buffer.concat([inc.subarray(0, firstEof),
+      Buffer.from('9 0 obj\n<< /Length 5000 >>\nstream\n' + 'x'.repeat(2000), 'latin1')]);
+    const partialPath = path.join(ROOT, 'test', 'fixtures', 'incomplete-partial.pdf');
+    state.contentByPath.set(partialPath, { path: partialPath, kind: 'pdf', bytes: new Uint8Array(tornIncremental), stamp: Date.now(),
+      seq: 72, incomplete: true, incompleteReason: 'no-eof' });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(partialPath)})`);
+    await waitCalm(win, `${pageCount} === 3 && (${note} || {}).kind === 'incomplete'`,
+      'a first open of a torn incremental update shows its finished revision, flagged', 15000);
+    assert.ok(/what could be read/.test((await evalIn(win, note)).text), 'the banner says it shows what could be read');
+
+    // 3 — a first open pdf.js cannot open at all, with nothing to fall back to: the error page, no banner — in main's
+    // words when main said the file is incomplete, in pdf.js's otherwise
+    const tornPath = path.join(ROOT, 'test', 'fixtures', 'incomplete-unopenable.pdf');
+    state.contentByPath.set(tornPath, { path: tornPath, kind: 'pdf', bytes: new Uint8Array(truncatePdf(portrait(5), 0.5)),
+      stamp: Date.now(), seq: 73, incomplete: true, incompleteReason: 'no-eof' });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(tornPath)})`);
+    await waitCalm(win, `(document.querySelector('.vv-content .vv-error')?.textContent || '').includes('incomplete')`,
+      'an unopenable incomplete first open is the error page, in main\'s words', 15000);
+    assert.ok(/once the file is finished/.test(await evalIn(win, `document.querySelector('.vv-content .vv-error').textContent`)),
+      'it says the PDF will appear once the file is finished');
+    assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-refresh-note'))`), false, 'and no banner');
+    const junkPath = path.join(ROOT, 'test', 'fixtures', 'unopenable.pdf');
+    state.contentByPath.set(junkPath, { path: junkPath, kind: 'pdf', bytes: new Uint8Array(Buffer.from('%PDF-1.5\nnot really a pdf\n')), stamp: Date.now() });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(junkPath)})`);
+    await waitCalm(win, `(document.querySelector('.vv-content .vv-error')?.textContent || '').includes('could not be opened')`,
+      'an unopenable PDF is the error page, in pdf.js\'s words', 15000);
+    assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-refresh-note'))`), false,
+      'never an empty view under a "last good version" banner');
+    console.log('[ok] incomplete PDFs: a shown version is kept behind a note; a recoverable first open is shown flagged; an unopenable one is the error page');
+  }
+
   // ── slide-deck DETECTION on prepare (ADR-0045): every PDF is classified from its own evidence, in the
   //    renderer, before the first mount — exposed as .vv-pdf-doc[data-deck] (DOM-level, release-safe) ──
   {
