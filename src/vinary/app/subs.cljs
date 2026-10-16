@@ -163,6 +163,8 @@
      (palette/candidates source query projects (commands/all-visible ctx)
                          (search-config/mode-for :palette settings)))))
 (rf/reg-sub :ui/uri-complete     (fn [db _] (get-in db [:ui :uri-complete])))
+;; the monotonic count of active-tab changes (nav/set-active) — the address bar scopes a loaded tab's draft to it
+(rf/reg-sub :ui/activation       (fn [db _] (nav/activation db)))
 (rf/reg-sub :ui/extensions-open? (fn [db _] (get-in db [:ui :extensions-open?])))
 (rf/reg-sub :ui/extensions       (fn [db _] (get-in db [:ui :extensions])))
 (rf/reg-sub :ui/adblock          (fn [db _] (get-in db [:ui :adblock])))

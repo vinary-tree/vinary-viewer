@@ -202,12 +202,17 @@
      ;; A foreground tab event updates app-db and requests focus in the same effect pass. Reagent commits the
      ;; new controlled value on the next frame, so defer URI focus/select until then; selecting synchronously
      ;; would select the previous tab's draft and React's value write would collapse it again.
-     :uri     (js/requestAnimationFrame
-               (fn []
-                 (when-let [^js el (.querySelector js/document ".vv-uri-input")]
-                   (when (.-isConnected el)
-                     (.focus el)
-                     (.select el)))))
+     ;; …and DROP the request if the active tab changed before that frame: it belonged to the earlier
+     ;; activation (Ctrl+L, then a quick tab switch), whose own focus target is the one that must stand — a stale
+     ;; URI focus would steal the keyboard from the document the user just switched to
+     :uri     (let [activation (get-in @rfdb/app-db [:ui :activation] 0)]
+                (js/requestAnimationFrame
+                 (fn []
+                   (when (= activation (get-in @rfdb/app-db [:ui :activation] 0))
+                     (when-let [^js el (.querySelector js/document ".vv-uri-input")]
+                       (when (.-isConnected el)
+                         (.focus el)
+                         (.select el)))))))
      :tree    (some-> ^js (.querySelector js/document ".vv-tree-filter") .focus)
      ;; preventScroll: focusing a scroller normally scrolls it to reveal the focused thing, which would
      ;; make "focus the content pane" silently move the reader's position (and would appear in the scroll

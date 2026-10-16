@@ -59,7 +59,20 @@
        vec))
 
 ;; ---- transforms (pure db→db, or db→[db' …]) ----
-(defn activate [db id] (assoc-in db [:ui :active-tab] id))
+(defn set-active
+  "db with tab `id` active. A CHANGE of the active tab bumps the monotonic [:ui :activation] counter, so a reader
+   that compares activations can see a switch even when it was undone within one animation frame (A → B → A
+   before any render — the address bar's per-activation drafts and its deferred focus request rely on it)."
+  [db id]
+  (cond-> (assoc-in db [:ui :active-tab] id)
+    (not= id (get-in db [:ui :active-tab])) (update-in [:ui :activation] (fnil inc 0))))
+
+(defn activation
+  "The monotonic count of active-tab changes (see set-active)."
+  [db]
+  (get-in db [:ui :activation] 0))
+
+(defn activate [db id] (set-active db id))
 
 ;; a history entry is {:uri :scroll :line :facet}: :scroll = the preview/default pixel scrollTop, :line = the
 ;; SOURCE viewport top line (CodeMirror scrolls internally, so its pixel is 0 — the line is the real coordinate)
@@ -73,7 +86,7 @@
   (let [id (get-in db [:ui :next-tab-id] 0)]
     (-> db
         (update-in [:ui :tabs] (fnil conj []) (mk-tab id uri))
-        (assoc-in [:ui :active-tab] id)
+        (set-active id)
         (assoc-in [:ui :next-tab-id] (inc id)))))
 
 (defn add-tab-background
@@ -102,7 +115,7 @@
                       (vec (concat (subvec ts 0 insert-at)
                                    [duplicate]
                                    (subvec ts insert-at))))
-            (assoc-in [:ui :active-tab] new-id)
+            (set-active new-id)
             (assoc-in [:ui :next-tab-id] (inc new-id)))))))
 
 (defn- update-active [db f]
@@ -224,7 +237,7 @@
       (let [closing    (get ts idx)
             ts'        (vec (concat (subvec ts 0 idx) (subvec ts (inc idx))))
             new-active (if (= (active-id db) id) (:id (or (get ts' idx) (get ts' (dec idx)))) (active-id db))]
-        [(-> db (assoc-in [:ui :tabs] ts') (assoc-in [:ui :active-tab] new-active))
+        [(-> db (assoc-in [:ui :tabs] ts') (set-active new-active))
          (:uri closing)
          (boolean (some #(= (:uri %) (:uri closing)) ts'))]))))
 

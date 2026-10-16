@@ -187,3 +187,23 @@
     (let [db' (nav/add-tab-background empty-db "file:///a/new.md")]
       (is (= 1 (count (get-in db' [:ui :tabs]))))
       (is (nil? (get-in db' [:ui :active-tab])) "still no active tab"))))
+
+(deftest the-activation-counter-sees-every-switch
+  ;; A switch away and back within one animation frame (A → B → A) must still be visible to readers that compare
+  ;; activations: the address bar scopes a loaded tab's draft to one, and drops a deferred URI focus request whose
+  ;; activation has passed.
+  (let [db0 (-> {:ui {:tabs [] :active-tab nil :next-tab-id 0}} (nav/add-tab "/a.md") (nav/add-tab "/b.md"))
+        n0  (nav/activation db0)]
+    (is (= 2 n0) "each new active tab is a change")
+    (is (= n0 (nav/activation (nav/activate db0 (nav/active-id db0)))) "re-activating the active tab is not")
+    (let [a  (:id (first (nav/tabs db0)))
+          b  (nav/active-id db0)
+          db (-> db0 (nav/activate a) (nav/activate b))]
+      (is (= b (nav/active-id db)) "back where it started…")
+      (is (= (+ n0 2) (nav/activation db)) "…but two activations later"))
+    (testing "closing the active tab activates a neighbour (a change); closing a background tab does not"
+      (let [b (nav/active-id db0)
+            a (:id (first (nav/tabs db0)))]
+        (is (= (inc n0) (nav/activation (first (nav/close db0 b)))))
+        (is (= n0 (nav/activation (first (nav/close db0 a)))))))
+    (is (= (inc n0) (nav/activation (nav/duplicate-tab db0 (nav/active-id db0)))) "a duplicate becomes active")))

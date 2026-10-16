@@ -1251,6 +1251,20 @@
          {})
        {}))))
 
+;; :rev is a monotonic counter of USER INTENT on the address bar — typing (:uri-complete/typed) and Enter
+;; (:uri/navigate) bump it. It survives every reset (the empty map below never moves it backwards), so a deferred
+;; writer can tell whether the user acted after it was scheduled (:uri-complete/sync-context).
+(def ^:private uri-complete-empty
+  {:tab-id nil :typed-input nil :input nil :dir nil :entries [] :target nil :exists? false :dir? false
+   :selected -1 :dismissed? false :error? false :rev 0})
+
+(defn- uri-complete-reset
+  "db with an empty completion state, keeping the monotonic :rev."
+  [db]
+  (assoc-in db [:ui :uri-complete] (assoc uri-complete-empty :rev (get-in db [:ui :uri-complete :rev] 0))))
+
+(defn- bump-uri-rev [db] (update-in db [:ui :uri-complete :rev] (fnil inc 0)))
+
 ;; URI bar Enter: open a complete existing path (file or directory), else the most-likely prefix match,
 ;; else a non-intrusive inline error (no dialog). http(s) bypasses path completion.
 (rf/reg-event-fx
@@ -1264,11 +1278,14 @@
        (str/blank? text) {}
        (uri/http? text)  {:fx [[:dispatch [:tab/navigate (uri/normalize text)]]]}
        :else
-       (let [uc (get-in db [:ui :uri-complete])]
+       ;; Enter is user intent: bump :rev, so a deferred re-sync scheduled before it cannot wipe its outcome
+       (let [db (bump-uri-rev db)
+             uc (get-in db [:ui :uri-complete])]
          (if (and (= tab-id (:tab-id uc))
                   (= text (:typed-input uc))
                   (= text (:input uc)))
-           {:fx [[:dispatch [:uri-complete/decide-enter tab-id (assoc uc :input text)]]]}
+           {:db db
+            :fx [[:dispatch [:uri-complete/decide-enter tab-id (assoc uc :input text)]]]}
            {:db (update-in db [:ui :uri-complete] merge {:tab-id tab-id :typed-input text})
             :fx [[:vv/complete-path {:input text
                                      :tag {:kind :enter :tab-id tab-id :input text}}]]}))))))
@@ -1280,11 +1297,7 @@
   [entries base]
   (nav/sort-entries (filter #(uri/matches-prefix? (:name %) base) entries)))
 
-(def ^:private uri-complete-empty
-  {:tab-id nil :typed-input nil :input nil :dir nil :entries [] :target nil :exists? false :dir? false
-   :selected -1 :dismissed? false :error? false})
-
-(rf/reg-event-db :uri-complete/clear       (fn [db _] (assoc-in db [:ui :uri-complete] uri-complete-empty)))
+(rf/reg-event-db :uri-complete/clear       (fn [db _] (uri-complete-reset db)))
 (rf/reg-event-db :uri-complete/set         (fn [db [_ m]] (update-in db [:ui :uri-complete] merge m)))
 (rf/reg-event-db :uri-complete/clear-error (fn [db _] (assoc-in db [:ui :uri-complete :error?] false)))
 
@@ -1301,19 +1314,42 @@
            (assoc-in [:ui :uri-complete :dismissed?] false)))
      db)))
 
-(rf/reg-event-fx
- :uri-complete/typed
- (fn [{:keys [db]} [_ tab-id text]]
-   (if (not= tab-id (nav/active-id db))
-     {}
-     (if (or (str/blank? text) (uri/http? text))
-       {:db (assoc-in db [:ui :uri-complete]
-                     (assoc uri-complete-empty :tab-id tab-id :typed-input text))}
-       {:db (update-in db [:ui :uri-complete] merge
-                       {:tab-id tab-id :typed-input text
-                        :selected -1 :dismissed? false :error? false})
-        :fx [[:vv/complete-path {:input text
-                                 :tag {:kind :live :tab-id tab-id :input text}}]]}))))
+(defn uri-typed-fx
+  "Effects of the address bar's text becoming `text` on tab `tab-id` (typing, a restored draft): own the
+   completion state for that tab and ask main for live completions (debounced). Bumps :rev (user intent)."
+  [db tab-id text]
+  (if (not= tab-id (nav/active-id db))
+    {}
+    (let [db (bump-uri-rev db)
+          rev (get-in db [:ui :uri-complete :rev])]
+      (if (or (str/blank? text) (uri/http? text))
+        {:db (assoc-in db [:ui :uri-complete]
+                       (assoc uri-complete-empty :tab-id tab-id :typed-input text :rev rev))}
+        {:db (update-in db [:ui :uri-complete] merge
+                        {:tab-id tab-id :typed-input text
+                         :selected -1 :dismissed? false :error? false})
+         :fx [[:vv/complete-path {:input text
+                                  :tag {:kind :live :tab-id tab-id :input text}}]]}))))
+
+(rf/reg-event-fx :uri-complete/typed (fn [{:keys [db]} [_ tab-id text]] (uri-typed-fx db tab-id text)))
+
+(defn uri-sync-context-fx
+  "Effects of the address bar re-syncing completion ownership after a tab / URI change (`text`: the restored
+   draft to complete, or nil for none). The bar schedules this one animation frame AFTER the render that saw
+   the change, passing the :rev it rendered with. If the user has typed or pressed Enter since — :rev moved —
+   their newer state stands and this is a no-op: resetting it then would wipe a completion they asked for, or
+   the inline error of an Enter they just pressed. Otherwise: reset the completion state and, with `text`,
+   complete it like typing would."
+  [db tab-id text rev]
+  (if (not= rev (get-in db [:ui :uri-complete :rev] 0))
+    {}
+    (let [db' (uri-complete-reset db)]
+      (if (some? text)
+        (uri-typed-fx db' tab-id text)
+        {:db db'}))))
+
+(rf/reg-event-fx :uri-complete/sync-context
+                 (fn [{:keys [db]} [_ tab-id text rev]] (uri-sync-context-fx db tab-id text rev)))
 
 (rf/reg-event-fx
  :uri-complete/decide-enter

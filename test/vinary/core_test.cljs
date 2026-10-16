@@ -1287,3 +1287,27 @@
         (.catch (fn [e] (is false (str "render failed: " (.-message e))) (done))))))
 
 (defn -main [& _] (run-tests))
+
+(deftest uri-bar-deferred-resync-is-fenced-by-user-intent
+  ;; The address bar re-syncs completion ownership one animation frame AFTER the render that saw a tab switch.
+  ;; Text typed and entered within that frame must survive it (the release-build smoke caught the reset wiping
+  ;; an Enter's inline error).
+  (let [db0 {:ui {:active-tab 4 :tabs [{:id 4 :uri nil :hist {:stack [{:uri nil}] :idx 0}}]
+                  :uri-complete {:tab-id 4 :typed-input "/a" :input "/a" :entries [] :error? false :rev 7}}}]
+    (testing "typing and Enter bump the monotonic :rev"
+      (is (= 8 (get-in (:db (events/uri-typed-fx db0 4 "/missing/x")) [:ui :uri-complete :rev])))
+      (is (= 8 (get-in (:db (events/uri-typed-fx db0 4 "")) [:ui :uri-complete :rev]))
+          "the blank reset keeps (and bumps) the counter — it never moves backwards"))
+    (testing "a re-sync scheduled at :rev 7 is a no-op once the user acted (rev 8)"
+      (let [acted (-> (:db (events/uri-typed-fx db0 4 "/missing/x"))
+                      (assoc-in [:ui :uri-complete :error?] true))]
+        (is (= {} (events/uri-sync-context-fx acted 4 "/missing/x" 7)))))
+    (testing "with nothing typed since, the re-sync resets ownership and completes the restored draft"
+      (let [{:keys [db fx]} (events/uri-sync-context-fx db0 4 "/draft" 7)]
+        (is (= "/draft" (get-in db [:ui :uri-complete :typed-input])))
+        (is (= 8 (get-in db [:ui :uri-complete :rev])) "its own completion request is intent too")
+        (is (= :vv/complete-path (ffirst fx))))
+      (let [{:keys [db fx]} (events/uri-sync-context-fx db0 4 nil 7)]
+        (is (nil? (get-in db [:ui :uri-complete :tab-id])) "no draft: just the reset")
+        (is (= 7 (get-in db [:ui :uri-complete :rev])) "the reset keeps the counter")
+        (is (nil? fx))))))

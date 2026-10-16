@@ -4,6 +4,7 @@
    Empty (no tabs) shows the Vinary Tree shield watermark."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
+            [re-frame.db :as rfdb]
             [clojure.string :as str]
             [vinary.app.uri :as uri]
             [vinary.app.nav :as nav]
@@ -1545,7 +1546,16 @@
    error (never a dialog); Esc closes the dropdown, then reverts. Holding Ctrl while hovering turns a
    local path into a clickable breadcrumb. (Per-tab history: back/forward act on the active tab.)"
   []
-  (let [drafts        (r/atom {})          ; tab-id -> {:text :baseline :blank?}; never app-db (ADR-0033)
+  (let [drafts        (r/atom {})          ; tab-id -> {:text :baseline :blank? :activation}; never app-db (ADR-0033)
+        ;; the activation (nav/set-active) a draft is made in, read from app-db AT EVENT TIME — a handler's closure
+        ;; holds the last RENDER's value, which a tab switch inside the same frame has already made stale
+        current-activation (fn [] (get-in @rfdb/app-db [:ui :activation] 0))
+        ;; a draft is current for the shown tab when it was started on that tab's URI and — for a LOADED tab — in
+        ;; this same activation: a loaded tab's address edit is transient and is abandoned by leaving the tab, even
+        ;; when leaving and returning both happen before the bar renders. A blank tab's draft persists by design.
+        draft-current? (fn [e uri activation]
+                         (boolean (and e (= (:baseline e) uri)
+                                       (or (:blank? e) (= (:activation e) activation)))))
         hover?        (r/atom false)
         input*        (atom nil)
         editing-owner (atom nil)           ; {:id :blank?}, stable across a focusout/tab-render race
@@ -1561,13 +1571,16 @@
             fwd?        @(rf/subscribe [:history/can-forward?])
             uc          @(rf/subscribe [:ui/uri-complete])
             web-history @(rf/subscribe [:ui/web-history])
+            activation  @(rf/subscribe [:ui/activation])
             entry       (get @drafts active-id)
             ;; A model URI change is authoritative immediately. This baseline gate prevents the old draft from
-            ;; flashing for one render while the successful navigation's focus handoff triggers its blur cleanup.
-            entry-current? (and entry (= (:baseline entry) active-uri))
+            ;; flashing for one render while the successful navigation's focus handoff triggers its blur cleanup;
+            ;; the activation gate drops a loaded tab's edit abandoned by a tab switch (draft-current?).
+            entry-current? (draft-current? entry active-uri activation)
             shown       (if entry-current? (:text entry) active-display)
             blank?      (nil? active-uri)
-            context     [active-id active-uri]
+            ;; the activation makes a switch away and back within one frame (A → B → A) a context change too
+            context     [active-id active-uri activation]
             context-changed? (not= context @context*)
             previous-context @context*
             live-ids    (into #{} (map :id) tabs)
@@ -1586,7 +1599,10 @@
                             (let [[previous-id previous-uri] (when (vector? previous-context) previous-context)
                                   previous-entry (get @drafts previous-id)
                                   active-entry entry
-                                  restore-text shown]
+                                  restore-text shown
+                                  ;; the completion state's user-intent counter as THIS render saw it: the deferred
+                                  ;; re-sync below applies only if nothing was typed / entered since
+                                  rendered-rev (:rev uc)]
                               (r/next-tick
                                (fn []
                                  (when (and (vector? previous-context) (some? previous-uri))
@@ -1600,13 +1616,18 @@
                                    (swap! drafts (fn [m] (if (identical? active-entry (get m active-id))
                                                           (dissoc m active-id)
                                                           m))))
-                                 (rf/dispatch [:uri-complete/clear])
+                                 ;; Reset completion ownership to the new context — FENCED by :rev: this runs one
+                                 ;; animation frame after the render, and an address typed + entered within that
+                                 ;; frame (a fast typist, automation) must keep its completion / its Enter's inline
+                                 ;; error rather than be wiped by this stale reset (:uri-complete/sync-context).
                                  (let [latest (get @drafts active-id)
-                                       latest-current? (and latest (= (:baseline latest) active-uri))]
-                                   (when (or blank? latest-current?)
-                                     (reset! editing-owner {:id active-id :blank? blank?})
-                                     (rf/dispatch [:uri-complete/typed active-id
-                                                   (if latest-current? (:text latest) restore-text)])))))))
+                                       latest-current? (draft-current? latest active-uri (current-activation))
+                                       restore? (or blank? latest-current?)]
+                                   (when restore?
+                                     (reset! editing-owner {:id active-id :blank? blank?}))
+                                   (rf/dispatch [:uri-complete/sync-context active-id
+                                                 (when restore? (if latest-current? (:text latest) restore-text))
+                                                 rendered-rev]))))))
             crumbs?     (and ctrl? @hover? active-path)
             editing?    (boolean entry-current?)
             completion-current? (= active-id (:tab-id uc))
@@ -1636,7 +1657,7 @@
             accept!     (fn [m]                ; commit a chosen entry; re-list if it is a directory
                           (let [nd (str dir-part (:name m) (when (:dir? m) (platform/path-sep)))]
                             (swap! drafts assoc active-id
-                                   {:text nd :baseline active-uri :blank? blank?})
+                                   {:text nd :baseline active-uri :blank? blank? :activation (current-activation)})
                             (rf/dispatch [:uri-complete/typed active-id nd])))]
         [:div.vv-uribar {:on-mouse-enter #(reset! hover? true)
                          :on-mouse-leave #(reset! hover? false)}
@@ -1661,11 +1682,11 @@
               ;; :in-input? is derived from document.activeElement by the keymap resolver (ADR-0032)
               :on-focus    (fn [^js e]
                              (let [saved (get @drafts active-id)
-                                   current? (and saved (= (:baseline saved) active-uri))
+                                   current? (draft-current? saved active-uri (current-activation))
                                    v (if current? (:text saved) active-display)]
                                (when-not current?
                                  (swap! drafts assoc active-id
-                                        {:text v :baseline active-uri :blank? blank?}))
+                                        {:text v :baseline active-uri :blank? blank? :activation (current-activation)}))
                                (reset! editing-owner {:id active-id :blank? blank?})
                                (.select (.-target e))
                                (rf/dispatch [:uri-complete/typed active-id v])))
@@ -1677,7 +1698,7 @@
               :on-change   (fn [^js e]
                              (let [v (.. e -target -value)]
                                (swap! drafts assoc active-id
-                                      {:text v :baseline active-uri :blank? blank?})
+                                      {:text v :baseline active-uri :blank? blank? :activation (current-activation)})
                                (reset! editing-owner {:id active-id :blank? blank?})
                                (rf/dispatch [:uri-complete/typed active-id v])))
               :on-key-down
@@ -1695,7 +1716,7 @@
                               (if (> (count cp) (count base))  ; extend to the matches' common prefix…
                                 (let [nd (str dir-part cp)]
                                   (swap! drafts assoc active-id
-                                         {:text nd :baseline active-uri :blank? blank?})
+                                         {:text nd :baseline active-uri :blank? blank? :activation (current-activation)})
                                   (rf/dispatch [:uri-complete/typed active-id nd]))
                                 (rf/dispatch [:uri-complete/set {:dismissed? false :selected -1}]))))))  ; …else just list
                     ("ArrowRight" "End")

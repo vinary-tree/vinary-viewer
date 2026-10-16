@@ -21,6 +21,7 @@
         ;; browser-tab model: tabs are views ({:id :uri :hist {:stack :idx}}); DataScript caches content.
         :tabs []
         :active-tab nil
+        :activation 0               ; monotonic count of active-tab changes (nav/set-active) — sees A → B → A in one frame
         :next-tab-id 0
         :projects []                ; [{:root :files :synthetic?} …] — one file tree per open project: a
                                     ; git root, or (:synthetic?) a directory adopted for a file in no repo
@@ -77,7 +78,9 @@
         ;; URI-bar path auto-completion (children of the current dir + ghost/dropdown state)
         :uri-complete {:tab-id nil :typed-input nil
                        :input nil :dir nil :entries [] :target nil :exists? false :dir? false
-                       :selected -1 :dismissed? false :error? false}
+                       :selected -1 :dismissed? false :error? false
+                       ;; monotonic user-intent counter (typing / Enter); fences the bar's deferred re-sync
+                       :rev 0}
         ;; extension runtime + ad-blocking (state pushed from main over vv:ext-state / vv:ext-config)
         :extensions-open? false
         :extensions {:enabled? true :installed [] :install-status nil :update-status nil}

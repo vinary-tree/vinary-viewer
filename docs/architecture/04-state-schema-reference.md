@@ -132,7 +132,9 @@ Important slices:
 |------|---------|
 | `:ds/rev` | DataScript transaction revision signal. |
 | `[:ui :tabs]` | Ordered browser-like tab views. |
-| `[:ui :active-tab]` | Active tab id. |
+| `[:ui :active-tab]` | Active tab id — written only through `nav/set-active`. |
+| `[:ui :activation]` | Monotonic count of active-tab changes (`nav/set-active`): a switch away and back within one animation frame still moves it. The address bar's per-activation drafts (a loaded tab's edit is abandoned by leaving the tab) and the deferred URI-focus request's staleness check read it. |
+| `[:ui :uri-complete :rev]` | Monotonic count of address-bar user intent (typing, Enter). The bar's deferred re-sync after a tab change applies only if it has not moved (`:uri-complete/sync-context`). |
 | `[:ui :tab-drop]` | Tab-drag drop-line indicator `{:over <tab-id> :after? bool}` (or nil). |
 | `[:ui :dir-selected]` | Explicitly highlighted directory-entry path (the rendered highlight also consults the trail). |
 | `[:ui :ctrl-held?]` | Whether Control is held; gates the Ctrl-hover breadcrumb URI bar. |

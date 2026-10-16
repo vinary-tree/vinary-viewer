@@ -544,7 +544,12 @@ function installIpc(state) {
     }
     const payload = state.contentByPath.get(filePath);
     if (payload) {
-      event.sender.send('vv:content', { ...payload, stamp: Date.now() });
+      // record the stamp actually DELIVERED: a test that then sends a "newer" refresh must stamp it after THIS one
+      // (a stamp taken before the open can equal it — the round trip can take 1 ms — and an equal stamp is no
+      // refresh at all to the view)
+      const sentStamp = Date.now();
+      state.sentStamps.set(filePath, sentStamp);
+      event.sender.send('vv:content', { ...payload, stamp: sentStamp });
     } else {
       state.openedPaths.push(filePath);
     }
@@ -685,6 +690,7 @@ function installIpc(state) {
 
 async function main() {
   const state = {
+    sentStamps: new Map(),   // path → the stamp the stub delivered on its last vv:open reply (see installIpc)
     openDialogs: 0,
     lastOpenSeed: null,   // ordered candidate folder paths the renderer passed with the last vv:open-dialog
     zoomRequests: 0,   // vv:zoom-request boot-pull calls (Bug-1 restart-% regression)
@@ -1714,8 +1720,13 @@ async function main() {
     await delay(300);
     const before = await evalIn(win, `document.querySelector('.vv-content').scrollTop`);
 
+    // every refresh is stamped AFTER the version the stub delivered on open (its stamp is taken when the renderer's
+    // vv:open arrives, which can be the very millisecond after t0 — an equal stamp would not be a refresh)
+    const delivered = state.sentStamps.get(livePath);
+    assert.ok(Number.isFinite(delivered), 'the stub recorded the delivered stamp');
+
     // 1 — a good refresh with one more page swaps in place
-    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(7)), stamp: t0 + 1 });
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(7)), stamp: delivered + 1 });
     await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 7`,
       'the refreshed document (7 pages) is swapped in', 15000);
     const afterGood = await evalIn(win, `(() => ({
@@ -1727,7 +1738,7 @@ async function main() {
     assert.strictEqual(afterGood.note, false, 'a good refresh shows no note');
 
     // 2 — a torn refresh (half a file) keeps the last good render + raises the non-fatal note
-    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(truncatePdf(version(8), 0.5)), stamp: t0 + 2 });
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(truncatePdf(version(8), 0.5)), stamp: delivered + 2 });
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-refresh-note[data-kind="render-failed"]'))`),
       'a refresh that cannot be opened raises the render-failed note', 10000);
     const afterTorn = await evalIn(win, `(() => ({
@@ -1739,7 +1750,7 @@ async function main() {
       'a torn refresh keeps the last good document on screen (no error page, no remount)');
 
     // 3 — the next good refresh replaces it and clears the note
-    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(8)), stamp: t0 + 3 });
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(8)), stamp: delivered + 3 });
     await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 8
       && !document.querySelector('.vv-refresh-note')`,
       'the next good refresh is shown and clears the note', 15000);
@@ -2567,8 +2578,13 @@ async function main() {
   await clickTabId(blankTabA, 'return to loaded document after URI edit');
   await waitFor(() => evalIn(win, `document.activeElement === document.querySelector('.vv-content')`),
     'returning to a loaded document focuses its body');
-  assert.strictEqual(await evalIn(win, `document.querySelector('.vv-uri-input').value !== ${JSON.stringify(transientDocDraft)}`),
-    true, 'a loaded document does not retain an abandoned URI edit');
+  // an EVENTUAL property: the bar re-renders the returned tab on the next frame (the clicks above can all land
+  // inside one frame, before any render). A retained draft would never go away, so this still fails on the bug.
+  await waitFor(() => evalIn(win, `document.querySelector('.vv-uri-input').value !== ${JSON.stringify(transientDocDraft)}
+    && document.querySelector('.vv-uri-input').value.includes('markdown-features.md')`),
+    'a loaded document does not retain an abandoned URI edit', 4000);
+  assert.strictEqual(await evalIn(win, `document.activeElement === document.querySelector('.vv-content')`), true,
+    'the stale Ctrl+L focus request does not steal focus after the tab switches (it belonged to an earlier activation)');
   await waitFor(
     () => evalIn(win, `Boolean(document.querySelector('.markdown-body .vv-math-inline mjx-container svg'))`),
     'inline MathJax SVG'
