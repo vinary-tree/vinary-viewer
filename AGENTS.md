@@ -21,6 +21,10 @@
   buffer is actually being reused (ADR-0033).
 - `npm run bench:input`: the input-latency benchmark behind those thresholds. Pin it, per the standing
   benchmarking practice: `taskset -c 2-9 npm run bench:input`.
+- `npm run bench:remote`: the remote (SFTP) whole-file read benchmark behind docs/scientific/11 — the real
+  transport against the in-process SFTP fixture behind a TCP latency proxy, size × RTT × server ident × reader,
+  sha256-verified. Pin the client (`taskset -c 2-5 npm run bench:remote -- --server-nodelay | tee …`); the
+  server child pins itself to 6-9. `VV_BENCH_QUICK=1` runs a small subset.
 
 ## Coding Style & Naming Conventions
 Use idiomatic ClojureScript with two-space indentation, kebab-case vars/functions, and namespace-to-file mapping such as `vinary.input.keymaps-registry` in `src/vinary/input/keymaps_registry.cljs`. Keep renderer filesystem access behind the existing `contextBridge`/IPC boundary; the renderer should operate on plain JSON/EDN data. JavaScript files use CommonJS, `'use strict'`, and minimal dependencies. CSS custom properties use the `--vv-*` prefix and must be defined by every theme in `resources/public/css/themes/`.

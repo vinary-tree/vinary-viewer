@@ -652,6 +652,7 @@ module.exports = {
   remoteStat, remoteReaddir, remoteReadFile, remoteReadText, remoteReadPrefix, remoteCreateReadStream,
   remoteResolvePath, remoteForwardOut, connectionKey,
   openConnection, closeConnection, closeAll, connectionCount, connectionHealth,
-  // exposed for tests / diagnostics
-  _resolveForUri: resolveForUri, _childUri: childUri, _execCapture: execCapture,
+  // exposed for tests / diagnostics (scripts/bench-remote-read.cjs reaches the raw SFTP channel through
+  // _resolvePath to time ssh2's own readFile/fastGet as reference readers)
+  _resolveForUri: resolveForUri, _childUri: childUri, _execCapture: execCapture, _resolvePath: resolvePath,
 };

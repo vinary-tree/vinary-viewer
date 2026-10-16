@@ -45,6 +45,7 @@
     "pdfjs:check": "node scripts/check-pdfjs.mjs",
     "grammars:sync": "node scripts/sync-grammars.mjs",
     "grammars:check": "node scripts/check-grammars.mjs",
+    "bench:remote": "node scripts/bench-remote-read.cjs",
     "bench:input": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs --width=1400 --height=1000 electron --no-sandbox scripts/bench-input-latency.cjs",
     "screenshots": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && node scripts/run-electron-headless.mjs --width=1280 --height=1024 electron --no-sandbox scripts/screenshots.cjs",
     "screenshots:display": "npm run assets:sync && npm run pdfjs:sync && shadow-cljs compile renderer && electron --no-sandbox scripts/screenshots.cjs",
