@@ -1,0 +1,9 @@
+# bench-remote-read 2026-10-16T15:49:24.547Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4291781kHz max=4561833kHz  pid 2809313's current affinity list: 2-5
+# sizes=1M,8M rtts=50 idents=ssh2,openssh readers=stream runs≤7 budget=30s warmup=1 TCP_NODELAY: server=true client=false
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms
+ssh2      50    1M  stream                7      2547.8    2558.9   2549.8±4.6         0.39    47.5         9.8         1.1   2500
+ssh2      50    8M  stream                3     19572.7   19605.6 19583.5±19.2         0.41   288.3        51.2         1.2  19300
+openssh   50    1M  stream                7       925.3     926.8    924.3±2.5         1.08    16.2        67.2         1.2    900
+openssh   50    8M  stream                5      6644.0    6651.6   6641.3±9.3         1.20   103.7        75.9         1.1   6500
+# wrote /tmp/claude-1000/-home-dylon-Workspace-f1r3fly-io-vinary-viewer/f84c375b-50f5-408d-bb32-743e219a9fda/scratchpad/bench-e0-rtt50.json

@@ -1,0 +1,21 @@
+# bench-remote-read 2026-10-16T15:46:44.462Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4106095kHz max=4561833kHz  pid 2802728's current affinity list: 2-5
+# sizes=64K,1M,8M,32M rtts=0,10 idents=ssh2,openssh readers=stream runs≤7 budget=30s warmup=1 TCP_NODELAY: server=true client=false
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms
+ssh2       0   64K  stream                7         1.9       5.7      2.5±1.4        32.74     1.2         1.9         2.4      0
+ssh2       0    1M  stream                7        14.0      21.5     15.7±4.2        71.66    10.7        28.3         2.3      0
+ssh2       0    8M  stream                7        72.7      97.5    75.2±10.4       110.09    44.5        81.6         5.0      0
+ssh2       0   32M  stream                7       267.9     289.2   272.2±10.1       119.46   160.5       191.6         2.0      0
+ssh2      10   64K  stream                7        52.9      56.9     53.9±1.6         1.18     1.8        98.4         1.3     50
+ssh2      10    1M  stream                7       538.5     541.0    536.3±4.6         1.86    18.6       130.5         1.9    500
+ssh2      10    8M  stream                7      4136.3    4159.0   4139.7±9.8         1.93   148.5       161.6         1.9   3860
+ssh2      10   32M  stream                3     16123.4   16167.1 16136.1±27.0         1.98   406.4       162.7         1.9  15380
+openssh    0   64K  stream                7         1.2       1.6      1.2±0.2        53.68     0.5        99.0         1.3      0
+openssh    0    1M  stream                7        10.1      12.3     10.2±1.6        99.00     4.3       121.7         1.9      0
+openssh    0    8M  stream                7        44.1      51.2     42.9±6.0       181.56    23.5       167.4         5.9      0
+openssh    0   32M  stream                7       144.1     155.5    144.5±6.4       222.11    96.5       182.4         1.6      0
+openssh   10   64K  stream                7        32.0      32.4     32.1±0.2         1.95     0.9        99.3         1.2     30
+openssh   10    1M  stream                7       193.5     194.3    193.5±0.5         5.17     5.8       143.4         1.2    180
+openssh   10    8M  stream                7      1390.3    1393.7   1390.5±2.3         5.75    41.1       160.8         1.2   1300
+openssh   10   32M  stream                6      5495.2    5501.4   5497.1±2.8         5.82   168.1       164.6         1.2   5140
+# wrote /tmp/claude-1000/-home-dylon-Workspace-f1r3fly-io-vinary-viewer/f84c375b-50f5-408d-bb32-743e219a9fda/scratchpad/bench-e0.json

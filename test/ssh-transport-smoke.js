@@ -20,6 +20,30 @@ async function drain(stream) {
   return new Promise((res, rej) => { let s = ''; stream.on('data', (c) => (s += c)); stream.on('end', () => res(s)); stream.on('error', rej); });
 }
 
+// Regression guard for docs/scientific/11 H0/E0 (ADR-0046). With Nagle's algorithm on, every SFTP request/response
+// turn waits out the peer's delayed-ACK timer (~40 ms on Linux), and a whole-file read issues one request per
+// 64 KiB (split into 3 against this fixture's ssh2 ident). Against a server that — like OpenSSH's sshd — disables
+// Nagle on ITS side, a 1 MiB read is ~50 turns: ~2 s with the client's Nagle on (measured 2059 ms), ~20 ms with
+// it off (measured 21 ms). 800 ms separates the two by a wide margin either way.
+async function testNoDelay() {
+  const big = crypto.randomBytes(1024 * 1024);
+  const srv = await startSftpServer({ password: 'nd-pw', files: { 'big.bin': big }, noDelay: true });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-nd-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => 'nd-pw', onError: () => {},
+  });
+  await transport.remoteStat(srv.url('/big.bin'));   // connect + open the SFTP channel outside the timing
+  const t0 = process.hrtime.bigint();
+  const got = await transport.remoteReadFile(srv.url('/big.bin'));
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  ok(got.equals(big), 'the 1 MiB TCP_NODELAY read is byte-exact');
+  ok(ms < 800, `a 1 MiB read over loopback took ${ms.toFixed(1)} ms — must be < 800 ms: the client sets TCP_NODELAY, so no request waits out a delayed ACK`);
+  transport.closeAll();
+  await srv.close();
+}
+
 async function main() {
   // 0. pure-JS crypto: ssh2's CRYPTO is Node's built-in crypto — its optional native crypto addon (sshcrypto.node)
   // is never built, so ssh2 imposes no hard native-build requirement and stays portable. (cpu-features, a small
@@ -111,6 +135,9 @@ async function main() {
 
   // 9e. a throwing status/error sink must not wedge connect/read (guarded sink) — see testThrowingSink.
   await testThrowingSink();
+
+  // 9f. TCP_NODELAY on the client (docs/scientific/11 H0/E0) — a timing guard against the Nagle/delayed-ACK stall.
+  await testNoDelay();
 
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);

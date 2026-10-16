@@ -225,7 +225,8 @@ async function main() {
   console.log(`# bench-remote-read ${env.date}  node ${env.node}  ssh2 ${env.ssh2}  ${env.cpu} (${env.cpus} cpus)`);
   console.log(`# governor=${env.governor} cur=${env.curFreqKHz}kHz max=${env.maxFreqKHz}kHz  ${env.affinity || 'affinity: (taskset unavailable)'}`);
   console.log(`# sizes=${o.sizes} rtts=${o.rtts} idents=${o.idents} readers=${o.readers} runs≤${o.runs} budget=${o.budgetS}s warmup=${o.warmup}` +
-              ` TCP_NODELAY: server=${o.serverNoDelay} client=${o.clientNoDelay}`);
+              ` TCP_NODELAY overrides: server=${o.serverNoDelay} client=${o.clientNoDelay}` +
+              ' (since E0 the transport itself sets client TCP_NODELAY on every connection)');
   console.log('ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms');
 
   const results = [];

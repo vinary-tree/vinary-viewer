@@ -233,13 +233,85 @@ of payload. H6 will be tested against a preallocated reader.
 
 ## 9 · Results after the interventions
 
-*Pending — recorded here as each intervention lands, against the same driver, cells and host.*
+Each intervention is re-measured with the same driver, cells and host as the baseline (§5), so a row here
+compares directly with the row there.
+
+### 9.1 · E0 — client `TCP_NODELAY` (2026-10-16)
+
+**Intervention.** `connect()` in `src/vinary/main/ssh_transport.js` calls `client.setNoDelay(true)` right after
+`client.connect(…)`. ssh2 creates the TCP socket synchronously inside `connect`, so the handshake is covered
+too. A ProxyJump hop's forwarded channel has no TCP socket of its own; ssh2 skips it, and the hop's own
+connection gets the setting when it connects.
+
+**Prediction (§8).**
+- $`R \le 10`$ ms cells drop to H1's sequential model, e.g. OpenSSH 1 MiB at 10 ms: 935 → ≈ 190 ms.
+- $`R \ge 50`$ ms cells do not change.
+
+**Run.** Same driver, `--server-nodelay` (emulating `sshd`), shipped reader only (`stream`).
+- Client pinned to cores 2–5, server to 6–9.
+- Governor `performance`.
+- 1 warm-up, then ≤ 7 timed reads or 30 s per cell; every read SHA-256-verified.
+- The $`R = 50`$ ms cells were re-measured for 1 and 8 MiB only, as the no-change control.
+- Raw output: `data/11/e0.txt`, `data/11/e0-rtt50.txt` (+ `.json`). The comparison below is
+  `data/11/e0-analysis.txt`.
+
+| Ident | $`S`$ | $`R`$ (ms) | baseline (ms) | E0 (ms) | speedup | $`\hat t`$ (ms) | E0 / $`\hat t`$ | excess / request |
+|---|---|---|---|---|---|---|---|---|
+| ssh2 | 64 KiB | 0 | 206.0 | 1.9 | 108× | 0 | — | 0.38 ms |
+| ssh2 | 1 MiB | 0 | 2 058.9 | 14.0 | 147× | 0 | — | 0.28 ms |
+| ssh2 | 8 MiB | 0 | 15 925.5 | 72.7 | 219× | 0 | — | 0.19 ms |
+| ssh2 | 32 MiB | 0 | 63 403.3 | 267.9 | 237× | 0 | — | 0.17 ms |
+| ssh2 | 64 KiB | 10 | 255.9 | 52.9 | 4.8× | 50 | 1.058 | 0.58 ms |
+| ssh2 | 1 MiB | 10 | 2 584.3 | 538.5 | 4.8× | 500 | 1.077 | 0.77 ms |
+| ssh2 | 8 MiB | 10 | 19 979.7 | 4 136.3 | 4.8× | 3 860 | 1.072 | 0.72 ms |
+| ssh2 | 32 MiB | 10 | 80 035.7 | 16 123.4 | 5.0× | 15 380 | 1.048 | 0.48 ms |
+| ssh2 | 1 MiB | 50 | 2 556.4 | 2 547.8 | 1.0× | 2 500 | 1.019 | 0.96 ms |
+| ssh2 | 8 MiB | 50 | 19 734.7 | 19 572.7 | 1.0× | 19 300 | 1.014 | 0.71 ms |
+| OpenSSH | 64 KiB | 0 | 124.8 | 1.2 | 107× | 0 | — | 0.39 ms |
+| OpenSSH | 1 MiB | 0 | 742.4 | 10.1 | 74× | 0 | — | 0.56 ms |
+| OpenSSH | 8 MiB | 0 | 5 367.9 | 44.1 | 122× | 0 | — | 0.34 ms |
+| OpenSSH | 32 MiB | 0 | 21 215.3 | 144.1 | 147× | 0 | — | 0.28 ms |
+| OpenSSH | 64 KiB | 10 | 154.8 | 32.0 | 4.8× | 30 | 1.067 | 0.67 ms |
+| **OpenSSH** | **1 MiB** | **10** | **934.6** | **193.5** | **4.8×** | **180** | **1.075** | **0.75 ms** |
+| OpenSSH | 8 MiB | 10 | 6 683.0 | 1 390.3 | 4.8× | 1 300 | 1.069 | 0.69 ms |
+| OpenSSH | 32 MiB | 10 | 26 388.6 | 5 495.2 | 4.8× | 5 140 | 1.069 | 0.69 ms |
+| OpenSSH | 1 MiB | 50 | 917.8 | 925.3 | 1.0× | 900 | 1.028 | 1.41 ms |
+| OpenSSH | 8 MiB | 50 | 6 627.3 | 6 644.0 | 1.0× | 6 500 | 1.022 | 1.11 ms |
+
+**Result: the prediction holds in every cell.**
+- At $`R = 10`$ ms every cell now sits 5–8 % above H1. The per-request excess fell from 41.2–42.0 ms to
+  0.48–0.77 ms, the same size as the residual H1 already left at $`R \ge 50`$ ms (crypto, framing, the proxy
+  hop). The worked example: OpenSSH 1 MiB at 10 ms went from 934.6 to **193.5 ms** (predicted ≈ 190).
+- At $`R = 0`$ the whole-file read is now bound by the client's CPU, not by timers: 32 MiB in 268 ms (ssh2
+  ident, 119 MiB/s) and 144 ms (OpenSSH ident, 222 MiB/s). The client process's own CPU time (`cpu_ms`) is
+  42–76 % of the wall time in these cells; the rest is the server process and the loopback hop.
+- At $`R = 50`$ ms the medians moved by −0.8 % to +0.8 %, inside run-to-run noise; there was no stall there to
+  remove.
+- p95 stayed within 1.3 % of the median in every $`R \ge 10`$ cell but one: ssh2 64 KiB at 10 ms (7.6 %, a
+  4 ms spread on a 53 ms read). The $`R = 0`$ cells last only a few milliseconds, so their p95/median ratio (up
+  to 3×) reflects scheduler jitter, not the transport.
+
+**Consequence for E1.** The baseline's `fastGet` column (§5) was measured with the client-side stall still in
+place, so its "stream / fastGet" headroom at $`R \le 10`$ ms is inflated: after E0, the sequential reader
+at $`R = 0`$ (14.0 ms for 1 MiB, ssh2 ident) is already faster than the baseline's `fastGet` (169.3 ms). E3
+re-measures `fastGet` together with the pipelined reader, all with E0 in place. Pipelining is still expected
+to matter wherever $`R`$ dominates: at $`R \ge 10`$ ms the sequential reader remains at H1, one round trip
+per request.
+
+**Guard.** `test/ssh-transport-smoke.js` `testNoDelay` reads 1 MiB from the fixture with its server-side
+`noDelay` on, and fails above 800 ms. With the fix commented out, the same arm measured 2 067 ms (the
+one-sided stall of §4); with it, it passes in tens of milliseconds.
+
+*E1–E3 and D1–D7 are recorded below as they land.*
 
 ## 10 · Regression guards
 
+- **`TCP_NODELAY` (E0):** `ssh-transport-smoke` `testNoDelay`. A 1 MiB fixture read must finish within 800 ms.
+  The stalled read takes ≈ 2 s, the fixed one tens of milliseconds, so the threshold separates them with a
+  wide margin on either side (§9.1).
+
 *Pending:*
 - `ssh-transport-smoke` arms for the pipelined reader;
-- the `TCP_NODELAY` assertion;
 - `remote-pdf-e2e` byte counts.
 
 [ADR-0045 — Slide-deck presentation]: ../design-decisions/0045-slide-deck-presentation.md

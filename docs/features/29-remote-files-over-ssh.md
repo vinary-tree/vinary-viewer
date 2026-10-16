@@ -246,6 +246,11 @@ protections:
 - **Idle connections are reaped.** A pooled connection with no open streams is closed after ~5 minutes idle;
   the CLI closes pooled connections on exit so the process can terminate.
 - **A whole-file read is capped** at 1 GiB; larger logs / text stream instead (they are not read whole).
+- **Nagle is off on every SSH connection.** The transport sets `TCP_NODELAY` as soon as it connects, the same
+  as OpenSSH's `sshd` does on its side. ssh2 leaves Nagle's algorithm on. With it on, each SFTP read request
+  waited out the peer's ≈ 40 ms delayed-ACK timer, so a 1 MiB file on a host 10 ms away took 0.93 s instead
+  of 0.19 s. Far hosts (≥ 50 ms) never saw the stall. A whole-file read still costs one round trip per 64 KiB
+  read request; see [experiment 11](../scientific/11-remote-read-and-reload-safety-experiments.md) §9.1.
 
 ## References / see also
 

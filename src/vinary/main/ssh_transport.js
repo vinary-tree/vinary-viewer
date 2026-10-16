@@ -406,7 +406,16 @@ async function connect(conn, resolved, inboundSock, depth) {
       hostVerifier: makeHostVerifier(resolved), authHandler: makeAuthHandler(conn, resolved),
     };
     if (sock) connectOpts.sock = sock;
-    try { client.connect(connectOpts); } catch (e) { pool.delete(conn.connKey); fail(e); }
+    try {
+      client.connect(connectOpts);
+      // TCP_NODELAY (Nagle off) — ssh2 never sets it. With Nagle on, every SFTP request/response turn waits out
+      // the peer's delayed-ACK timer (~40 ms on Linux): a whole-file read issues one request per 64 KiB, so a
+      // 1 MiB read on a LAN-near host took ~2 s instead of ~0.2 s (docs/scientific/11 H0/E0, ADR-0046). OpenSSH's
+      // sshd already disables Nagle on its side; this is the client half. ssh2 created the socket synchronously in
+      // connect(), so this also covers the handshake; a ProxyJump hop's forwarded channel has no TCP socket and
+      // ssh2 skips it (its own hop's TCP connection is set when that hop connects).
+      client.setNoDelay(true);
+    } catch (e) { pool.delete(conn.connKey); fail(e); }
   });
 }
 

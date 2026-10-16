@@ -470,6 +470,13 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Remote files (ssh:// and sftp://) on a nearby host load about 5x faster.
+      The SSH connection now turns off Nagle's algorithm (TCP_NODELAY), as
+      OpenSSH's sshd already does on its side. Until now, every SFTP read
+      request waited out the peer's ~40 ms delayed-ACK timer: a 1 MiB file on a
+      host 10 ms away took 0.93 s instead of 0.19 s, and over loopback 2 s
+      instead of 14 ms. Hosts 50 ms or more away are unchanged. See
+      docs/scientific/11-remote-read-and-reload-safety-experiments.md.
     - A live refresh whose PDF bytes cannot be opened (read while pdflatex was
       still writing the file) no longer leaves a blank pane: the last good
       version stays on screen with a non-fatal banner (Retry / dismiss), and the
