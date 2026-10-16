@@ -2172,6 +2172,52 @@ async function main() {
     console.log('[ok] PDF slide entry points: View menu (Fit/flip/show/overview gating), slide bar (▶, page field), toolbar toggle (focus back), context menu Start From This Slide, fullscreen preference');
   }
 
+  // ── NAMED ACTIONS (ADR-0045 F8): a deck's links page it — NextPage, a GoTo destination (a JUMP), GoBack walks the
+  // jump history, Find opens find — and only allow-listed actions get a link at all (Print stays inert).
+  {
+    const { makeDeckPdf } = require('./fixtures/pdf-gen');
+    const slidesAt = (want, label) => waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {};
+        const c = document.querySelector('.vv-content'); const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${want} && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+    const linksPath = path.join(ROOT, 'test', 'fixtures', 'links-deck.pdf');   // virtual path; bytes below
+    state.contentByPath.set(linksPath, { path: linksPath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(makeDeckPdf({ frames: [1, 1, 1, 1], links: [
+        { page: 0, rect: [10, 10, 80, 40], action: 'NextPage' },
+        { page: 0, rect: [100, 10, 170, 40], dest: 3 },
+        { page: 3, rect: [10, 10, 80, 40], action: 'GoBack' },
+        { page: 3, rect: [100, 10, 170, 40], action: 'Print' },
+        { page: 3, rect: [190, 10, 260, 40], action: 'Find' }] })) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(linksPath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).pages === 4 && Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`,
+      'the links deck opens in the slides layout', 15000);
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await slidesAt(0, 'on slide 1');
+    const link = (page, sel) => `document.querySelector('#vv-pdf-page-${page} .vv-pdf-anno ${sel}')`;
+    await waitCalm(win, `Boolean(${link(1, '.vv-pdf-link[title="NextPage"]')})`, 'the NextPage link is built', 8000);
+    await evalIn(win, `${link(1, '.vv-pdf-link[title="NextPage"]')}.click(); true`);
+    await slidesAt(1, 'a NextPage link advances');
+    await evalIn(win, `window.__vvslides('first')`);
+    await slidesAt(0, 'back on slide 1');
+    await evalIn(win, `${link(1, '.vv-pdf-link:not([title])')}.click(); true`);
+    await slidesAt(3, 'a GoTo link jumps to its destination');
+    await waitCalm(win, `Boolean(${link(4, '.vv-pdf-link[title="GoBack"]')})`, 'the GoBack link is built', 8000);
+    assert.strictEqual(await evalIn(win, `Boolean(${link(4, '.vv-pdf-link[title="Print"]')})`), false,
+      'a Print named action gets no link (not on the allow-list)');
+    await evalIn(win, `${link(4, '.vv-pdf-link[title="GoBack"]')}.click(); true`);
+    await slidesAt(0, 'GoBack returns to where the jump came from');
+    await evalIn(win, `window.__vvslides('last')`);
+    await slidesAt(3, 'on the last slide again');
+    await waitCalm(win, `Boolean(${link(4, '.vv-pdf-link[title="Find"]')})`, 'the Find link is built', 8000);
+    await evalIn(win, `${link(4, '.vv-pdf-link[title="Find"]')}.click(); true`);
+    await waitCalm(win, `window.__vvdb().ui.find['visible?'] === true`, 'a Find link opens the find bar', 4000);
+    await evalIn(win, `${link(4, '.vv-pdf-link[title="Find"]')}.click(); true`);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.strictEqual(await evalIn(win, `window.__vvdb().ui.find['visible?']`), true, 'Find never closes the bar');
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitCalm(win, `window.__vvdb().ui.find['visible?'] === false`, 'find closed', 4000);
+    console.log('[ok] PDF named actions: NextPage advances, GoTo jumps, GoBack returns, Find opens find, Print is inert');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

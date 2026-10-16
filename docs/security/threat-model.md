@@ -326,6 +326,14 @@ CSP (§6) whose `script-src` forbids inline script. This is why the `innerHTML` 
   pass through the fail-closed delegated click handler and Electron navigation guard. Local POSIX/drive/UNC and
   remote URI codecs percent-encode filename syntax (`#`, `?`, spaces, Unicode); malformed/relative href inputs
   fail closed.
+- **PDF link actions (ADR-0045).** A PDF's link annotations are rebuilt as the app's own `<a>` elements in a
+  separate link layer; nothing in the PDF runs. A URI link opens externally through `:shell/open-external`; a
+  GoTo destination pages the document; a *named* action (`/S /Named`) gets a link **only** when it is on the
+  allow-list `vinary.slides.deck/named-actions` — NextPage, PrevPage, FirstPage, LastPage, GoBack, GoForward
+  (paging, and in the slides layout the jump history) and Find (opens the find bar). Every other named action
+  — Print, SaveAs, Quit, FullScreen, … — produces no element at all, so a document can page itself but cannot
+  print, save, quit, or make the window fullscreen (a show goes fullscreen only from F5 or a menu action;
+  `/PageMode /FullScreen` is detection evidence, never a trigger).
 - **Images.** `<img src=url>` (Markdown or raw HTML) loads local (`file://`) and `data:` images, and — by
   project decision — remote **https** images (`http:` is blocked to force TLS). The renderer CSP
   `img-src 'self' file: data: https:` enforces this, and `connect-src` blocks remote fetch/XHR exfil.

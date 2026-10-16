@@ -267,6 +267,20 @@
 
 ;; ---- input mapping (pure) -------------------------------------------------------------------------------
 
+(def named-actions
+  "The PDF named actions (PDF 32000-1:2008 §12.6.4.11, `/S /Named`) that a LINK in a document may trigger, mapped
+   to what the viewer does: the paging ops of `step`, and :find (open the find bar). An ALLOW-LIST — every other
+   named action (Print, SaveAs, Quit, FullScreen, Open, …) is ignored, so a document can page itself and open find
+   but never print, save, quit or make the window fullscreen (ADR-0045 D13). Beamer emits GoBack / Find /
+   GoForward for its back-find-forward navigation symbol; hyperref's \\Acrobatmenu can emit any of them."
+  {"NextPage" :next "PrevPage" :prev "FirstPage" :first "LastPage" :last
+   "GoBack"   :back "GoForward" :forward "Find" :find})
+
+(defn named-action-op
+  "The op for PDF named action `action` (a string), or nil when it is not allowed."
+  [action]
+  (get named-actions action))
+
 (def max-digits
   "A typed slide number keeps at most this many digits."
   6)

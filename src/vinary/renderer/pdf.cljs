@@ -27,7 +27,7 @@
 (def ^:const click-slop-px 4)     ; presenting: a press that moved further than this is a drag, not a click
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
-         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command!)
+         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command! current-anchor)
 
 ;; ---- pdf.js module + worker bootstrap -----------------------------------------------------------
 ;; pdfjs-dist uses dynamic import() internally, which Closure :simple cannot bundle — so we do NOT
@@ -348,9 +348,21 @@
     (set! (.-width st) (str w "px"))
     (set! (.-height st) (str h "px"))))
 
+(declare named-action!)
+
 (defn- make-link [state ^js a ^js vp]
-  (let [rect (.-rect a) url (.-url a) dest (.-dest a)]
+  (let [rect (.-rect a) url (.-url a) dest (.-dest a) action (.-action a)]
     (cond
+      ;; a NAMED action (/S /Named — Beamer's back/find/forward symbols, hyperref's \Acrobatmenu): only the
+      ;; allow-listed ones get a link at all (deck/named-actions); Print, SaveAs, FullScreen, … stay inert
+      (and (string? action) (deck/named-action-op action))
+      (doto (js/document.createElement "a")
+        (-> .-className (set! "vv-pdf-link"))
+        (-> .-href (set! "#"))
+        (-> .-title (set! action))
+        (place! vp rect)
+        (.addEventListener "click" (fn [e] (.preventDefault e) (named-action! state action))))
+
       (and url (string? url))
       (doto (js/document.createElement "a")
         (-> .-className (set! "vv-pdf-link"))
@@ -411,6 +423,27 @@
         (set! (.-scrollTop scroller) (+ (.-offsetTop container) (:top (nth rects idx))))))))
 
 ;; ---- outline → :doc/toc (async dest resolution, then dispatch) ----------------------------------
+
+(defn- named-action!
+  "Run allow-listed PDF named `action` (deck/named-actions). Find opens the find bar. In the slides layout the
+   paging ops go through :slides/command — the same path as the keys, so a blanked screen or a typed number sees
+   them first, and GoBack / GoForward walk the jump history. In the continuous document layout Next/Prev/First/
+   LastPage page in place; GoBack / GoForward do nothing there (that layout keeps no jump history)."
+  [state action]
+  (let [op (deck/named-action-op action)]
+    (cond
+      (nil? op)       nil
+      (= :find op)    (rf/dispatch [:find/open])
+      (slides? state) (rf/dispatch [:slides/command op])
+      :else
+      (let [n   (count (:sizes @state))
+            cur (or (:idx (current-anchor state)) 0)]
+        (case op
+          :next  (scroll-to-page! state (inc (min (dec n) (inc cur))))
+          :prev  (scroll-to-page! state (inc (max 0 (dec cur))))
+          :first (scroll-to-page! state 1)
+          :last  (scroll-to-page! state n)
+          nil)))))
 (defn- walk-outline [^js doc items level]
   (-> (js/Promise.all
        (into-array

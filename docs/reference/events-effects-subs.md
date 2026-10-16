@@ -122,6 +122,7 @@ generation, the bar's match mode (`[:ui :find :mode]`: `:exact`, `:approximate` 
 
 | Event | Kind | Payload | Reads | Writes | Effects |
 | --- | --- | --- | --- | --- | --- |
+| `:find/open` | fx | — | `:ui :find :visible?` | — | hidden → `[:dispatch [:find/toggle]]`; already open → nothing (never closes) — a PDF's `Find` named-action link (ADR-0045) |
 | `:find/toggle` | fx | — | `:ui :find :visible?`, `:ui :find :query`, `[:ui :settings :find-default-mode]` | `:ui :find :visible?` ← not; opening resets `:mode` ← the `:find-default-mode` preference (default `:exact`); `:gen`++ | opening with a remembered query: `[:find/search {:q :gen :mode :phonetic?}]`; closing: `[:async/cancel :find/search]` (a search armed by the last keystroke must not repaint a closed bar) then `[:find/clear]` |
 | `:find/set-query` | fx | `q` | `:ui :find :gen` | `:ui :find :query` ← q; `:gen`++ | `[:async/debounce {:key :find/search :ms 40 :dispatch [:find/run gen]}]` |
 | `:find/set-mode` | fx | `mode` (`:exact` / `:approximate` / `:fzf`; any other value is a no-op) | `:ui :find :query` | `:ui :find :mode` ← mode; `:gen`++ | blank query → `[:find/clear]`; else re-search immediately with the new mode (`[:find/search {:q :gen :mode :phonetic?}]`) — the find bar's mode selector |

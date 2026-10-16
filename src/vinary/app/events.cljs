@@ -1526,6 +1526,13 @@
    :mode (get-in db [:ui :find :mode] :exact)
    :phonetic? (boolean (get-in db [:ui :settings :find-phonetic?]))})
 
+;; open the find bar if it is closed (a PDF's Find named action, ADR-0045) — never closes it, unlike :find/toggle
+(rf/reg-event-fx
+ :find/open
+ (fn [{:keys [db]} _]
+   (when-not (get-in db [:ui :find :visible?])
+     {:fx [[:dispatch [:find/toggle]]]})))
+
 (rf/reg-event-fx
  :find/toggle
  (fn [{:keys [db]} _]

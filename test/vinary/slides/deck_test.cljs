@@ -237,3 +237,20 @@
   (is (= :slides (deck/effective-layout {:deck? true})) "the default for a detected deck is the Slides layout")
   (is (= :document (deck/effective-layout {:deck? true :open-as :document})) "…unless the preference says otherwise")
   (is (= :document (deck/effective-layout {:deck? false}))))
+
+(deftest named-actions-are-an-allow-list
+  (testing "paging and find are allowed, mapped to the viewer's ops"
+    (is (= :next (deck/named-action-op "NextPage")))
+    (is (= :prev (deck/named-action-op "PrevPage")))
+    (is (= :first (deck/named-action-op "FirstPage")))
+    (is (= :last (deck/named-action-op "LastPage")))
+    (is (= :back (deck/named-action-op "GoBack")) "Beamer's back-find-forward symbol")
+    (is (= :forward (deck/named-action-op "GoForward")))
+    (is (= :find (deck/named-action-op "Find"))))
+  (testing "everything else is inert — a document never prints, saves, quits or goes fullscreen (ADR-0045 D13)"
+    (doseq [a ["Print" "SaveAs" "Quit" "FullScreen" "Open" "Close" "nextpage" "" nil]]
+      (is (nil? (deck/named-action-op a)) (pr-str a))))
+  (testing "every allowed paging op is one `step` understands"
+    (let [d (deck/deck {:creator "LaTeX with Beamer class" :sizes [[453.5 255.1] [453.5 255.1] [453.5 255.1]]})]
+      (doseq [[a op] deck/named-actions :when (not= op :find)]
+        (is (map? (deck/step d {:page 1 :back [0] :fwd [2]} op)) a)))))

@@ -64,6 +64,11 @@ Added
       gains a Slides section: how detected decks open, which overlay an
       overview tile shows, whether a show goes full screen, and whether a click
       advances it.
+      Links inside a deck now work as navigation: a link to another slide is a
+      jump (Back returns), and PDF named-action links page the deck -- Next/
+      Previous/First/Last page, GoBack/GoForward (Beamer's back-find-forward
+      symbol) and Find (opens the find bar). Only those actions are honoured: a
+      document's Print, SaveAs, Quit or FullScreen links stay inert.
     - File and line-range history (ADR-0040): ask for one file's commit history
       or one line range's, and both Commits surfaces -- the sidebar tab and the
       Commit Graph -- show that focused log at once. File History (right-click a
