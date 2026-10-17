@@ -60,7 +60,7 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | # | Decision |
 |---|---|
 | N1 | A pure, DOM-free notes model, `vinary.slides.notes`, describes where a deck's notes are: split, interleaved, text, or none. |
-| N2 | Interleaved note pages are found from the labels by an exact automaton. Ambiguity is settled by a probe that walks back from the last candidate and reads two pages when a deck has no notes. A deck without labels is settled by a content scan. The probe and the scan run in the background after the first paint. |
+| N2 | Interleaved note pages are found from the labels by an exact automaton. Ambiguity is settled by a probe that walks back from the last candidate and reads two pages when a deck has no notes. A deck without labels is settled by a content scan. A parse from a driver whose labels lag a pass (XeLaTeX, dvipdfmx, dvips) is confirmed page by page before its note pages leave the sequence. The probe, the scan and the confirmation run in the background after the first paint. |
 | N3 | Note pages leave the audience's sequence but stay in the DOM: navigation runs over shown pages, a page snaps only downward, typed numbers match shown labels. |
 | N4 | Text notes come from the annotations pdfpc reads and from the pdfpc sidecar file, per page; both are shown when both exist. They are rendered as sanitized Markdown when the deck carries pdfpc metadata (as pdfpc does), as plain text otherwise, and never as raw HTML. |
 | N5 | pdfpc's settings are read from the raw XMP and from the sidecar (XMP first): notes position, duration, start and end time, last minutes, end slide, Markdown, hidden pages and forced overlays. |
@@ -237,13 +237,51 @@ Such a deck is **scanned**: every page's text is read once, in order, and page $
 matches the last slide page before it. Consecutive note pages all match that one slide.
 
 The probe and the scan run **in the background after the first paint**, so the first paint never waits for page text.
-A proven deck is decided from its labels before the first paint. The result reaches the mounted view like a refresh
+A proven deck from pdfTeX or LuaTeX is decided from its labels before the first paint (§2.5 covers the other
+engines). The result reaches the mounted view like a refresh
 does: the document stays, the deck model is rebuilt, and a current page that turns out to be a note page snaps to its
 slide (§3). Until then the deck shows every page, as today. That takes a few hundred milliseconds for a scanned
 hundred-page deck, and the probe reads a handful of pages.
 
 A deck whose note template draws neither a thumbnail nor the date (`plain`, `lined`) cannot be recognized without
-labels, so it is shown as it is. `vv --cli --deck-info` waits for both and prints the final decision.
+labels, so it is shown as it is. `vv --cli --deck-info` waits for the probe, the scan and the confirmation (§2.5), and
+prints the final decision.
+
+#### 2.5 Labels that lag a pass
+
+hyperref writes the labels in the run itself only for pdfTeX and LuaTeX (and the obsolete VTeX). Its drivers for
+XeLaTeX, dvipdfm(x) and dvips (`hxetex.def`, `hdvipdfm.def`, `pdfmark.def`) write the labels that the previous run
+recorded. So one pass over an **edited** deck carries the previous version's labels, and its log has no warning.
+[Experiment 12](../scientific/12-slide-deck-detection-and-flip-latency.md) §5.1 measured it: after a frame was
+inserted, a single XeLaTeX pass labelled the new deck with the old deck's labels. A watch loop that runs one XeLaTeX
+pass per save, feeding a live-refreshing viewer, is always in that state.
+
+Labels from another version can still obey the rules of §2.1. The automaton would then prove a parse whose note pages
+are, in this version, slides, and the audience would not see them. So, unless the Producer names pdfTeX, LuaTeX or
+LuaHBTeX, a parse from labels (proven, or chosen by the probe) is **confirmed** before its note pages leave the
+audience's sequence:
+
+```
+procedure CONFIRM(parse)
+  for each note page j of parse, in order do
+    s ← the last slide page of parse before j                       ⟨the slide that page j annotates⟩
+    if SIG(s, j) ≠ true and not ROTATED-DATE(j) then return false   ⟨page j may be a slide⟩
+  return true
+```
+
+Here `SIG` is the signature of §2.2, and `ROTATED-DATE(j)` holds when page $`j`$ has a run rotated by $`\pm 90°`$ that
+reads as a date `YYYY-MM-DD` (also §2.2). The confirmation runs in the background after the first paint, like the
+probe, and stops at the first page that fails. A confirmed parse is used, and a deck that fails is shown as it is.
+Each note page and each slide that has notes is read once, so the cost is at most two pages' text per note page, and a
+parse without note pages costs nothing.
+
+*What is given up.* A deck from one of these drivers whose note template draws neither a thumbnail nor the date
+(`plain`, `lined`) is never confirmed, so it is shown as it is, as it would be without labels (§2.4). Its labels may
+well be right, but nothing on its pages can tell a stale parse from a fresh one. Showing a note page to the audience
+costs less than hiding a slide from it.
+
+*Why the probe's choice is confirmed too.* The probe tests one pair, $`(a - 1, a)`$. A stale parse can agree there and
+still mark a later slide as a note page.
 
 ### 3. Navigating over the audience's pages (N3)
 
@@ -690,6 +728,8 @@ new boundary.
 - On native Wayland the audience window must be moved to the projector by hand (Shift+F then fullscreens it), and
   *Swap screens* is not offered.
 - A swap briefly shows both windows windowed while they change displays.
+- A `plain` or `lined` notes deck from XeLaTeX, dvipdfmx or dvips is shown as it is: its labels cannot be confirmed
+  (§2.5).
 - `S` is a bare letter in the `:all` layer, so it acts wherever F5 does, with the focus on the sidebar too.
 
 ## Alternatives considered
@@ -710,6 +750,9 @@ new boundary.
 - *Making the deck model compute notes itself*: `notes` needs `deck`'s geometry, which would make a namespace cycle;
   `deck` takes a generic `:hidden`, and `notes` depends on `deck` in one direction.
 - *pdfpc's precedence (an annotation hides the sidecar note)*: drops an author's note silently.
+- *Trusting every engine's labels*: one XeLaTeX pass over an edited deck carries the previous version's labels, so a
+  proven parse could hide a slide from the audience (§2.5). Confirming only XeLaTeX would miss dvipdfmx and dvips, which
+  write labels the same way.
 
 **The presenter view.**
 - *A notes drawer over the slide*: covers the slide and cannot show rendered note regions.
@@ -757,7 +800,7 @@ new boundary.
 
 | Rule | Evidence |
 |---|---|
-| The automaton, the signature, the probe, the scan, pdfpc settings, text notes | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes) with its expected decisions written down before the run (both to be written) |
+| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures |
 | The presenter view, the pane, transitions, find | `npm run test:electron` blocks |
