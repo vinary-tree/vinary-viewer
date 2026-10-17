@@ -35,7 +35,9 @@
    (docs/scientific/12) found hundreds of landscape figures, web print-outs and forms — but these exact sizes
    are what the tools emit for every slide. Each entry says where it comes from: MEASURED (exported here by
    scripts/exp-deck-export-corpus.cjs, LibreOffice Impress 26.8 at each slide-size preset), OBSERVED (an export
-   in the natural corpus), or DOCUMENTED (the vendor's published preset; no sample could be produced here)."
+   in the natural corpus), DOCUMENTED (the vendor's own published preset), or REPORTED (a third-party source only;
+   the vendor's documentation names the preset without its size, and no sample could be produced here) —
+   docs/scientific/12 §7 cites each."
   {:powerpoint-169 [960 540]        ; PowerPoint Widescreen, 13.333 × 7.5 in; Impress Widescreen (measured)
    :powerpoint-43  [720 540]        ; PowerPoint / Impress On-screen Show (4:3), 10 × 7.5 in (Impress measured)
    :google-169     [720 405]        ; Google Slides 16:9; Impress On-screen Show (16:9) (measured)
@@ -45,7 +47,7 @@
    :impress-169    [793.7 446.5]    ; Impress Screen 16:9, 28 × 15.75 cm — Impress's default (measured)
    :impress-1610   [793.7 496.1]    ; Impress Screen 16:10, 28 × 17.5 cm (measured)
    :keynote-43     [1024 768]       ; Keynote Standard (observed)
-   :keynote-169    [1920 1080]})    ; Keynote Wide (documented)
+   :keynote-169    [1920 1080]})    ; Keynote Wide (reported — see the docstring)
 
 (def size-tolerance
   "|Δ| in bp under which two page dimensions count as equal (TeX rounds \\paperwidth to the scaled point;

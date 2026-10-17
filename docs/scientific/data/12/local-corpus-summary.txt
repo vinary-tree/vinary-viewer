@@ -1,0 +1,75 @@
+# exp-deck-local-corpus 2026-10-17T06:35:09.016Z: 2456 PDFs listed, 2333 classified, 123 unreadable
+
+## Verdicts
+  2316  not a deck
+     9  deck: probable/slide-export
+     8  deck: definite/beamer
+
+## By producer family
+        Adobe: not a deck 292
+        LibreOffice / OpenOffice (other): not a deck 8
+        Chromium / Skia print: not a deck 26
+        other: not a deck 265; deck: probable/slide-export 1
+        TeX engine (other): not a deck 1271
+        Cairo: not a deck 48
+        Apple (Quartz / Pages / macOS): not a deck 226
+        Microsoft Office (other): not a deck 42
+        no Creator / Producer: deck: probable/slide-export 2; not a deck 29
+        Google (Slides / Docs): deck: probable/slide-export 1; not a deck 3
+        Microsoft PowerPoint: deck: probable/slide-export 4; not a deck 2
+        Ghostscript: not a deck 100
+        Beamer (Creator tag): deck: definite/beamer 8
+        Typst: not a deck 1
+        LibreOffice / OpenOffice Impress: not a deck 2; deck: probable/slide-export 1
+        Apple Keynote: not a deck 1
+
+## By page-size class
+        other portrait: not a deck 311
+        A4 / Letter portrait: not a deck 1381
+        A4 / Letter landscape: not a deck 100
+        mixed sizes: not a deck 73
+        other landscape: not a deck 451
+        slide-export canvas: deck: probable/slide-export 9
+        Beamer paper: deck: definite/beamer 8
+
+## The cases detection must get right
+   527  uniform landscape (1 page): not a deck
+    24  uniform landscape (≥ 2 pages): not a deck
+     4  presentation-tool producer (Microsoft PowerPoint), size class "slide-export canvas": deck: probable/slide-export
+     2  presentation-tool producer (Google (Slides / Docs)), size class "A4 / Letter portrait": not a deck
+     2  presentation-tool producer (LibreOffice / OpenOffice Impress), size class "other landscape": not a deck
+     1  presentation-tool producer (Google (Slides / Docs)), size class "slide-export canvas": deck: probable/slide-export
+     1  presentation-tool producer (Microsoft PowerPoint), size class "A4 / Letter portrait": not a deck
+     1  presentation-tool producer (Apple Keynote), size class "other landscape": not a deck
+     1  presentation-tool producer (Google (Slides / Docs)), size class "mixed sizes": not a deck
+     1  presentation-tool producer (Microsoft PowerPoint), size class "other portrait": not a deck
+     1  presentation-tool producer (LibreOffice / OpenOffice Impress), size class "slide-export canvas": deck: probable/slide-export
+
+## Unreadable, by reason
+   120  not a PDF (no %PDF- header in its first KiB)
+     1  another pdf.js error
+     1  refused by the file system (missing, permissions, a directory)
+     1  encrypted (a password is required)
+
+## Uniform multi-page landscape not called a deck: producer family @ page size
+     5  other @ 792.0×612.0 bp
+     3  Chromium / Skia print @ 792.0×612.0 bp
+     3  Apple (Quartz / Pages / macOS) @ 756.0×553.0 bp
+     2  Adobe @ 792.0×612.0 bp
+     2  Apple (Quartz / Pages / macOS) @ 1224.0×792.0 bp
+     2  LibreOffice / OpenOffice Impress @ 794.0×595.0 bp
+     1  Microsoft Office (other) @ 841.9×595.3 bp
+     1  other @ 1500.0×1150.0 bp
+     1  other @ 842.0×595.0 bp
+     1  Microsoft Office (other) @ 792.0×612.0 bp
+     1  TeX engine (other) @ 792.0×612.0 bp
+     1  Apple Keynote @ 1024.0×768.0 bp
+     1  Adobe @ 1008.0×720.0 bp
+
+## Presentation-tool exports not called a deck: producer family @ first page size
+     2  Google (Slides / Docs) @ 612.0×792.0 bp, ≥ 2 pages
+     2  LibreOffice / OpenOffice Impress @ 794.0×595.0 bp, ≥ 2 pages
+     1  Microsoft PowerPoint @ 612.0×792.0 bp, ≥ 2 pages
+     1  Apple Keynote @ 1024.0×768.0 bp, ≥ 2 pages
+     1  Google (Slides / Docs) @ 612.0×792.0 bp (first page; mixed sizes), ≥ 2 pages
+     1  Microsoft PowerPoint @ 836.0×1289.0 bp, 1 page

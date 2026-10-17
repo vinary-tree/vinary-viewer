@@ -361,6 +361,12 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `activity-asset-vendoring.puml` | activity | `engineering/02-asset-vendoring.md` |
 | `seq-byte-parity.puml` | sequence | `scientific/01-byte-parity-verification.md` |
 | `activity-inkloss-experiment.puml` | activity | `scientific/05-mathjax-inkloss-experiment.md` |
+| `activity-async-text-input.puml` | activity | `design-decisions/0033-asynchronous-text-input.md` |
+| `activity-find-collect.puml` | activity | `features/05-in-page-find.md` |
+| `seq-commits-log.puml` | sequence | `design-decisions/0039-…` · `features/32-commits-tab.md` |
+| `seq-git-open-diff.puml` | sequence | `design-decisions/0039-…` · `features/32-commits-tab.md` |
+| `component-git-integration.puml` | component | `design-decisions/0040-…` · `features/33-commit-graph.md` · `features/34-git-blame-and-file-history.md` |
+| `seq-key-to-frame.puml` | sequence | `scientific/12-slide-deck-detection-and-flip-latency.md` |
 
 ### Keeping this table honest
 

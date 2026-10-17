@@ -27,7 +27,7 @@ Concretely, the project validates five classes of property, each with its own in
 | 2 | **Bounded memory** | Does a stream's working set stay `$`O(1)`$` in document length? | [02 — Bounded-memory streaming validation](02-bounded-memory-streaming-validation.md) |
 | 3 | **Algebraic law** | Do the parser's weights actually form a semiring? | [03 — Semiring algebraic laws](03-semiring-algebraic-laws.md) |
 | 4 | **Security invariance** | Is per-block sanitization identical to whole-document sanitization? | [04 — Sanitizer context-freedom](04-sanitizer-context-freedom.md) |
-| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md) |
+| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md), [12 — Slide-deck detection & flip latency](12-slide-deck-detection-and-flip-latency.md) |
 
 Runtime performance benchmarking is a **documented, deliberate gap** — the project ships no `perf`/`hyperfine`
 harness today. [07 — Measurement methodology](07-measurement-methodology.md) writes down the methodology that
@@ -85,9 +85,9 @@ property as low as it will go is what keeps the fast feedback loop meaningful.
 
 ## 3 · What each page establishes
 
-The seven substantive pages are ordered from the strongest, most general guarantee (byte-parity of the whole
-migration) to the narrowest, most empirical (a single rendering-defect experiment) and finally to forward-looking
-methodology.
+The substantive pages are ordered from the strongest, most general guarantee (byte-parity of the whole migration)
+to the narrowest, most empirical (a single rendering-defect experiment), then the methodology, then the experiments
+that applied it (08–12).
 
 - **[01 — Byte-parity verification.](01-byte-parity-verification.md)** The lossless-round-trip guarantee: the
   IR lowers to HTML *byte-identical* to the retired legacy path (`ir.parity-test`), and the streamed render is
@@ -126,6 +126,25 @@ methodology.
   controlled A/B in which a pre-fix build reproduces the exact field stack on demand, a re-measurement showing
   the fixed build survives the same stimulus — and the invariant that generalizes it (*a process-lifetime
   service must not hold a window-lifetime handle*).
+
+- **[09 — In-page find & scroll ownership.](09-in-page-find-and-scroll-experiments.md)** Four symptoms reported
+  together turned out to be three independent defects and one design gap, each isolated, measured, fixed and
+  re-measured; the decision is ADR-0032 (scroll ownership, derived input focus).
+
+- **[10 — Text-input latency.](10-input-latency-experiments.md)** "Lag per character" and "missed keys" were two
+  defects with different mechanisms; the typist-latency gate of `find-e2e` (T1–T4) and its benchmark come from here,
+  as does ADR-0033 (asynchronous text input). §10 records T3's sensitivity to machine load.
+
+- **[11 — Remote read & reload safety.](11-remote-read-and-reload-safety-experiments.md)** How long a whole remote
+  file takes over SFTP as a function of size, round-trip time and server identity, and how much a better reader
+  removes. Hypotheses H0–H7 cover the pipelined reader, the channel window, the streaming source, bytes per change
+  and torn reads during real compile loops; the decision is ADR-0046.
+
+- **[12 — Slide-deck detection & flip latency.](12-slide-deck-detection-and-flip-latency.md)** The slide-deck
+  detector checked four ways: Beamer's two-screen pages, a controlled 42-case Beamer corpus, a 2456-PDF natural
+  corpus (counts only) and a controlled Impress corpus, which together found and closed a gap in the export
+  canvases. Also the slide-flip latency: a frame of deferral after every key, attributed (H-sched), one refuted and
+  one successful intervention, and a median key → frame of 24.3 → 7.9 ms.
 
 ---
 

@@ -1,0 +1,51 @@
+# exp-deck-corpus 2026-10-17T05:15:54.037Z  node v26.11.1
+# pdflatex: pdfTeX 3.141592653-2.6-1.40.29 (TeX Live 2026/Arch Linux)
+# lualatex: This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux)
+# xelatex: XeTeX 3.141592653-2.6-0.999998 (TeX Live 2026/Arch Linux)
+
+variant                  engine    expected                                   got                                        match
+aspect43                 pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect43                 lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect43                 xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+aspect169                pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect169                lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect169                xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+aspect1610               pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect1610               lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect1610               xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+aspect141                pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect141                lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect141                xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+aspect32                 pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect32                 lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+aspect32                 xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+handout                  pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+handout                  lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+handout                  xelatex   deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+notes-right              pdflatex  deck definite/beamer f=16 horizontal       deck definite/beamer f=16 horizontal       yes
+notes-right              lualatex  deck definite/beamer f=16 horizontal       deck definite/beamer f=16 horizontal       yes
+notes-right              xelatex   deck definite/beamer f=16 horizontal       deck definite/beamer f=16 horizontal       yes
+notes-bottom             pdflatex  deck definite/beamer f=16 vertical         deck definite/beamer f=16 vertical         yes
+notes-bottom             lualatex  deck definite/beamer f=16 vertical         deck definite/beamer f=16 vertical         yes
+notes-bottom             xelatex   deck definite/beamer f=16 vertical         deck definite/beamer f=16 vertical         yes
+creator-override         pdflatex  deck probable/beamer-geometry f=6          deck probable/beamer-geometry f=6          yes
+creator-override         lualatex  deck probable/beamer-geometry f=6          deck probable/beamer-geometry f=6          yes
+creator-override         xelatex   deck probable/beamer-geometry f=16         deck probable/beamer-geometry f=16         yes
+fullscreen-override      pdflatex  deck definite/fullscreen-mode f=16         deck definite/fullscreen-mode f=16         yes
+fullscreen-override      lualatex  deck definite/fullscreen-mode f=16         deck definite/fullscreen-mode f=16         yes
+fullscreen-override      xelatex   deck definite/fullscreen-mode f=16         deck definite/fullscreen-mode f=16         yes
+fullscreen-beamer        pdflatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+fullscreen-beamer        lualatex  deck definite/beamer f=6                   deck definite/beamer f=6                   yes
+fullscreen-beamer        xelatex   deck definite/beamer f=16                  deck definite/beamer f=16                  yes
+poster                   pdflatex  no —/— f=1                                 no —/— f=1                                 yes
+poster                   lualatex  no —/— f=1                                 no —/— f=1                                 yes
+poster                   xelatex   no —/— f=1                                 no —/— f=1                                 yes
+article-landscape        pdflatex  no —/— f=3                                 no —/— f=3                                 yes
+article-landscape        lualatex  no —/— f=3                                 no —/— f=3                                 yes
+article-landscape        xelatex   no —/— f=3                                 no —/— f=3                                 yes
+article-on-beamer-paper  pdflatex  deck probable/beamer-geometry f=2          deck probable/beamer-geometry f=2          yes
+article-on-beamer-paper  lualatex  deck probable/beamer-geometry f=2          deck probable/beamer-geometry f=2          yes
+article-on-beamer-paper  xelatex   deck probable/beamer-geometry f=2          deck probable/beamer-geometry f=2          yes
+
+42 cases (0 failed to compile): verdict (deck/tier/source) as expected in 42; field mismatches 0
+# wrote docs/scientific/data/12/positive-corpus.json

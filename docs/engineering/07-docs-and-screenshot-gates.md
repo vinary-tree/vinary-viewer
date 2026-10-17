@@ -136,9 +136,9 @@ catalog records the pin:
 > committed SVG byte-for-byte, so `git status` stays clean unless a `.puml`
 > actually changed.
 
-There are currently **63** `.puml` sources and 63 rendered `.svg` files in
-`docs/diagrams/` (the "50" figure in the catalog prose predates recent additions;
-the reproducibility property is unchanged).
+There are currently **81** `.puml` sources and 81 rendered `.svg` files in
+`docs/diagrams/` (the catalog in [`docs/diagrams/README.md`](../diagrams/README.md)
+lists every one; its two loops check that against the filesystem).
 
 Two practical cautions, both verifiable on this workstation:
 

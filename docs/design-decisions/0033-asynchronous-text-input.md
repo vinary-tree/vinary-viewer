@@ -48,6 +48,10 @@ incident:
 
 ## Decision
 
+![Asynchronous text input — one keystroke, two lifetimes](../diagrams/activity-async-text-input.svg)
+
+*Diagram source: [`../diagrams/activity-async-text-input.puml`](../diagrams/activity-async-text-input.puml).*
+
 ### 1 · A text field owns its own value
 
 `vinary.ui.text-input/async-input` replaces the controlled `<input>` in every widget whose value is

@@ -33,3 +33,9 @@ exactly the 3 files above change verdict (to deck, probable, slide-export) and n
 DEDUCTION, not a blind prediction: the corpus summary already lists every uniform multi-page landscape file that is
 not a deck, and only those 3 lie on a new canvas (every new canvas is landscape). The re-run therefore checks the
 implementation, not the hypothesis.
+
+CORRECTION (2026-10-17, written after the runs; the predictions above are left as they were registered)
+"Keynote Wide 1920 × 1080 (Apple's documented preset …)" overstated the evidence. Apple's own documentation names the
+Keynote presets ("4:3 (Standard)", "16:9 (Widescreen)") without their sizes; the 1920 × 1080 canvas rests on one
+third-party source (cited in docs/scientific/12 §7). The entry is kept, labelled REPORTED in vinary.slides.deck/export-canvases.
+PowerPoint's On-screen Show (16:10), 10 × 6.25 in = 720 × 450 bp, IS in Microsoft's documentation, as stated.

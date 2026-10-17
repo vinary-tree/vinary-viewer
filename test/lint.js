@@ -41,7 +41,7 @@ const jsFiles = [
   'scripts/bench-remote-read.cjs', 'scripts/exp-torn-pdf-reads.cjs', 'scripts/diag-sftp-window.cjs',
   'scripts/analyze-e2-sibling-stats.cjs', 'scripts/analyze-e3-remote-reads.cjs', 'scripts/analyze-s7-streaming.cjs',
   // the deck-detection corpus instruments behind docs/scientific/12 (ADR-0045)
-  'scripts/exp-deck-corpus.cjs', 'scripts/exp-deck-export-corpus.cjs',
+  'scripts/exp-deck-corpus.cjs', 'scripts/exp-deck-export-corpus.cjs', 'scripts/exp-deck-local-corpus.cjs',
   // the slide-flip latency benchmark of docs/scientific/12 and its analysis
   'scripts/bench-slide-flip.cjs', 'scripts/analyze-flip-runs.cjs',
   // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools

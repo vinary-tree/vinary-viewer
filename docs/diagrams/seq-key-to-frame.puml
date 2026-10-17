@@ -1,0 +1,42 @@
+@startuml seq-key-to-frame
+'' PlantUML over Mermaid: the point is WHEN each step runs relative to the frame boundary, and that an
+'' ordinary posted task (re-frame's queue) runs AFTER the frame Chromium renders right after a key. A sequence
+'' diagram with one phase per build states that ordering exactly. Purple = keyboard input, blue = re-frame's
+'' queue, teal = the renderer (the slides engine, and the frame it renders).
+!include _vv-theme.iuml
+
+title A → key on a slide show: why it showed a frame late, and the fix (docs/scientific/12 §8)
+
+participant "keyboard\n(a discrete input event)" as K KEYMAP_TINT
+participant "keydown handler\n(key-scroll! · keymap resolver)" as H KEYMAP_TINT
+participant "re-frame queue\n(a posted next-tick task)" as Q REFRAME_TINT
+participant "slides engine\n(renderer.pdf)" as E RENDERER_TINT
+participant "frame\n(the rendering update)" as F RENDERER_TINT
+
+== baseline (A): two queued hops ==
+K -> H : keydown, dispatched at <latex>t_0</latex>
+activate H
+H -> Q : rf/dispatch [:nav/scroll {:dx :right}]
+deactivate H
+note over Q #E2EBF3: posted during an input event:\nChromium renders the next frame FIRST
+F -> F : frame N — still the old slide
+Q -> Q : :nav/scroll → :dom/scroll → scroll delegate\n→ rf/dispatch [:slides/command :next]  (queued again)
+Q -> E : :slides/command → command!
+activate E
+E -> E : scrollTop := the next slot  (just after frame N)
+deactivate E
+F -> F : frame N+1 shows the slide
+note right of F #E3F2ED: median <latex>t_{\mathrm{pre}} - t_0 \approx 24\,\mathrm{ms}</latex>\n(about a frame and a half)
+
+== intervention (C): the view move runs inside the keydown handler ==
+K -> H : keydown, dispatched at <latex>t_0</latex>
+activate H
+H -> E : commands/dispatch-now! → rf/dispatch-sync [:nav/scroll]\n→ :dom/scroll → delegate → step! → command!
+activate E
+E -> E : scrollTop := the next slot  (<latex>\approx 0.4\,\mathrm{ms}</latex> after <latex>t_0</latex>)
+deactivate E
+deactivate H
+F -> F : frame N shows the slide
+note right of F #E3F2ED: median <latex>t_{\mathrm{pre}} - t_0 \approx 8\,\mathrm{ms}</latex>\n(half a frame on average)
+note over Q #E2EBF3: a blanked screen or a half-typed slide number\nstill goes through :slides/command (step!)
+@enduml
