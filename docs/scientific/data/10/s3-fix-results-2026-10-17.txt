@@ -1,0 +1,89 @@
+# docs/scientific/10 §11 — the fix, measured: three DIAG runs of find-e2e at commit 179c6f7 (2026-10-17)
+#
+# Command (each run): VV_FIND_E2E_DIAG=<dir> node scripts/run-electron-headless.mjs --width=1400 --height=1000 \
+#                       electron --no-sandbox test/find-e2e.js
+# Machine: the same 64-CPU workstation as the baseline (docs/scientific/10 §11 attribution), Linux, Xvfb (X11)
+# backend, hardware acceleration off, dev build. Load average ≈ 9 on 64 CPUs throughout (logged per run below).
+# Lines are verbatim from the harness output; "P6" lines are computed from each run's main CPU profile (spawn
+# self time ÷ phase time; samples with spawnSync / execFileSync / execSync anywhere on the stack).
+# The listing census is the phase's own delta (peak-running is since boot).
+
+## run log (start / end, head, load)
+run 1 head 179c6f7 start 2026-10-17T05:59:37-04:00 load 9.77 8.63 9.07 11/8702 719014
+run 1 exit 0 end 2026-10-17T06:02:43-04:00 load 8.91 9.32 9.31 8/8660 809481
+run 2 head 179c6f7 start 2026-10-17T06:02:43-04:00 load 8.91 9.32 9.31 10/8661 809488
+run 2 exit 0 end 2026-10-17T06:05:49-04:00 load 8.63 9.07 9.22 7/8631 895052
+run 3 head 179c6f7 start 2026-10-17T06:05:49-04:00 load 8.63 9.07 9.22 6/8631 895060
+run 3 exit 0 end 2026-10-17T06:08:49-04:00 load 8.87 9.06 9.20 11/8644 1002938
+
+## run 1
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: main event-loop delay over 3357 ms — max 22.0 ms, p99 15.4 ms, mean 10.2 ms; CPU profile <diag-dir>/s3c-diag-1/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings during the phase {"requests":{"call":0,"watch":53},"collapsed":0,"listings":{"git":2,"walk":0},"failed":0,"waited-behind":{"0":4,"1":49},"peak-running":1,"git":{"rev-parse":0,"ls-files":4}} (peak-running since boot)
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 8.9 / 9.3 / 9.3 on 64 cpus
+typist find           : max lag 105 ms over 225 probes
+typist tree filter    : max lag 84 ms over 109 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3309 ms; spawn self 25.3 ms = 0.764 %; samples with a synchronous spawn on the stack: 0
+renderer CPU profile — the longest busy stretches (consecutive non-idle samples):
+  105.3 ms  from 1500 ms into the profile, 99 samples
+  84.8 ms  from 1100 ms into the profile, 112 samples
+  77.3 ms  from 1700 ms into the profile, 73 samples
+
+## run 2
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: main event-loop delay over 3371 ms — max 26.5 ms, p99 17.2 ms, mean 10.3 ms; CPU profile <diag-dir>/s3c-diag-2/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings during the phase {"requests":{"call":0,"watch":53},"collapsed":0,"listings":{"git":2,"walk":0},"failed":0,"waited-behind":{"0":1,"1":52},"peak-running":1,"git":{"rev-parse":0,"ls-files":4}} (peak-running since boot)
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 8.6 / 9.1 / 9.2 on 64 cpus
+typist find           : max lag 78 ms over 225 probes
+typist tree filter    : max lag 68 ms over 109 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3315 ms; spawn self 22.4 ms = 0.675 %; samples with a synchronous spawn on the stack: 0
+renderer CPU profile — the longest busy stretches (consecutive non-idle samples):
+  125.2 ms  from 1377 ms into the profile, 118 samples
+  94.4 ms  from 1529 ms into the profile, 89 samples
+  81.6 ms  from 1099 ms into the profile, 109 samples
+
+## run 3
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: main event-loop delay over 3404 ms — max 30.4 ms, p99 17.1 ms, mean 10.3 ms; CPU profile <diag-dir>/s3c-diag-3/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":6,"sync":0,"async":6,"bySubcommand":{"ls-files":6},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings during the phase {"requests":{"call":0,"watch":65},"collapsed":0,"listings":{"git":3,"walk":0},"failed":0,"waited-behind":{"0":6,"1":59},"peak-running":1,"git":{"rev-parse":0,"ls-files":6}} (peak-running since boot)
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 8.9 / 9.1 / 9.2 on 64 cpus
+typist find           : max lag 91 ms over 225 probes
+typist tree filter    : max lag 115 ms over 109 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3336 ms; spawn self 33.5 ms = 1.003 %; samples with a synchronous spawn on the stack: 0
+renderer CPU profile — the longest busy stretches (consecutive non-idle samples):
+  156.1 ms  from 1395 ms into the profile, 147 samples
+  142.1 ms  from 1061 ms into the profile, 166 samples
+  104.0 ms  from 1630 ms into the profile, 98 samples

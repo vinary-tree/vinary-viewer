@@ -1,0 +1,186 @@
+# docs/scientific/10 §11 — the fix, during development: the runs that found the renderer-side residue (2026-10-17)
+#
+# These runs used the working tree that became commit 179c6f7. Run B-1 and DIAG-1 had the main-side fix only
+# (asynchronous, coalesced listings); DIAG-2…4 also had the renderer-side derivation fix (vinary.app.tree-state)
+# that hypothesis H-R1 proposed. Same machine and harness as s3-fix-results-2026-10-17.txt; the listing census in
+# these runs is PROCESS-WIDE since boot (the per-phase delta was added to the harness afterwards).
+
+## Run B-1 — main-side fix only, no DIAG (load 13.0 / 12.5 / 10.6)
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✗ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 9.7 / 11.1 / 10.4 on 64 cpus
+typist find           : max lag 82 ms over 225 probes
+typist tree filter    : max lag 221 ms over 109 probes
+find-e2e: 69 passed, 1 failed
+  • file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+input trace summary (renderer-side blocking, from the typist's tracer):
+{
+  "queueMs": {
+    "p50": 27.19999998807907,
+    "p95": 142.60000002384186,
+    "max": 142.60000002384186
+  },
+  "keystrokes": 5,
+  "clobbers": 1,
+  "lostKeys": 0,
+  "blockTotalMs": 467,
+  "settledMs": {
+    "p50": null,
+    "p95": null,
+    "max": null
+  },
+  "blocks": 5,
+  "frameGapMs": {
+    "p50": 65.10000002384186,
+    "p95": 216,
+    "max": 216
+  },
+  "blockMs": {
+    "p50": 62,
+    "p95": 209,
+    "max": 209
+  }
+}
+
+## DIAG-1 — main-side fix only (load 9.7 / 10.7 / 10.3)
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✗ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: renderer CPU profile <diag-dir>/s3b-diag-1/renderer-tree-filter.cpuprofile
+[diag] tree-filter: main event-loop delay over 3385 ms — max 29.4 ms, p99 16.7 ms, mean 10.3 ms; CPU profile <diag-dir>/s3b-diag-1/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings {"requests":{"call":9,"watch":64},"collapsed":0,"listings":{"git":6,"walk":8},"failed":0,"waited-behind":{"0":14,"1":59},"peak-running":1,"git":{"rev-parse":9,"ls-files":12}}
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 9.8 / 10.3 / 10.3 on 64 cpus
+typist find           : max lag 113 ms over 225 probes
+typist tree filter    : max lag 248 ms over 109 probes
+find-e2e: 69 passed, 1 failed
+  • file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+P6 (main profile): phase 3320 ms; spawn self 22.8 ms = 0.688 %; samples with a synchronous spawn on the stack: 0
+renderer CPU profile (node scripts/analyze-cpuprofile.cjs renderer-tree-filter.cpuprofile --busy=6 --frames=22), the
+longest busy stretch and its heaviest frames:
+      365.1 ms  from 1434 ms into the profile, 344 samples
+        365.1 ms  (root)
+        297.2 ms  (anonymous) @ cljs.core.js:8454
+        282.3 ms  (anonymous) @ cljs.core.js:20724
+        280.2 ms  (anonymous) @ cljs.core.js:19525
+        269.5 ms  G__24887__2 @ cljs.core.js:17824
+        269.5 ms  vinary$app$tree_state$project_directory_scopes @ vinary.app.tree_state.js:11
+        260.0 ms  vinary$app$tree_state$directory_scopes @ vinary.app.tree_state.js:20
+        238.8 ms  re_frame$events$handle @ re_frame.events.js:61
+        238.8 ms  (anonymous) @ re_frame.router.js:576
+        238.8 ms  (anonymous) @ re_frame.router.js:312
+        238.8 ms  (anonymous) @ re_frame.router.js:416
+        238.8 ms  (anonymous) @ re_frame.router.js:375
+        238.8 ms  G__31483 @ re_frame.router.js:369
+        238.8 ms  channel.port1.onmessage @ goog.async.nexttick.js:63
+        237.7 ms  re_frame$interceptor$invoke_interceptor_fn @ re_frame.interceptor.js:222
+        237.7 ms  re_frame$interceptor$invoke_interceptors @ re_frame.interceptor.js:266
+        237.7 ms  re_frame$interceptor$execute_STAR_ @ re_frame.interceptor.js:327
+        237.7 ms  re_frame$interceptor$execute @ re_frame.interceptor.js:427
+        236.7 ms  re_frame$std_interceptors$fx_handler__GT_interceptor_$_fx_handler_before @ re_frame.std_interceptors.js:120
+        235.6 ms  (anonymous) @ vinary.app.events.js:2665
+        235.6 ms  (anonymous) @ re_frame.std_interceptors.js:121
+        234.6 ms  vinary$app$events$apply_tree_entry @ vinary.app.events.js:2656
+self time, top entries over the phase:
+  2451.8 ms   71.9 %  (idle)
+  162.9 ms    4.8 %  (program)
+  148.5 ms    4.4 %  (anonymous) @ clojure.string.js:264
+  25.4 ms    0.7 %  (anonymous) @ cljs.core.js:11908
+  20.1 ms    0.6 %  exports.createElement @ module$node_modules$react$cjs$react_development.js:567
+  18.1 ms    0.5 %  cljs$core$hash @ cljs.core.js:4062
+  18.1 ms    0.5 %  (garbage collector)
+
+## Hypothesis H-R1 — registered after DIAG-1, BEFORE the change (verbatim from the session ledger)
+The residual tree-filter T3 lag is the renderer recomputing EVERY directory scope of every project
+(tree-state/directory-scopes): twice per tree payload in events/prune-tree-ui and again on every Files render
+(tree-state/effective-expanded), constructing a [root dir] vector + str/join for every (file, depth) pair.
+Prediction: an index-scanning relative-directory set, memoized on project (and projects-vector) identity,
+cuts directory-scope cost > 5x (micro-benchmark on this repository's listing) and T3 passes in 3/3 DIAG runs with
+P1 still holding. Refuted if T3 still fails with directory-scopes no longer in the longest stretches.
+
+## Micro-benchmark — taskset -c 2 node scripts/bench-tree-scopes.cjs --runs=40 (cpu2: governor performance)
+repository   : /home/dylon/Workspace/f1r3fly.io/vinary-viewer
+files        : 1084; directory scopes: 137
+node         : v26.11.1; runs 40 after 5 warm-ups; cpu affinity pid 276257's current affinity list: 2
+definition   : median 6.876 ms, p95 12.892 ms, min 6.571 ms
+derive       : median 0.786 ms, p95 1.395 ms, min 0.757 ms
+memo hit     : median 0.001 ms, p95 0.001 ms, min 0.001 ms
+speed-up (median, definition / derive): 8.7×
+
+## DIAG-2 — main-side + renderer-side fix
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: renderer CPU profile <diag-dir>/s3b-diag-2/renderer-tree-filter.cpuprofile
+[diag] tree-filter: main event-loop delay over 3363 ms — max 24.0 ms, p99 15.8 ms, mean 10.2 ms; CPU profile <diag-dir>/s3b-diag-2/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings {"requests":{"call":9,"watch":56},"collapsed":0,"listings":{"git":6,"walk":8},"failed":0,"waited-behind":{"0":15,"1":50},"peak-running":1,"git":{"rev-parse":9,"ls-files":12}}
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 9.4 / 9.6 / 9.9 on 64 cpus
+typist find           : max lag 88 ms over 225 probes
+typist tree filter    : max lag 69 ms over 108 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3307 ms; spawn self 23.6 ms = 0.715 %; samples with a synchronous spawn on the stack: 0
+
+## DIAG-3 — main-side + renderer-side fix
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: renderer CPU profile <diag-dir>/s3b-diag-3/renderer-tree-filter.cpuprofile
+[diag] tree-filter: main event-loop delay over 3379 ms — max 23.9 ms, p99 15.9 ms, mean 10.2 ms; CPU profile <diag-dir>/s3b-diag-3/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings {"requests":{"call":9,"watch":54},"collapsed":0,"listings":{"git":5,"walk":8},"failed":0,"waited-behind":{"0":13,"1":50},"peak-running":1,"git":{"rev-parse":9,"ls-files":10}}
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 9.7 / 9.6 / 9.8 on 64 cpus
+typist find           : max lag 99 ms over 224 probes
+typist tree filter    : max lag 60 ms over 110 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3329 ms; spawn self 18.7 ms = 0.563 %; samples with a synchronous spawn on the stack: 0
+
+## DIAG-4 — main-side + renderer-side fix
+  ✓ find (1.1 MB doc): ASSERT T1 — every character typed at 150 ms survives
+  ✓ find (1.1 MB doc): ASSERT T2 — no re-render takes a character back out of the field
+  ✓ find (1.1 MB doc): ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+  ✓ find (1.1 MB doc): ASSERT T4 — the flattened buffer is reused across keystrokes
+  ✓ file-tree filter: ASSERT T1 — every character typed at 150 ms survives
+  ✓ file-tree filter: ASSERT T2 — no re-render takes a character back out of the field
+  ✓ file-tree filter: ASSERT T3 — the renderer stays responsive while typing (max 200 ms)
+[diag] tree-filter: renderer CPU profile <diag-dir>/s3b-diag-4/renderer-tree-filter.cpuprofile
+[diag] tree-filter: main event-loop delay over 3382 ms — max 29.6 ms, p99 18.5 ms, mean 10.3 ms; CPU profile <diag-dir>/s3b-diag-4/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":4,"sync":0,"async":4,"bySubcommand":{"ls-files":4},"peakListingsPerCwd":1}
+[diag] tree-filter: tree listings {"requests":{"call":9,"watch":56},"collapsed":0,"listings":{"git":5,"walk":8},"failed":0,"waited-behind":{"0":13,"1":52},"peak-running":1,"git":{"rev-parse":9,"ls-files":10}}
+  ✓ file-tree filter: ASSERT T5 — main starts no git process synchronously
+  ✓ file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time
+hardware acceleration : OFF (disableHardwareAcceleration)
+load average (1/5/15) : 9.2 / 9.3 / 9.6 on 64 cpus
+typist find           : max lag 83 ms over 225 probes
+typist tree filter    : max lag 65 ms over 109 probes
+find-e2e: 70 passed, 0 failed
+P6 (main profile): phase 3326 ms; spawn self 22.4 ms = 0.675 %; samples with a synchronous spawn on the stack: 0

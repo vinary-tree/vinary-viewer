@@ -526,3 +526,73 @@ phase (DevTools protocol `Profiler`, 1 ms sampling), and prints the listing runn
 task is many leaves, not one blocking call); and
 [`scripts/bench-tree-scopes.cjs`](../../scripts/bench-tree-scopes.cjs) times the directory-scope derivation on
 this repository's listing, old against new.
+
+**Results — during development** (`data/10/s3-fix-development-2026-10-17.txt`). The main-side fix was measured
+first, on its own.
+
+- **Run B-1** (no DIAG, load 9.7–13): T5 and T6 passed, but T3 failed in the tree-filter phase at **221 ms**. The
+  typist's tracer put the time on the **renderer**: five blocks, the longest 209 ms.
+- **DIAG-1** (load ≈ 10): P1 held — main's event loop was blocked for at most **29.4 ms**, against 2 405 ms before
+  — and so did P3, P4 and P6. P2 failed again (248 ms). This is the case the refutation rule anticipated: "if P2
+  fails while P1 holds, the remaining latency is on the renderer / IPC side". The renderer's profile attributed it:
+  its longest busy stretch, **365 ms**, was a re-frame handler (`events/apply-tree-entry`), and **260 ms** of it was
+  `tree-state/directory-scopes`, which re-derives every directory of every project.
+
+**A second hypothesis, H-R1,** was registered before any change (verbatim in the data file):
+
+> The residual tree-filter T3 lag is the renderer recomputing every directory scope of every project — twice per
+> tree payload (`events/prune-tree-ui`) and again on every Files render (`tree-state/effective-expanded`), building a
+> `[root dir]` vector and a `str/join` for every (file, depth) pair. Prediction: an index-scanning derivation,
+> memoized on project identity, cuts the derivation's cost by more than 5× on this repository's listing, and T3
+> passes in 3 of 3 DIAG runs with P1 still holding. Refuted if T3 still fails with `directory-scopes` gone from the
+> longest stretches.
+
+The fix (in commit `179c6f7` with the rest) scans each path for separators, so a directory is built once rather than
+once per file below it, and memoizes on the project's identity (and on the projects vector's). The micro-benchmark
+on this repository's listing (1 084 files, 137 directories; `taskset -c 2`, performance governor, 40 runs after 5
+warm-ups):
+
+| Derivation | Median | p95 |
+|---|---|---|
+| the old definition (union of `file-directory-scopes`) | 6.876 ms | 12.892 ms |
+| the index-scanning derivation, memo missed | 0.786 ms | 1.395 ms |
+| a memo hit (an unchanged project) | 0.001 ms | 0.001 ms |
+
+That is **8.7×** at the median, above the predicted 5×. DIAG-2…4 then passed T3 every time, at tree-filter worst
+round trips of 69, 60 and 65 ms. Main stayed at 24.0, 23.9 and 29.6 ms, and `directory-scopes` no longer appeared
+among the renderer's long stretches. **H-R1 is supported.**
+
+**Results — the fix as committed** (`data/10/s3-fix-results-2026-10-17.txt`). Three DIAG runs at `179c6f7`, at load
+≈ 9 on 64 CPUs, with the listing census now taken per phase:
+
+| Id | Prediction | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| P1 | main's max event-loop delay < 50 ms | 22.0 ms | 26.5 ms | 30.4 ms | **holds** (baseline 2 405 ms) |
+| P2 | T3 passes | 84 ms | 68 ms | 115 ms | **holds** (budget 200 ms) |
+| P3 | 0 synchronous git processes | 0 of 4 | 0 of 4 | 0 of 6 | **holds** (baseline 106) |
+| P4 | ≤ 1 listing of one repository at a time | 1 | 1 | 1 | **holds** |
+| P5 | fewer listings than watcher refreshes; none waits behind more than one | 2 for 53 | 2 for 53 | 3 for 65 | **holds** (baseline 53 for 53); waited-behind ≤ 1 for all 171 requests |
+| P6 | `spawn` self time ≤ 1 % of the phase, no synchronous-spawn frames | 0.764 % | 0.676 % | **1.004 %** | **missed in run 3** by 0.004 points; no synchronous frames in any run |
+
+**P6, read honestly.** Run 3 listed the repository three times (6 git processes) instead of twice. The cost per
+process was steady across all seven DIAG runs, at **4.7–6.3 ms** of `spawn` self time — the fork and exec on main's
+thread, which an asynchronous spawn still pays. So the share scales with the number of listings, and the 1 % bound,
+written with two listings in mind, did not allow for a third. What P6 was meant to show still holds: synchronous git went from 40.3 % of the
+phase to none, and nothing on main now blocks for longer than one spawn (P1). The prediction as registered, however,
+failed once, and it stays recorded as failed. If a git process should ever cost more on main, the next step is a
+utility process for git (ADR-0034's amendment, alternatives).
+
+**The renderer, after both fixes.** The longest busy stretches were 105, 125 and 156 ms. They are React renders,
+and in this dev build about a third of each is re-frame-10x's own panel re-rendering — a debugging tool the
+release build does not contain. They fit inside the 150 ms keystroke cadence without delaying a character beyond
+T3's budget.
+
+**T3's statistic, revisited with data.** §10 asked whether T3 should become a percentile because of load. With the
+stall removed, T3 passed in 6 of 6 post-fix DIAG runs at load ≈ 9–10, with a worst round trip of 60–115 ms. The
+earlier failures came from the stall, not from the statistic, so T3 stays a maximum. T5 and T6 now gate the
+mechanism itself, and they are independent of load.
+
+**Conclusion.** The tree-filter stall had two causes, one behind the other. The first was main's synchronous
+whole-repository git listings, all due at once: 2.4 s, now under 31 ms. The second was the renderer re-deriving
+every directory scope on every tree payload, which the main-side stall had hidden: 365 ms, now gone from the long
+stretches. Both are fixed, and both are gated.
