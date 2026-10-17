@@ -129,6 +129,13 @@
   [db]
   (get-in db [:ui :slides :blank]))
 
+(defn command-needs-db?
+  "Would :slides/command change app-db before (or instead of) moving the slide — a blanked screen to end, a typed
+   slide number to forget (vinary.app.events/slides-command-fx)? When not, the step is exactly the engine call, and
+   the slide engine runs it at once instead of through the event (renderer.pdf/step!)."
+  [db]
+  (boolean (or (blank db) (digits db))))
+
 (defn clear-blank
   "db without a blanked screen."
   [db]

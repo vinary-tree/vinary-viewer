@@ -14,7 +14,9 @@
             [vinary.ir.node :as node]
             [vinary.ir.frontend.pdf :as pdf-fe]
             [vinary.ir.backend.html :as ir-html]
-            [re-frame.core :as rf]))
+            [vinary.app.slides :as app-slides]
+            [re-frame.core :as rf]
+            [re-frame.db :as rfdb]))
 
 (def ^:const gap 16)        ; px between pages
 (def ^:const overscan 1.5)  ; viewport-heights of canvas-render overscan each side (document layout)
@@ -856,23 +858,35 @@
       1 (/ d 30)
       d)))
 
+(defn- step!
+  "Run slide op `op` from an input — a key (through the scroll delegate), the wheel, a swipe — on this view. At once
+   when :slides/command would change nothing in app-db (app-slides/command-needs-db?: no blanked screen, no
+   half-typed slide number), else through that event, which ends the blanking or forgets the digits first (so the
+   wheel, like the keys, only ends a blanking). At once matters: a key's handling is synchronous up to here
+   (commands/dispatch-now!), and one more re-frame event would run after the next frame and show the slide a frame
+   late (docs/scientific/12 §Flip latency, H-sync2)."
+  [state op]
+  (if (app-slides/command-needs-db? @rfdb/app-db)
+    (rf/dispatch [:slides/command op])
+    (command! state op)))
+
 (defn- on-wheel! [state ^js e]
   ;; Ctrl/Meta+wheel is zoom elsewhere in the app — leave it alone
   (when (and (slides? state) (not (.-ctrlKey e)) (not (.-metaKey e)))
     (let [{st :state op :op} (deck/wheel-step (:wheel @state) (normalize-wheel e) (js/performance.now))]
       (swap! state assoc :wheel st)
-      (when op (command! state op)))))
+      (when op (step! state op)))))
 
 (defn- scroll-delegate
   "The content-scroll delegate of the slides layout (vinary.renderer.scroll): every keymap's scroll command —
    arrows, PageUp/PageDown (Shift = a frame), Home/End, Vim j/k/h/l/C-d/C-u/C-f/C-b/gg/G, Emacs C-v/M-v/C-n/C-p —
-   becomes the slide op deck/scroll->op names, run through :slides/command so a typed slide number or (while
-   presenting) a blanked screen sees it first. Always claims the command: a pixel scroll would only be undone by
-   the snap."
-  [_state]
+   becomes the slide op deck/scroll->op names, run by step! — at once, or through :slides/command when a typed
+   slide number or (while presenting) a blanked screen must see it first. Always claims the command: a pixel
+   scroll would only be undone by the snap."
+  [state]
   (fn [opts]
     (when-let [op (deck/scroll->op opts)]
-      (rf/dispatch [:slides/command op]))
+      (step! state op))
     true))
 
 (defn- attach-slides-listeners!
@@ -891,7 +905,7 @@
             on-wheel  (fn [e] (on-wheel! state e))
             delegate  (scroll-delegate state)
             ;; a SWIPE (touch / pen — a mouse drag selects text): press → release, classified by deck/swipe-op and
-            ;; run through :slides/command like the keys (so a blanked screen sees it first)
+            ;; run by step! like the keys (so a blanked screen sees it first)
             swipe     (atom nil)
             on-pdown  (fn [^js e]
                         (reset! swipe (when (and (.-isPrimary e) (#{"touch" "pen"} (.-pointerType e)))
@@ -902,7 +916,7 @@
                           (when (= id (.-pointerId e))
                             (when-let [op (deck/swipe-op {:dx (- (.-clientX e) x) :dy (- (.-clientY e) y)
                                                           :dt (- (js/performance.now) t)})]
-                              (rf/dispatch [:slides/command op])))))
+                              (step! state op)))))
             on-pcancel (fn [_] (reset! swipe nil))]
         (.addEventListener scroller "scroll" on-scroll #js {:passive true})
         (.addEventListener scroller "scrollend" on-end)

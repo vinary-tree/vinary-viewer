@@ -1,0 +1,14 @@
+# environment 2026-10-17T03:07:10-04:00
+governor/EPP: performance/performance; max 4561833 kHz
+load: 9.10 8.17 8.10
+top CPU consumers (pid %cpu cpu command):
+1345786 93.5  30 pgmcp
+ 874582 82.3  13 chrome
+ 125128 64.1  54 postgres
+   5270 23.3  19 postgres
+   5271 21.6  16 postgres
+   5272 20.0  33 postgres
+ 208761 17.3  16 codex
+  39686 16.3  24 codex
+electron: 42.5.0  node: v26.11.1
+A = HEAD 43cae5c key paths (rf/dispatch); C = A + commands/dispatch-now! + renderer.pdf/step! (both hops synchronous)

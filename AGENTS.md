@@ -25,6 +25,10 @@
   transport against the in-process SFTP fixture behind a TCP latency proxy, size × RTT × server ident × reader,
   sha256-verified. Pin the client (`taskset -c 2-5 npm run bench:remote -- --server-nodelay | tee …`); the
   server child pins itself to 6-9. `VV_BENCH_QUICK=1` runs a small subset.
+- `npm run bench:flip`: the slide-flip latency benchmark behind docs/scientific/12 — the real app, a 50-slide
+  Beamer deck, → flips and Home/End jumps timed from the key's dispatch to the frame that shows the slide,
+  live canvases counted every frame. Pin it: `taskset -c 2-9 npm run bench:flip | tee …`;
+  `VV_BENCH_JSON=<path>` writes every sample, and `node scripts/analyze-flip-runs.cjs` pools and compares runs.
 
 ## Coding Style & Naming Conventions
 Use idiomatic ClojureScript with two-space indentation, kebab-case vars/functions, and namespace-to-file mapping such as `vinary.input.keymaps-registry` in `src/vinary/input/keymaps_registry.cljs`. Keep renderer filesystem access behind the existing `contextBridge`/IPC boundary; the renderer should operate on plain JSON/EDN data. JavaScript files use CommonJS, `'use strict'`, and minimal dependencies. CSS custom properties use the `--vv-*` prefix and must be defined by every theme in `resources/public/css/themes/`.

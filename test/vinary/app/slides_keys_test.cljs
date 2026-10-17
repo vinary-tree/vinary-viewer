@@ -3,6 +3,8 @@
    the resolver's layering, the typed-slide-number events, Escape's cancel order, the overlay predicate, the
    scroll delegate seam, and command gating (keyboard-only commands never reach the palette)."
   (:require [cljs.test :refer [deftest is testing]]
+            [re-frame.core]
+            [re-frame.events]
             [vinary.app.commands :as commands]
             [vinary.app.events :as events]
             [vinary.app.overlay :as overlay]
@@ -208,3 +210,50 @@
       (is (not-any? visible [:slides/digit :slides/enter :slides/backspace]))))
   (testing "the key-binding editor lists every category the registry uses"
     (is (empty? (remove (set kbe/category-order) (set (map :category (vals commands/registry))))))))
+
+(deftest keys-run-view-moves-at-once
+  ;; docs/scientific/12 §Flip latency (H-sched): re-frame's queue drains only after the next frame once a key has been
+  ;; dispatched, so a key's view move runs at once (commands/dispatch-now!) and shows one frame sooner
+  (testing "every immediate command is a registered command"
+    (is (empty? (remove (set (keys commands/registry)) commands/immediate-commands))))
+  (testing "every command that only scrolls or steps the slides is immediate (a new one cannot miss the fast path)"
+    (let [view-moves (for [[id spec] commands/registry
+                           :when (#{:nav/scroll :slides/command} (first (:dispatch spec)))]
+                       id)]
+      (is (seq view-moves))
+      (is (empty? (remove commands/immediate-commands view-moves)))))
+  (let [calls (atom [])
+        run!  (fn [& args]
+                (reset! calls [])
+                (with-redefs [re-frame.core/dispatch      (fn [ev] (swap! calls conj [:queued ev]))
+                              re-frame.core/dispatch-sync (fn [ev] (swap! calls conj [:now ev]))]
+                  (apply commands/run args))
+                @calls)]
+    (testing "from a key handler ({:now? true}) an immediate command runs at once"
+      (is (= [[:now [:slides/command :next]]] (run! :slides/next {:slides-view? true} nil {:now? true})))
+      (is (= [[:now [:nav/scroll {:dy 80}]]] (run! :nav/scroll-down {} nil {:now? true}))))
+    (testing "…an ordinary command still goes through the queue"
+      (is (= [[:queued [:slides/present {:from :first}]]] (run! :slides/present {:pdf-view? true} nil {:now? true}))))
+    (testing "without {:now? true} (the palette) everything goes through the queue"
+      (is (= [[:queued [:slides/command :next]]] (run! :slides/next {:slides-view? true})))))
+  (testing "inside a re-frame handler dispatch-now! falls back to the queue (re-frame refuses dispatch-sync there)"
+    (let [calls (atom [])]
+      (with-redefs [re-frame.core/dispatch      (fn [ev] (swap! calls conj [:queued ev]))
+                    re-frame.core/dispatch-sync (fn [ev] (swap! calls conj [:now ev]))]
+        (binding [re-frame.events/*handling* [:some/event]]
+          (commands/dispatch-now! [:nav/scroll {:dy 80}])))
+      (is (= [[:queued [:nav/scroll {:dy 80}]]] @calls)))))
+
+(deftest the-engine-shortcut-is-exactly-the-event-when-app-db-is-untouched
+  ;; renderer.pdf/step! runs a slide op on the engine at once unless :slides/command would change app-db
+  ;; (slides/command-needs-db?). The shortcut is sound only if, whenever it is taken, the event's whole effect is that
+  ;; one engine call — checked for every combination of a blanked screen and a typed number.
+  (doseq [blank  [nil :black :white]
+          typed  [nil "" "12"]
+          :let   [db (cond-> {:ui {:slides {:layout :slides}}}
+                       blank (assoc-in [:ui :slides :blank] blank)
+                       typed (assoc-in [:ui :slides :digits] typed))
+                  fx (events/slides-command-fx db :next)]]
+    (is (= (slides/command-needs-db? db) (contains? fx :db)) (pr-str [blank typed]))
+    (when-not (slides/command-needs-db? db)
+      (is (= {:fx [[:slides/command :next]]} fx) (pr-str [blank typed])))))

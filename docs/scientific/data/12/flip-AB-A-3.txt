@@ -1,0 +1,13 @@
+# bench-slide-flip 2026-10-17T07:01:10.118Z  50 slides  window 1280×860 @1x  GPU off  rest 150 ms
+# clock offset renderer−main 0.064 ms ± 0.029 ms (tightest of 25 round trips)
+neighbour flips (→) (a canvas already in the target's slot: 49 of 49; frame-ambiguous: 0)
+  key → frame that shows it    n=49  median 23.8  p95 28.7  max 31.7  min 16.5 ms
+  dispatch → scrollTop written n=49  median 9.6  p95 13.5  max 17.8  min 1.0 ms
+  scrollTop written → frame    n=49  median 15.2  p95 15.9  max 16.1  min 12.9 ms
+  dispatch → a posted task runs n=49  median 9.4  p95 13.3  max 17.6  min 0.9 ms; after the next frame began: 49 of 49
+jumps (Home / End) (a canvas already in the target's slot: 0 of 10; frame-ambiguous: 10)
+  key → frame that shows it    n=10  median 55.0  p95 56.0  max 56.0  min 51.5 ms
+  dispatch → scrollTop written n=10  median 6.1  p95 6.8  max 6.8  min 2.6 ms
+  scrollTop written → frame    n=10  median 48.9  p95 49.3  max 49.3  min 48.5 ms
+  dispatch → a posted task runs n=10  median 5.9  p95 6.7  max 6.7  min 2.4 ms; after the next frame began: 10 of 10
+live page canvases: max over every frame 3; after each move max 3 (seen: 2, 3)

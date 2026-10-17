@@ -105,8 +105,10 @@
             {:action :consume}
             {:action :pass})))))
 
-(defn- run-command! [decision ctx]
-  (commands/run (:command decision) ctx (some-> (:args decision) vec)))
+(defn- run-command!
+  "Run a resolved command — from this keydown handler, so a view move runs at once (commands/immediate-commands)."
+  [decision ctx]
+  (commands/run (:command decision) ctx (some-> (:args decision) vec) {:now? true}))
 
 (defn- sync-mirror!
   "Self-heal the app-db copy of :in-input? from the value we just derived. focusin/focusout cover ordinary

@@ -5,6 +5,7 @@
    (Command pattern: invokers — keymap, palette, mouse — are decoupled from the actions.)"
   (:require [re-frame.core :as rf]
             [re-frame.db :as rfdb]
+            [re-frame.events]
             [vinary.app.nav :as nav]
             [vinary.app.slides :as slides]))
 
@@ -145,21 +146,50 @@
         pred (get predicates (:when spec) (:always predicates))]
     (boolean (pred ctx))))
 
+;; ---- keys run view moves at once ---------------------------------------------------------------------------
+;; After a discrete input event Chromium renders the next frame BEFORE ordinary posted tasks, and re-frame's queue
+;; drains in such a task (goog.async.nextTick). So a key handled through rf/dispatch makes its change just after a
+;; frame, and the change shows a whole frame later. Measured on slide flips: a task posted at the key ran after the
+;; next frame began in 11 of 11 flips (docs/scientific/12 §Flip latency, H-sched). A key's view move therefore runs at
+;; once, inside the keydown handler.
+
+(def immediate-commands
+  "Commands a KEY runs at once (`dispatch-now!`) instead of through re-frame's queue: the ones that only move the
+   view — scrolling, slide steps, the typed slide number and its Enter / Backspace (all three immediate, so their
+   order is kept), and the blank screens. Running them ahead of events already queued changes nothing those events
+   depend on. The palette runs everything through the queue (it is not a key handler)."
+  #{:nav/scroll-down :nav/scroll-up :nav/scroll-left :nav/scroll-right :nav/page-down :nav/page-up
+    :nav/half-page-down :nav/half-page-up :nav/scroll-top :nav/scroll-bottom
+    :slides/next :slides/prev :slides/next-frame :slides/prev-frame :slides/first :slides/last
+    :slides/back :slides/forward :slides/digit :slides/enter :slides/backspace :slides/black :slides/white})
+
+(defn dispatch-now!
+  "Process event `ev` at once — rf/dispatch-sync — so a KEY's change lands before the next frame (see above). Only
+   from a DOM event handler: re-frame refuses dispatch-sync while it is handling an event (it logs an error and drops
+   the event), so inside one this falls back to rf/dispatch."
+  [ev]
+  (if re-frame.events/*handling*
+    (rf/dispatch ev)
+    (rf/dispatch-sync ev)))
+
 (defn run
   "Resolve command id against ctx and dispatch. Returns true if it consumed the key (dispatched or the
-   gate passed), false if the :when gate failed (so the key can pass through)."
-  ([id ctx] (run id ctx nil))
-  ([id ctx args]
-   (let [spec (get registry id)]
+   gate passed), false if the :when gate failed (so the key can pass through). With `{:now? true}` — the keymap
+   resolver, a keydown handler — an `immediate-commands` member runs at once (`dispatch-now!`)."
+  ([id ctx] (run id ctx nil nil))
+  ([id ctx args] (run id ctx args nil))
+  ([id ctx args {:keys [now?]}]
+   (let [spec (get registry id)
+         send (if (and now? (contains? immediate-commands id)) dispatch-now! rf/dispatch)]
      (cond
        (nil? spec)             false
        (not (allowed? id ctx)) false
-       (:handler spec)         (do (when-let [ev ((:handler spec) ctx)] (rf/dispatch ev)) true)
+       (:handler spec)         (do (when-let [ev ((:handler spec) ctx)] (send ev)) true)
        (:dispatch spec)        (let [ev (cond
                                           (seq args)            (into (:dispatch spec) args)
                                           (contains? spec :arg) (conj (:dispatch spec) (:arg spec))
                                           :else                 (:dispatch spec))]
-                                 (rf/dispatch ev) true)
+                                 (send ev) true)
        (:prompt spec)          (do (rf/dispatch [:palette/open {:source (:prompt spec)}]) true)
        :else                   false))))
 

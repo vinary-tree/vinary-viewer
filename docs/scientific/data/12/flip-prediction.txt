@@ -1,0 +1,57 @@
+Experiment 12 — slide-flip latency: pre-registration (written 2026-10-17, BEFORE scripts/bench-slide-flip.cjs ran)
+
+Setup: the real app, a generated 50-slide Beamer deck (test/fixtures/pdf-gen.js makeDeckPdf, 16:9 paper, coloured
+pages with text), the Slides layout, GPU off (software compositing, as bench-input-latency), Xvfb 1400×1000,
+pinned with taskset -c 2-9. 49 → flips from rest (150 ms apart), then 10 Home/End jumps (49 slots each).
+"key → frame" = event.timeStamp of the keydown → the rAF timestamp of the first frame in which the target slot
+sits at the scroller's top with its page canvas present.
+
+Model. A → key reaches the slides engine through the keymap resolver and the scroll delegate; the engine sets
+scrollTop at once (transitions default to none) and the neighbour's canvas already exists. The slide then shows in
+the next frame: key → frame ≈ h + U, where h is the handler's work (≈ 1–3 ms) and U is the wait for the next frame
+boundary, uniform on [0, 16.7) ms at 60 Hz. Point estimates: median ≈ 10 ms, p95 ≈ 20 ms; one missed frame adds
+16.7 ms. A jump lands on a slot with no canvas: the frame after the scroll shows its blank sheet, the slides
+observer's callback (delivered after that frame) starts pdf.js, and a later frame shows the swapped-in canvas:
+key → frame ≈ 1 frame + render (tens of ms for these simple pages) + up to 1 frame.
+
+H-flip-1  neighbour flips: key → frame median ≤ 33 ms (2 frames) and p95 ≤ 50 ms (3 frames).
+          Refuted if either bound is exceeded.
+H-flip-2  every neighbour target already has its canvas when its key is sent (49 of 49): the ±1-slot render band.
+          Refuted by any flip whose target had no canvas at the key.
+H-flip-3  Home/End jumps: no target has a canvas at the key (0 of 10), and key → frame median ≤ 150 ms.
+          Refuted if a target was pre-rendered or the median exceeds 150 ms.
+H-flip-4  at most 3 page canvases are attached to the document in ANY frame of the run (sampled every frame) and
+          after every move. Refuted by a single frame with 4 or more.
+
+ADDENDUM (2026-10-17, written after the instrument's validation runs and BEFORE the intervention below ran; the
+formal run above has not run yet)
+The validation runs (12 slides; not the measurement) put the neighbour median near 25 ms, not the model's ≈ 10 ms,
+and the attribution probes located the gap: dispatch → the engine's scrollTop write ≈ 9–11 ms (the handler's own work
+is < 1 ms), then the write → the frame that shows it ≈ 15 ms (a full frame). A task posted at the key's dispatch —
+as re-frame's router posts its next-tick — ran only AFTER the next frame began, in 11 of 11 flips.
+H-sched (confirmed by that probe): after a discrete input event Chromium runs the next rendering before ordinary
+posted tasks, so a key handled through rf/dispatch writes scrollTop just after a frame and waits a whole frame.
+H-sync  processing the scroll command synchronously in the keydown handler (rf/dispatch-sync in key-scroll!) puts
+        the write before that frame: dispatch → scrollTop write < 2 ms (median), and neighbour key → frame median
+        ≤ 12 ms with p95 ≤ 20 ms — about one frame (≈ 16.7 ms) faster at the median. Refuted if the median write
+        delay is ≥ 2 ms or the median improves by less than 10 ms.
+The formal run (H-flip-1…4) is made on BOTH builds — first the baseline (rf/dispatch), then the intervention — with
+the same instrument, deck and pinning, and both are reported; H-sync is judged on the two formal runs.
+
+ADDENDUM 2 (2026-10-17, written after the formal A/B runs below and BEFORE the next intervention ran)
+Formal runs, alternated A B A B A B (flip-A-{1,2,3}.txt, flip-B-{1,2,3}.txt; environment in flip-environment.txt):
+  neighbour key → frame median  A 21.9 / 24.4 / 23.8 ms   B 24.7 / 24.7 / 19.5 ms
+  dispatch → scrollTop write    A 7.2 / 8.6 / 9.6 ms      B 10.5 / 9.7 / 4.6 ms
+H-sync is REFUTED (write delay ≥ 2 ms; no improvement). Cause, from the code: the slides layout's scroll delegate
+does not move the slide itself — it dispatches [:slides/command op], a SECOND re-frame event. dispatch-sync made
+only the first hop synchronous; the second is queued from inside the first event's effects (where re-frame forbids
+dispatch-sync), runs after the next frame, and the slide still shows one frame late. (B's frame-ambiguous 49/49 is
+the probe's documented ordering artifact: the queued re-frame task now runs just before the post-frame check, so
+that check sees the target a frame before the frame that renders it; the pre-frame check attributes both builds
+to the same frame.)
+H-sync2 the delegate runs the step on the engine at once (no second event) whenever :slides/command would change
+        nothing in app-db — no blanked screen, no half-typed slide number — and keeps the event otherwise. With
+        dispatch-now! in key-scroll!, a → key then reaches scrollTop inside its own keydown handler. Predicted on a
+        build C = B + this: dispatch → scrollTop write median < 2 ms, and neighbour key → frame median ≤ 12 ms with
+        p95 ≤ 20 ms. Refuted if the median write delay is ≥ 2 ms or the median improves by less than 10 ms on A.
+        Judged on alternated formal runs A C A C A C.

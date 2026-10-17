@@ -162,8 +162,8 @@ such as the runners and `daemon-smoke`, may set `process.exitCode`: Node honours
 **Hermetic real-app harnesses.** A harness that boots the real main process inherits three ways out of its
 sandbox. All three are closed in every such harness by [`test/fixtures/hermetic-env.js`](../../test/fixtures/hermetic-env.js),
 called before `dist/main/main.js` is required. The harnesses are `find-e2e`, `tree-e2e`, `watch-e2e`,
-`fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e`, `bench-input-latency` and the cold-start
-profiler; `daemon-smoke` writes the same config file.
+`fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e`, `bench-input-latency`, `bench-slide-flip` and the
+cold-start profiler; `daemon-smoke` writes the same config file.
 
 | Way out | Risk | Closed by |
 |---|---|---|
@@ -186,7 +186,8 @@ verifiable only in pieces.
 
 [`tree-e2e.js`](../../test/tree-e2e.js) was the first harness to close that gap, and the one described here.
 `find-e2e`, `watch-e2e`, `fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e` and the
-`bench-input-latency` benchmark boot the real main the same way, under the hermetic environment of §3.4. It `require`s the **real compiled main**
+`bench-input-latency` / `bench-slide-flip` benchmarks boot the real main the same way, under the hermetic
+environment of §3.4. It `require`s the **real compiled main**
 (`dist/main/main.js`) from inside an Electron process — the only way it can be required, since it
 auto-invokes `vinary.main.core/main` on load — so the entire production chain runs:
 

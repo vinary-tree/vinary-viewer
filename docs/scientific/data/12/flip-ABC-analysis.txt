@@ -1,0 +1,48 @@
+# analyze-flip-runs: 9 runs (A ×3, B ×3, C ×3); reference A
+
+## neighbour flips (→)
+  key → frame that shows it
+    A: n=147  median 24.3  p95 29.5  max 32.8  min 15.9 ms;  per-run medians 24.1 / 24.3 / 22.7
+    B: n=147  median 24.7  p95 28.8  max 32.7  min 16.5 ms;  per-run medians 19.9 / 24.7 / 25.5   A − B: -0.4 ms [95 % bootstrap -5.0, 3.9]
+    C: n=147  median 7.9  p95 15.1  max 16.0  min -0.7 ms;  per-run medians 8.2 / 6.8 / 8.2   A − C: 16.4 ms [95 % bootstrap 12.7, 20.0]
+  key → that frame rendered
+    A: n=147  median 27.2  p95 33.1  max 36.2  min 19.9 ms;  per-run medians 27.2 / 27.8 / 26.4
+    B: n=147  median 10.7  p95 14.3  max 19.6  min 1.3 ms;  per-run medians 5.1 / 10.8 / 10.3   A − B: 16.5 ms [95 % bootstrap 14.3, 21.5]
+    C: n=147  median 11.6  p95 20.0  max 20.9  min 3.1 ms;  per-run medians 12.0 / 9.5 / 11.8   A − C: 15.6 ms [95 % bootstrap 13.3, 19.5]
+  send → rendered (end to end)
+    A: n=147  median 27.2  p95 33.2  max 36.2  min 19.9 ms;  per-run medians 27.2 / 27.7 / 26.5
+    B: n=147  median 10.7  p95 14.4  max 19.6  min 1.3 ms;  per-run medians 5.1 / 10.9 / 10.2   A − B: 16.5 ms [95 % bootstrap 14.3, 21.6]
+    C: n=147  median 11.6  p95 20.0  max 20.9  min 3.1 ms;  per-run medians 11.9 / 9.5 / 11.9   A − C: 15.7 ms [95 % bootstrap 13.4, 19.6]
+  dispatch → scrollTop written
+    A: n=147  median 9.4  p95 14.8  max 18.5  min 0.9 ms;  per-run medians 9.0 / 10.4 / 9.1
+    B: n=147  median 10.3  p95 14.1  max 19.2  min 0.9 ms;  per-run medians 4.9 / 10.6 / 10.0   A − B: -0.9 ms [95 % bootstrap -4.9, 3.9]
+    C: n=147  median 0.4  p95 0.5  max 0.8  min 0.3 ms;  per-run medians 0.4 / 0.4 / 0.4   A − C: 9.0 ms [95 % bootstrap 5.0, 10.8]
+  A: a canvas already in the target's slot 147 of 147; frame-ambiguous 0
+  B: a canvas already in the target's slot 147 of 147; frame-ambiguous 147
+  C: a canvas already in the target's slot 147 of 147; frame-ambiguous 0
+
+## jumps (Home / End)
+  key → frame that shows it
+    A: n=30  median 61.3  p95 66.0  max 66.5  min 50.2 ms;  per-run medians 62.3 / 55.0 / 62.7
+    B: n=30  median 55.3  p95 65.2  max 65.8  min 49.6 ms;  per-run medians 55.1 / 55.1 / 56.8   A − B: 6.0 ms [95 % bootstrap -0.6, 7.5]
+    C: n=30  median 38.8  p95 48.6  max 49.7  min 33.0 ms;  per-run medians 38.3 / 38.4 / 38.9   A − C: 22.5 ms [95 % bootstrap 11.1, 24.6]
+  key → that frame rendered
+    A: n=30  median 51.6  p95 55.9  max 56.5  min 40.1 ms;  per-run medians 52.0 / 45.1 / 52.8
+    B: n=30  median 45.4  p95 55.1  max 55.7  min 40.0 ms;  per-run medians 45.5 / 45.1 / 46.8   A − B: 6.2 ms [95 % bootstrap -0.7, 7.4]
+    C: n=30  median 28.8  p95 38.2  max 39.6  min 22.7 ms;  per-run medians 28.0 / 28.4 / 29.1   A − C: 22.8 ms [95 % bootstrap 12.0, 24.6]
+  send → rendered (end to end)
+    A: n=30  median 51.6  p95 56.0  max 56.5  min 40.1 ms;  per-run medians 52.0 / 45.0 / 52.9
+    B: n=30  median 45.4  p95 55.2  max 55.8  min 40.1 ms;  per-run medians 45.6 / 45.1 / 46.7   A − B: 6.2 ms [95 % bootstrap -0.7, 7.4]
+    C: n=30  median 28.8  p95 38.1  max 39.6  min 22.7 ms;  per-run medians 27.9 / 28.4 / 29.1   A − C: 22.8 ms [95 % bootstrap 12.0, 24.7]
+  dispatch → scrollTop written
+    A: n=30  median 12.5  p95 17.4  max 17.8  min 1.7 ms;  per-run medians 13.1 / 5.8 / 13.6
+    B: n=30  median 6.4  p95 16.3  max 16.5  min 0.9 ms;  per-run medians 5.9 / 6.1 / 7.6   A − B: 6.1 ms [95 % bootstrap -0.7, 7.4]
+    C: n=30  median 0.4  p95 0.5  max 0.5  min 0.3 ms;  per-run medians 0.4 / 0.4 / 0.3   A − C: 12.1 ms [95 % bootstrap 5.5, 13.2]
+  A: a canvas already in the target's slot 0 of 30; frame-ambiguous 30
+  B: a canvas already in the target's slot 0 of 30; frame-ambiguous 30
+  C: a canvas already in the target's slot 0 of 30; frame-ambiguous 30
+
+## live page canvases
+  A: max over every frame of every run 3; after each move max 3
+  B: max over every frame of every run 3; after each move max 3
+  C: max over every frame of every run 3; after each move max 3

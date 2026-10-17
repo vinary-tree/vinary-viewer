@@ -9,7 +9,7 @@
             [vinary.app.overlay :as overlay]
             [vinary.app.events]
             [vinary.app.subs]
-            [vinary.app.commands]
+            [vinary.app.commands :as commands]
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
             [vinary.input.fx :as input-fx]
@@ -405,7 +405,7 @@
    them to frame steps); PageDown/PageUp/Home/End also act with Shift held (never with Ctrl/Alt/Meta) and pass
    `:shift?` along, so the slides layout's scroll delegate turns Shift+PageDown/PageUp into a frame step
    (ADR-0045). Held keys auto-repeat into the smooth-scroll animator. Capture-phase so it preempts the keymap
-   resolver."
+   resolver. The scroll is processed at once (commands/dispatch-now!), so it lands before the next frame."
   []
   (.addEventListener js/window "keydown"
                      (fn [^js e]
@@ -419,7 +419,9 @@
                          (when ev
                            (.preventDefault e)
                            (.stopPropagation e)
-                           (rf/dispatch ev)
+                           ;; at once, not through re-frame's queue: the queue drains only after the next frame, so
+                           ;; the scroll (or slide flip) would show a frame late (commands/dispatch-now!)
+                           (commands/dispatch-now! ev)
                            (when-let [kind (get key->web-scroll (.-key e))]
                              (when-let [^js vv (.-vv js/window)]
                                (when (.-httpScroll vv) (.httpScroll vv kind)))))))

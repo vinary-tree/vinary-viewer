@@ -1,0 +1,14 @@
+# environment 2026-10-17T02:59:58-04:00
+governor/EPP: performance/performance; max 4561833 kHz
+load: 9.69 8.89 8.23
+top CPU consumers (pid %cpu cpu command):
+ 802706  160  55 chrome
+1345786 93.4  53 pgmcp
+ 125128 56.3  54 postgres
+ 802062 24.0  20 node-MainThread
+   5270 23.3  10 postgres
+   5271 21.6  19 postgres
+   5272 20.0  46 postgres
+ 208761 17.3  16 codex
+electron: 42.5.0 (this file's version probe failed on a quoting error; the same session's A/C and A/B/C files record 42.5.0)  node: v26.11.1
+A = HEAD 43cae5c renderer key paths (rf/dispatch); B = A + commands/dispatch-now! (immediate view moves)
