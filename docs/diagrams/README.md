@@ -375,6 +375,9 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `seq-reload-safe-refresh.puml` | sequence | `design-decisions/0046-reload-safe-pipelined-remote-reads.md` |
 | `seq-bench-hidden-window.puml` | sequence | `scientific/10-input-latency-experiments.md` |
 | `seq-edn-store-echo.puml` | sequence | `design-decisions/0047-persisted-state-stores.md` · `architecture/03-ipc-protocol.md` |
+| `seq-linked-slide-show.puml` | sequence | `design-decisions/0048-speaker-notes-and-linked-presenter-windows.md` · `theory/11-linked-slide-show-protocol.md` |
+| `state-linked-slide-show.puml` | state | `design-decisions/0048-speaker-notes-and-linked-presenter-windows.md` · `theory/11-linked-slide-show-protocol.md` |
+| `seq-linked-show-last-move.puml` | sequence | `theory/11-linked-slide-show-protocol.md` |
 
 ### Keeping this table honest
 

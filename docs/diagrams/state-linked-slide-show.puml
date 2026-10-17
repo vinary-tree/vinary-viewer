@@ -1,0 +1,62 @@
+@startuml state-linked-slide-show
+'' PlantUML over Mermaid: a linked slide show has two state machines that must be read together — main's session
+'' (which only sequences and relays) and each window's link state (which decides what an arriving message does).
+'' PlantUML state diagrams give composite states, per-state fills and per-transition arrow colours from the shared
+'' palette, and render byte-reproducibly; Mermaid's do not.
+'' Fills: slate = held by main (vinary.main.slides-link — the session, its seq and members); blue-violet = held in a
+'' window's app-db ([:ui :slides-link]). Arrows: amber = a message over the IPC seam; magenta = something the person
+'' does (a key, closing a window); teal = the window's own view (its deck mounting, its engine's report, unmounting);
+'' red = an end.
+!include _vv-theme.iuml
+
+title A linked slide show's state (ADR-0048 §8): main's session, and each window's link
+
+hide empty description
+
+state "main — one session (vinary.main.slides-link)" as Main MAIN_FILL {
+  state "Claiming\na window is being claimed for the audience;\nthe presenter is already a member" as Claiming MAIN_TINT
+  state "Active\nseq · {page, blank} · members {wc → role}\nevery accepted move: seq + 1, ack to the sender,\npush to every other member" as Active MAIN_TINT
+  state "Ended\nreason: stopped · presenter-left · audience-left ·\ndisplay-removed · no-window" as MEnded ERROR_TINT
+
+  [*] -[IPC_BORDER]-> Claiming : vv:presenter-open accepted\n(own webContents, focused,\nretains the path, in no session)
+  Claiming -[IPC_BORDER]-> Active : the window is claimed →\nvv:open-files {link} to B,\njoined to A
+  Claiming -[ERROR_BORDER]-> MEnded : no window could be opened\n(ended {stop: false, "no-window"})
+  Active -[IPC_BORDER]-> Active : vv:presenter-move from a member\n(a non-member's move is dropped) ·\nvv:presenter-ready → peer "live" to A
+  Active -[ERROR_BORDER]-> MEnded : leave "stopped" from either ·\nthe presenter's view unmounts, its window closes,\nreloads or crashes · the audience window\ncloses, reloads, crashes or its view unmounts ·\nthe audience window's display is removed
+  MEnded -[ERROR_BORDER]-> [*] : ended → every remaining member;\nthe audience window is closed
+}
+
+state "each window — [:ui :slides-link] (vinary.app.slides-link)" as Win APPDB_FILL {
+  state "Opening\n(window A: sent vv:presenter-open)" as Opening APPDB_TINT
+  state "Joining\n(window B: vv:open-files carried a link;\na push only updates :start)" as Joining APPDB_TINT
+  state "Live" as Live APPDB_FILL {
+    state "In step\nout = {} — nothing of mine is on the way" as Synced APPDB_TINT
+    state "Outstanding\nout ≠ {} — my move is on the way;\na push is HELD, not shown" as Outstanding APPDB_TINT
+    [*] --> Synced
+    Synced -[RENDERER_BORDER]-> Outstanding : the engine's report differs from\nknown → move {mid}, known := it\n(while Outstanding too: one more move)
+    Synced -[IPC_BORDER]-> Synced : a push newer than seq →\nknown := it; [:show page]
+    Outstanding -[IPC_BORDER]-> Outstanding : a push newer than seq → held ·\nan ack that leaves out ≠ {}
+    Outstanding -[IPC_BORDER]-> Synced : the last ack → show the held push\nonly if it is newer than own-seq
+  }
+  state "Ended\nthe link is forgotten" as WEnded ERROR_TINT
+
+  [*] -[KEYMAP_BORDER]-> Opening : Shift+S (A)
+  [*] -[IPC_BORDER]-> Joining : vv:open-files {link} (B)
+  Opening -[IPC_BORDER]-> Live : joined → known = the start;\nthe interceptor runs once
+  Opening -[ERROR_BORDER]-> WEnded : refused (busy · not-focused ·\nnot-retained · invalid) → a chip
+  Joining -[RENDERER_BORDER]-> Live : the deck mounts → the show starts at\n:start; known = the start, so nothing is\nsent; vv:presenter-ready (moves nothing)
+  Live -[ERROR_BORDER]-> WEnded : ended {stop} — stop the show too ·\nmy own Escape / unmount → vv:presenter-leave
+  Joining -[ERROR_BORDER]-> WEnded : ended
+}
+
+legend right
+  |= Colour |= Fill: where the state is held · Arrow: what triggers it |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| fill: main's session model |
+  |<#7590DB>&#160;&#160;&#160;&#160;| fill: a window's app-db ([:ui :slides-link]) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| arrow: a message over the IPC seam |
+  |<#2D9574>&#160;&#160;&#160;&#160;| arrow: the window's own view — the deck mounting, the engine's report |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| arrow: a key the person presses |
+  |<#E0211D>&#160;&#160;&#160;&#160;| an end |
+  A push whose seq is not newer than the window's seq is dropped (ADR-0046's guard); an ack always clears its mid.
+endlegend
+@enduml

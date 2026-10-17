@@ -1,0 +1,55 @@
+@startuml seq-linked-show-last-move
+'' PlantUML over Mermaid: this is the argument of theory/11's convergence proof (Theorem 3), and the argument IS an
+'' ordering — what main sends after the last move it accepts, and what each window does with every message that can
+'' still arrive. A sequence diagram with phase dividers and notes states it exactly; PlantUML typesets the proof's
+'' symbols with LaTeX and renders the SVG byte-reproducibly (README §4); Mermaid does neither.
+'' Colours, from the shared palette: teal = a renderer window; slate = main; amber = the IPC seam (every IPC arrow is
+'' amber); the closing note is the renderer's fill because its conclusion is about what both windows show.
+!include _vv-theme.iuml
+
+title Why two linked windows converge (theory/11, Theorem 3): once main's last move <latex>M_n</latex> is delivered, nothing moves either window away from it
+
+autonumber "0:"
+
+participant "window <latex>o</latex>\n(it sent the last move)" as O RENDERER_TINT
+participant "main\n(the fixed sequencer)" as M MAIN_TINT
+participant "window <latex>v = \bar{o}</latex>\n(the other window)" as V RENDERER_TINT
+
+== the last move: o sends it, main numbers it n ==
+O -> O : the interceptor: what it shows differs from <latex>\mathit{known}_o</latex> →\n<latex>\mathit{known}_o := \pi_n</latex>, <latex>\mu \in \mathit{out}_o</latex>
+O -[IPC_BORDER]> M : move<latex>(\mu, \pi_n)</latex>
+M -> M : <latex>\mu > \mathit{lastMid}_o</latex> — Lemma 4.1: had o sent a later move, main\nwould have accepted it first and then refused this one → number <latex>n</latex>
+M -[IPC_BORDER]> O : ack<latex>(n, \mu, \mathit{accepted})</latex> — to the sender only
+M -[IPC_BORDER]> V : push<latex>(n, \pi_n)</latex> — to the other window
+
+== window o keeps showing its own move (Claim A) ==
+note over O
+  while <latex>\mu</latex> is on the way, a push is **held**, never shown (the hold)
+  ack<latex>(n)</latex> sets <latex>\mathit{seq}_o \geq n</latex> and <latex>\mathit{own}_o \geq n</latex>; o sends nothing more (Lemma 4.1)
+  a held push numbered <latex>s</latex>: <latex>s < n \leq \mathit{own}_o</latex>, so it is not shown (the held check)
+  a push that arrives later, numbered <latex>s \leq n \leq \mathit{seq}_o</latex>: dropped (the stale guard)
+end note
+
+== window v shows main's last move (Claim B) ==
+note over V
+  push<latex>(n)</latex> passes the stale guard: no message numbered <latex>n</latex> reached v before it
+  joining: <latex>\mathit{start} := (n, \pi_n)</latex>, and the deck mounts there
+  live, <latex>\mathit{out}_v = \varnothing</latex>: <latex>\pi_n</latex> is shown at once
+  live, <latex>\mathit{out}_v \neq \varnothing</latex>: held; at the last ack <latex>n > \mathit{own}_v</latex> (move <latex>n</latex> is o's), so <latex>\pi_n</latex> is shown
+  afterwards v sends nothing (Lemma 4.2), and every older push is dropped
+end note
+
+note over O, V #E3F2ED
+  in a quiescent state both windows have <latex>\mathit{known}_w = \pi_n</latex>, and with no report due the engine
+  shows <latex>\mathit{known}_w</latex> (Corollary 3.1): the windows have converged on main's last move —
+  for any delivery order, whatever pages the windows snap
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| a renderer window: its link state, its engine |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main: the session's sequencer |
+  |<#B1951D>&#160;&#160;&#160;&#160;| the IPC seam (vv:presenter-move, vv:presenter-state) |
+  <latex>\mu</latex> is o's own move counter (mid); <latex>n</latex> is main's; <latex>\pi_n</latex> is the position of move <latex>n</latex>.
+endlegend
+@enduml

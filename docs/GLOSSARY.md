@@ -438,12 +438,23 @@ Alphabetized. The mathematical foundations (semiring, transducer, WPDA, Earley) 
 [`theory/08 §7`](theory/08-common-document-ir.md) and [`theory/09 §11`](theory/09-document-streaming-and-the-wpda.md);
 these entries define the term and point to the page that develops it.
 
+**ack (linked show)** — Main's reply to the window whose **move** it received, on `vv:presenter-state`: the number
+(`seq`) main gave the move and the sender's own `mid` — or *not accepted*, for a move older than one main already took
+from that window. Only the sender gets it; the other window gets a **push**. A window that knows the numbers of its own
+moves can order a foreign move against them. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.4; proved in [`theory/11`](theory/11-linked-slide-show-protocol.md).*
+
 **anchor-id** — A collision-free, stable identifier `ir.meta` attaches to each IR node, so DOM ids do not
 churn as a streamed document grows. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
 
 **ANSI (back-end)** — The escape-sequence encoding the terminal renderer emits: SGR colour/style codes plus,
 where the terminal supports them, kitty/sixel graphics. `ir.backend.ansi` is the tty counterpart of
 `backend.html`. *First introduced in `theory/10-terminal-rendering-second-renderer.md`.*
+
+**audience window · audience view** — The *audience window* is the window main opens for a **linked show** (`S`):
+without taking the focus and, when the platform lets main place it, fullscreen on another display. The *audience view*
+is the slide-only view of any window — the **Slides layout** as ADR-0045 made it — as opposed to the **presenter
+view**; a single-window show starts in it, because its screen may be mirrored to a projector. Main closes the audience
+window when the show ends and never saves its bounds to `window.edn`. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.1 and §8.*
 
 **beam / beam width $`\beta`$** — The prune width bounding the WPDA streaming decoder's frontier;
 $`\textsf{prune}_\beta`$ keeps the $`\beta`$ lowest-weight configs. *First introduced in
@@ -489,6 +500,11 @@ shows one tile per frame. Not to be confused with a *rendering* frame (one displ
 config is $`(q, \gamma, w)`$ (state, stack, weight). *First introduced in
 `theory/09-document-streaming-and-the-wpda.md`.*
 
+**held push** — A **push** that reaches a window while its own **move** is still on the way. It is kept, not shown:
+once the window's moves are all acknowledged it is shown only if it is newer than the window's own last accepted move —
+otherwise main ordered the window's move after it, and showing it would take the window back to a superseded slide.
+*First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.4; [`theory/11`](theory/11-linked-slide-show-protocol.md) §3.3.*
+
 **hunk** — A contiguous change region in a unified diff, headed by an `@@ … @@` range line. *First introduced
 in `features/28-diff-rendering.md`.*
 
@@ -503,6 +519,23 @@ raster images inline where supported; otherwise images degrade to a text placeho
 **known_hosts / TOFU (trust-on-first-use)** — SSH host-key verification: a presented host key is checked
 against `~/.ssh/known_hosts`; an unknown host prompts once and is appended on accept; a **changed** key is a
 hard reject. *First introduced in `features/29-remote-files-over-ssh.md`; ADR-0027.*
+
+**linked show (session)** — Two windows of one deck whose slide shows move together, started with `S` (Shift+S) in
+the presenter's window. Main runs it as a *session* (`vinary.main.slides-link`): the members and their roles, a move
+counter `seq`, and the authoritative position. Either window drives — keys, clicks, the overview, links, find,
+blanking — and Escape in either ends it. Its protocol converges, never echoes and never undoes a move, for any delivery
+order of the messages. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8; proved and model-checked in [`theory/11`](theory/11-linked-slide-show-protocol.md).*
+
+**move (linked show)** — A window's new *position* — a physical page index and a blank colour — sent to main on
+`vv:presenter-move` with the window's own counter `mid`. It is always a whole position, never a step, so the last move
+main accepted is the show's state. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.4.*
+
+**note page** — A whole page of **speaker notes** placed after the overlay it belongs to — or after a frame, for a
+`\note` written between frames, so two can follow each other — as Beamer's `\setbeameroption{show notes}` produces,
+and labelled with its *physical* page number. That label is how the label automaton of `vinary.slides.notes` finds
+it; a deck without page labels is scanned in the background instead. In the
+Slides layout a note page leaves the audience's sequence and appears in the **presenter view**. *First introduced in
+[ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1–§3.*
 
 **overlay (Beamer)** — One page of a Beamer **frame**: one build step, produced by `\pause` or by an overlay
 specification such as `<2->`. In the **Slides layout**, → steps one overlay and Shift+→ skips the frame's remaining
@@ -522,11 +555,24 @@ returns from. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-p
 composites at least 5 animation frames in 300 ms. A hidden window draws about one frame a second, so a measurement there is of no
 window a user could see. *First introduced in `scientific/10-input-latency-experiments.md` §12.*
 
+**pdfpc** — A presenter console for PDF slides (<https://github.com/pdfpc/pdfpc>). vinary-viewer reads what pdfpc
+reads — its `\pdfpcnote` annotations, its `pdfpc:` XMP keys and its sidecar file `talk.pdfpc` beside the PDF — with
+pdfpc's semantics for the notes position, the timer, the end slide and hidden pages, and never writes any of them.
+*First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §4–§5.*
+
+**presenter view** — The layout `s` toggles during a show or in the Slides layout: the current slide on the left, and
+a pane (`vinary.ui.slides-presenter`) holding the timer, the frame counter, the current slide's **speaker notes** and
+the next slide. In a **linked show** it is the presenter window's view. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
+
 **presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)
 and recorded in `[:ui :presentation]`: the **Slides layout** without a margin, the app chrome hidden by CSS
 (`.vv-root.vv-presenting`) and, by default, the window made fullscreen by main — which only ever leaves a fullscreen
 it entered. The app's own prompts stay above the show; Escape unwinds it one step at a time.
 *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §5.*
+
+**push (linked show)** — Main's copy of an accepted **move**, sent on `vv:presenter-state` to every member except the
+sender, with the number main gave the move. A window drops a push that is not newer than what it has seen (ADR-0046's
+rule) and holds one that arrives while its own move is on the way (a **held push**). *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.4.*
 
 **reflow (PDF)** — An opt-in view (View ▸ Reflow Text) rendering a PDF's extracted text as reflowable prose
 through the page/block/line/run IR facet, augmenting — never replacing — the faithful canvas render. *First
@@ -562,6 +608,18 @@ sheet (`.vv-pdf-sheet`) is centred in its slot at the page's own fit, and showin
 top of slot $`i`$. Because the slots keep every page in the DOM, find, links and the Contents outline work unchanged.
 *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §3.*
 
+**snap (hidden page)** — What a window does with a page it does not show, such as a **note page**: it shows the
+nearest shown page *below* it. A snap only ever moves down, so two windows that disagree for a while about which pages
+are hidden cannot correct each other for ever. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §3; why it must move down: [`theory/11`](theory/11-linked-slide-show-protocol.md) §5.6.*
+
+**speaker notes** — What the presenter reads and the audience does not see: **split notes**, **note pages** or **text
+notes**, located by the pure notes model `vinary.slides.notes` and shown in the **presenter view**. *First introduced in
+[ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1.*
+
+**split notes** — Speaker notes on one half of every page, as Beamer's `show notes on second screen=<side>`
+produces; the other half is the slide. The audience sees the slide half, and the presenter view renders the notes
+half. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §9; [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1.*
+
 **SSH / SFTP (`ssh://`, `sftp://`)** — The remote **virtual backend**: a remote URI opens through the same
 pipeline, renderers, streaming, and refresh as a local path, main-side only. *First introduced in
 `features/29-remote-files-over-ssh.md`; ADR-0027.*
@@ -578,6 +636,11 @@ window a claim shows is current. No action ever targets it. *First introduced in
 **StreamParser** — The pure `feed`/`finish` protocol (`vinary.stream.protocol`) that emits only
 newly-completed IR blocks and retains only the open block — the node-testable heart of streaming. *First
 introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**text notes** — Speaker notes carried as text: the `/Contents` of a page's `/Text`, `/FreeText`, `/Highlight`,
+`/Underline` and `/Squiggly` annotations — the types **pdfpc** reads, and the hidden `/Text` annotations its
+`\pdfpcnote` writes — and the notes of the pdfpc sidecar file. They are rendered as sanitized Markdown for a deck that
+carries pdfpc metadata, as plain text otherwise, and never as raw HTML. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §4.*
 
 **torn read** — A read of a file taken while its writer is rewriting it in place, which returns bytes that match no
 finished version — typically a prefix of the new file. pdflatex, lualatex and xelatex rewrite their PDF in place, and

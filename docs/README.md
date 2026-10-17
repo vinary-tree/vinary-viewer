@@ -103,6 +103,9 @@ invariants — independent of any one file. Read it in order:
 10. [`theory/10-terminal-rendering-second-renderer.md`](theory/10-terminal-rendering-second-renderer.md)
     — the terminal (`vv-cli` / `vv-tui`) as a **second renderer** over the same IR
     and streaming spine; ANSI back-end, kitty/sixel graphics, headless PDF reflow.
+11. [`theory/11-linked-slide-show-protocol.md`](theory/11-linked-slide-show-protocol.md)
+    — two windows driving **one slide show**: main as a fixed sequencer, acks to the sender and
+    pushes to the other window; proofs (for any delivery order) and a TLA+ model checked by TLC.
 
 Then read the **architecture pillar** for the concrete realisation:
 
@@ -158,6 +161,7 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`theory/08-common-document-ir.md`](theory/08-common-document-ir.md) | theory | One tagged IR per format; semiring/WPDA/tree-transducer; single sanitizer; byte-parity |
 | [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md) | theory | Document as a bounded-memory stream; WPDA log grammar; StreamParser; append sink |
 | [`theory/10-terminal-rendering-second-renderer.md`](theory/10-terminal-rendering-second-renderer.md) | theory | Terminal as a second renderer over the shared IR/streaming spine; ANSI back-end; kitty/sixel |
+| [`theory/11-linked-slide-show-protocol.md`](theory/11-linked-slide-show-protocol.md) | theory | Two linked slide-show windows: a fixed sequencer, acks and pushes, the held push; proofs for any delivery order; TLA+/TLC with seven negative controls |
 | [`architecture/01-overview.md`](architecture/01-overview.md) | architecture | System-level component map |
 | [`architecture/02-process-and-build-topology.md`](architecture/02-process-and-build-topology.md) | architecture | Two Electron processes; the two shadow-cljs builds |
 | [`architecture/03-ipc-protocol.md`](architecture/03-ipc-protocol.md) | architecture | The `vv:*` channels and payload shapes |
