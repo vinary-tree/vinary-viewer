@@ -506,6 +506,55 @@ for the difference of the pooled medians [EFRON], with B = 10 000 resamples and 
   next sequence. Their summaries were restored verbatim from the instrument's printed output, and the replication
   (§8.5) re-measures A in full.
 
+### 8.7 · The wheel: what a notch is, measured (2026-10-17)
+
+**Question.** The wheel flips a slide the way pdf.js's presentation mode does: each event's delta is normalized,
+accumulated, and one slide flips when the sum reaches $`\theta = 0.1`$ (§2's wheel rule; `deck/wheel-step`). How
+many notches of a real mouse wheel does a flip take?
+
+**A defect, found in review.** The normalization divided a pixel delta by 1 200 — "30 px per line × 40 lines" — while
+citing pdf.js. pdf.js's own `normalizeWheelEventDelta` (pdfjs-dist 5.4.149, `web/pdf_viewer.mjs`) divides by
+`MOUSE_PIXELS_PER_LINE × MOUSE_LINES_PER_PAGE` = 30 × 30 = **900**.
+
+**Instrument.** [`scripts/probe-wheel-notch.cjs`](../../scripts/probe-wheel-notch.cjs) opens a bare Electron window on
+the headless runner's Xvfb display and presses the wheel buttons with `xdotool` — the X server's own wheel events —
+recording every `WheelEvent`, at four window zoom factors (`setZoomFactor`). Raw data:
+[`data/12/wheel-notch-2026-10-17.txt`](data/12/wheel-notch-2026-10-17.txt).
+
+| Zoom | `deltaY` per notch (CSS px) | `deltaMode` | `devicePixelRatio` |
+|---|---|---|---|
+| 1 | 120 | 0 (pixels) | 1 |
+| 1.25 | 96 | 0 | 1.25 |
+| 1.5 | 80 | 0 | 1.5 |
+| 0.8 | 150 | 0 | 0.8 |
+
+One notch is one event of **120 device-independent pixels**, reported in CSS pixels, $`120 / z`$ at zoom $`z`$
+(Electron 42.5.0, Chrome 148, X11).
+
+**Consequence, by arithmetic.** With the old divisor, a notch at 100 % gave exactly $`120/1200 = \theta`$ — a flip by
+floating-point equality — and at 125 % or 150 % zoom ($`0.08`$, $`0.067`$) **two notches per slide**. pdf.js's
+divisor alone would fix 125 % ($`96/900 \approx 0.107`$) but not 150 % ($`80/900 \approx 0.089`$).
+
+**Change.** `deck/wheel-notches` normalizes as pdf.js does, and first scales a pixel delta back to device-independent
+pixels by the window zoom (`[:ui :window-zoom]`):
+
+```math
+n = \frac{\pm\sqrt{\Delta x^2 + \Delta y^2}\cdot z}{900}\ \text{(pixels)},\qquad
+n = \frac{\pm\sqrt{\Delta x^2 + \Delta y^2}}{30}\ \text{(lines)},
+```
+
+positive towards the next slide. Every measured notch is then $`n = 120/900 \approx 0.133 \ge \theta`$ at every zoom:
+one flip per notch, and the cooldown keeps it to one. A trackpad still accumulates: twelve-pixel steps flip on the
+eighth.
+
+**Guards and negative control.** `deck_test`'s `one-wheel-notch-flips-one-slide` runs five notches at each measured
+zoom, plus a 100-pixel notch, and requires five flips each. On the same cases the old formula flips only every
+other notch at 125 % and 150 % and for the 100-pixel notch: three of the five fail. `wheel-notches-normalizes-as-pdf-js-and-undoes-the-zoom`
+pins the units, the sign and the zoom-independence.
+
+**Threats.** Only X11 was measured. Wayland, macOS and Windows deliver their own notch sizes, which the normalization
+handles alike as long as a notch is at least 90 device-independent pixels; a smaller notch takes two.
+
 ## 9 · Refuted (kept)
 
 - **The flip model's baseline estimate** (median ≈ 10 ms): the baseline measured 24.3 ms. The model was right about
@@ -522,6 +571,7 @@ for the difference of the pooled medians [EFRON], with B = 10 000 resamples and 
 | the view-moving commands are all immediate, `run` routes them, `dispatch-now!` falls back inside a handler, and the shortcut is sound | `test/vinary/app/slides_keys_test.cljs` |
 | `--deck-info` evidence and verdicts on a real Beamer deck, a PowerPoint-shaped export and an ordinary PDF; a missing file reported without stopping the rest | `test/cli-smoke.js` |
 | the flip bounds H-flip-1…4 (a manual, pinned run) | `npm run bench:flip` |
+| one wheel notch flips one slide at every measured zoom (§8.7) | `test/vinary/slides/deck_test.cljs` |
 
 ## 11 · Reproduction
 
@@ -533,6 +583,7 @@ fd -t f -e pdf --no-ignore --exclude node_modules --exclude .git . ~ > /tmp/pdfs
 node scripts/exp-deck-local-corpus.cjs --list=/tmp/pdfs.txt --raw=/tmp/deck-info.jsonl --json=summary.json < /dev/null
 npm run compile
 taskset -c 2-9 env VV_BENCH_JSON=flip.json npm run bench:flip | tee flip.txt
+node scripts/run-electron-headless.mjs --backend=x11 electron --no-sandbox scripts/probe-wheel-notch.cjs | tee wheel.txt
 node scripts/analyze-flip-runs.cjs --ref=A flip-ABC-*.json | tee analysis.txt
 ```
 

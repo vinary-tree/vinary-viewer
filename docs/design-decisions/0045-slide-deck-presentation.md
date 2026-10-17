@@ -243,9 +243,12 @@ number.
 **Input mappings**, all pure and unit-tested:
 
 - `scroll->op` turns a scroll command into a slide op (§4).
-- `wheel-step` follows pdf.js's presentation mode [PDFJS-PM]. A wheel event's delta $`d`$ is normalized to notches
-  — the length of $`(\Delta x, \Delta y)`$ divided by 1 200 for pixel deltas or by 30 for line deltas, positive
-  towards the next slide. An accumulator $`a`$ is reset to 0 when $`d`$ has the opposite sign, then
+- `wheel-step` follows pdf.js's presentation mode [PDFJS-PM]. A wheel event's delta $`d`$ is normalized as pdf.js
+  normalizes it (`wheel-notches`) — the length of $`(\Delta x, \Delta y)`$ divided by 900 (30 px per line × 30 lines)
+  for pixel deltas or by 30 for line deltas, positive towards the next slide — after scaling a pixel delta back by the
+  window zoom, since Chromium reports a notch's 120 device-independent pixels as $`120/z`$ CSS pixels at zoom $`z`$
+  (experiment 12 §8.7; the divisor was 1 200 until that review, which put a 100 % notch exactly on the threshold
+  and made a zoomed-in window take two notches per slide). An accumulator $`a`$ is reset to 0 when $`d`$ has the opposite sign, then
   $`a \gets a + d`$; when $`|a| \ge 0.1`$ one slide flips and $`a \gets 0`$, and wheel input is ignored for 50 ms
   after a flip, so one trackpad fling cannot skip several slides.
 - `swipe-op` classifies a touch or pen gesture (§11).

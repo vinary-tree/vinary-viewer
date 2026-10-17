@@ -217,6 +217,40 @@
     (is (= -0.05 (:acc s'))))
   (is (= :prev (:op (deck/wheel-step {} -0.2 0)))))
 
+(defn- near? [a b] (< (js/Math.abs (- a b)) 1e-9))
+
+(deftest wheel-notches-normalizes-as-pdf-js-and-undoes-the-zoom
+  (testing "pdf.js's units: pixels ÷ 900 (30 px per line × 30 lines), lines ÷ 30, pages as they are"
+    (is (near? (/ 120 900) (deck/wheel-notches {:dy 120 :mode 0 :zoom 1})))
+    (is (near? (/ 3 30) (deck/wheel-notches {:dy 3 :mode 1})))
+    (is (= 1 (deck/wheel-notches {:dy 1 :mode 2}))))
+  (testing "signed towards the next slide: down and right are positive, up and left negative"
+    (is (pos? (deck/wheel-notches {:dy 120 :mode 0})))
+    (is (neg? (deck/wheel-notches {:dy -120 :mode 0})))
+    (is (pos? (deck/wheel-notches {:dx 120 :mode 0})))
+    (is (neg? (deck/wheel-notches {:dx -120 :mode 0})))
+    (is (zero? (deck/wheel-notches {:dx 0 :dy 0 :mode 0}))))
+  (testing "a notch is the same notch at any window zoom — Chromium's measured CSS-pixel deltas (docs/scientific/12 §8.7)"
+    (doseq [[zoom dy] [[1 120] [1.25 96] [1.5 80] [0.8 149.99999776482585]]]
+      (is (< (js/Math.abs (- (/ 120 900) (deck/wheel-notches {:dy dy :mode 0 :zoom zoom}))) 1e-6) (str "zoom " zoom)))))
+
+(deftest one-wheel-notch-flips-one-slide
+  (testing "every measured notch, at every zoom, and a smaller 100-px notch: one flip per notch, none skipped"
+    (doseq [[zoom dy] [[1 120] [1.25 96] [1.5 80] [0.8 149.99999776482585] [1 100]]]
+      (let [ops (loop [s {} t 1000 n 5 ops []]
+                  (if (zero? n)
+                    ops
+                    (let [{s' :state op :op} (deck/wheel-step s (deck/wheel-notches {:dy dy :mode 0 :zoom zoom}) t)]
+                      (recur s' (+ t 250) (dec n) (conj ops op)))))]
+        (is (= (repeat 5 :next) ops) (str "zoom " zoom ", " dy " px")))))
+  (testing "a trackpad's small deltas accumulate: 12 px at a time flips on the 8th event (96 px), not before"
+    (let [ops (loop [s {} t 1000 n 8 ops []]
+                (if (zero? n)
+                  ops
+                  (let [{s' :state op :op} (deck/wheel-step s (deck/wheel-notches {:dy 12 :mode 0 :zoom 1}) t)]
+                    (recur s' (+ t 16) (dec n) (conj ops op)))))]
+      (is (= (concat (repeat 7 nil) [:next]) ops)))))
+
 ;; ---- overview -------------------------------------------------------------------------------------------
 
 (deftest overview-tiles-one-per-frame

@@ -404,14 +404,43 @@
   "Accumulated normalized wheel delta that flips one slide (pdf.js presentation mode's PAGE_SWITCH_THRESHOLD)."
   0.1)
 
+(def wheel-pixels-per-unit
+  "Wheel pixels per normalized unit: pdf.js normalizeWheelEventDelta's MOUSE_PIXELS_PER_LINE (30) × its
+   MOUSE_LINES_PER_PAGE (30). A mouse-wheel notch is 120 device-independent pixels in Chromium on Linux/X11
+   (measured, docs/scientific/12 §8.7), so it is one flip — 120/900 ≈ 0.133, clear of the threshold, where the old
+   ÷ 1200 sat exactly ON it — and so is any notch of at least 90 pixels."
+  900)
+
+(def wheel-lines-per-unit
+  "Wheel lines per normalized unit (pdf.js's MOUSE_LINES_PER_PAGE): a browser that scrolls a notch as 3 lines
+   reaches the threshold in one notch."
+  30)
+
+(defn wheel-notches
+  "One wheel event's delta {:dx :dy :mode :zoom} in pdf.js's normalized units (normalizeWheelEventDelta), signed
+   TOWARDS THE NEXT SLIDE: the length of the (dx, dy) vector, positive when scrolling down or right. A pixel delta
+   (mode 0) is first scaled back to device-independent pixels by the window `zoom`: Chromium reports it in CSS
+   pixels, a notch's 120 divided by the zoom (measured: 96 at 125 %, 80 at 150 %), so without this a zoomed-in
+   window would need two notches per slide. Then pixels ÷ wheel-pixels-per-unit, lines (mode 1) ÷
+   wheel-lines-per-unit, and pages (mode 2) as they are."
+  [{:keys [dx dy mode zoom]}]
+  (let [dx    (or dx 0)
+        dy    (or dy 0)
+        len   (js/Math.hypot dx dy)
+        angle (js/Math.atan2 dy dx)
+        d     (if (and (< (* -0.25 js/Math.PI) angle) (< angle (* 0.75 js/Math.PI))) len (- len))]
+    (case mode
+      0 (/ (* d (or zoom 1)) wheel-pixels-per-unit)
+      1 (/ d wheel-lines-per-unit)
+      d)))
+
 (def wheel-cooldown-ms
   "After a wheel flip, ignore wheel input for this long (pdf.js MOUSE_SCROLL_COOLDOWN_TIME) so one trackpad
    fling cannot skip several slides."
   50)
 
 (defn wheel-step
-  "Accumulate one normalized wheel `delta` (positive = towards the next slide; pixel deltas ÷ 1200, line deltas
-   ÷ 30 — pdf.js normalizeWheelEventDelta) at time `now` (ms). State {:acc :last} where :last is the time of the
+  "Accumulate one normalized wheel `delta` (wheel-notches: positive = towards the next slide) at time `now` (ms). State {:acc :last} where :last is the time of the
    last flip. Returns {:state state' :op :next|:prev|nil}. The accumulator resets when the direction changes."
   [{:keys [acc last] :or {acc 0 last -1e15}} delta now]
   (cond

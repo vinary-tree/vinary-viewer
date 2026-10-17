@@ -556,6 +556,11 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - In a slide show, one notch of the mouse wheel now flips one slide at any
+      window zoom. The wheel's scaling was not pdf.js's: a notch landed exactly
+      on the flip threshold at 100 % zoom, and a zoomed-in window (125 %,
+      150 %) took two notches per slide. Wheel deltas are now normalized as
+      pdf.js's presentation mode does, after undoing the window zoom.
     - A document can no longer stop live-refreshing for good because a window
       closed at the wrong moment. If a window was destroyed just as a new
       version was being sent to it, the read that should have followed was

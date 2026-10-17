@@ -78,8 +78,9 @@ slide keys is added on top.
 | During a show: black / white screen | `b` `.` / `w` `,` | the same | the same |
 | Cancel, one step at a time | Escape, Ctrl+G | Escape | Escape, `C-g` |
 
-- **The mouse and touch.** The mouse wheel and a trackpad flip slides one at a time: after each flip the wheel rests
-  for 50 ms, so one fling cannot skip several slides. During a show a click advances and Shift+click goes back — not on a link, not when it ends a text selection or a drag. On a touch
+- **The mouse and touch.** The mouse wheel and a trackpad flip slides one at a time: one notch of a mouse wheel is
+  one slide at any window zoom (about 90 device-independent pixels of scrolling flip one, as in pdf.js's
+  presentation mode), and after each flip the wheel rests for 50 ms, so one fling cannot skip several slides. During a show a click advances and Shift+click goes back — not on a link, not when it ends a text selection or a drag. On a touch
   screen or with a pen, a quick, mostly horizontal swipe of at least 48 px flips a slide (leftward forward); a mouse
   drag selects text instead.
 - **Typing a number.** A "Go to 12" chip shows what you typed. The number names the label printed on a Beamer slide

@@ -2098,8 +2098,9 @@ async function main() {
     await evalIn(win, `window.__vvslides('prev-frame')`);
     s = await at('prev-frame shows the previous frame fully built');
     assert.strictEqual(s.page, 3, 'prev-frame lands on the LAST overlay of frame 2 (page 4)');
-    // the wheel: one notch-sized flick flips exactly one slide (pdf.js presentation-mode accumulation)
-    await evalIn(win, `document.querySelector('.vv-content').dispatchEvent(new WheelEvent('wheel', { deltaY: 240, deltaMode: 0, bubbles: true })); true`);
+    // the wheel: ONE notch flips exactly one slide (pdf.js presentation-mode accumulation) — 120 px, the notch Chromium
+    // delivers on X11 at 100 % zoom (docs/scientific/12 §8.7)
+    await evalIn(win, `document.querySelector('.vv-content').dispatchEvent(new WheelEvent('wheel', { deltaY: 120, deltaMode: 0, bubbles: true })); true`);
     s = await at('a wheel notch flips one slide');
     assert.strictEqual(s.page, 4, 'the wheel advanced one slide');
     await evalIn(win, `window.__vvslides('last')`);

@@ -43,7 +43,8 @@ const jsFiles = [
   // the deck-detection corpus instruments behind docs/scientific/12 (ADR-0045)
   'scripts/exp-deck-corpus.cjs', 'scripts/exp-deck-export-corpus.cjs', 'scripts/exp-deck-local-corpus.cjs',
   // the slide-flip latency benchmark of docs/scientific/12 and its analysis
-  'scripts/bench-slide-flip.cjs', 'scripts/analyze-flip-runs.cjs',
+  'scripts/bench-slide-flip.cjs', 'scripts/analyze-flip-runs.cjs', 'scripts/probe-wheel-notch.cjs',
+  'scripts/bench-tree-scopes.cjs',
   // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools
   'scripts/profile-cold-start.mjs', 'scripts/sync-assets.mjs', 'scripts/check-assets.mjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the

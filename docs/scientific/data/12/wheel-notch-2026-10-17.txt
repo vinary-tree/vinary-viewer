@@ -1,0 +1,55 @@
+# docs/scientific/12 §8.7 — one mouse-wheel notch as a DOM WheelEvent, at four window zoom factors (2026-10-17)
+#
+# node scripts/run-electron-headless.mjs --backend=x11 electron --no-sandbox scripts/probe-wheel-notch.cjs
+# Xvfb (X11) display from the headless runner; xdotool presses buttons 5 (down) / 4 (up), 3 notches per direction.
+# Machine: AMD Ryzen Threadripper PRO 5975WX, Linux 7.2.9-arch1-1; xdotool version 4.20260303.1.
+#
+{
+    "display": ":99",
+    "electron": "42.5.0",
+    "chrome": "148.0.7778.271",
+    "zoom 1 down": [
+        "dy 120 mode 0 wdy -120",
+        "dy 120 mode 0 wdy -120",
+        "dy 120 mode 0 wdy -120"
+    ],
+    "zoom 1 up": [
+        "dy -120 mode 0 wdy 120",
+        "dy -120 mode 0 wdy 120",
+        "dy -120 mode 0 wdy 120"
+    ],
+    "zoom 1 devicePixelRatio": 1,
+    "zoom 1.25 down": [
+        "dy 96 mode 0 wdy -96",
+        "dy 96 mode 0 wdy -96",
+        "dy 96 mode 0 wdy -96"
+    ],
+    "zoom 1.25 up": [
+        "dy -96 mode 0 wdy 96",
+        "dy -96 mode 0 wdy 96",
+        "dy -96 mode 0 wdy 96"
+    ],
+    "zoom 1.25 devicePixelRatio": 1.25,
+    "zoom 1.5 down": [
+        "dy 80 mode 0 wdy -80",
+        "dy 80 mode 0 wdy -80",
+        "dy 80 mode 0 wdy -80"
+    ],
+    "zoom 1.5 up": [
+        "dy -80 mode 0 wdy 80",
+        "dy -80 mode 0 wdy 80",
+        "dy -80 mode 0 wdy 80"
+    ],
+    "zoom 1.5 devicePixelRatio": 1.5,
+    "zoom 0.8 down": [
+        "dy 149.99999776482585 mode 0 wdy -149",
+        "dy 149.99999776482585 mode 0 wdy -149",
+        "dy 149.99999776482585 mode 0 wdy -149"
+    ],
+    "zoom 0.8 up": [
+        "dy -149.99999776482585 mode 0 wdy 149",
+        "dy -149.99999776482585 mode 0 wdy 149",
+        "dy -149.99999776482585 mode 0 wdy 149"
+    ],
+    "zoom 0.8 devicePixelRatio": 0.800000011920929
+}

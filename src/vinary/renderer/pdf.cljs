@@ -845,18 +845,11 @@
       (report! state))))
 
 (defn- normalize-wheel
-  "pdf.js's normalizeWheelEventDelta, signed TOWARDS THE NEXT SLIDE: the length of the (dx, dy) vector, positive
-   when scrolling down/right, in notch units — pixel deltas ÷ 1200 (30 px per line × 40 lines), line deltas ÷ 30."
+  "A wheel event in pdf.js's normalized units, signed towards the next slide (deck/wheel-notches), its pixel deltas
+   scaled back by this window's zoom so a notch is a notch at any zoom."
   [^js e]
-  (let [dx    (.-deltaX e)
-        dy    (.-deltaY e)
-        len   (js/Math.hypot dx dy)
-        angle (js/Math.atan2 dy dx)
-        d     (if (and (< (* -0.25 js/Math.PI) angle) (< angle (* 0.75 js/Math.PI))) len (- len))]
-    (case (.-deltaMode e)
-      0 (/ d 1200)
-      1 (/ d 30)
-      d)))
+  (deck/wheel-notches {:dx (.-deltaX e) :dy (.-deltaY e) :mode (.-deltaMode e)
+                       :zoom (get-in @rfdb/app-db [:ui :window-zoom] 1.0)}))
 
 (defn- step!
   "Run slide op `op` from an input — a key (through the scroll delegate), the wheel, a swipe — on this view. At once
