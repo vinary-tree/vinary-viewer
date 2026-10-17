@@ -1,0 +1,16 @@
+ 22:43:11 up 4 days,  6:10,  1 user,  load average: 15.50, 26.33, 25.56
+# bench-remote-read 2026-10-17T02:43:11.936Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4286059kHz max=4561833kHz  pid 3396608's current affinity list: 2-5
+# sizes=8M,32M rtts=10 idents=openssh,ssh2 readers=readable-discard,readable runs≤5 budget=60s warmup=1 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: LIVE — gc() before every 5 ms sample: dAB = the read's live footprint; timings perturbed, not comparable
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+openssh   10    8M  readable-discard      5       101.7     154.0   113.5±24.3        78.66   230.2         2.8      2.5         8.3   1300
+openssh   10    8M  readable              5       105.3     111.3    107.2±3.1        75.95   246.8        16.5     16.2         7.7   1300
+openssh   10   32M  readable-discard      5       290.3     331.2   295.1±21.4       110.23   626.8         2.8      2.5         9.6   5140
+openssh   10   32M  readable              5       341.1     352.1   336.8±13.5        93.81   767.5        64.6     64.2        10.9   5140
+ssh2      10    8M  readable-discard      5       108.2     140.2   113.2±15.3        73.96   229.6         3.3      2.9         9.9   3860
+ssh2      10    8M  readable              5       129.3     143.9   127.2±16.1        61.86   326.6        19.0     18.6        16.7   3860
+ssh2      10   32M  readable-discard      5       348.7     377.0   342.4±28.9        91.78   786.4         3.3      2.9        13.7  15380
+ssh2      10   32M  readable              5       371.2     383.6   362.5±24.0        86.21   829.6        77.7     77.3        22.6  15380
+# wrote docs/scientific/data/11/s7-memory.json
+ 22:43:28 up 4 days,  6:10,  1 user,  load average: 16.23, 25.96, 25.45

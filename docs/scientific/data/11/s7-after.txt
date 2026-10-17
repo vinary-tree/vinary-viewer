@@ -1,0 +1,44 @@
+ 22:39:21 up 4 days,  6:06,  1 user,  load average: 29.69, 33.15, 26.68
+# bench-remote-read 2026-10-17T02:39:21.356Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4283535kHz max=4561833kHz  pid 3318303's current affinity list: 2-5
+# sizes=1M,8M,32M rtts=0,10,50 idents=openssh,ssh2 readers=readable runs≤5 budget=30s warmup=1 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+openssh    0    1M  readable              5         7.4      12.7      8.8±2.4       134.94     8.0         8.0      7.7         3.8      0
+openssh    0    8M  readable              5        23.0      28.6     24.3±3.0       347.26    40.9        45.7     45.4         6.0      0
+openssh    0   32M  readable              5        95.9     106.5     95.9±7.5       333.66   176.4        94.6     94.2        10.6      0
+openssh   10    1M  readable              5        39.2      40.6     39.4±1.2        25.51     7.6         8.4      8.0         2.3    180
+openssh   10    8M  readable              5        94.7     120.2    99.8±11.8        84.47    75.9        32.2     31.8         6.0   1300
+openssh   10   32M  readable              5       275.0     310.7   281.5±17.6       116.38   283.4        74.1     73.8         5.2   5140
+openssh   50    1M  readable              5       160.9     161.5    160.7±0.8         6.21    11.6         8.5      8.0         2.5    900
+openssh   50    8M  readable              5       379.7     384.6    378.5±6.5        21.07    84.0        26.0     25.5         2.7   6500
+openssh   50   32M  readable              5      1037.1    1069.3  1038.7±18.4        30.86   341.4        72.9     72.4         3.4  25700
+ssh2       0    1M  readable              5        11.8      15.3     12.7±2.0        84.79    13.1        33.6      5.4         4.0      0
+ssh2       0    8M  readable              5        37.2      48.7     39.0±5.9       215.22    55.9        33.2     30.1         9.9      0
+ssh2       0   32M  readable              5       128.6     164.5   140.7±19.1       248.89   206.2        94.9     94.3        13.7      0
+ssh2      10    1M  readable              5        46.0      64.1     48.7±9.4        21.74    13.6        39.1      6.6         4.9    500
+ssh2      10    8M  readable              5       104.6     131.1   106.4±15.6        76.45    79.7        27.1     25.4         6.5   3860
+ssh2      10   32M  readable              5       333.4     346.8   315.2±32.5        95.98   290.9        81.8     81.2         8.0  15380
+ssh2      50    1M  readable              5       170.0     176.0    169.7±5.0         5.88    19.9        35.8      5.5         3.3   2500
+ssh2      50    8M  readable              5       393.1     406.4   390.7±12.8        20.35   100.2        28.3     25.9         3.7  19300
+ssh2      50   32M  readable              5      1070.6    1085.1  1070.1±10.9        29.89   357.4        85.4     84.7         4.6  76900
+# wrote docs/scientific/data/11/s7-after.json
+# bench-remote-read 2026-10-17T02:40:02.258Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=3433125kHz max=4561833kHz  pid 3342213's current affinity list: 2-5
+# sizes=1M,8M rtts=0,10,50 idents=openssh,ssh2 readers=readable-legacy runs≤5 budget=30s warmup=1 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+openssh    0    1M  readable-legacy       5        14.3      15.8     13.9±2.1        70.05    11.9         5.3      5.0         2.1      0
+openssh    0    8M  readable-legacy       5        77.0      92.5    79.3±10.5       103.85    64.7        40.4     39.3         6.2      0
+openssh   10    1M  readable-legacy       5       203.1     219.7    205.7±8.3         4.92    13.7        17.6      5.5         2.2    180
+openssh   10    8M  readable-legacy       5      1480.0    1507.8  1479.6±22.8         5.41   134.6        22.5     22.0         1.8   1300
+openssh   50    1M  readable-legacy       5       930.6     945.5    933.0±7.1         1.07    33.3         6.5      5.5         1.6    900
+openssh   50    8M  readable-legacy       5      6780.0    6784.9  6772.5±14.5         1.18   272.7        25.7     25.2         1.5   6500
+ssh2       0    1M  readable-legacy       5        15.7      17.5     15.5±1.7        63.68     8.8        18.0      4.0         4.0      0
+ssh2       0    8M  readable-legacy       5        85.0     102.5     86.9±9.8        94.16    71.3        25.6     25.0         5.2      0
+ssh2      10    1M  readable-legacy       5       538.2     548.3    540.7±5.4         1.86    25.1         4.6      4.0         1.9    500
+ssh2      10    8M  readable-legacy       5      4165.7    4225.0  4178.1±29.5         1.92   201.8        21.7     21.0         2.0   3860
+ssh2      50    1M  readable-legacy       5      2554.9    2557.9   2552.3±5.9         0.39    72.8        18.5      4.0         1.5   2500
+ssh2      50    8M  readable-legacy       3     19692.8   20009.8 19797.4±183.9         0.41   508.1        17.6     16.9         1.6  19300
+# wrote docs/scientific/data/11/s7-after-legacy.json
+ 22:43:11 up 4 days,  6:10,  1 user,  load average: 15.50, 26.33, 25.56

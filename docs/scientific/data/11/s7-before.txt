@@ -1,0 +1,32 @@
+ 22:23:24 up 4 days,  5:50,  1 user,  load average: 23.73, 18.67, 14.50
+# bench-remote-read 2026-10-17T02:23:24.308Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=3432955kHz max=4561833kHz  pid 3039395's current affinity list: 2-5
+# sizes=1M,8M rtts=0,10,50 idents=openssh,ssh2 readers=readable,readable-legacy runs≤5 budget=30s warmup=1 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+openssh    0    1M  readable              5        18.9      24.4     17.0±5.8        53.00    12.7         5.4      5.0         3.9      0
+openssh    0    1M  readable-legacy       5        14.7      33.4     17.6±9.1        68.22     8.9         5.4      5.0         5.5      0
+openssh    0    8M  readable              5        75.7      80.5     72.6±9.7       105.66    74.5        40.4     40.0         6.8      0
+openssh    0    8M  readable-legacy       5        76.2      99.5    78.2±12.9       104.99    74.4        40.5     40.1         6.6      0
+openssh   10    1M  readable              5       226.7     239.9    226.1±9.1         4.41    28.5        21.9      5.5         3.3    180
+openssh   10    1M  readable-legacy       5       221.0     253.9   226.2±15.8         4.53    23.9         5.9      5.5         3.4    180
+openssh   10    8M  readable              5      1577.3    1600.6  1575.8±20.7         5.07   183.2        23.0     22.6         2.8   1300
+openssh   10    8M  readable-legacy       5      1614.3    1645.3  1607.2±34.3         4.96   179.8        30.5     30.0         2.4   1300
+openssh   50    1M  readable              5       944.4     956.1    945.9±6.5         1.06    48.0        17.7      5.5         1.9    900
+openssh   50    1M  readable-legacy       5       952.4     958.0    951.8±6.4         1.05    52.2         6.0      5.5         2.0    900
+openssh   50    8M  readable              5      6871.6    6908.9  6860.7±40.4         1.16   469.8        25.1     24.5         2.2   6500
+openssh   50    8M  readable-legacy       5      6852.1    6884.7  6860.1±16.5         1.17   426.2        25.7     25.2         2.0   6500
+ssh2       0    1M  readable              5        21.5      44.7    25.5±11.0        46.41    14.6         7.8      4.0         3.4      0
+ssh2       0    1M  readable-legacy       5        18.3      24.0     19.3±4.5        54.60    16.2         4.6      4.1         3.1      0
+ssh2       0    8M  readable              5       131.3     138.0   119.4±21.6        60.91   111.4        25.7     25.1         4.0      0
+ssh2       0    8M  readable-legacy       5       109.2     121.5    110.3±9.5        73.27    93.7        25.7     25.2         3.0      0
+ssh2      10    1M  readable              5       578.6     593.1    579.7±9.8         1.73    46.0         4.6      4.1         2.1    500
+ssh2      10    1M  readable-legacy       5       585.2     601.8   583.9±12.8         1.71    48.7         8.3      4.0         2.4    500
+ssh2      10    8M  readable              5      4407.6    4527.7  4431.9±54.4         1.82   360.1        21.5     20.9         2.0   3860
+ssh2      10    8M  readable-legacy       5      4444.8    4544.1  4462.3±61.1         1.80   370.3        21.2     20.5         2.3   3860
+ssh2      50    1M  readable              5      2617.0    2628.0  2616.5±10.5         0.38   125.5        18.7      4.0         2.1   2500
+ssh2      50    1M  readable-legacy       5      2603.8    2620.2   2607.2±9.3         0.38   126.2         4.7      4.1         2.1   2500
+ssh2      50    8M  readable              3     20186.0   20217.7 20176.8±46.2         0.40   983.2        18.1     16.3         2.4  19300
+ssh2      50    8M  readable-legacy       3     20237.7   20286.6 20251.0±31.1         0.40  1032.8        19.1     18.4         2.3  19300
+# wrote docs/scientific/data/11/s7-before.json
+ 22:29:52 up 4 days,  5:56,  1 user,  load average: 32.33, 27.85, 20.23

@@ -5,8 +5,9 @@
   - the baseline and its hypotheses, plus one discovery made while validating the instrument (H0);
   - E0, E1 and E2 (§9.1–§9.3);
   - why H2 failed at 32 MiB, and E4, the eager channel window that fixes it (§9.4);
-  - E3, the re-measurement with E0–E4 in place: H2 holds, the depth is chosen, and H6 holds (§9.5).
-- **Pending:** the pipelined streaming reader (§9.6), and the D-phase measurements of H4 and H5.
+  - E3, the re-measurement with E0–E4 in place: H2 holds, the depth is chosen, and H6 holds (§9.5);
+  - S7, the pipelined streaming source: H7 was refuted by one round trip, fixed, then held (§9.6).
+- **Pending:** the D-phase measurements of H4 and H5.
 
 These experiments support [ADR-0046 — Reload-safe, pipelined remote reads] and the slide-deck work of
 [ADR-0045 — Slide-deck presentation], where a remote deck (`vv sftp://host/talk.pdf`) is read whole over SFTP
@@ -664,7 +665,95 @@ There are 2 fixed round trips (OPEN and FSTAT, since the reader is given no size
 | OpenSSH, 64 KiB, 50 ms | 152.6 | 152.6 | 1.0× | — (3 R either way: no small-file regression) |
 | remote PDF open, 64 KiB, 50 ms (§9.3) | 862.2 | 254.8 | 3.4× | E2 |
 
-*The D-phase measurements (H4, H5) and the streaming reader (§9.6) are recorded below as they land.*
+### 9.6 · S7 — the streaming source, pipelined (2026-10-17)
+
+**Why.** `remoteCreateReadStream` feeds two engines: the bounded-memory streaming engine for large remote logs, and
+the page-by-page reader for large logs and tables. It was ssh2's `createReadStream`, which keeps one 64 KiB request
+in flight, three sequential sub-reads against the ssh2 ident. That is H1's cost, a round trip per 64 KiB, after E1
+had already removed it from whole-file reads.
+
+**Intervention S7 (`8d20617`).** `pipelinedReadStream` is a `Readable` through the E1 file handle.
+- It keeps up to $`D`$ requests of $`C`$ bytes in flight and delivers them strictly in file order.
+- **Backpressure:** no new request while `push()` reports a full buffer, so the buffering is bounded by
+  ≈ $`hwm + DC`$ whatever the file's size.
+- **Short reads:** the remainder is re-requested ahead of later requests.
+- **Size hint:** `o.size` keeps requests within the stat'ed file plus the end-of-file probe.
+
+**Pre-registration.** `data/11/s7-prediction.txt`, committed with the instrument (`a52a86b`) before any run. H7
+claims that a stream keeping $`DC`$ in flight costs what the whole-file reader costs (with E4's
+$`W_{eff} = W - 3 \cdot 32`$ KiB, no FSTAT), not H1; and that its buffering stays under 3 MiB whatever the size.
+
+**Instrument.** The `readable`, `readable-legacy` and `readable-discard` readers (header of
+`scripts/bench-remote-read.cjs`).
+
+**Runs.** Client on cores 2–5, server on 6–9, `--server-nodelay`, 1 warm-up, then ≤ 5 timed reads or 30 s.
+
+| Run | What it measures | Commit |
+|---|---|---|
+| before | 1 and 8 MiB | `a52a86b`, from an isolated export, where `remoteCreateReadStream` is still ssh2's |
+| after | 1, 8 and 32 MiB | `8d20617` |
+| after, straddle fixed | 1, 8 and 32 MiB | `73e40ed` |
+| memory | live footprint | `8d20617` |
+
+- The 32 MiB legacy cells were not re-run: one such read takes 26–78 s at 50 ms, and §5 measured that algorithm.
+- The straddle fix changes only the file's last request, not the buffering, so the memory run stands.
+- The host's load average was 13–33 during these runs, higher than in §9.5. The pinning held.
+- Every verdict is in `data/11/s7-analysis.txt`, produced by
+  [`scripts/analyze-s7-streaming.cjs`](../../scripts/analyze-s7-streaming.cjs).
+
+**1. Before: H1 holds** in all 16 cells with $`R \ge 10`$ ms (+2.8 % to +17.3 %). `readable` and
+`readable-legacy` agree, as they must: both were ssh2's stream.
+
+**2. After (`8d20617`): H7 is refuted** in 6 of 12 cells, off by more than 25 %.
+- **The failing cells:** every 1 MiB cell at 10 and 50 ms, plus OpenSSH 8 MiB at 10 and 50 ms (+26 % to +52 %).
+- **The holding cells:** the 32 MiB cells, and ssh2 8 MiB.
+- **Diagnosis: one extra round trip per stream, at its end.**
+  - The end of the file straddled a chunk: 1 MiB is 4.03 chunks of 260 096 B.
+  - The straddling read came back short, and the stream re-requested its remainder only to learn "end of file".
+  - The pre-registration said the end-of-file probes are "answered in the same round trip as the last body
+    requests". That is true of the requests issued past the end, but not of the remainder the straddling chunk
+    demanded.
+  - E1 had removed exactly this straddle from `readAll`, by splitting at the expected size, but not from the
+    stream.
+
+**Fix (`73e40ed`).** The end of the file now costs no round trip of its own.
+- **With a size hint:** the request that would straddle the size ends exactly at it, so an exact file has no short
+  read at all.
+- **Without one:** a short read is taken as the end when both of these hold:
+  1. an earlier read of that length came back full, so the server does not cap reads that long;
+  2. the request starting right after it, already in the same flight, found end-of-file.
+
+  A first read that is short, or a server that caps reads, still costs the remainder request. Inferring there could
+  truncate the file.
+
+**3. After the fix: H7 holds in all 12 cells** (−22.0 % to +9.8 %):
+
+| Ident | $`S`$ | $`R`$ = 10 ms: measured / model (ms) | $`R`$ = 50 ms |
+|---|---|---|---|
+| OpenSSH | 1 MiB | 27.9 / 28.8 | 107.2 / 108.8 |
+| OpenSSH | 8 MiB | 80.3 / 82.1 | 318.3 / 289.9 |
+| OpenSSH | 32 MiB | 245.8 / 249.0 | 967.3 / 960.5 |
+| ssh2 | 1 MiB | 29.0 / 28.0 | 107.6 / 108.0 |
+| ssh2 | 8 MiB | 76.6 / 98.3 | 315.4 / 338.3 |
+| ssh2 | 32 MiB | 255.7 / 300.3 | 959.5 / 1 020.3 |
+
+**4. `readable-legacy` did not move:** −8.3 % to −1.1 % in every cell with $`R \ge 10`$ ms, inside ±10 %.
+
+**5. Memory holds.** `readable-discard`, which hashes and drops each chunk as a streaming consumer would, has a live
+footprint of 2.48–2.51 MiB (OpenSSH) and 2.82–2.94 MiB (ssh2), at 8 and at 32 MiB. It grows by at most 0.03 MiB
+across a 4× larger file: the stream's own buffering, $`hwm + DC`$ plus one packet in assembly. `readable` holds
+about 2 S only because the bench concatenates everything it receives.
+
+**Speed-up of the streaming source:**
+
+| Ident | $`S`$ | $`R`$ = 10 ms (ms) | $`R`$ = 50 ms (ms) |
+|---|---|---|---|
+| OpenSSH | 1 MiB | 226.7 → 27.9 (8.1×) | 944.4 → 107.2 (8.8×) |
+| OpenSSH | 8 MiB | 1 577.3 → 80.3 (19.6×) | 6 871.6 → 318.3 (21.6×) |
+| ssh2 | 1 MiB | 578.6 → 29.0 (19.9×) | 2 617.0 → 107.6 (24.3×) |
+| ssh2 | 8 MiB | 4 407.6 → 76.6 (57.5×) | 20 186.0 → 315.4 (64.0×) |
+
+*The D-phase measurements (H4, H5) are recorded below as they land.*
 
 ## 10 · Regression guards
 
@@ -699,6 +788,17 @@ There are 2 fixed round trips (OPEN and FSTAT, since the reader is given no size
 - **Connection pool (found in §9.4):** `ssh-transport-smoke` `testStaleCloseKeepsSuccessor`. After `closeAll`
   and a reconnect, the server must hold exactly one live connection, and none after the final `closeAll`.
   Deleting by key fails it with two.
+
+- **Pipelined streaming source (S7):** `ssh-transport-smoke` `testPipelinedStream`.
+  - Byte-exact at every chunk boundary; at most D requests in flight, and actually pipelined; request counts.
+  - The end of the file costs no remainder request (with and without a size hint).
+  - A start offset; a size hint (2 requests for a 1-byte file; a file that outgrew its hint read to its end).
+  - Backpressure: a paused stream stops requesting. Destroy mid-stream; a capping server; a drop erroring within
+    1 s.
+  - Negative controls:
+    - ignoring `push()`'s return requests the whole file while paused;
+    - the first growth check stalls;
+    - the committed stream before `73e40ed` requests its remainder at the end offset.
 
 *Pending:* `remote-pdf-e2e` byte counts.
 
