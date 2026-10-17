@@ -450,8 +450,8 @@ churn as a streamed document grows. *First introduced in `theory/09-document-str
 where the terminal supports them, kitty/sixel graphics. `ir.backend.ansi` is the tty counterpart of
 `backend.html`. *First introduced in `theory/10-terminal-rendering-second-renderer.md`.*
 
-**audience window · audience view** — The *audience window* is the window main opens for a **linked show** (`S`):
-without taking the focus and, when the platform lets main place it, fullscreen on another display. The *audience view*
+**audience window · audience view** — The *audience window* is the window main opens for a **linked show**
+(*Present in New Window*, `S`): without taking the focus and, when the platform lets main place it, fullscreen on another display. The *audience view*
 is the slide-only view of any window — the **Slides layout** as ADR-0045 made it — as opposed to the **presenter
 view**; a single-window show starts in it, because its screen may be mirrored to a projector. Main closes the audience
 window when the show ends and never saves its bounds to `window.edn`. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.1 and §8.*
@@ -520,8 +520,9 @@ raster images inline where supported; otherwise images degrade to a text placeho
 against `~/.ssh/known_hosts`; an unknown host prompts once and is appended on accept; a **changed** key is a
 hard reject. *First introduced in `features/29-remote-files-over-ssh.md`; ADR-0027.*
 
-**linked show (session)** — Two windows of one deck whose slide shows move together, started with `S` (Shift+S) in
-the presenter's window. Main runs it as a *session* (`vinary.main.slides-link`): the members and their roles, a move
+**linked show (session)** — Two windows of one deck whose slide shows move together, started with *Present in New
+Window* (View menu, the palette, or `S` = Shift+S) in the presenter's window; **Swap screens** exchanges their
+displays. Main runs it as a *session* (`vinary.main.slides-link`): the members and their roles, a move
 counter `seq`, and the authoritative position. Either window drives — keys, clicks, the overview, links, find,
 blanking — and Escape in either ends it. Its protocol converges, never echoes and never undoes a move, for any delivery
 order of the messages. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8; proved and model-checked in [`theory/11`](theory/11-linked-slide-show-protocol.md).*
@@ -632,6 +633,10 @@ keyboard-interactive); on decrypting a key file it may `AddKeysToAgent`. *First 
 persisted-state broadcasts — settings, keymap, recent files, connections, extension prefs — while it waits, so the
 window a claim shows is current. No action ever targets it. *First introduced in
 `design-decisions/0047-persisted-state-stores.md`.*
+
+**Swap screens** — The presenter view's command, in a **linked show** whose windows are on separate displays, that
+moves each window to the other's display and keeps each one's fullscreen and its owner. It fixes a wrong guess of
+which display is the projector, and the show's protocol never sees it. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.7.*
 
 **StreamParser** — The pure `feed`/`finish` protocol (`vinary.stream.protocol`) that emits only
 newly-completed IR blocks and retains only the open block — the node-testable heart of streaming. *First

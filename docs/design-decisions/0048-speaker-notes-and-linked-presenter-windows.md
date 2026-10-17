@@ -25,7 +25,7 @@ What the code did, read before this decision (file references are to the tree at
 | F2 | **An interleaved `show notes` deck is mis-presented.** Beamer's `\setbeameroption{show notes}` puts a note page after every overlay that has notes (and one more for every `\note` written between frames), and labels it with its *physical* page number. ADR-0045 §9 shows such decks as they are: the note pages are flipped through as slides, every note page becomes a frame of its own (frames are runs of equal labels), and typing `2` goes to page index 1 — the first note page — because labels are tried first. | `deck.cljs` `frames-from-labels`, `resolve-goto`; experiment 12 data, finding 5 |
 | F3 | **pdfpc notes are never read.** pdfpc's `\pdfpcnote` writes hidden `/Text` annotations (`/F 6`, Hidden + Print), and pdfpc also keeps notes in a `talk.pdfpc` file beside the PDF. The deck evidence reads only `Creator`, `Producer`, `CreatorTool`, `/PageMode` and the labels; the link layer keeps only `/Link` annotations. pdf.js 5.4.149 does return the hidden notes (`getAnnotations` keeps every annotation that is not Invisible or NoView). | `slides/evidence.cljs` `gather`; `pdf.cljs` `build-link-layer!`; `pdf.worker.mjs` `_isViewable` |
 | F4 | **Nothing lets a renderer open a window or reach another one.** The preload exposes no window API; the window-open handler denies; `open-window!` is the only caller of `claim-window!`, and a claim shows and focuses its window. Every window opens with the same saved bounds, and one module-level save timer serves all windows, so one window's move cancels another's pending save. SSH prompts go to the focused window — which, during a show, may be the projector. A Wayland client cannot place its own windows. | `main/core.cljs`, `main/window.cljs`, `main/ssh.cljs`, `main/windows.cljs` |
-| F5 | **`s`, `S` and `F` are free** in the `:slides` key layer of all three presets and in Vim's normal mode (`n` is search-next, so it is not). | `resources/keymaps/*.edn` |
+| F5 | **`s`, `S` and `F` are free** in every layer and mode of all three presets: none binds them at the root of a layer (`s` occurs only inside Vim's `SPC` sequences, `f` is Vim's link hints, `n` its search-next). The palette and the menu bar carry no descriptions. | `resources/keymaps/*.edn`; `ui/palette.cljs`, `ui/menubar.cljs` |
 | F6 | **One position funnel.** Every slide change — keys, clicks, links, the overview, find, swipes, a refresh's clamp — goes through the engine's `report!`, coalesced to one `:slides/changed` per animation frame and read when the frame fires. | `pdf.cljs` `report!` |
 
 What the formats carry, established before this decision (§1 and §2 have the details):
@@ -70,15 +70,17 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | P2 | The engine is never remounted: the pane is an absolutely positioned sibling of the slides, and the slides shrink beside it. |
 | P3 | The pane renders the notes regions and the next slide from the engine's document into canvases of its own (`vinary.renderer.pdf-region`); transitions are clipped to the slides. |
 | P4 | The timer is a pure function, `vinary.slides.presenter/clock`, with pdfpc's semantics; the counter counts frames up to pdfpc's end slide. |
+| P5 | When a single-window show starts on a deck with notes, a hint names `s` and *Present in New Window*, once: then `:slides-notes-hinted?` is saved. |
 | F1 | `F` (Shift+f) toggles this window's fullscreen during a show, through main's existing ownership rule. |
-| L1 | `S` (Shift+s) links a second window: main opens an **audience window** from the warm pool without taking the focus, on another display when there is one, fullscreen there when the platform lets it place windows. |
+| L1 | **Present in New Window** (the View menu, the palette, and `S` = Shift+s; offered for every PDF view) links a second window: main opens an **audience window** from the warm pool without taking the focus, on another display when there is one, fullscreen there when the platform lets it place windows. The speaker notes stay in the window it was chosen in. |
 | L2 | Main sequences the session: every move gets a `seq`, an ack goes to its sender and a push to every other member. A window holds a push that arrives while its own move is on the way. The protocol converges, never echoes and never undoes a move (proof and model check: [theory/11](../theory/11-linked-slide-show-protocol.md)). |
 | L3 | A window sends its position through one interceptor that runs after the engine's report or a local blank change, never after an incoming message. |
 | L4 | The audience window starts at the position main gave it and announces itself with a `ready` message that moves nothing. |
 | L5 | Either window ends the show; main closes the audience window it opened. A member that closes, reloads, crashes or loses its display ends the session. |
 | L6 | window.edn is saved per window, and never for an audience window. |
 | L7 | SSH prompts never go to an audience window. |
-| L8 | The trust boundary widens by exactly two capabilities, each constrained (§8.9); the threat model is updated. |
+| L8 | The trust boundary widens by exactly three capabilities, each constrained (§8.9); the threat model is updated. |
+| L9 | With the two windows on different displays, **Swap screens** in the presenter view moves each window to the other's display, keeping each one's fullscreen (§8.7). |
 
 ---
 
@@ -318,7 +320,7 @@ above 2, is not a sidecar this version understands (it is ignored and named in `
 parse as JSON is read as the legacy format, which has `[section]` headers and `### <n>` notes. vinary-viewer never
 writes the sidecar.
 
-### 6. The presenter view, in one window (P1–P4)
+### 6. The presenter view, in one window (P1–P5)
 
 #### 6.1 What the presenter sees
 
@@ -334,6 +336,17 @@ A **single-window show starts in the audience view**, because its screen may be 
 view is remembered in `[:ui :presentation :notes-view-before]` and restored when the show ends. A deck without notes
 still gets the timer, the counter and the next slide, with *This deck has no speaker notes* in the notes box, or *No
 notes on this slide* when other pages have them.
+
+**The hint (P5).** The notes a single-window show hides were the request's first complaint, so the first show that
+hides them says so. When a show starts in the audience view of a single window, and the deck has notes — split
+halves, note pages, a sidecar with notes, pdfpc metadata, or a text note on any page rendered so far (the link layer
+already reads every rendered page's annotations) — a chip at the bottom reads *Speaker notes: **s** shows them here ·
+**Shift+S** presents in a new window*. It fades after 6 s or at the next key or click, and is `role="status"`
+(polite). Then `:slides-notes-hinted? true` is saved in settings.edn, which every window receives (ADR-0047), so it is
+shown once per installation. It is never shown in an audience window, nor when the show starts in the presenter view.
+Notes found after the show started — a background scan that finishes, a text note on a later page — show it then, if
+it has not been shown. The chip floats where the *Go to 12* chip does (`vinary.ui.slides-hud`), and a typed digit
+dismisses it first. A mirrored projector shows it too, for those six seconds, once.
 
 #### 6.2 DOM and CSS (P2)
 
@@ -410,19 +423,27 @@ synchronized: only a presenter view shows it.
 `vv:set-fullscreen`, so `vinary.main.fullscreen/decide` still owns it: main leaves only a fullscreen it entered. It is
 needed on Wayland (§8.7), with one display, and when the `:slides-fullscreen?` preference is off.
 
-### 8. Two linked windows (L1–L8)
+### 8. Two linked windows (L1–L9)
 
 #### 8.1 What the presenter does
 
-`S` (Shift+s; *Present with speaker notes in a second window*, `:when :pdf-view?`) in window A starts the show from
-the current slide if none is running — **without** asking for fullscreen yet — switches A to the presenter view, and
-asks main for a linked show. Main opens window B, the audience window, from the warm pool when one is ready: B appears
-without taking the focus (`showInactive`), on another display when there is one, and goes fullscreen there when the
-platform lets main place it. From then on either window drives the show — keys, clicks, swipes, overview picks, typed
-numbers, links, find, blanking — and the other follows, with the same transition. `S` again while linked re-sends the
-state and raises B; nothing new opens. A window takes part in at most one linked show; joining an existing window is
-not offered, because the audience window's whole lifecycle (placement, fullscreen, closing) is main's, and an existing
-window's is the user's.
+**Present in New Window** (`:slides/present-linked`) is offered in three places: the View menu, after *Start from
+Current Slide* (access key `p`, shown with `Shift+S`, `:pdf-only`); the palette (category Slides, `:when :pdf-view?`);
+and the key `S` (Shift+s). `S` is bound in the `:all` layer of every preset, next to F5, and not in the `:slides`
+layer, so the key works wherever the menu item does: in the document layout too, and with the focus on the sidebar,
+as F5 does. Both the menu item and the palette row carry the tooltip *Speaker notes stay in this window*. That needs
+one new optional field, `:tooltip`, on menu items and on commands, rendered as the row's `title`.
+
+The command is offered for every PDF view, not only for decks with notes. The timer, the counter and the next slide help
+without notes. And a deck without labels learns its notes only after its first paint (§2.4), so a command that appeared
+then would be a surprise. Chosen in window A, it starts the show from the current slide if none is running — **without**
+asking for fullscreen yet — switches A to the presenter view, and asks main for a linked show. Main opens window B, the
+audience window, from the warm pool when one is ready: B appears without taking the focus (`showInactive`), on another
+display when there is one, and goes fullscreen there when the platform lets main place it. From then on either window
+drives the show — keys, clicks, swipes, overview picks, typed numbers, links, find, blanking — and the other follows,
+with the same transition. `S` again while linked re-sends the state and raises B; nothing new opens. A window takes part
+in at most one linked show; joining an existing window is not offered, because the audience window's whole lifecycle
+(placement, fullscreen, closing) is main's, and an existing window's is the user's.
 
 #### 8.2 Who owns what
 
@@ -444,7 +465,8 @@ screen.
 #### 8.3 Channels
 
 They follow the bridge-effect pattern of `app/fx.cljs` and the `on*` pattern of the preload, which gains
-`presenterOpen`, `presenterMove`, `presenterReady`, `presenterLeave` and `onPresenterState` (none in `web-preload.js`).
+`presenterOpen`, `presenterMove`, `presenterReady`, `presenterLeave`, `presenterSwap` and `onPresenterState` (none in
+`web-preload.js`).
 
 | Channel | Direction | Payload |
 |---|---|---|
@@ -452,8 +474,10 @@ They follow the bridge-effect pattern of `app/fx.cljs` and the `on*` pattern of 
 | `vv:presenter-move` | renderer → main | `{session, mid, page, blank}` |
 | `vv:presenter-ready` | renderer → main | `{session}` — the audience's deck is showing; moves nothing |
 | `vv:presenter-leave` | renderer → main | `{session, reason: "stopped" \| "unmounted"}` |
-| `vv:presenter-state` | main → renderer | one of: **joined** `{session, seq, role: "presenter", page, blank, joined: true, display: "separate" \| "same" \| "manual"}`; **push** `{session, seq, page, blank}`; **ack** `{session, seq, ack: mid, accepted}`; **peer** `{session, peer: "live"}`; **ended** `{session, ended: true, stop, reason}`; **refused** `{session: null, refused: "busy" \| "not-focused" \| "not-retained" \| "invalid"}` |
+| `vv:presenter-swap` | renderer → main | `{session}` — Swap screens (§8.7) |
+| `vv:presenter-state` | main → renderer | one of: **joined** `{session, seq, role: "presenter", page, blank, joined: true, display: "separate" \| "same" \| "manual"}`; **push** `{session, seq, page, blank}`; **ack** `{session, seq, ack: mid, accepted}`; **peer** `{session, peer: "live"}`; **swapped** `{session, swapped: true, lost: [role…]}` (the roles whose window could not go fullscreen again) or `{session, swapped: false, why: "same-display" \| "busy"}`; **ended** `{session, ended: true, stop, reason}`; **refused** `{session: null, refused: "busy" \| "not-focused" \| "not-retained" \| "invalid"}` |
 | `vv:open-files` (existing) | main → renderer | gains `link: {session, seq, role: "audience", page, blank, fullscreen}` — ADR-0046's "fields, not channels" |
+| `vv:fullscreen-changed` (existing) | main → renderer | gains `swap: true` on the one report that ends a swap (§8.7) |
 
 The session id (`"show-<n>"`) is minted by main, which identifies a sender by `event.sender`; ids need not be secret.
 
@@ -547,7 +571,7 @@ move `:start`.
 | the warm pool | — | standby windows never receive `vv:presenter-state` (members only) |
 | no window could be claimed | the claim fails | the presenter gets `ended {stop: false, reason: "no-window"}` |
 
-#### 8.7 Displays, placement and fullscreen
+#### 8.7 Displays, placement, fullscreen, and swapping screens (L1, L9)
 
 Pure `vinary.main.displays`: `display-of` (the display with the largest intersection), `audience-display` (prefer a
 display that is not the presenter's, then an external one, then the largest, then the lowest id; nil with one display),
@@ -561,6 +585,43 @@ target display, and shows it inactive. The link's `fullscreen` is the presenter'
 Wayland, B opens where the compositor puts it (`display: "manual"`), and A's pane says: *Move the audience window to
 the other screen, then press Shift+F in it.* After B goes fullscreen, main re-focuses A (best effort — window managers
 differ; correctness never depends on the focus, since either window drives).
+
+**Swap screens (L9).** `audience-display` guesses which display is the projector, and the guess can be wrong — a laptop
+lid closed onto an external monitor, or three displays. When the joined message said `display: "separate"`, the
+presenter view's status strip shows **Swap screens** (also a palette command, *Swap the presenter and audience
+screens*, `:when` a linked show is live on separate displays). It sends `vv:presenter-swap`. The pure
+`displays/swap-plan` takes both windows' bounds, fullscreen flags and the displays, and returns, for each window, the
+`placement` on the other window's display and whether to restore fullscreen there — or nil when both are on one
+display (the user moved one by hand), and then main answers `swapped: false, why: "same-display"`, which the pane
+shows as *Both windows are on one display*.
+
+A fullscreen window cannot be moved, so a swap must leave fullscreen and enter it again. Two existing rules stand in
+the way, and the swap keeps both. `fullscreen/wire!` treats every `leave-full-screen` as the user's: it clears main's
+ownership, and it reports the change, which ends the show in that window (`fullscreen-changed-fx`, ADR-0045). So the
+shell runs the plan in four steps, with each member marked *swapping* (a flag on the `BrowserWindow`, which `wire!`'s
+two handlers check first):
+
+1. record each member's fullscreen state and ownership; each fullscreen member leaves fullscreen, and main waits for
+   its `leave-full-screen` (at most 2 s; leaving is asynchronous on Linux, animated on macOS). For a swapping window,
+   `wire!` neither reports nor clears the ownership;
+2. place each window on its new display (`setBounds`, un-maximized first, as when B was claimed);
+3. each window that was fullscreen enters it again, and main waits for its `enter-full-screen` (at most 2 s);
+4. unmark the windows, give each its recorded ownership back, and report each window's real state once, as
+   `vv:fullscreen-changed {fullscreen, owned, swap: true}`.
+
+The swap is the one place where main leaves a fullscreen it did not enter, and it restores it within the same swap.
+Afterwards each window has the fullscreen it had and the same owner, so main still leaves only a fullscreen it
+entered: the user's own fullscreen survives the end of the show. The renderer never sees the transient leave. If a
+window could not enter fullscreen again (a window manager refused it), the final report says `fullscreen: false`.
+With `swap: true`, `fullscreen-changed-fx` then keeps the show running windowed, and sets the presentation's
+`:fullscreen?` to false, instead of ending it. The presenter's pane says *The audience window could not go fullscreen
+again; press Shift+F in it* (or names the presenter window when that is the one).
+
+Main then re-focuses the window the swap came from (best effort) and answers `swapped: true`, with `lost` naming any
+window that did not get its fullscreen back. Nothing in the session changes: roles, positions and the `seq` are
+untouched, so the protocol of §8.4 never sees a swap. A swap requested while another runs is refused (`why: "busy"`). A
+member that closes, or a display that is removed, during a swap ends the session as it would at any other time; the
+windows that remain are unmarked, and their state is reported.
 
 #### 8.8 window.edn, the warm pool, remote decks, SSH prompts (L6, L7)
 
@@ -581,14 +642,21 @@ differ; correctness never depends on the focus, since either window drives).
 
 #### 8.9 The trust boundary (L8)
 
-A renderer can now cause one new window to open, and can move another window's slide. Each capability is constrained:
-the request must come from an app window's **own** main webContents (never a web view or an embedded view), that
-window must be **focused** (a stand-in for a user gesture), it may be in at most one session with at most one claim in
-flight, the path must be one that window **already retains** (`service/window-retains?`), every payload is validated,
-and moves are accepted only from members and delivered only to members. Annotation and sidecar text is rendered as
-text, or as Markdown through the document sanitizer — never as raw HTML. The new commands are not reachable from a
-PDF's named actions or links (ADR-0045's allow-list is unchanged). The sidecar is read only as the PDF's same-stem
-sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) records the new boundary.
+A renderer can now cause one new window to open, can move another window's slide, and can move the two windows of its
+session between displays. Each capability is constrained:
+
+- the request must come from an app window's **own** main webContents (never a web view or an embedded view);
+- to open a window, that window must be **focused** (a stand-in for a user gesture), it may be in at most one session
+  with at most one claim in flight, and the path must be one it **already retains** (`service/window-retains?`);
+- moves are accepted only from members and delivered only to members;
+- a swap is accepted only from a focused member of a live session whose windows are on separate displays, one swap at
+  a time, and it moves only that session's two windows;
+- every payload is validated.
+
+Annotation and sidecar text is rendered as text, or as Markdown through the document sanitizer — never as raw HTML. The
+new commands are not reachable from a PDF's named actions or links (ADR-0045's allow-list is unchanged). The sidecar is
+read only as the PDF's same-stem sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) records the
+new boundary.
 
 ---
 
@@ -601,8 +669,10 @@ sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) record
 - A `show notes` deck is presented without its note pages: they leave the slide sequence, the overview, the counter and
   typed numbers, and appear in the presenter view instead. A deck without page labels (a single XeLaTeX pass) gets the
   same once its background scan ends.
-- `S` puts the audience view on the other display and keeps the presenter view here; either window drives the show,
-  with the same transitions, and Escape in either ends it.
+- *Present in New Window* (Shift+S) puts the audience view on the other display and keeps the presenter view here;
+  either window drives the show, with the same transitions, and Escape in either ends it. *Swap screens* fixes a wrong
+  guess of which display is the projector.
+- The first single-window show of a deck with notes says, once, how to see them.
 - `F` fullscreens the window it is pressed in.
 - Two ordinary windows no longer cancel each other's window.edn save.
 
@@ -617,7 +687,10 @@ sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) record
   move was ordered first, and the key had not been reported yet. Both windows still agree.
 - pdfpc features outside notes and timing — its transitions, bookmarks, note editing and note font size — are not
   adopted; vinary-viewer never writes the sidecar.
-- On native Wayland the audience window must be moved to the projector by hand (Shift+F then fullscreens it).
+- On native Wayland the audience window must be moved to the projector by hand (Shift+F then fullscreens it), and
+  *Swap screens* is not offered.
+- A swap briefly shows both windows windowed while they change displays.
+- `S` is a bare letter in the `:all` layer, so it acts wherever F5 does, with the focus on the sidebar too.
 
 ## Alternatives considered
 
@@ -669,6 +742,17 @@ sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) record
   a Wayland output.
 - *Surviving a member's reload by a boot pull*: a reloaded renderer may not even have the deck open.
 
+**The command and the hint** (chosen with the user).
+- *Offering Present in New Window only for decks with notes*: a deck without labels learns its notes after its first
+  paint, so the command would appear late, and the timer, the counter and the next slide help without notes.
+- *Binding `S` in the `:slides` layer only*: the menu item, offered in the document layout too, would then show a key
+  that does nothing there.
+- *No swap, moving the windows by hand*: a wrong guess of the projector would cost leaving fullscreen in each window,
+  dragging both, and fullscreening each again.
+- *Ending the show when a swap's fullscreen is lost*: a window manager's refusal would end a talk. The show continues
+  windowed and the pane says how to recover.
+- *A hint at every show of a deck with notes*: a repeated chip on a projector is noise; once per installation.
+
 ## Verification
 
 | Rule | Evidence |
@@ -678,7 +762,9 @@ sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) record
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures |
 | The presenter view, the pane, transitions, find | `npm run test:electron` blocks |
 | The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages; seven negative controls); unit and randomized simulation tests of both pure models (to be written) |
-| The real main: link, both directions, crossing moves, blanking, lifecycle, window.edn | `test/presenter-e2e.js` (to be written) |
+| Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (to be written) |
+| The real main: link, both directions, crossing moves, blanking, lifecycle, swap, window.edn | `test/presenter-e2e.js`, with two displays faked over one wide virtual screen (to be written) |
+| The hint: when it shows, once per installation | unit (the pure trigger) and an `npm run test:electron` block (to be written) |
 
 ## References
 
