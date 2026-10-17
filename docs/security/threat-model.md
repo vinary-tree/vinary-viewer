@@ -181,6 +181,33 @@ is built so nothing it contains gains execution or option-injection power:
 - **Everything is a query** — `log`, `for-each-ref`, `rev-parse`, `diff`, `cat-file`. No mutating
   git subcommand exists in the namespace.
 
+### The `vv` socket (process ↔ process)
+
+The resident-server socket ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process))
+is a second, local IPC boundary between processes.
+
+- **What a connection can do.** Open paths and URIs in a new window, which is what the user can do with `vv`
+  from a terminal. That includes `ssh://`/`sftp://` URIs, which connect to the named host under the usual
+  host-key checks, with prompts in the window. A connection can also ask for the process's pid and build
+  (`vv1 ping`) and stop it gracefully (`vv1 stop`). A malformed or unknown message opens nothing.
+- **Who can connect.** Connecting to a Unix stream socket needs write permission on the socket file
+  ([unix(7)](https://man7.org/linux/man-pages/man7/unix.7.html)). The file is created under the umask
+  (`srwxr-xr-x` with the usual `022`), so only its owner can connect. Under `$XDG_RUNTIME_DIR` (per-user,
+  `0700`, cleared at logout) and macOS's per-user `$TMPDIR`, no other user can create the path either.
+- **Ownership.** A primary that finds another instance answering on the path runs without the socket. Only a
+  socket nobody answers on (the leftover of an unclean exit) is removed, and only the inode that failed the
+  probe. A second instance therefore cannot take a running daemon's socket, as it could before 2026-10-17.
+- **Exposure: the shared-`/tmp` fallback.** Without `$XDG_RUNTIME_DIR` (a session without logind, some
+  containers), the path is `$TMPDIR/vinary-viewer-<uid>.sock`, and on a shared `/tmp` another local user can
+  create it first.
+  - **Through the client.** The user's `vv` would then send its open messages, which name the files being
+    opened, to that user's listener, and print that listener's error reply on the user's terminal.
+  - **Through the daemon.** The user's daemon stands down from a live foreign socket. The build before the
+    ownership rule could not have removed it either: `/tmp` is sticky, so the unlink fails with `EPERM`.
+  - **Status.** The exposure predates the ownership rule. Checking the socket's owner uid in the client and the
+    daemon would close it; that hardening is filed for triage (pgmcp
+    `vinary-viewer-vv-socket-owner-uid-check`).
+
 ---
 
 ## 4. Filesystem exposure

@@ -505,6 +505,9 @@
   (.on app "before-quit" (fn []
                            (service/shutdown!)
                            (ssh/shutdown!)))   ; stop event tunnels/server, then tear down pooled SSH connections
+  ;; withdraw the `vv` socket while this process still holds the single-instance lock (Electron releases it only
+  ;; after will-quit), so a successor never probes a socket that is about to vanish and stands down without one
+  (.on app "will-quit" (fn [] (daemon/release!)))
   ;; a daemon survives all its windows closing (so it stays warm for the next `vv <file>`); a normal launch quits
   (.on app "window-all-closed"
        (fn [] (cond

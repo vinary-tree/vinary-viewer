@@ -14,6 +14,13 @@ Every experiment records a hypothesis, the change, the measured before/after, an
   as the `vv` launcher does (`electron "$REPO" <file>` — NO `--no-sandbox`, which would shift `process.argv`
   and make `doc-uris` open the repo dir instead of the file), N× per fixture under xvfb (forcing X11 so the
   windows stay headless, not on the host Wayland compositor), and reports median ms-from-`entry` per phase.
+- **Isolation (since 2026-10-17):** every launch runs under a private `$XDG_CONFIG_HOME` (default settings, its
+  own single-instance lock), a private `$XDG_RUNTIME_DIR`, and a disabled password bridge
+  ([`test/fixtures/hermetic-env.js`](../../../test/fixtures/hermetic-env.js);
+  [test strategy §3.4](../../engineering/03-test-strategy.md)). Before, launches used the developer's own
+  config, so a running `vv` daemon held the lock: each launch would have handed its fixture to that daemon and
+  quit, leaving nothing to profile. The numbers below were recorded before this change. Every launch in them
+  reached `rendered`, so each ran as the primary, and no daemon can have held the lock at the time.
 - Build: `npm run compile` (main + renderer), then run the harness.
 
 ## Baseline (before any optimization)

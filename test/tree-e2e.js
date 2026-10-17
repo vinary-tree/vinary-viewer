@@ -47,6 +47,8 @@ const CLI_DOC = path.join(ROOT, 'src', 'vinary', 'ui', 'tree.cljs');
 // requires the default Files panel to be mounted before startup activation, and tests must never read/write the
 // developer's real config. The nested repository file supplies three directory ancestors to expand.
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+// …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 
 function writeFixture() {
   const mk = (rel, body) => {
@@ -847,6 +849,7 @@ app.whenReady().then(() =>
       fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
       fs.rmSync(DIFF_BASE, { recursive: true, force: true });
       fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      RUNTIME.cleanup();
       app.exit(0);
     })
     .catch((err) => {
@@ -855,5 +858,6 @@ app.whenReady().then(() =>
       fs.rmSync(GIT_SCRATCH, { recursive: true, force: true });
       fs.rmSync(DIFF_BASE, { recursive: true, force: true });
       fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      RUNTIME.cleanup();
       app.exit(1);
     }));

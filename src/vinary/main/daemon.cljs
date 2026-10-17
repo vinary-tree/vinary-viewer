@@ -1,6 +1,7 @@
 (ns vinary.main.daemon
-  "The resident-server IPC socket — a systemd-INDEPENDENT way to reach the warm process. Any primary (the
-   single-instance lock holder) listens on a per-user Unix domain socket; `vv <file>` (scripts/vv-open.mjs)
+  "The resident-server IPC socket — a systemd-INDEPENDENT way to reach the warm process. A primary (a
+   single-instance lock holder) listens on a per-user Unix domain socket — the first to publish it, until it
+   quits (see socket ownership, below); `vv <file>` (scripts/vv-open.mjs)
    connects and sends the file paths, so the resident process opens them in a NEW window without a second cold
    start. It works with OR without systemd — systemd, if present, merely runs the process with `--daemon`; the
    `vv` launcher spawns `--daemon` itself when no socket is reachable.
@@ -108,6 +109,114 @@
         (js/console.error "[vv daemon] bad request:" (str e))
         (end! conn nil)))))
 
+;; ── socket ownership ──────────────────────────────────────────────────────────────────────────────────────
+;; The single-instance lock is per userData directory, and userData follows $XDG_CONFIG_HOME, so two primaries
+;; CAN run at once — a test harness or a second profile beside the user's daemon. The socket path is per USER,
+;; so it needs an ownership rule of its own: the instance that published the socket owns it until it quits;
+;; another primary probes it and, finding it answered, runs WITHOUT the socket. Only a socket nobody answers on
+;; (the leftover of an unclean exit) is ever removed, and only the inode that failed the probe. This replaced an
+;; unconditional unlink-then-bind that let any second primary take a live daemon's socket: the daemon kept
+;; listening on an inode no path named, and `vv` could not reach it again until it restarted.
+
+(def ^:private probe-timeout-ms
+  "How long the ownership probe keeps its connection to an owner that never answers `vv1 ping` (connecting at
+   all already proved the owner live; the answer is not needed)."
+  2000)
+
+(defonce ^:private published
+  ;; {:path :ino :server} — the socket THIS process published, or nil
+  (atom nil))
+
+(defonce ^:private hooks-installed? (atom false))
+
+(defn- inode-of
+  "The inode at `p` (not following a symlink), or nil when nothing is there."
+  [p]
+  (try (.-ino (.lstatSync fs p)) (catch :default _ nil)))
+
+(defn- probe
+  "Who answers at the socket path? Resolves to
+     :live     a server accepted the connection — another running instance owns the socket. It is sent
+               `vv1 ping`, so a current daemon answers it and logs nothing (an empty connection would log
+               `bad request` in the owner);
+     :stale    nothing listens (ECONNREFUSED) — the leftover of an unclean exit (SIGKILL, a crash, app.exit);
+     :absent   no file (ENOENT);
+     :unknown  anything else (EACCES, a path longer than sun_path, a full backlog…) — leave the path alone."
+  [sock]
+  (js/Promise.
+   (fn [resolve _]
+     (let [^js c (.connect net sock)
+           ^js t (js/setTimeout (fn [] (.destroy c)) probe-timeout-ms)]
+       (.unref t)
+       (.on c "connect" (fn [] (resolve :live) (.end c (str control-prefix "ping\n"))))
+       (.on c "data" (fn [_] nil))
+       (.on c "close" (fn [_] (js/clearTimeout t)))
+       (.on c "error" (fn [^js e]
+                        (resolve (case (.-code e) "ECONNREFUSED" :stale "ENOENT" :absent :unknown))))))))
+
+(defn- remove-stale!
+  "Unlink the stale socket at `sock` — only if it is STILL the socket inode `ino` that refused the probe, so a
+   socket another instance has bound since is never removed. True when the path is now free to bind. (POSIX
+   has no unlink-if-inode; what remains is the microseconds between this check and the unlink.)"
+  [sock ino]
+  (let [^js st (try (.lstatSync fs sock) (catch :default _ nil))]
+    (cond
+      (nil? st) true                                      ; gone since the probe: free
+      (and (.isSocket st) (= ino (.-ino st))) (do (try (.unlinkSync fs sock) (catch :default _ nil)) true)
+      :else (do (js/console.warn "[vv daemon]" sock "changed since the probe or is not a socket — left untouched")
+                false))))
+
+(defn- bind!
+  "Listen on `sock`. bind(2) fails with EADDRINUSE rather than replace an existing path, so a socket another
+   instance published since the probe is never taken over. Resolves to the server, or nil."
+  [sock handlers]
+  (js/Promise.
+   (fn [resolve _]
+     (let [server (.createServer net
+                    ;; allowHalfOpen: the client half-closes to frame its message, and a control frame is
+                    ;; answered AFTER that FIN — without this, node ends the writable side automatically on
+                    ;; `end` and the reply would be a write-after-end. Every path in handle! closes the conn.
+                    #js {:allowHalfOpen true}
+                    (fn [^js conn]
+                      (let [chunks (atom "")]
+                        (.on conn "data"  (fn [d] (swap! chunks str d)))
+                        (.on conn "error" (fn [_] nil))
+                        (.on conn "end"   (fn [] (handle! conn @chunks handlers))))))]
+       (.on server "error" (fn [^js e]
+                             (js/console.error "[vv daemon] socket error:" (.-message e))
+                             (resolve nil)))
+       (.listen server sock
+                (fn []
+                  (reset! published {:path sock :ino (inode-of sock) :server server})
+                  (resolve server)))))))
+
+(defn release!
+  "Withdraw the socket this process published, so the next launch binds cleanly. Only while the path still
+   names OUR socket's inode: the server is closed — libuv unlinks the name it bound — and the path is unlinked
+   explicitly as well. A path that now names another socket is left alone. Idempotent. core calls it at
+   `will-quit`, BEFORE Electron releases the single-instance lock, so a successor can never find this socket
+   still answering and stand down; the process `exit` hook covers app.exit and the stop watchdog.
+   Residual (measured, docs/architecture/03 §6): Electron's shutdown closes every handle still open — after
+   app.quit, and after app.exit once the process has had a window — and libuv unlinks a server's bound name on
+   close without checking what the name now holds. That can only remove another instance's socket if ours was
+   first deleted from outside and that instance then bound the name."
+  []
+  (when-let [{:keys [path ino ^js server]} @published]
+    (reset! published nil)
+    (when (and (some? ino) (= ino (inode-of path)))
+      (try (.close server) (catch :default _ nil))
+      (try (.unlinkSync fs path) (catch :default _ nil)))))
+
+(defn- install-process-hooks!
+  "Once per process, whether or not it owns the socket: release the socket at exit, and let SIGTERM/SIGINT
+   (systemctl restart, launchctl kickstart -k, Ctrl-C) take the SAME graceful path as `vv1 stop` — they used to
+   `process.exit(0)` outright, skipping before-quit (SSH pools, window bounds)."
+  [on-stop]
+  (when (compare-and-set! hooks-installed? false true)
+    (.on js/process "exit" (fn [] (release!)))
+    (.on js/process "SIGTERM" (fn [] (stop! on-stop)))
+    (.on js/process "SIGINT"  (fn [] (stop! on-stop)))))
+
 (defn listen!
   "Start the daemon socket server. Handlers: `:on-open` receives
    `{:args [...] :types [...] :stdin-index int|nil :cwd \"…\"|nil :instance-id \"…\"|nil}` for each open
@@ -116,28 +225,20 @@
    reject the open — the error is written back to the client as the connection's only reply;
    `:on-stop` quits the process for `vv1 stop` and for
    SIGTERM/SIGINT; `:status` returns {:pid :version :bundle-mtime-ms :windows :daemon?} for `vv1 ping`.
-   Returns the server (or nil if the socket could not be bound — e.g. a live daemon already owns it, which
-   shouldn't happen since only the single-instance primary calls this)."
+   The socket is probed first (see `probe`): an absent path is bound, a stale socket is replaced, and a socket
+   another running instance answers on is left to it. Resolves to the server, or nil when this process does
+   not serve the socket (another instance owns it, a bind race was lost, or the path cannot be used) — it then
+   runs as an ordinary primary that `vv` does not reach."
   [{:keys [on-stop] :as handlers}]
-  (let [sock (socket-path)]
-    (try (.unlinkSync fs sock) (catch :default _ nil))    ; clear a stale socket left by an unclean exit
-    (let [server (.createServer net
-                   ;; allowHalfOpen: the client half-closes to frame its message, and a control frame is
-                   ;; answered AFTER that FIN — without this, node ends the writable side automatically on
-                   ;; `end` and the reply would be a write-after-end. Every path in handle! closes the conn.
-                   #js {:allowHalfOpen true}
-                   (fn [^js conn]
-                     (let [chunks (atom "")]
-                       (.on conn "data"  (fn [d] (swap! chunks str d)))
-                       (.on conn "error" (fn [_] nil))
-                       (.on conn "end"   (fn [] (handle! conn @chunks handlers))))))]
-      (.on server "error" (fn [^js e] (js/console.error "[vv daemon] socket error:" (.-message e))))
-      (.listen server sock)
-      ;; best-effort socket cleanup so the next launch binds cleanly
-      (let [cleanup (fn [] (try (.close server) (catch :default _ nil)) (try (.unlinkSync fs sock) (catch :default _ nil)))]
-        (.on js/process "exit" cleanup)
-        ;; SIGTERM/SIGINT (systemctl restart, launchctl kickstart -k, Ctrl-C) take the SAME graceful path as
-        ;; `vv1 stop` — they used to `process.exit(0)` outright, skipping before-quit (SSH pools, window bounds).
-        (.on js/process "SIGTERM" (fn [] (stop! on-stop)))
-        (.on js/process "SIGINT"  (fn [] (stop! on-stop))))
-      server)))
+  (install-process-hooks! on-stop)
+  (let [sock (socket-path)
+        ino  (inode-of sock)]
+    (-> (probe sock)
+        (.then (fn [state]
+                 (case state
+                   :absent (bind! sock handlers)
+                   :stale  (if (remove-stale! sock ino) (bind! sock handlers) nil)
+                   :live   (do (js/console.warn "[vv daemon] another running instance serves" sock
+                                                "— this one runs without the socket")
+                               nil)
+                   (do (js/console.warn "[vv daemon] cannot probe" sock "— left untouched") nil)))))))

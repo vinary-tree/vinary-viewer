@@ -35,6 +35,8 @@ const WINDOW_EDN = path.join(CONFIG_HOME, 'vinary-viewer', 'window.edn');
 const DECK = path.join(SCRATCH, 'talk.pdf');
 fs.mkdirSync(CONFIG_HOME, { recursive: true });
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+// …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(SCRATCH, 'daemon-events.json');
 fs.writeFileSync(DECK, Buffer.from(makeDeckPdf({ frames: [1, 2, 1, 1] })));   // 5 pages, a Beamer deck
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -137,10 +139,12 @@ app.whenReady().then(() =>
   run()
     .then(() => {
       fs.rmSync(SCRATCH, { recursive: true, force: true });
+      RUNTIME.cleanup();
       app.exit(0);
     })
     .catch((error) => {
       console.error('\nfullscreen-e2e FAILED:\n', error && error.stack ? error.stack : error);
       fs.rmSync(SCRATCH, { recursive: true, force: true });
+      RUNTIME.cleanup();
       app.exit(1);
     }));

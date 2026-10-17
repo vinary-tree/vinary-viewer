@@ -32,6 +32,8 @@ const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-watch-
 // A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
 const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-watch-e2e-config-')));
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+// …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 const DOC = path.join(SCRATCH, 'shared.md');
 process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(SCRATCH, 'daemon-events.json');
 // a PDF caught mid-write settles on a unit-u backoff (ADR-0046 §Settling); 100 ms keeps the torn-write arm quick
@@ -278,11 +280,11 @@ async function run() {
 app.whenReady().then(() =>
   run()
     .then(() => {
-      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); RUNTIME.cleanup();
       app.exit(0);
     })
     .catch((error) => {
       console.error('\nwatch-e2e FAILED:\n', error && error.stack ? error.stack : error);
-      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); RUNTIME.cleanup();
       app.exit(1);
     }));

@@ -57,6 +57,8 @@ const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-
 // A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
 const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-input-config-')));
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+// …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+const RUNTIME = require('../test/fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 
 const GPU = process.env.VV_BENCH_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
@@ -509,7 +511,7 @@ app.whenReady().then(async () => {
     console.error('[bench] FAILED:', e && e.stack || e);
     code = 1;
   } finally {
-    try { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+    try { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); RUNTIME.cleanup(); } catch (_) { /* best effort */ }
     app.exit(code);
   }
 });

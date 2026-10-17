@@ -297,6 +297,55 @@ listens on it — not only a `--daemon` one — and `vv` (`scripts/vv-open.mjs`)
 Stated in two places that must change together: `daemon/socket-path` and
 `scripts/daemon-socket.mjs` (the single JS copy, imported by both client scripts).
 
+**Socket ownership — the first live owner keeps it.** The single-instance lock is per *userData* directory,
+and userData follows `$XDG_CONFIG_HOME`; the socket path is per *user*. So two primaries can run at once — a
+test harness or a second profile beside the user's daemon — and need a rule for the one path. `listen!` probes
+before it binds:
+
+| The probe finds | Meaning | `listen!` |
+|---|---|---|
+| a connection accepted (it sends `vv1 ping`) | another running instance owns the socket | leaves it; this primary runs **without** the socket |
+| `ECONNREFUSED` | a stale socket file, the leftover of an unclean exit | unlinks it — only if it is still a socket with the inode that failed the probe — then binds |
+| `ENOENT` | nothing there | binds; `bind(2)` fails with `EADDRINUSE` rather than replace a path, so a socket published since the probe is never taken |
+| anything else (`EACCES`, a path past `sun_path`, a full backlog) | unknown | touches nothing |
+
+The owner withdraws the socket at `will-quit`, while it still holds the lock. Electron releases the lock only
+after `will-quit`, so a same-config successor never probes a socket that is about to vanish. Withdrawal checks
+the inode first. A path that now names someone else's socket is left alone.
+
+*Why (2026-10-17).* The old `listen!` unlinked unconditionally, then bound. A second primary therefore took a
+live daemon's socket for good. The daemon kept listening on an inode that no path named, `vv` could not reach
+it, and `vv1 stop` could not stop it. Real-app test harnesses did exactly that to a developer's resident daemon.
+
+The experiment used a stand-in daemon (a plain server in its own process) and a real primary with a different
+config home, sharing one private runtime dir:
+
+| | Old build | Fixed build |
+|---|---|---|
+| While the primary ran, the path held | the primary's own inode, answering `vv1 ping` | the stand-in's inode |
+| The stand-in itself | still listening, on an orphaned inode | still answering `vv1 ping` |
+| After the primary exited | nothing at the path | the stand-in's inode, still answering |
+
+`test/daemon-smoke.js` steps 0 and 9 are the regression arms.
+
+*Residual — libuv.* libuv unlinks a server's **bound name** whenever the handle closes, and never checks what
+the name holds by then. Electron's shutdown closes every handle still open; measured, the path disappears:
+
+| Electron shutdown | The process had a window | Path afterwards |
+|---|---|---|
+| `app.quit()` | no | removed |
+| `app.quit()` | yes | removed |
+| `app.exit()` | yes | removed |
+| `app.exit()` | no | **kept** |
+
+An owner therefore removes its bound path at exit, whatever the path holds by then. This can only remove
+*another* instance's socket if ours was first deleted from outside and that instance then bound the name.
+
+The alternative that closes even this gap was considered and rejected. It would bind a private temporary name
+and publish it with an atomic `link(2)`, which fails with `EEXIST`. But `lsof -t` and `fuser` then cannot name
+the owner from the public path (measured: both exit 1), because they match a socket by its bound name.
+`scripts/vv-daemon.mjs` relies on both to find a pre-`vv1` daemon it must stop.
+
 **Messages** — one per connection. The client half-closes to frame its message; the server replies
 (control frames only) and ends. The server sets `allowHalfOpen` precisely so it can still write
 after the client's FIN.

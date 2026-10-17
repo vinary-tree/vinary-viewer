@@ -16,6 +16,9 @@
 //   • a mirror app directory whose package.json carries a different "name", which is what gives Electron a
 //     separate userData dir and therefore a SEPARATE single-instance lock. (HOME does not work for this on
 //     macOS — Chromium takes the real home regardless.)
+//   • the password-manager bridge switched off in its config (test/fixtures/hermetic-env.js): every window it
+//     opens would otherwise run the developer's password-manager CLIs, and one of them leaves an agent behind
+//     in the private runtime dir that outlives it.
 //
 // Needs a display for the window-count assertions (like the other Electron smokes), and a built
 // dist/main/main.js — it spawns real daemons.
@@ -25,7 +28,8 @@ const assert = require('assert');
 const fs = require('fs');
 const net = require('net');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
+const { disablePasswordBridge } = require('./fixtures/hermetic-env');
 
 const ROOT = path.resolve(__dirname, '..');
 const BUNDLE = path.join(ROOT, 'dist', 'main', 'main.js');
@@ -101,6 +105,7 @@ function startDaemon() {
 async function main() {
   fs.mkdirSync(RUNTIME_DIR, { recursive: true });
   makeMirrorApp();
+  disablePasswordBridge(path.join(APP, 'config'));
 
   // 1. A control frame must NOT be valid JSON. This is the whole backward-compatibility contract: a
   //    pre-vv1 daemon parses every message with JSON.parse inside a try/catch and only opens a window on
@@ -109,8 +114,16 @@ async function main() {
   assert.throws(() => JSON.parse('vv1 ping'), 'the vv1 control frame must not parse as JSON');
   assert.throws(() => JSON.parse('vv1 stop'), 'the vv1 control frame must not parse as JSON');
 
+  // 0. A STALE socket — the file an unclean exit leaves behind (SIGKILL, a crash) — is replaced: nothing answers on
+  //    it, so the daemon removes it and binds its own. (The probe that tells stale from LIVE is step 9's subject.)
+  spawnSync(process.execPath, ['-e', "require('net').createServer().listen(process.argv[1], () => process.kill(process.pid, 'SIGKILL'))",
+    SOCK], { stdio: 'ignore' });
+  assert.ok(fs.lstatSync(SOCK).isSocket() && await isFree(), 'the fixture leaves a stale socket: a socket file nothing answers on');
+  const staleIno = fs.lstatSync(SOCK).ino;
+
   startDaemon();
   await waitUntil(async () => !(await isFree()), 30000, 'the daemon to bind its socket');
+  assert.notStrictEqual(fs.lstatSync(SOCK).ino, staleIno, "the stale socket was replaced by the daemon's own");
 
   // 2. ping reports who we are and WHICH BUILD we loaded — the fields install.sh compares.
   const a = await ping();
@@ -227,12 +240,52 @@ async function main() {
   runNode(path.join(APP, 'scripts', 'vv-daemon.mjs'), ['stop']);
   await waitUntil(isFree, 20000, 'the socket to be released at teardown');
 
+  // 9. OWNERSHIP — a second primary never takes a LIVE socket. The single-instance lock is per userData, which
+  //    follows $XDG_CONFIG_HOME, so a primary with another config home (a test harness, a second profile) can run
+  //    beside the user's daemon. It used to unlink the daemon's socket and bind its own: the daemon went on
+  //    listening on an inode no path named, and `vv` could not reach it until it restarted. A plain server stands
+  //    in for the live owner; the primary under test is a real daemon of the mirror app.
+  liveOwner = net.createServer({ allowHalfOpen: true }, (c) => {
+    c.on('data', () => {});
+    c.on('end', () => c.end('the-live-owner\n'));
+  });
+  await new Promise((r) => liveOwner.listen(SOCK, r));
+  const ownerIno = fs.lstatSync(SOCK).ino;
+  // its own process group, so a failed step can kill electron's launcher AND the app it spawned (SIGKILL is not
+  // forwarded), and nothing outlives the smoke
+  secondPrimary = spawn(ELECTRON, [APP, '--daemon'], { env: env(), detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  let secondErr = '';
+  secondPrimary.stderr.on('data', (d) => { secondErr += d; });
+  // done when it stands down (its warning) — or when it has taken the path (the bug), so the assertion decides
+  const inodeAt = () => { try { return fs.lstatSync(SOCK).ino; } catch { return null; } };
+  await waitUntil(async () => /another running instance serves/.test(secondErr) || inodeAt() !== ownerIno, 30000,
+    'the second primary to probe the socket');
+  assert.strictEqual(inodeAt(), ownerIno, 'the live owner keeps its socket path');
+  assert.strictEqual(await request('vv1 ping\n'), 'the-live-owner', 'a client still reaches the live owner');
+  const exited = new Promise((r) => secondPrimary.once('exit', r));
+  secondPrimary.kill('SIGTERM');                         // electron's launcher forwards it: the graceful stop path
+  await exited;
+  secondPrimary = null;
+  assert.strictEqual(inodeAt(), ownerIno, "the second primary's quit leaves the owner's socket in place");
+  assert.strictEqual(await request('vv1 ping\n'), 'the-live-owner', 'the owner is still reachable after it quits');
+  await new Promise((r) => liveOwner.close(r));
+  liveOwner = null;
+  assert.ok(await isFree(), 'closing the owner frees the path');
+
   console.log('daemon control-protocol smoke OK');
 }
+
+let secondPrimary = null;                                 // step 9's processes and stand-in owner — torn down here
+let liveOwner = null;                                     //   if a step failed, so a failure exits instead of hanging
 
 main()
   .catch((err) => { console.error(err && err.stack ? err.stack : err); process.exitCode = 1; })
   .finally(async () => {
+    if (secondPrimary) {
+      try { process.kill(-secondPrimary.pid, 'SIGKILL'); } catch { /* gone */ }
+      secondPrimary.stderr.destroy();
+    }
+    if (liveOwner) liveOwner.close();
     try { runNode(path.join(APP, 'scripts', 'vv-daemon.mjs'), ['stop']); } catch { /* best effort */ }
     fs.rmSync(RUNTIME_DIR, { recursive: true, force: true });
     fs.rmSync(APP, { recursive: true, force: true });

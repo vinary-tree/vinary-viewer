@@ -47,6 +47,8 @@ const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e
 // A SEPARATE temp dir, not inside SCRATCH: test documents there may be adopted as a watched Files-tree project.
 const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e2e-config-')));
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+// …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 
 // VV_FIND_E2E_GPU=1 re-runs WITH hardware acceleration. app.disableHardwareAcceleration() changes the
 // scroller's compositing and therefore possibly the scroll-offset quantum the runaway-animator bug depends
@@ -921,9 +923,9 @@ async function run() {
 
 app.whenReady().then(() =>
   run()
-    .then(() => { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); app.exit(0); })
+    .then(() => { fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); RUNTIME.cleanup(); app.exit(0); })
     .catch((err) => {
       console.error('\nfind-e2e FAILED:\n', err && err.stack ? err.stack : err);
-      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true });
+      fs.rmSync(SCRATCH, { recursive: true, force: true }); fs.rmSync(CONFIG_HOME, { recursive: true, force: true }); RUNTIME.cleanup();
       app.exit(1);
     }));

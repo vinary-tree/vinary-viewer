@@ -77,6 +77,8 @@ async function run() {
 
   process.env.HOME = HOME_DIR;
   process.env.XDG_CONFIG_HOME = path.join(HOME_DIR, '.config');
+  // …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
+  const runtime = require('./fixtures/hermetic-env').hermeticRuntime(process.env.XDG_CONFIG_HOME);
   process.env.VV_DAEMON_EVENTS_DESCRIPTOR = DESCRIPTOR;
   process.env.VV_POOL = '0';
   process.argv.splice(1, process.argv.length - 1, __filename);
@@ -208,6 +210,7 @@ async function run() {
   } finally {
     server.destroyConnections();
     await server.close();
+    runtime.cleanup();
     // app.exit, not process.exitCode + app.quit(): Electron does not carry exitCode out through quit(), so a failed run
     // exited 0 — an injected failure proved it (see docs/engineering/03-test-strategy.md §Exit codes)
     app.exit(failed ? 1 : 0);

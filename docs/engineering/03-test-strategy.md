@@ -93,7 +93,7 @@ framework. They fall into three groups by host.
 | [`tree-e2e.js`](../../test/tree-e2e.js) | Boots the compiled renderer and **real main service** against synthetic and git fixtures. It covers scoped structural refresh, add/delete/rename (including unstaged tracked git paths), refresh-before-open DOM ordering, watcher release, watcher-ready reconciliation, directory/project context-menu Refresh, and the Files rail-icon Refresh All. |
 | [`watch-e2e.js`](../../test/watch-e2e.js) | Boots two real windows over the same path and proves one shallow tree watcher fans out to every retaining renderer, releases owners independently on collapse/window destruction, coexists with retained-document watchers, and is reacquired on expansion. |
 | [`extensions-smoke.js`](../../test/extensions-smoke.js) | The Chrome-extension + ad-block runtime ([ADR-0015](../design-decisions/0015-scoped-extension-runtime-gpl-free.md)): `session.extensions.loadExtension` loads the unpacked MV3 fixture, its content script injects into a matched HTTP page, its action popup loads with native `chrome.*` (runtime/storage/action), and the native ad-blocker fetches filter lists (network-gated). |
-| [`daemon-smoke.js`](../../test/daemon-smoke.js) | The resident-daemon control seam ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)): `vv1 ping` reports the pid/version/**loaded-bundle mtime**/window count `install.sh` verifies against; the v0.2 open message still opens a window; an unknown command opens none; `vv1 stop` exits the process and frees the socket **and** the single-instance lock; and `vv` retires a stale **idle** daemon but never one with a window open. It also guards the backward-compatibility contract that makes all this safe — a control frame must not parse as JSON, or probing a pre-`vv1` daemon would open a stray window on it. Spawns real daemons under a private `XDG_RUNTIME_DIR` and a renamed mirror app (its own userData → its own lock), so it cannot disturb the developer's live daemon. |
+| [`daemon-smoke.js`](../../test/daemon-smoke.js) | The resident-daemon control seam ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)): `vv1 ping` reports the pid/version/**loaded-bundle mtime**/window count `install.sh` verifies against; the v0.2 open message still opens a window; an unknown command opens none; `vv1 stop` exits the process and frees the socket **and** the single-instance lock; and `vv` retires a stale **idle** daemon but never one with a window open. It also guards the backward-compatibility contract that makes all this safe — a control frame must not parse as JSON, or probing a pre-`vv1` daemon would open a stray window on it. A **stale** socket file (an owner killed with SIGKILL) is replaced (step 0). A **live** socket is never taken: a second primary with its own config home finds the owner answering, runs without the socket, and leaves the owner's path in place when it quits (step 9; [IPC §6, socket ownership](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)). Spawns real daemons under a private `XDG_RUNTIME_DIR`, a renamed mirror app (its own userData → its own lock) and a disabled password bridge, so it cannot disturb the developer's live daemon or password managers. |
 
 ### 3.2 Terminal smokes (Node, no display)
 
@@ -159,14 +159,34 @@ was measured: `remote-daemon-events-e2e` with a failure injected after start-up 
 with `app.exit`. It and `scripts/screenshots.cjs` were the two harnesses that quit that way. (Plain Node scripts,
 such as the runners and `daemon-smoke`, may set `process.exitCode`: Node honours it.)
 
-### 3.5 The one harness that runs the REAL main process
+**Hermetic real-app harnesses.** A harness that boots the real main process inherits three ways out of its
+sandbox. All three are closed in every such harness by [`test/fixtures/hermetic-env.js`](../../test/fixtures/hermetic-env.js),
+called before `dist/main/main.js` is required. The harnesses are `find-e2e`, `tree-e2e`, `watch-e2e`,
+`fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e`, `bench-input-latency` and the cold-start
+profiler; `daemon-smoke` writes the same config file.
+
+| Way out | Risk | Closed by |
+|---|---|---|
+| **The config home** | the developer's settings, recents, window geometry and **single-instance lock** | an isolated `$XDG_CONFIG_HOME`, made by each harness |
+| **The runtime dir** | every primary serves the per-user `vv` socket in `$XDG_RUNTIME_DIR`, and stdin and commit-diff spills live there with age-gated sweeps | `hermeticRuntime` gives the process a short private `/tmp/vv-rt-*`. A Wayland backend's relative `WAYLAND_DISPLAY` is made absolute first, so moving the runtime dir does not lose the display. |
+| **The password-manager bridge** | each window asks for its state as it boots, and main then runs the developer's password-manager CLIs | `passwords.edn` `{:enabled? false}` in the isolated config |
+
+*How these were found (2026-10-17).* Real-app e2e runs on the developer's runtime dir took the resident daemon's
+socket for good; see [IPC §6, socket ownership](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process).
+The password CLIs ran against the developer's own accounts. One of them starts an agent in `$XDG_RUNTIME_DIR`,
+and each run whose runtime dir was private and then deleted left an unreachable agent behind. Four such
+orphans were observed: from a `daemon-smoke` run, a Wayland-backend run and two diagnostic runs.
+
+### 3.5 The harnesses that run the REAL main process
 
 `electron-smoke.js` and `scripts/screenshots.cjs` both **mock** the `vv:open` IPC seam — they inject
 content through `state.contentByPath` / `vv:open-files` — so main's real `open!` → `send-tree!` →
 `repo-tree` / `dir-walk` chain never executes in them. That left the sidebar's project-root logic
 verifiable only in pieces.
 
-[`tree-e2e.js`](../../test/tree-e2e.js) closes that gap. It `require`s the **real compiled main**
+[`tree-e2e.js`](../../test/tree-e2e.js) was the first harness to close that gap, and the one described here.
+`find-e2e`, `watch-e2e`, `fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e` and the
+`bench-input-latency` benchmark boot the real main the same way, under the hermetic environment of §3.4. It `require`s the **real compiled main**
 (`dist/main/main.js`) from inside an Electron process — the only way it can be required, since it
 auto-invokes `vinary.main.core/main` on load — so the entire production chain runs:
 
@@ -236,7 +256,11 @@ The smokes stand on a small set of committed fixtures under
 |---------|---------|---------|
 | `ext-probe/` (an unpacked MV3 extension: `manifest.json`, `background.js`, `content.js`, `popup.{html,js}`, `icon16.png`) | `extensions-smoke.js` | A minimal extension that exercises content-script injection and native `chrome.*` in the action popup. |
 | `smoke.pdf` | PDF paths in the smokes / screenshots | A tiny real PDF for the pdf.js pipeline. |
-| `ssh-server.js` (`startSftpServer`) | `ssh-transport-smoke.js`, `electron-smoke.js` | A hermetic **in-process** `ssh2.Server` SFTP server, so the SSH transport and the remote-streaming smoke run with no network and no external host. |
+| `ssh-server.js` (`startSftpServer`) | `ssh-transport-smoke.js`, `content-service-smoke.js`, `daemon-events-smoke.js`, `cli-smoke.js`, `electron-smoke.js`, `remote-daemon-events-e2e.js`, `remote-pdf-e2e.js`, `scripts/bench-remote-read.cjs`, `scripts/exp-torn-pdf-reads.cjs` | A hermetic **in-process** `ssh2.Server` SFTP server, so the SSH transport and every remote path run with no network and no external host. Instrumented for the remote-read experiments ([scientific/11](../scientific/11-remote-read-and-reload-safety-experiments.md)): a server identity, a read-length cap, per-request delays and faults, request hooks, statistics and open-handle counts. |
+| `latency-proxy.js` | `scripts/bench-remote-read.cjs`, `scripts/diag-sftp-window.cjs` | A TCP proxy that adds a round-trip time (one FIFO per direction, RTT/2 each way) and an optional bandwidth limit between the SSH client and the fixture. |
+| `pdf-gen.js` | the PDF smokes and e2e harnesses, the benchmarks, `cli-smoke.js` | Deterministic PDF builders: `makeTextPdf`, `makeOutlinePdf`, `makeDeckPdf` (Beamer-like decks with overlays, page labels, page modes, links, second-screen notes, padding, incremental updates), `truncatePdf`, `pageColour`. |
+| `beamer-notes-right.pdf` + `.tex` | `electron-smoke.js`, `cli-smoke.js`, `content-service-smoke.js` | A real lualatex Beamer deck with `show notes on second screen=right`, and its source. |
+| `hermetic-env.js` | every harness that boots the real main | The private runtime dir and the disabled password bridge (see §3.4, Hermetic real-app harnesses). |
 
 Most other fixtures are *generated* by the harness at run time (e.g.
 `graphics-smoke.js` builds its PNG/JPEG/GIF images with `pngjs`/`jpeg-js`/`omggif`

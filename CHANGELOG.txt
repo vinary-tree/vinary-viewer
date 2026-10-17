@@ -547,6 +547,21 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A second copy of the app no longer takes the resident daemon's `vv`
+      socket. A copy with its own config directory (a test harness, a second
+      profile) used to replace the running daemon's socket with its own. After
+      that the daemon was unreachable: `vv <file>` started a fresh copy and
+      `vv1 stop` could not stop it, until it was restarted by hand. Now a copy
+      that finds the socket answered runs without it. Only a socket that nobody
+      answers on (left by a crash or a kill) is replaced. The daemon withdraws
+      its socket before it lets the next copy start.
+    - The test harnesses that boot the real app are hermetic. Each one now gets a
+      private runtime directory, so it cannot take or answer your `vv` socket.
+      The password-manager bridge is switched off in its private config, so
+      running the tests no longer runs your password managers' command-line
+      tools, which left agent processes behind. The cold-start profiler is
+      isolated the same way. Before, a running daemon would have answered every
+      launch it profiled.
     - The SSH password prompt now owns the keyboard like every other dialog:
       keymap chords (Ctrl+T, Vim keys, ...), menubar Alt access keys and the
       page keys no longer act behind it, and a web page no longer paints over

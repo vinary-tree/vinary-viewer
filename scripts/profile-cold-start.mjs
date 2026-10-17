@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import hermeticEnv from '../test/fixtures/hermetic-env.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ELECTRON = path.join(ROOT, 'node_modules', '.bin', 'electron');
@@ -41,6 +42,15 @@ process.on('exit', killAll);
 
 // ── built-in fixtures (a temp dir, cleaned unless --keep) ──
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-profile-'));
+// Hermetic, like every harness that boots the real app (test/fixtures/hermetic-env.js). An isolated config home gives
+// the launches a single-instance lock of their own: on the developer's config a running `vv` daemon would win the
+// lock, take each fixture into its own session and leave nothing to profile. The private runtime dir and the
+// disabled password bridge keep the developer's `vv` socket and password managers out of the measurement too.
+const CONFIG_HOME = path.join(tmp, 'config');
+fs.mkdirSync(CONFIG_HOME, { recursive: true });
+process.env.XDG_CONFIG_HOME = CONFIG_HOME;
+const runtime = hermeticEnv.hermeticRuntime(CONFIG_HOME);
+process.on('exit', runtime.cleanup);                 // every exit path, the signal handlers' included
 const write = (name, body) => { const p = path.join(tmp, name); fs.writeFileSync(p, body); return p; };
 const builtin = fixtureArgs.length ? fixtureArgs : [
   write('empty.md', '# Empty\n'),

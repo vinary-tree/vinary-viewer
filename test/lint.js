@@ -28,13 +28,22 @@ const jsFiles = [
   'test/git-tree-smoke.js', 'test/git-log-smoke.js', 'test/git-blame-smoke.js', 'test/tree-e2e.js', 'test/cli-smoke.js', 'test/graphics-smoke.js',
   'test/tui-smoke.js', 'test/daemon-smoke.js', 'test/daemon-events-smoke.js',
   'test/headless-window.js', 'test/headless-runner-smoke.mjs',
-  // shared, deterministic test fixtures: the in-process SFTP server, the TCP latency proxy, the PDF builders
+  'test/ssh-config-smoke.js', 'test/ssh-transport-smoke.js', 'test/fullscreen-e2e.js',
+  // shared, deterministic test fixtures: the in-process SFTP server, the TCP latency proxy, the PDF builders, and
+  // the hermetic runtime every real-main harness boots under
   'test/fixtures/ssh-server.js', 'test/fixtures/latency-proxy.js', 'test/fixtures/pdf-gen.js',
+  'test/fixtures/hermetic-env.js',
   'test/remote-daemon-events-e2e-runner.js', 'test/remote-daemon-events-e2e.js',
+  'test/remote-pdf-e2e-runner.js', 'test/remote-pdf-e2e.js',
   // the in-page-find / typist-latency gate, and the benchmark that produced its threshold (ADR-0033)
   'test/find-e2e.js', 'test/find-worker-smoke.js', 'scripts/bench-input-latency.cjs',
-  // the remote whole-file read benchmark behind docs/scientific/11 (ADR-0046)
-  'scripts/bench-remote-read.cjs',
+  // the remote whole-file read benchmark behind docs/scientific/11 (ADR-0046), and its experiments and analyses
+  'scripts/bench-remote-read.cjs', 'scripts/exp-torn-pdf-reads.cjs', 'scripts/diag-sftp-window.cjs',
+  'scripts/analyze-e2-sibling-stats.cjs', 'scripts/analyze-e3-remote-reads.cjs', 'scripts/analyze-s7-streaming.cjs',
+  // the deck-detection corpus instrument behind docs/scientific/12 (ADR-0045)
+  'scripts/exp-deck-corpus.cjs',
+  // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools
+  'scripts/profile-cold-start.mjs', 'scripts/sync-assets.mjs', 'scripts/check-assets.mjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the
   // socket path/helpers both import (scripts/vv-open.mjs was previously unchecked here)
   'scripts/vv-open.mjs', 'scripts/vv-daemon.mjs', 'scripts/daemon-socket.mjs',
