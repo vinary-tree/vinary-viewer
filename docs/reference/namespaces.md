@@ -323,7 +323,7 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 |-----------|----------------|
 | `vinary.terminal.caps` | Terminal capability detection: width, colour, truecolor, OSC-8 hyperlinks, inline graphics. |
 | `vinary.terminal.graphics` | Headless terminal image graphics (the terminal analog of `<img>`): kitty/sixel raster + vector decode. |
-| `vinary.terminal.pdf` | Headless PDF text extraction: the pdf.js **legacy** build (pure JS, no DOM/canvas) → reflowed text. pdf.js runs at `verbosity 0` (errors only): its warnings are `console.log`s, and stdout carries the document (`vv --cli`) or the screen (`vv --tui`). |
+| `vinary.terminal.pdf` | Headless PDF text extraction: the pdf.js **legacy** build (pure JS, no DOM/canvas) → reflowed text; `open-document` (the one loader) and `page-sizes` (scale-1 page sizes, rotation applied — the measure the GUI engine gives the deck detector). pdf.js runs at `verbosity 0` (errors only): its warnings are `console.log`s, and stdout carries the document (`vv --cli`) or the screen (`vv --tui`). |
 | `vinary.terminal.stream` | The sink-agnostic, cancellable terminal streaming engine (line stream via `content_service`). |
 | `vinary.terminal.stdin` | Piped-stdin intake shared by `vv-cli`, `vv-tui` and the main daemon (ADR-0036): stdin drained to EOF (binary-safe) is an immutable snapshot — zero bytes means no stdin document — spilled to a private per-invocation directory only where a real path is needed, and stale spills are age-swept at daemon boot. |
 | `vinary.terminal.syntax` | Headless tree-sitter → ANSI syntax highlighter (the terminal analog of the CodeMirror-coupled highlighter). |
@@ -351,7 +351,7 @@ GUI is untouched; these lower the same IR to ANSI for `vv-cli`/`vv-tui`.
 
 | Namespace | Responsibility |
 |-----------|----------------|
-| `vinary.cli.core` | `vv-cli` — a headless terminal document renderer; reads a file with the Electron-free `content_service` and prints. |
+| `vinary.cli.core` | `vv-cli` — a headless terminal document renderer; reads a file with the Electron-free `content_service` and prints. `--deck-info` prints a PDF's slide-deck evidence and classification as JSON instead (`deck-info`: `slides.evidence` + `terminal.pdf/page-sizes` → `slides.deck`, the GUI's own pipeline; docs/scientific/12's instrument). |
 | `vinary.cli.render` | Turn a `content_service` payload into terminal ANSI, reusing the GUI's IR front-ends verbatim and lowering through `ir.backend.ansi`. |
 
 ---

@@ -11,6 +11,9 @@
             ["readline" :as readline]
             [clojure.string :as str]
             [vinary.cli.render :as render]
+            [vinary.slides.deck :as deck]
+            [vinary.slides.evidence :as evidence]
+            [vinary.terminal.pdf :as tpdf]
             ;; eager (non-lazy) population of the shared renderer.heavy-registry — Node has no shadow.lazy, so
             ;; unified-latex/uniorg are bundled + wired at startup (see main) instead of code-split like the renderer.
             [vinary.renderer.heavy-node :as heavy-node]
@@ -35,6 +38,8 @@
      "                      alias (diff, md, csv, log), or a grammar language (python, rust). --file-type"
      "                      is an accepted alias. NOTE: -t used to mean --toc; that short form moved here."
      "      --toc           print the document outline (Contents) first"
+     "      --deck-info     for each PDF, print its slide-deck evidence and classification as one JSON line"
+     "                      (Creator/Producer, page mode, sizes, label counts → deck?, tier, source, frames)"
      "      --width N       wrap column (default: terminal width or 80)"
      "      --no-color      disable ANSI colour (also auto-off when piped / NO_COLOR)"
      "      --color         force colour even when not a TTY"
@@ -66,6 +71,7 @@
                                               (recur (rest as) files (cond-> opts (#{:kitty :sixel} v) (assoc :force-graphics v))))
           (= "--no-hyperlinks" a)  (recur (rest as) files (assoc opts :no-hyperlinks true))
           (= "--toc" a)            (recur (rest as) files (assoc opts :toc true))
+          (= "--deck-info" a)      (recur (rest as) files (assoc opts :deck-info true))
           (= "--width" a)          (recur (drop 2 as) files (assoc opts :width (js/parseInt (or (second as) "80"))))
           (str/starts-with? a "--width=") (recur (rest as) files (assoc opts :width (js/parseInt (subs a 8))))
           (str/starts-with? a "-") (recur (rest as) files opts)                 ; ignore unknown flags
@@ -166,6 +172,71 @@
         "text"
         (let [k0 (.classifyName cs uri)]
           (if (and (= "text" k0) (gc/grammar-for-path uri gc/bundled-grammars {})) "source" k0)))))
+
+;; ── --deck-info: one PDF's slide-deck evidence and classification (ADR-0045), as a JSON line ──────────────────
+;; The diagnostic behind deck detection and the instrument of docs/scientific/12: the SAME evidence (slides.evidence
+;; on the headless pdf.js) and the SAME page measure (terminal.pdf/page-sizes ≡ renderer.pdf/page-sizes) feed the
+;; SAME classifier (slides.deck) the GUI uses on prepare. Page labels are summarised — how many, how many distinct —
+;; never listed: they are document content.
+
+(defn- round2 [x] (/ (js/Math.round (* 100 x)) 100))
+
+(def ^:private deck-info-keys
+  "The order --deck-info prints its fields in (a map this large is unordered; a diagnostic line should not be)."
+  [:path :pages :sizes :distinctSizes :creator :producer :creatorTool :pageMode :labels
+   :deck :tier :source :frames :secondScreen])
+
+(defn deck-info
+  "PDF bytes → Promise<a map of the deck evidence, the measured sizes and the classification> for `uri`."
+  [uri ^js bytes]
+  (-> (tpdf/open-document bytes)
+      (.then (fn [^js doc]
+               (-> (js/Promise.all #js [(evidence/gather doc) (tpdf/page-sizes doc)])
+                   (.then (fn [^js both]
+                            (let [ev     (aget both 0)
+                                  sizes  (aget both 1)
+                                  d      (deck/deck (assoc ev :sizes sizes))
+                                  sum    (deck/summary d)
+                                  shapes (vec (distinct (map (fn [[w h]] [(round2 w) (round2 h)]) sizes)))
+                                  labels (:labels ev)]
+                              (-> (.destroy doc) (.catch (fn [_] nil)))
+                              {:path          uri
+                               :pages         (count sizes)
+                               :sizes         (vec (take 5 shapes))
+                               :distinctSizes (count shapes)
+                               :creator       (:creator ev)
+                               :producer      (:producer ev)
+                               :creatorTool   (:creator-tool ev)
+                               :pageMode      (:page-mode ev)
+                               :labels        (when labels {:count (count labels) :distinct (count (distinct labels))})
+                               :deck          (:deck? sum)
+                               :tier          (some-> (:tier sum) name)
+                               :source        (some-> (:source sum) name)
+                               :frames        (:frame-count sum)
+                               :secondScreen  (some-> (:second-screen sum) name)}))))))))
+
+(defn- deck-info-spec!
+  "Print one spec's --deck-info line. Its bytes come from the same readers as rendering (stdin buffer, the verified
+   local read, the remote reader); a file that is not a PDF is an error for this flag."
+  [{:keys [uri stdin?] :as spec} buf]
+  (let [kind (effective-kind spec)]
+    (-> (cond
+          (not= "pdf" kind)            (js/Promise.reject (js/Error. (str "--deck-info reads PDFs; this is " kind)))
+          stdin?                       (js/Promise.resolve buf)
+          (.isRemoteUri ssh-transport uri) (-> (.openRemoteUri cs uri "pdf" #js {:notifies false})
+                                               (.then (fn [^js payload] (.-bytes payload))))
+          :else (-> (js/Promise.resolve (.readPdfLocal cs uri #js {:notifies false}))
+                    (.then (fn [^js r]
+                             (when (.-incomplete r)
+                               (ewrite (str "vv-cli: " uri ": the PDF looks incomplete (" (.-incomplete r)
+                                            ") — is it still being written?")))
+                             (.-bytes r)))))
+        (.then (fn [bytes] (deck-info uri bytes)))
+        (.then (fn [info]
+                 (let [o (js-obj)]
+                   (doseq [k deck-info-keys] (aset o (name k) (clj->js (get info k))))
+                   (write (str (js/JSON.stringify o) "\n")))))
+        (.catch (fn [e] (ewrite (str "vv-cli: " uri ": " (.-message e))) (set! (.-exitCode js/process) 1))))))
 
 (defn- render-spec!
   "Render one resolved open spec ({:uri :kind? :language? :delimiter? :stdin?} — vinary.file-type). `buf`
@@ -271,7 +342,9 @@
                    ;; render each document in order (a blank line between multiple docs), then close any pooled
                    ;; SSH connection so the process can exit (an open socket would hold the event loop open).
                    (-> (reduce (fn [p spec]
-                                 (-> p (.then (fn [_] (render-spec! spec (when (:stdin? spec) buf) opts)))))
+                                 (-> p (.then (fn [_] (if (:deck-info opts)
+                                                        (deck-info-spec! spec (when (:stdin? spec) buf))
+                                                        (render-spec! spec (when (:stdin? spec) buf) opts))))))
                                (js/Promise.resolve nil) (:specs result))
                        (.finally (fn [] (.closeAll ssh-transport))))))))))))))
 

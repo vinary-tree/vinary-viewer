@@ -14,6 +14,11 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
+      viewer does or does not treat it as a slide deck: the evidence it reads
+      (Creator / Producer, page mode, page sizes, how many page labels) and the
+      classification it makes (deck, tier, source, frame count, second-screen
+      notes).
     - Slide decks open as slides (ADR-0045): a PDF recognized as a deck -- a Beamer
       deck (its Creator tag, or Beamer paper + a TeX producer), a PDF that asks to
       open in full-screen mode, or a PowerPoint / Google Slides export (their exact

@@ -270,6 +270,36 @@ if (fs.existsSync(pdf)) {
      'pdf.js warnings ("Indexing all PDF objects") never reach stdout');
 }
 
+// ── 4e. --deck-info (ADR-0045): one JSON line per PDF — the GUI's own evidence, page measure and classifier ──────
+if (fs.existsSync(pdf)) {
+  const { makeDeckPdf } = require('./fixtures/pdf-gen.js');
+  const info = (file) => {
+    const r = runFull(['--deck-info', file]);
+    return { code: r.code, err: r.err, json: r.out.trim() ? JSON.parse(r.out.trim()) : null };
+  };
+  const beamer = info(path.join(ROOT, 'test', 'fixtures', 'beamer-notes-right.pdf'));   // real LuaLaTeX output
+  ok(beamer.code === 0 && beamer.json && beamer.json.deck === true && beamer.json.tier === 'definite'
+     && beamer.json.source === 'beamer', '--deck-info: a real Beamer deck is a definite beamer deck');
+  ok(beamer.json.pages === 3 && beamer.json.secondScreen === 'horizontal' && beamer.json.frames === 3,
+     '…with its pages, its second-screen notes axis, and one frame per page');
+  ok(/Beamer/.test(beamer.json.creator) && /LuaTeX/.test(beamer.json.producer) && beamer.json.distinctSizes === 1,
+     '…and the evidence it was classified on (Creator, Producer, one page size)');
+  const paper = info(pdf);
+  ok(paper.code === 0 && paper.json.deck === false && paper.json.tier === null, '--deck-info: an ordinary PDF is not a deck');
+  const exportPdf = path.join(tmp, 'export.pdf');
+  fs.writeFileSync(exportPdf, makeDeckPdf({ pages: 4, size: 'powerpoint-169', labels: null,
+    creator: 'Microsoft PowerPoint', producer: 'Microsoft PowerPoint' }));
+  const exp = info(exportPdf);
+  ok(exp.json.deck === true && exp.json.tier === 'probable' && exp.json.source === 'slide-export'
+     && exp.json.sizes[0][0] === 960 && exp.json.labels === null,
+     '--deck-info: a 16:9 PowerPoint export is a probable slide export (960 × 540, no page labels)');
+  const two = runFull(['--deck-info', pdf, exportPdf]);
+  const lines = two.out.trim().split('\n');
+  ok(two.code === 0 && lines.length === 2 && lines.every((l) => JSON.parse(l).path), 'one JSON line per file');
+  const notPdf = runFull(['--deck-info', md]);
+  ok(notPdf.code === 1 && /--deck-info reads PDFs/.test(notPdf.err), 'a file that is not a PDF is an error for --deck-info');
+}
+
 // ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────
 {
   const diffText = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n';

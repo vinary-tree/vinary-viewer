@@ -86,6 +86,7 @@ curl -s https://x/y.md | vv --cli -t md  # pipe + explicit markdown type
 |--------|--------|
 | `-t`, `--type TYPE` | File type for the Nth file (repeatable; a piped-stdin document is file 0; files without a type deduce by extension, else plain text). `TYPE` is a MIME type (`text/x-diff`, `application/pdf`), a short alias (`diff`, `md`, `csv`, `log`, `table`), or a grammar language (`python`, `rust` — highlighted source). `--file-type` is an accepted alias. **Breaking change:** `-t` used to be the short form of `--toc`; it now means `--type` uniformly across `vv`, `--cli`, and `--tui`. |
 | `--toc` | Print the document outline (Contents) before the body. (Long-only — see `-t` above.) |
+| `--deck-info` | Instead of rendering, print one JSON line per PDF: the slide-deck evidence (`creator`, `producer`, `creatorTool`, `pageMode`, the page `sizes` and how many are distinct, and how many page `labels` there are and how many distinct — never the labels themselves) and the classification the GUI would make (`deck`, `tier`, `source`, `frames`, `secondScreen`; ADR-0045). A file that is not a PDF is an error. |
 | `--width N` | Wrap column (default: the terminal width, else 80). |
 | `--no-color` | Disable ANSI colour; this explicit opt-out takes precedence over every other setting. |
 | `--color` | Force colour even when stdout is not a TTY or `NO_COLOR` is set (e.g. through a pipe). |
@@ -103,7 +104,23 @@ vv --cli --plain README.md            # safest for logging / grep-ing the output
 vv --cli --graphics sixel diagram.png  # force sixel where auto-detection can't tell
 vv --cli -t csv exported.txt           # a delimited table by declaration, whatever the extension
 vv --cli -t py build-script            # highlighted python source, no extension needed
+vv --cli --deck-info talk.pdf          # is it a slide deck, and why? (one JSON line)
 ```
+
+`--deck-info` reports what the GUI decides when it opens the PDF. It uses the same evidence, the same page measure
+and the same classifier. A Beamer deck compiled with LuaLaTeX and `show notes on second screen`, for example,
+prints:
+
+```json
+{"path":"talk.pdf","pages":3,"sizes":[[725.67,272.13]],"distinctSizes":1,"creator":"LaTeX with Beamer class",
+ "producer":"LuaTeX-1.24.0","creatorTool":null,"pageMode":"UseOutlines","labels":{"count":3,"distinct":1},
+ "deck":true,"tier":"definite","source":"beamer","frames":3,"secondScreen":"horizontal"}
+```
+
+(Wrapped here for width; the CLI prints one line per file, fields in this order. `labels` counts the PDF's page labels.
+Here pgfpages' two-screen output labels every page "1". That is why a second-screen deck is split into one frame
+per page, not grouped by label.) Like every `vv --cli` invocation, it reads a piped stdin as a document, so a
+script that runs it should redirect stdin: `vv --cli --deck-info talk.pdf < /dev/null`.
 
 ![CLI render sequence](../diagrams/seq-cli-render.svg)
 

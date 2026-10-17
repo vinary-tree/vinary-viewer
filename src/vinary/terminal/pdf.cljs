@@ -24,9 +24,9 @@
       (.then (fn [^js page] (.getTextContent page)))
       (.then (fn [^js tc] [p (mapv pdf/normalize-item (array-seq (.-items tc)))]))))
 
-(defn extract
-  "PDF bytes (Uint8Array/Buffer) → Promise<[[page-num [normalized-item …]] …]> for ir.frontend.pdf/doc->ir. Runs
-   pdf.js on the main thread (no worker), text content only."
+(defn open-document
+  "PDF bytes (Uint8Array/Buffer) → Promise<PDFDocumentProxy> from the headless legacy pdf.js (main thread, no
+   worker) — the one loader behind text extraction and `vv --cli --deck-info`."
   [bytes]
   (-> (load-pdfjs)
       (.then (fn [^js lib]
@@ -35,7 +35,24 @@
                ;; damaged file, font fallbacks, …) with console.log — onto STDOUT, which carries the document in
                ;; vv --cli and the screen in vv --tui. Errors still reject the promise and reach stderr.
                (.-promise (.getDocument lib #js {:data (js/Uint8Array. bytes) :useSystemFonts true :isEvalSupported false
-                                                 :verbosity 0}))))
+                                                 :verbosity 0}))))))
+
+(defn page-sizes
+  "Promise<[[w h] …]>: every page's size in PDF points at scale 1, rotation applied (/Rotate 90 swaps w and h) — the
+   same measure the GUI engine gives the deck detector (renderer.pdf/page-sizes)."
+  [^js doc]
+  (-> (js/Promise.all
+       (into-array
+        (for [i (range 1 (inc (or (.-numPages doc) 0)))]
+          (-> (.getPage doc i)
+              (.then (fn [^js page] (let [^js vp (.getViewport page #js {:scale 1})] [(.-width vp) (.-height vp)])))))))
+      (.then vec)))
+
+(defn extract
+  "PDF bytes (Uint8Array/Buffer) → Promise<[[page-num [normalized-item …]] …]> for ir.frontend.pdf/doc->ir. Runs
+   pdf.js on the main thread (no worker), text content only."
+  [bytes]
+  (-> (open-document bytes)
       (.then (fn [^js doc]
                (js/Promise.all (into-array (map #(page-items doc %) (range 1 (inc (or (.-numPages doc) 0))))))))
       (.then (fn [pages] (vec pages)))))
