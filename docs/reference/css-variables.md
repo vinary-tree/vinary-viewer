@@ -42,6 +42,7 @@ resources/public/index.html
 | `--vv-bg2` | Panels, `<pre>`, table zebra | `#212026` | `#efeae9` | `.vv-tree`, `.vv-toc`, `.vv-tabs`, `.vv-nav-btn`, `.vv-theme-select`, `.vv-find`, `.markdown-body pre`, `table tr:nth-child(2n)`, `.vv-tab-close:hover` |
 | `--vv-bg-code` | Inline-code background; hover surfaces | `#2f2b33` | `#e8e3e3` | `.markdown-body code`, tree/tab/toc/`nav-btn` hover, `.vv-tree-filter:focus`, `.vv-find-btn:hover` |
 | `--vv-bg-quote` | Blockquote background | `#293235` | `#edf2e9` | `.markdown-body blockquote` |
+| `--vv-figure-bg` | Backdrop behind diagrams and figures, so the ink of a transparent SVG stays legible in either theme; an opaque image covers it | `#fafafa` | `#fafafa` | the embedded-figure / Mermaid frame (`.markdown-body > a.vv-figure-link`, `.markdown-body .vv-mermaid`), `.vv-image-view img`, `.vv-diagram svg`, `.vv-mermaid-view .vv-mermaid svg`, `.vv-slides-tile-thumb` — each with a `#fafafa` fallback |
 
 ### 2.2 Text
 
@@ -59,6 +60,7 @@ resources/public/index.html
 | `--vv-border` | Rules, borders, header underlines | `#5d4d7a` | `#b3b9be` | most `border`/`border-*` (tree, toc, tabs, toolbar, find, `nav-btn`, `theme-select`, headings underline, `pre`, `th/td`, `hr`) |
 | `--vv-highlight` | Text selection; current tree/TOC item | `#444155` | `#d3d3e7` | `::selection` bg, `.vv-file-active` bg, `::highlight(vv-find)` bg |
 | `--vv-disabled` | Disabled control text | `#44475a` | `#b3aebb` | *(reserved for disabled controls)* |
+| `--vv-accent` | Active accent of segmented / view-switch controls and of the commit surfaces; a theme may set it apart from the blue | `var(--vv-head1)` | `var(--vv-head1)` | `.vv-combo-active`, `.vv-combo-select-check`, `.vv-ssh-input:focus`; the Commits panel (`.vv-commits-pill`, `-row-sel` outline, `-row-cur` rule, `-chip`, `-chip-x`) and the Commit Graph (`.vv-gg-row-sel`, `-row-cur`, `-ref-head`) |
 
 #### 2.3.1 Dialog elevation (modals & menus)
 
@@ -166,6 +168,33 @@ preference is set, so an unset preference leaves the `app.css` default authorita
 > prose), so toggling it never disturbs the normal typographic ligatures (fi, fl) of the Noto Sans / Latin
 > Modern prose. A single `--vv-code-liga` token means one preference toggles every mono surface at once.
 > See [ADR-0031](../design-decisions/0031-per-content-type-fonts-and-ligatures.md).
+
+### 2.9 Window-chrome row heights
+
+Also structural, on `:root` in **`app.css`**, with no theme variants and no preference: two row heights the
+chrome shares so rows in different columns line up.
+
+| Token | Default (`app.css`) | Role |
+| --- | --- | --- |
+| `--vv-chrome-tabrow-h` | `36px` | the document tab strip (`.vv-tabs`) |
+| `--vv-chrome-navrow-h` | `33px` | the Files filter (`.vv-tree-filter`) and the back/forward/address bar (`.vv-uribar`) — the same height, so the two rows line up across the sidebar's edge |
+
+### 2.10 Commit-graph lane colours
+
+The Commits panel's lane rail and the Commit Graph colour each lane from an **8-hue cycle**: lane $`l`$ takes
+`.vv-lane-`$`(l \bmod 8)`$ (`vinary.git.graph-geometry`, `vinary.ui.commits`), which sets both `color` and
+`stroke` from the matching token, so a commit's dot and its lines agree.
+
+| Token | Dark | Light |
+| --- | --- | --- |
+| `--vv-lane-0` | `#4f97d7` | `#3a81c3` |
+| `--vv-lane-1` | `#2d9574` | `#2d9574` |
+| `--vv-lane-2` | `#67b11d` | `#67b11d` |
+| `--vv-lane-3` | `#b1951d` | `#b1951d` |
+| `--vv-lane-4` | `#ce537a` | `#ce537a` |
+| `--vv-lane-5` | `#a45bad` | `#6c3163` |
+| `--vv-lane-6` | `#dc752f` | `#dc752f` |
+| `--vv-lane-7` | `#2aa1ae` | `#2aa1ae` |
 
 ---
 

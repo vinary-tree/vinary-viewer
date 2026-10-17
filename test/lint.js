@@ -7,6 +7,7 @@
 //        a. docs/reference/events-effects-subs.md ↔ every re-frame registration (per section)
 //        b. docs/reference/ipc-channels.md ↔ every vv:* IPC channel in the preloads + main
 //        c. docs/reference/namespaces.md ↔ every namespace and JS module under src/vinary
+//        d. docs/reference/css-variables.md ↔ every --vv-* token the app's stylesheets define or read
 //   5. every relative link and image in the Markdown docs names a file that exists
 // Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
@@ -196,6 +197,33 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
     `${docPath} documents all ${inCode.size} namespaces + JS modules under src/vinary` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
   log(stale.length === 0,
     `${docPath} names no removed namespace` + (stale.length ? ` — NOT IN CODE: ${show(stale)}` : ''));
+}
+
+//  4d. CSS tokens: every `--vv-*` custom property that app.css or a theme file DEFINES (`--vv-x:`) or app.css READS
+//      (`var(--vv-x`) must have a FIRST-COLUMN row in the CSS-variables reference, and every first-column `--vv-*` row
+//      there must still be defined or read. (Before this gate, 12 tokens had no row — the accent, the two chrome row
+//      heights, the figure backdrop and the 8 commit-graph lane colours.)
+{
+  const appCss = fs.readFileSync(path.join(root, 'resources/public/css/app.css'), 'utf8');
+  const themeDir = path.join(root, 'resources/public/css/themes');
+  const themeCss = fs.readdirSync(themeDir).filter((f) => f.endsWith('.css'))
+    .map((f) => fs.readFileSync(path.join(themeDir, f), 'utf8')).join('\n');
+  const inCode = new Set([...(appCss + '\n' + themeCss).matchAll(/(--vv-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  for (const m of appCss.matchAll(/var\(\s*(--vv-[a-z0-9-]+)/g)) inCode.add(m[1]);
+  const docPath = 'docs/reference/css-variables.md';
+  const doc = fs.readFileSync(path.join(root, docPath), 'utf8');
+  const allow = allowed(doc);
+  const inDoc = new Set();
+  for (const line of doc.split('\n')) {
+    const m = line.match(/^\|\s*`(--vv-[a-z0-9-]+)`/);
+    if (m) inDoc.add(m[1]);
+  }
+  const missing = [...inCode].filter((t) => !inDoc.has(t) && !allow.has(t)).sort();
+  const stale = [...inDoc].filter((t) => !inCode.has(t) && !allow.has(t)).sort();
+  log(missing.length === 0,
+    `${docPath} documents all ${inCode.size} --vv-* tokens the app's stylesheets define or read` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
+  log(stale.length === 0,
+    `${docPath} names no removed token` + (stale.length ? ` — NOT IN CSS: ${show(stale)}` : ''));
 }
 
 // 5. Relative links resolve. A Markdown link or image to a repository path is a claim about the filesystem, and
