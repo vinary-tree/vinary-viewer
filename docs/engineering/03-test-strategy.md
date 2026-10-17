@@ -132,7 +132,8 @@ shadow-cljs compile test && node dist/test/test.js \
 
 The Electron smokes are separate scripts (`test:electron`, `test:electron:release`,
 `test:extensions`, `test:extensions:sandbox`, `test:tree-e2e`, `test:watch-e2e`,
-`test:remote-daemon-events-e2e`) because they require a running Electron with a display protocol. The repository
+`test:remote-daemon-events-e2e`, `test:remote-pdf-e2e`) because they require a running Electron with a display
+protocol. The repository
 headless runner supplies that protocol without using the developer's desktop (see §3.6 and
 [08-ci-and-validation-discipline.md](08-ci-and-validation-discipline.md)).
 
@@ -141,6 +142,19 @@ crosses the in-process SSH2 SFTP/direct-forward fixture, and proves target conte
 both URI schemes, including URI-encoded tree clicks, project Refresh/Refresh All, collapsed-scope release, and
 re-expansion refresh. Its outer Node runner owns the isolated Electron profile and removes it only after the
 Electron child has fully exited.
+
+`remote-pdf-e2e` is the same kind of harness for slide decks over SFTP (ADR-0045, ADR-0046). It uses two in-process
+SSH2 servers:
+- **The deck host,** where main is also the target daemon. A Beamer deck opens as slides in three windows. One
+  change is read once and fanned out to all three, at most 2·S + two tail probes (H4). A delayed read never moves a
+  window backwards. A half-written deck and a refused read both keep the last version behind their notes. A
+  connection dropped mid-read while presenting keeps the slide, and Retry reconnects to show the new version there.
+- **The quiet host,** with no daemon and no poller, so only a Back/Forward step can notice a change. Back to an
+  unchanged remote document costs one stat and no read; a changed one is read again. The view position survives
+  Back/Forward, a tab switch and a tab close.
+
+The harness ends with `app.exit(code)`. Electron does not carry `process.exitCode` through `app.quit()`, so a
+failed run of a harness that quit that way exited 0.
 
 ### 3.5 The one harness that runs the REAL main process
 
