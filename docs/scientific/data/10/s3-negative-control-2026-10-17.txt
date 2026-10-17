@@ -1,0 +1,53 @@
+# S3 negative control — the census on the PRE-FIX build (2026-10-17)
+# find-e2e with VV_FIND_E2E_DIAG; build = HEAD 3699d0b (tree listings synchronous)
+# instrument check: the first control run's census counted 0 git calls (its markers missed source-mapped frames);
+# fixed (test/fixtures/spawn-census.js MAIN_MARKERS), then this run:
+[diag] tree-filter: main event-loop delay over 5932 ms — max 2682.3 ms, p99 18.8 ms, mean 18.6 ms; CPU profile s3-negctl2/main-tree-filter.cpuprofile
+[diag] tree-filter: main's git processes {"git":106,"sync":106,"async":0,"bySubcommand":{"ls-files":106},"peakListingsPerCwd":1}
+load average (1/5/15) : 9.5 / 8.5 / 10.0 on 64 cpus
+typist find           : max lag 85 ms over 225 probes
+typist tree filter    : max lag 171 ms over 107 probes
+
+# main-tree-filter.cpuprofile: 5330 samples over 5916 ms
+
+## self time, top 8
+   3138.1 ms   53.0 %  (idle)
+   2263.3 ms   38.3 %  spawn
+    144.0 ms    2.4 %  normalizeSpawnArguments @ node:child_process:567
+     27.7 ms    0.5 %  (garbage collector)
+     12.9 ms    0.2 %  (anonymous) @ source-map-support.js:361
+     12.7 ms    0.2 %  cloneCallSite @ source-map-support.js:359
+     12.3 ms    0.2 %  record @ spawn-census.js:38
+     10.8 ms    0.2 %  _send
+
+## the 2 longest runs on one leaf (excluding (idle))
+     47.0 ms  from 2483 ms into the profile, 42 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             execFileSyncCensus @ spawn-census.js:79
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
+     46.6 ms  from 1107 ms into the profile, 41 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             execFileSyncCensus @ spawn-census.js:79
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)

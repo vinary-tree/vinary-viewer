@@ -432,3 +432,70 @@ Hypotheses and arms (each a full find-e2e run, pinned to cores 16–63):
 - Not done here (recorded for a follow-up): attributing the main-side stall (a `perf`/eBPF trace of the
   Electron main thread during the tree-filter phase under I/O load), and deciding whether T3 should
   measure a percentile instead of the maximum.
+
+## 11 · The tree-filter stall, attributed (S3, 2026-10-17)
+
+§10 left the main-process stall behind T3's failures as an inference: "consistent with the Files tree's main-side
+filesystem work under disk contention". This section attributes it with a trace, then fixes it.
+
+**Symptom, reproduced.** At a load average of 10–12 on 64 CPUs, find-e2e failed T3 in the tree-filter phase. The
+worst round trip was 2 121 ms on the current build and **4 968 ms on the baseline build** (a control: build A of
+docs/scientific/12 §8, run under the same conditions). The find-bar typist in the same runs stayed at 86–111 ms.
+
+**Instrument.**
+
+- `VV_FIND_E2E_DIAG=<dir>` wraps the tree-filter typist (`mainDiagnostics` in `test/find-e2e.js`). It records:
+  - **main's event-loop delay**, with `perf_hooks.monitorEventLoopDelay` at 10 ms resolution — is main the side
+    that is blocked?;
+  - **a V8 CPU profile of main** (inspector `Profiler`, 1 ms sampling) — what runs while it is blocked?;
+  - **main's git processes** (`test/fixtures/spawn-census.js`) — synchronous or not, by subcommand, and the most
+    `ls-files` listings of one repository running at once.
+- [`scripts/analyze-cpuprofile.cjs`](../../scripts/analyze-cpuprofile.cjs) reports a profile's self time by
+  function and its longest runs on one stack.
+
+**Attribution** (`data/10/s3-tree-filter-stall-2026-10-17.txt`). Over the 5.6 s phase:
+
+- main's event loop was blocked for up to **2 405 ms** (p99 16.9 ms);
+- **40.3 %** of the phase (2 235 ms) was spent in one stack, about 20 times over at ≈ 114 ms each:
+
+  `spawn` ← `execFileSync` ← `service/git` ← `repo-files` ← `tree-entry-for` ← `refresh-watched-tree!` ← a timer.
+
+The mechanism, read from the code:
+
+1. The filter expands many directories, and every expanded directory gets a shallow watcher.
+2. Each watcher's `ready` event schedules a reconciliation refresh, with a 150 ms debounce per directory.
+3. Each refresh lists the **whole repository** with two synchronous `git ls-files`, then keeps one directory's
+   prefix.
+4. About twenty timers expire together. libuv runs every expired timer in one pass before it services I/O, so main
+   is blocked for about 20 × 114 ms. The harness's round trips, and every IPC reply, wait behind it.
+
+§10's inference was right about the place and wrong about the cause. The cost is not disk contention in the file
+tree's own reads, but **one whole-repository `git ls-files` per expanded directory, synchronous, all due at once**.
+Load lengthens each git process, and the count multiplies it.
+
+**Pre-registered predictions** for the fix, written before it was measured. The fix makes every listing
+asynchronous and coalesces the listings per repository: at most one runs, and the requests that arrive meanwhile
+share one trailing listing. Same machine, load ≈ 10 on 64 CPUs, three DIAG runs:
+
+| Id | Prediction | Baseline |
+|---|---|---|
+| P1 | Main's maximum event-loop delay in the tree-filter phase is < 50 ms in every run. | 2 405 ms |
+| P2 | T3 passes in every run. | failed |
+| P3 | Main starts **0** synchronous git processes in the phase. | **106** (the census, negative control) |
+| P4 | At most **1** `ls-files` listing of one repository runs at a time. | 1, because every call was synchronous |
+| P5 | Fewer listings than watcher refreshes, and no request waits behind more than one listing. | equal: **53** whole-repository listings (106 `ls-files` ÷ 2) |
+| P6 | `spawn` self time is ≤ 1 % of the phase, and no `spawnSync` frames appear. | 40.3 % |
+
+**Refutation.** A violation of P1, P3 or P4 refutes the fix. If P2 fails while P1 holds, the remaining latency is
+on the renderer / IPC side.
+
+**Negative control** (`data/10/s3-negative-control-2026-10-17.txt`). The census on the pre-fix build must report
+the synchronous spawns, so the instrument is shown to see what it is meant to see.
+
+- **First run: it did not.** The census counted 0 git calls while main was blocked 2.7 s inside `execFileSync`.
+  Its markers looked for main's compiled file names, but the dev build source-maps its stack frames to
+  `…/vinary/main/<ns>.cljs`.
+- **Second run, markers fixed:** 106 git processes in the phase, all synchronous, all `ls-files` — 53 whole-repository
+  listings. At most one ran at a time, as synchronous calls must. Main's event loop was blocked for up to 2 682 ms.
+- **T3 passed in that run** (worst round trip 171 ms), because the block fell outside the probing window. T3 is a
+  noisy proxy for this stall; P1's event-loop delay measures it directly.

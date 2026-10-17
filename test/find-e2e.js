@@ -55,6 +55,45 @@ const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 // on, so the confound is switchable and REPORTED rather than hidden (docs/scientific/07 §1.2).
 const GPU = process.env.VV_FIND_E2E_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
+
+// VV_FIND_E2E_DIAG=<dir> attributes a tree-filter T3 stall (docs/scientific/10 §10, 12): around the tree-filter
+// typist it records this MAIN process's event-loop delay (perf_hooks.monitorEventLoopDelay, 10 ms resolution — is
+// main the side that is blocked?) and a V8 CPU profile of main (inspector Profiler, 1 ms sampling — what runs while
+// it is), written to <dir>/main-tree-filter.cpuprofile. Off by default: it costs nothing then.
+const DIAG_DIR = process.env.VV_FIND_E2E_DIAG || null;
+async function mainDiagnostics(label, body) {
+  if (!DIAG_DIR) return body();
+  const { monitorEventLoopDelay } = require('perf_hooks');
+  const inspector = require('inspector');
+  const session = new inspector.Session();
+  session.connect();
+  const post = (method, params) => new Promise((resolve, reject) =>
+    session.post(method, params || {}, (err, res) => (err ? reject(err) : resolve(res))));
+  const lag = monitorEventLoopDelay({ resolution: 10 });
+  const censusFrom = CENSUS.mark();
+  await post('Profiler.enable');
+  await post('Profiler.setSamplingInterval', { interval: 1000 });
+  await post('Profiler.start');
+  lag.enable();
+  const t0 = Date.now();
+  try {
+    return await body();
+  } finally {
+    lag.disable();
+    const { profile } = await post('Profiler.stop');
+    session.disconnect();
+    fs.mkdirSync(DIAG_DIR, { recursive: true });
+    const file = path.join(DIAG_DIR, `main-${label}.cpuprofile`);
+    fs.writeFileSync(file, JSON.stringify(profile));
+    const ms = (ns) => (ns / 1e6).toFixed(1);
+    console.log(`[diag] ${label}: main event-loop delay over ${Date.now() - t0} ms — max ${ms(lag.max)} ms, p99 ${ms(lag.percentile(99))} ms, ` +
+                `mean ${ms(lag.mean)} ms; CPU profile ${file}`);
+    console.log(`[diag] ${label}: main's git processes ${JSON.stringify(CENSUS.summary(censusFrom))}`);
+    // the Files-tree listing runner's counters, once it exists (global: the dev build's goog.global; ^:export in release)
+    const listing = global.vinary && global.vinary.main && global.vinary.main.tree_listing;
+    if (listing && listing.stats) console.log(`[diag] ${label}: tree listings ${JSON.stringify(listing.stats())}`);
+  }
+}
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
@@ -106,6 +145,8 @@ function writeFixtures() {
   fs.writeFileSync(RHO, source.join('\n'));
 }
 
+// which git processes main starts, and how (test/fixtures/spawn-census.js) — installed BEFORE main is required
+const CENSUS = require('./fixtures/spawn-census').install();
 require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -891,8 +932,8 @@ async function run() {
     if (files) files.click(); return Boolean(files); })()`);
   await until(wc, `Boolean(document.querySelector('.vv-tree-filter'))`, (v) => v === true, 'tree filter mounts');
   await sleep(500);
-  latency.tree = await typistCheck(win, { label: 'file-tree filter', selector: '.vv-tree-filter',
-                                          phrase: 'views', check, settleMs: 2000 });
+  latency.tree = await mainDiagnostics('tree-filter', () => typistCheck(win, {
+    label: 'file-tree filter', selector: '.vv-tree-filter', phrase: 'views', check, settleMs: 2000 }));
   await evalIn(wc, CLEAR_FIELD('.vv-tree-filter'));
 
   if (failed.length > seen) {

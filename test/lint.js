@@ -32,11 +32,11 @@ const jsFiles = [
   // shared, deterministic test fixtures: the in-process SFTP server, the TCP latency proxy, the PDF builders, and
   // the hermetic runtime every real-main harness boots under
   'test/fixtures/ssh-server.js', 'test/fixtures/latency-proxy.js', 'test/fixtures/pdf-gen.js',
-  'test/fixtures/hermetic-env.js',
+  'test/fixtures/hermetic-env.js', 'test/fixtures/spawn-census.js',
   'test/remote-daemon-events-e2e-runner.js', 'test/remote-daemon-events-e2e.js',
   'test/remote-pdf-e2e-runner.js', 'test/remote-pdf-e2e.js',
   // the in-page-find / typist-latency gate, and the benchmark that produced its threshold (ADR-0033)
-  'test/find-e2e.js', 'test/find-worker-smoke.js', 'scripts/bench-input-latency.cjs',
+  'test/find-e2e.js', 'test/find-worker-smoke.js', 'scripts/bench-input-latency.cjs', 'scripts/analyze-cpuprofile.cjs',
   // the remote whole-file read benchmark behind docs/scientific/11 (ADR-0046), and its experiments and analyses
   'scripts/bench-remote-read.cjs', 'scripts/exp-torn-pdf-reads.cjs', 'scripts/diag-sftp-window.cjs',
   'scripts/analyze-e2-sibling-stats.cjs', 'scripts/analyze-e3-remote-reads.cjs', 'scripts/analyze-s7-streaming.cjs',

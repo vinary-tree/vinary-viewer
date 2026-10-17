@@ -133,7 +133,8 @@ that applied it (08–12).
 
 - **[10 — Text-input latency.](10-input-latency-experiments.md)** "Lag per character" and "missed keys" were two
   defects with different mechanisms; the typist-latency gate of `find-e2e` (T1–T4) and its benchmark come from here,
-  as does ADR-0033 (asynchronous text input). §10 records T3's sensitivity to machine load.
+  as does ADR-0033 (asynchronous text input). §10 records T3's sensitivity to machine load, and §11 attributes
+  the main-process stall behind it.
 
 - **[11 — Remote read & reload safety.](11-remote-read-and-reload-safety-experiments.md)** How long a whole remote
   file takes over SFTP as a function of size, round-trip time and server identity, and how much a better reader

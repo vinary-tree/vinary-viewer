@@ -1,0 +1,103 @@
+# S3 — the tree-filter T3 stall, attributed (2026-10-17)
+# find-e2e with VV_FIND_E2E_DIAG (main-process event-loop delay + V8 CPU profile around the tree-filter typist)
+# conditions: load average  10.4 / 11.0 / 10.5  on 64 cpus; build = the working tree (C); the control on build A failed T3 the same way (4968 ms)
+      worst round trip was 286 ms over 103 probes; work started by a keystroke is blocking the main thread long enough to make the next character late
+[diag] tree-filter: main event-loop delay over 5567 ms — max 2405.4 ms, p99 16.9 ms, mean 18.0 ms; CPU profile s3-diag-1/main-tree-filter.cpuprofile
+typist find           : max lag 111 ms over 226 probes
+typist tree filter    : max lag 286 ms over 103 probes
+
+# main-tree-filter.cpuprofile: 5127 samples over 5549 ms
+
+## self time, top 20
+   3056.4 ms   55.1 %  (idle)
+   2235.0 ms   40.3 %  spawn
+     60.7 ms    1.1 %  normalizeSpawnArguments @ node:child_process:567
+     15.7 ms    0.3 %  (garbage collector)
+      9.6 ms    0.2 %  resolve @ node:path:1245
+      9.6 ms    0.2 %  (program)
+      8.5 ms    0.2 %  cljs$core$thisfn @ cljs.core.js:35862
+      6.4 ms    0.1 %  emit @ node:events:456
+      6.4 ms    0.1 %  start
+      5.5 ms    0.1 %  (anonymous) @ cljs.core.js:20737
+      5.4 ms    0.1 %  cljs$core$_conj_BANG_ @ cljs.core.js:3186
+      5.3 ms    0.1 %  toString @ node:buffer:908
+      5.3 ms    0.1 %  normalizeString @ node:path:92
+      4.4 ms    0.1 %  (anonymous) @ cljs.core.js:1896
+      4.4 ms    0.1 %  clojure$string$replace @ clojure.string.js:75
+      4.4 ms    0.1 %  (anonymous) @ cljs.core.js:19641
+      4.4 ms    0.1 %  cljs$core$select_keys @ cljs.core.js:30156
+      4.3 ms    0.1 %  (anonymous) @ cljs.core.js:17913
+      4.3 ms    0.1 %  runMicrotasks
+      4.2 ms    0.1 %  _isIgnored @ index.js:657
+
+## the 5 longest runs on one leaf (excluding (idle))
+    114.9 ms  from 2490 ms into the profile, 106 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
+    114.8 ms  from 1308 ms into the profile, 102 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
+    114.8 ms  from 2734 ms into the profile, 106 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
+    114.1 ms  from 2370 ms into the profile, 105 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
+    112.8 ms  from 1064 ms into the profile, 104 samples
+             spawn
+             spawnSync @ child_process:1128
+             spawnSync @ node:child_process:880
+             execFileSync @ node:child_process:964
+             func @ node_init:2
+             vinary$main$service$git @ vinary.main.service.js:51
+             vinary$main$service$repo_files @ vinary.main.service.js:59
+             vinary$main$service$tree_entry_for @ vinary.main.service.js:251
+             vinary$main$service$refresh_watched_tree_BANG_ @ vinary.main.service.js:1408
+             (anonymous) @ vinary.main.service.js:1140
+             listOnTimeout @ timers:546
+             processTimers @ timers:526
+             (root)
