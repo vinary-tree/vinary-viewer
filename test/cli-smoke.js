@@ -298,6 +298,15 @@ if (fs.existsSync(pdf)) {
   ok(two.code === 0 && lines.length === 2 && lines.every((l) => JSON.parse(l).path), 'one JSON line per file');
   const notPdf = runFull(['--deck-info', md]);
   ok(notPdf.code === 1 && /--deck-info reads PDFs/.test(notPdf.err), 'a file that is not a PDF is an error for --deck-info');
+  // a missing file is a failure like any other, and the files after it are still read. Its synchronous open used to
+  // escape the spec's .catch: every later file was skipped and the run ended in an uncaught stack trace.
+  const gone = path.join(tmp, 'gone.pdf');
+  const mixed = runFull(['--deck-info', gone, exportPdf]);
+  const mixedLines = mixed.out.trim().split('\n').filter(Boolean);
+  ok(mixed.code === 1 && mixedLines.length === 1 && path.basename(JSON.parse(mixedLines[0]).path) === 'export.pdf',
+     '--deck-info: a missing file does not stop the files after it');
+  ok(mixed.err.includes(`vv-cli: ${gone}: ENOENT`) && !/\n\s+at /.test(mixed.err),
+     '…and is reported in one line, not a stack trace');
 }
 
 // ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────

@@ -219,24 +219,29 @@
   "Print one spec's --deck-info line. Its bytes come from the same readers as rendering (stdin buffer, the verified
    local read, the remote reader); a file that is not a PDF is an error for this flag."
   [{:keys [uri stdin?] :as spec} buf]
-  (let [kind (effective-kind spec)]
-    (-> (cond
-          (not= "pdf" kind)            (js/Promise.reject (js/Error. (str "--deck-info reads PDFs; this is " kind)))
-          stdin?                       (js/Promise.resolve buf)
-          (.isRemoteUri ssh-transport uri) (-> (.openRemoteUri cs uri "pdf" #js {:notifies false})
-                                               (.then (fn [^js payload] (.-bytes payload))))
-          :else (-> (js/Promise.resolve (.readPdfLocal cs uri #js {:notifies false}))
-                    (.then (fn [^js r]
-                             (when (.-incomplete r)
-                               (ewrite (str "vv-cli: " uri ": the PDF looks incomplete (" (.-incomplete r)
-                                            ") — is it still being written?")))
-                             (.-bytes r)))))
-        (.then (fn [bytes] (deck-info uri bytes)))
-        (.then (fn [info]
-                 (let [o (js-obj)]
-                   (doseq [k deck-info-keys] (aset o (name k) (clj->js (get info k))))
-                   (write (str (js/JSON.stringify o) "\n")))))
-        (.catch (fn [e] (ewrite (str "vv-cli: " uri ": " (.-message e))) (set! (.-exitCode js/process) 1))))))
+  ;; the kind and the read run INSIDE .then, as in render-spec!: readPdfLocal opens the file synchronously, and a
+  ;; missing or unreadable file's synchronous throw would otherwise escape this spec's .catch — rejecting the whole
+  ;; sequence in `main`, so every later file was skipped and the run ended in an uncaught stack trace
+  (-> (js/Promise.resolve nil)
+      (.then (fn [_]
+               (let [kind (effective-kind spec)]
+                 (cond
+                   (not= "pdf" kind)            (js/Promise.reject (js/Error. (str "--deck-info reads PDFs; this is " kind)))
+                   stdin?                       buf
+                   (.isRemoteUri ssh-transport uri) (-> (.openRemoteUri cs uri "pdf" #js {:notifies false})
+                                                        (.then (fn [^js payload] (.-bytes payload))))
+                   :else (-> (js/Promise.resolve (.readPdfLocal cs uri #js {:notifies false}))
+                             (.then (fn [^js r]
+                                      (when (.-incomplete r)
+                                        (ewrite (str "vv-cli: " uri ": the PDF looks incomplete (" (.-incomplete r)
+                                                     ") — is it still being written?")))
+                                      (.-bytes r))))))))
+      (.then (fn [bytes] (deck-info uri bytes)))
+      (.then (fn [info]
+               (let [o (js-obj)]
+                 (doseq [k deck-info-keys] (aset o (name k) (clj->js (get info k))))
+                 (write (str (js/JSON.stringify o) "\n")))))
+      (.catch (fn [e] (ewrite (str "vv-cli: " uri ": " (.-message e))) (set! (.-exitCode js/process) 1)))))
 
 (defn- render-spec!
   "Render one resolved open spec ({:uri :kind? :language? :delimiter? :stdin?} — vinary.file-type). `buf`

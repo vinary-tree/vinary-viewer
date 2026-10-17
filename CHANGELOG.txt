@@ -547,6 +547,10 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - vv --cli --deck-info with several files no longer stops at a missing one.
+      The missing file's open used to throw outside the error handling, so the
+      files after it were skipped and the run ended in a stack trace. Now it is
+      reported in one line like any unreadable file, and the rest are read.
     - A second copy of the app no longer takes the resident daemon's `vv`
       socket. A copy with its own config directory (a test harness, a second
       profile) used to replace the running daemon's socket with its own. After
