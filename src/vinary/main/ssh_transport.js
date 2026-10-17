@@ -333,6 +333,15 @@ function destroyStreams(conn) {
   conn.openStreams.clear();
 }
 
+// Remove THIS connection from the pool — never a successor pooled under the same key since. ssh2 delivers a
+// connection's 'error' and 'close' asynchronously: after closeAll / closeConnection / the idle reaper (which already
+// unpooled it), or after its own 'error', a reconnect can pool the successor — getConn pools it BEFORE its handshake —
+// before the old connection's 'close' arrives. Deleting by key there evicted the successor: it stayed open, unpooled
+// and unreachable (never closed), and the next request dialled a third connection — a second password prompt.
+function unpool(conn) {
+  if (pool.get(conn.connKey) === conn) pool.delete(conn.connKey);
+}
+
 function closeConn(conn) {
   try { if (conn.client) conn.client.end(); } catch (_e) { /* already closed */ }
   destroyStreams(conn);
@@ -390,12 +399,12 @@ async function connect(conn, resolved, inboundSock, depth) {
       settled = true; resolve(conn);
     });
     client.on('error', (err) => {
-      conn.state = 'error'; conn.lastError = err; pool.delete(conn.connKey); destroyStreams(conn);
+      conn.state = 'error'; conn.lastError = err; unpool(conn); destroyStreams(conn);
       safeError(errInfo(err, resolved)); fail(err);
     });
     client.on('close', () => {
       const wasReady = conn.state === 'ready';
-      conn.state = 'closed'; pool.delete(conn.connKey); destroyStreams(conn); conn.sftpP = null;
+      conn.state = 'closed'; unpool(conn); destroyStreams(conn); conn.sftpP = null;
       if (wasReady) safeStatus({ connKey: conn.connKey, host: resolved.host, state: 'closed' });
       fail(new Error('connection closed'));
     });
@@ -415,7 +424,7 @@ async function connect(conn, resolved, inboundSock, depth) {
       // connect(), so this also covers the handshake; a ProxyJump hop's forwarded channel has no TCP socket and
       // ssh2 skips it (its own hop's TCP connection is set when that hop connects).
       client.setNoDelay(true);
-    } catch (e) { pool.delete(conn.connKey); fail(e); }
+    } catch (e) { unpool(conn); fail(e); }
   });
 }
 

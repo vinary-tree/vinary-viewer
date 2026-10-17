@@ -44,6 +44,42 @@ async function testNoDelay() {
   await srv.close();
 }
 
+// A closed connection's LATE 'close' event must not evict its successor from the pool. closeAll() unpools a
+// connection at once, but ssh2 delivers its 'close' only when the socket is gone; a reconnect pools its successor
+// BEFORE the successor's handshake, so the old 'close' landed mid-handshake and deleted the successor by key: the
+// successor stayed open but unpooled — leaked, nothing could ever close it — and the next request dialled a third
+// connection (with password auth, a second prompt). Deterministic here: the old FIN lands within the new handshake.
+async function testStaleCloseKeepsSuccessor() {
+  const srv = await startSftpServer({ password: 'sc-pw', files: { 'a.txt': 'alpha' } });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-sc-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  transport.configure({
+    homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => 'sc-pw', onError: () => {},
+  });
+  // the server's live-connection count settles asynchronously (sockets close after the FIN exchange): wait, boundedly
+  const settled = async (want) => {
+    const deadline = Date.now() + 2000;
+    while (srv.liveConnections() !== want && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    return srv.liveConnections();
+  };
+  try {
+    await transport.remoteStat(srv.url('/a.txt'));                 // connection A
+    eq(await settled(1), 1, 'the server holds one connection');
+    transport.closeAll();                                          // A is unpooled at once; its 'close' comes later
+    await transport.remoteStat(srv.url('/a.txt'));                 // B — pooled before its handshake, during which A's 'close' lands
+    eq((await transport.remoteReadFile(srv.url('/a.txt'))).toString(), 'alpha', 'a read after the reconnect succeeds');
+    eq(transport.connectionCount(), 1, 'the transport pools exactly one connection');
+    eq(await settled(1), 1, "the server holds exactly ONE live connection: A is gone and B is reused — no third dial, nothing leaked");
+    transport.closeAll();
+    eq(await settled(0), 0, 'closeAll leaves no connection open on the server');
+  } finally {
+    transport.closeAll();
+    srv.destroyConnections();                                      // so a regression fails its assertion, never hangs close()
+    await srv.close();
+  }
+}
+
 // ADR-0046 E1 — the pipelined, preallocated whole-file reader (remoteOpenFile → readAll), against BOTH server
 // identities (ssh2's own, whose reads are capped at 31 952 bytes, and OpenSSH's, at 260 096): byte-exact results at
 // every chunk boundary, at most D requests in flight, short reads from a capping server, out-of-order replies, a file
@@ -307,6 +343,9 @@ async function main() {
 
   // 9g. the pipelined, preallocated whole-file reader (ADR-0046 E1)
   await testPipelinedReader();
+
+  // 9h. a closed connection's late 'close' event never evicts its successor from the pool
+  await testStaleCloseKeepsSuccessor();
 
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);

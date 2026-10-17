@@ -580,6 +580,11 @@ Fixed
       download: the 11 checks go out together, during the download. On a host
       50 ms away a remote PDF now opens in 0.26 s instead of 0.86 s, and a
       Markdown file in 0.15 s instead of 0.76 s.
+    - Reconnecting to an SSH host right after its connection closed (an error,
+      the idle timeout, or closing every connection) no longer leaves the new
+      connection orphaned: it stayed open but forgotten, never closed until
+      the server gave up on it, and the next request dialled a third
+      connection -- asking for the password again.
     - A changed file is read ONCE and delivered to every window showing it,
       instead of once per window: a remote (ssh:// / sftp://) document open in
       three windows now costs one download per change, not three, and a burst

@@ -20,6 +20,7 @@
 //   srv.stats           { byPath: {path: {opens, reads, readBytes, stats}}, requests, inFlightReads,
 //                         maxInFlightReads, inFlightStats, maxInFlightStats }; srv.resetStats()
 //   srv.openHandles()   live SFTP handles across every session (a leak check)
+//   srv.liveConnections()  SSH connections the server still holds open (a connection-leak check)
 //
 // Requires ssh-keygen (openssh) to mint an OpenSSH-format host key (the format ssh2.utils.parseKey accepts).
 
@@ -319,6 +320,7 @@ function startSftpServer(config) {
         get stats() { return stats; },
         resetStats: () => { stats = freshStats(); },
         openHandles: () => liveHandles.size,
+        liveConnections: () => clients.size,
         STATUS_CODE,
         server,
       });
