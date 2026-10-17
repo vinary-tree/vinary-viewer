@@ -11,6 +11,7 @@ const Papa = require('papaparse');
 const mammoth = require('mammoth');
 const { XMLParser } = require('fast-xml-parser');
 const transport = require('./ssh_transport.js');   // SSH/SFTP remote reads (ssh://, sftp://)
+const pdfIntegrity = require('./pdf_integrity.js');   // is a PDF complete, or caught mid-write? (ADR-0046)
 
 const SMALL_LOG_BYTES = 5 * 1024 * 1024;
 const SMALL_TABLE_BYTES = 2 * 1024 * 1024;
@@ -744,6 +745,137 @@ async function remoteContentStream(uri) {
   return contentStreamForName(uri, await transport.remoteCreateReadStream(uri));
 }
 
+// ── verified PDF reads (ADR-0046 §Torn reads) ─────────────────────────────────────────────────────────────────
+// pdflatex / lualatex rewrite their PDF in place, so a live-refresh read can catch it half-written — and pdf.js then
+// fails on it, or opens a partial document. A PDF read is therefore VERIFIED (pdf_integrity.js): the file's TAIL
+// first — one whose tail does not end like a finished PDF is not read any further — then the body, then the size and
+// modification time again on the SAME handle (a rewrite during the read), then the whole-file verdict. An attempt that
+// fails is retried on a backoff schedule until the file settles (settlePdf).
+
+const PDF_TAIL_READ = pdfIntegrity.TAIL_WINDOW + 64;   // what tailVerdict needs: the final KiB + startxref slack
+
+// readSync until `buf` is full or the file ends → the bytes read
+function readFullySync(fd, buf, position) {
+  let got = 0;
+  while (got < buf.length) {
+    const n = fs.readSync(fd, buf, got, buf.length - got, position + got);
+    if (n === 0) break;
+    got += n;
+  }
+  return got;
+}
+
+const sameSig = (a, b) => Boolean(a && b && a.size === b.size && a.mtimeMs === b.mtimeMs);
+
+// One verified attempt at a LOCAL PDF — synchronous, so a complete file is delivered in the same tick as before.
+// → { bytes, sig } (complete) | { incomplete: reason, sig } | { changing: sig }; sig = { size, mtimeMs }.
+function readPdfAttemptLocal(p) {
+  const fd = fs.openSync(p, 'r');
+  try {
+    const st = fs.fstatSync(fd);
+    const sig = { size: st.size, mtimeMs: st.mtimeMs };
+    const tailLen = Math.min(st.size, PDF_TAIL_READ);
+    const tail = Buffer.allocUnsafe(tailLen);
+    const tailGot = readFullySync(fd, tail, st.size - tailLen);
+    const tv = pdfIntegrity.tailVerdict(tail.subarray(0, tailGot), st.size);
+    if (!tv.ok) return { incomplete: tv.reason, sig };
+    const bytes = Buffer.allocUnsafe(st.size);
+    const got = readFullySync(fd, bytes, 0);
+    const st2 = fs.fstatSync(fd);
+    if (got !== st.size || st2.size !== st.size || st2.mtimeMs !== st.mtimeMs) {
+      return { changing: { size: st2.size, mtimeMs: st2.mtimeMs } };
+    }
+    const v = pdfIntegrity.verdict(bytes);
+    return v.ok ? { bytes, sig } : { incomplete: v.reason, sig };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// One verified attempt at a REMOTE PDF whose stat is `st0` (taken by the caller — openRemoteUri needs it anyway).
+// The tail comes first: an unfinished file costs its OPEN and one ~1 KiB READ — no download. (SFTP reports mtime in
+// whole seconds, so a same-size rewrite within one second escapes the fstat comparison; the verdict and pdf.js remain.)
+async function readPdfAttemptRemote(uri, st0) {
+  const file = await transport.remoteOpenFile(uri);
+  try {
+    const size = st0.size;
+    const sig = { size, mtimeMs: st0.mtime };
+    const tailLen = Math.min(size, PDF_TAIL_READ);
+    const tail = await file.readRange(size - tailLen, tailLen);
+    const tv = pdfIntegrity.tailVerdict(tail, size);
+    if (!tv.ok) return { incomplete: tv.reason, sig };
+    const bytes = await file.readAll({ size });
+    const st2 = await file.fstat();
+    if (bytes.length !== size || st2.size !== size || st2.mtime !== st0.mtime) {
+      return { changing: { size: st2.size, mtimeMs: st2.mtime } };
+    }
+    const v = pdfIntegrity.verdict(bytes);
+    return v.ok ? { bytes, sig } : { incomplete: v.reason, sig };
+  } finally {
+    file.close().catch(() => {});
+  }
+}
+
+// The settle schedule's unit u (ms): attempts follow at u, 2u, 4u and 8u after the first, and a file whose size and
+// modification time stay put for 6u while it is incomplete is STABLE. u = 250 → 0.25 / 0.75 / 1.75 / 3.75 s, and 1.5 s.
+// VV_PDF_SETTLE_MS overrides u (tests shorten it).
+function pdfSettleUnit() {
+  const v = Number(process.env.VV_PDF_SETTLE_MS);
+  return Number.isFinite(v) && v >= 0 ? v : 250;
+}
+
+// Read a PDF until it is complete — or settle on what it is (ADR-0046 §Settling). `first` is an attempt already made;
+// `attempt()` makes another. o.notifies: does a change notification follow every write here (a watcher, a daemon
+// subscription, a poller)? — a boolean, or a function asked when the loop decides (a first open starts its watcher
+// after the read began). o.changed(): a Promise of the next change notification — a wait ends early on it.
+// → { bytes }                       complete
+//   { pending: true }               still changing, and a notification is coming: deliver nothing now — that
+//                                   notification's read will (vinary.main.content-flight carries the requesters)
+//   { incomplete: reason }          deliver it flagged incomplete: stable but unfinished (a LaTeX run that died), or
+//                                   still changing with no notification coming (the CLI, an unwatched remote file)
+async function settlePdf(attempt, first, o) {
+  o = o || {};
+  const u = pdfSettleUnit();
+  const complete = (r) => Boolean(r && r.bytes && !r.incomplete && !r.changing);
+  let r = first;
+  let seen = r.incomplete ? { sig: r.sig, at: Date.now() } : null;
+  for (const ms of [u, 2 * u, 4 * u, 8 * u]) {
+    if (complete(r)) return { bytes: r.bytes };
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      if (o.changed) Promise.resolve(o.changed()).then(() => { clearTimeout(timer); resolve(); }, () => {});
+    });
+    r = await attempt();
+    if (complete(r)) return { bytes: r.bytes };
+    if (r.incomplete && seen && sameSig(seen.sig, r.sig)) {
+      if (Date.now() - seen.at >= 6 * u) return { incomplete: r.incomplete };
+    } else {
+      seen = r.incomplete ? { sig: r.sig, at: Date.now() } : null;
+    }
+  }
+  if (complete(r)) return { bytes: r.bytes };
+  const notifies = typeof o.notifies === 'function' ? o.notifies() : o.notifies;
+  return notifies ? { pending: true } : { incomplete: r.incomplete || 'changing' };
+}
+
+// A LOCAL PDF, verified and settled. → { bytes } synchronously when the first attempt finds it complete (the usual
+// case: the open's vv:content keeps its place before vv:tree), else a Promise of settlePdf's outcome — with the bytes
+// as they stand for an incomplete delivery (a window that shows nothing yet lets pdf.js try to recover them).
+function readPdfLocal(p, o) {
+  const first = readPdfAttemptLocal(p);
+  if (first.bytes && !first.incomplete && !first.changing) return { bytes: first.bytes };
+  return settlePdf(() => readPdfAttemptLocal(p), first, o).then((s) => (
+    s.incomplete ? { incomplete: s.incomplete, bytes: fs.readFileSync(p) } : s));
+}
+
+// A REMOTE PDF, verified and settled (the remote twin of readPdfLocal; `st0` = the caller's stat).
+async function readPdfRemote(uri, st0, o) {
+  const first = await readPdfAttemptRemote(uri, st0);
+  if (first.bytes && !first.incomplete && !first.changing) return { bytes: first.bytes };
+  const s = await settlePdf(async () => readPdfAttemptRemote(uri, await transport.remoteStat(uri)), first, o);
+  return s.incomplete ? { incomplete: s.incomplete, bytes: await transport.remoteReadFile(uri) } : s;
+}
+
 // The remote reader — an ssh://sftp:// analog of openLocal, paralleling openArchiveUri (a virtual backend).
 // It stats once (to decide list-vs-read and to fill meta.size, which the streaming gate needs), then produces
 // the SAME payload contract, reusing every existing parser (office/table/log/image/pdf/text sniff) and the
@@ -803,7 +935,12 @@ async function openRemoteUri(uri, kind, opts = {}) {
   }
   if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri, sized())), stamp, meta };
   if (k === 'pdf') {
-    const payload = { path: uri, kind: 'pdf', bytes: await transport.remoteReadFile(uri, sized()), stamp, meta };
+    // VERIFIED and settled (ADR-0046 §Torn reads): the tail first, then the body, then fstat on the same handle;
+    // `pending` (a notification is coming) delivers nothing; `incomplete` is delivered flagged
+    const r = await readPdfRemote(uri, st, opts);
+    if (r.pending) return { path: uri, kind: 'pdf', pending: true, stamp, meta };
+    const payload = { path: uri, kind: 'pdf', bytes: r.bytes, stamp, meta };
+    if (r.incomplete) { payload.incomplete = true; payload.incompleteReason = r.incomplete; }
     payload.siblings = await remoteSiblingsGroup(uri);   // the PDF's collocated group (its authored sources + itself)
     return payload;
   }
@@ -1477,6 +1614,11 @@ setInterval(() => {
 function streamCount() { return streams.size; }   // for the electron smoke's fd-leak assertion
 
 module.exports = {
+  readPdfLocal,
+  readPdfRemote,
+  _readPdfAttemptLocal: readPdfAttemptLocal,
+  _readPdfAttemptRemote: readPdfAttemptRemote,
+  _settlePdf: settlePdf,
   archiveUri,
   classifyName,
   contentPage,

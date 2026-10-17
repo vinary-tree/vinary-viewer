@@ -587,6 +587,13 @@ Fixed
       refreshes it and removes the banner. The same holds for a File Type
       re-type that fails and for Reload of a vanished file. A document that
       never loaded still shows the error page.
+    - Every PDF is checked before it is shown. LaTeX rewrites its PDF in
+      place, so a read can catch it half-written: a file whose end (the end-of-
+      file marker and the cross-reference pointer) is missing, or that changes
+      while it is read, is read again on a short backoff -- up to about 4 s,
+      sooner the moment the file changes again -- and a remote one costs ~1 KiB
+      per check instead of a whole download. vv --cli and vv --tui do the same
+      and say when a PDF is still incomplete after that.
     - vv --cli and vv --tui no longer print pdf.js's own warnings (such as
       "Warning: Indexing all PDF objects" for a damaged PDF) into the
       document: they went to standard output, mixed into `vv --cli file.pdf >

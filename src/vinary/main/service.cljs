@@ -22,6 +22,7 @@
             [vinary.main.diff-source :as diff-source]
             [vinary.main.git :as git]
             [vinary.main.file-kind :as file-kind]
+            [vinary.main.remote-subs :as remote-subs]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
@@ -34,7 +35,9 @@
 (defonce ^:private tree-windows (atom {}))    ; owner -> {:wc|:send :offered {root metadata} :visible :expanded}
 (defonce ^:private tree-watchers (atom {}))   ; [root dir] -> {:watcher :owners #{owner} :timer timeout? :synthetic?}
 (defonce ^:private remote-content-owners (atom {})) ; local path -> {[session sub-id] invalidate-callback}
-(defonce ^:private remote-event-subs (atom #{}))    ; source-side ssh/sftp URIs subscribed to a target daemon
+(defonce ^:private remote-event-subs (atom {}))     ; source-side ssh/sftp URI subscribed to a target daemon → {:active? bool}
+                                                    ; (vinary.main.remote-subs: live once the target reports it active)
+(defonce ^:private pdf-wakers (atom {}))            ; path → resolve fns: a PDF settle wait ends on its next change
 (defonce ^:private remote-owner-windows (atom {}))  ; source-side target owner-id -> renderer webContents
 (defonce ^:private remote-tree-pending (atom {}))   ; [webContents.id opened-uri] -> target owner-id
 
@@ -328,6 +331,8 @@
 ;; of one for the parsed and remote reads. Producers never send: the content-flight driver below delivers each
 ;; result to every window that asked for it (ADR-0046), stamping it on the way out.
 
+(declare pdf-settle-opts)   ; the PDF settle options (ADR-0046 §Settling), defined with the content watchers below
+
 (defn- parsed-payload [path kind ov]
   ;; `kind` is passed to openUri ONLY when an override exists — for openLocal/openArchiveUri, presence of
   ;; the argument means "explicit, skip classifyName and every content sniff".
@@ -342,12 +347,13 @@
 ;; sniffed text); openRemoteUri stats internally to decide list-vs-read and to fill meta.size (the streaming
 ;; gate). Because that kind argument is ALWAYS passed, remote explicitness travels separately as opts.explicit.
 (defn- remote-payload [uri]
-  (let [ov (doc-overrides/for-path uri)]
-    (-> (.openRemoteUri content-service uri (doc-overrides/effective-kind kind-of uri)
-                        (clj->js (cond-> {}
-                                   (:kind ov)      (assoc :explicit true)
-                                   (:delimiter ov) (assoc :delimiter (:delimiter ov)))))
-        (.then  (fn [payload] {:payload (decorate-js-payload! payload ov)}))
+  (let [ov   (doc-overrides/for-path uri)
+        opts (pdf-settle-opts uri)]                          ; a remote PDF is verified and settled too
+    (when (:kind ov) (aset opts "explicit" true))
+    (when (:delimiter ov) (aset opts "delimiter" (:delimiter ov)))
+    (-> (.openRemoteUri content-service uri (doc-overrides/effective-kind kind-of uri) opts)
+        (.then  (fn [^js payload]
+                  (if (.-pending payload) {:pending true} {:payload (decorate-js-payload! payload ov)})))
         (.catch (fn [e] {:error (.-message e)})))))
 
 (defn- conf-dir []
@@ -364,6 +370,18 @@
           m   (when (and txt (not (str/blank? txt))) (reader/read-string txt))]
       (:remote m))
     (catch :default _ nil)))
+
+(defn- pdf-result
+  "A verified PDF read's outcome (content_service readPdfLocal / settlePdf: {bytes} | {pending} | {incomplete bytes})
+   → a producer result. :pending delivers nothing — the change notification that follows will read again (the
+   content-flight model carries the requesters); an incomplete PDF is delivered FLAGGED, so a window that shows a
+   previous version keeps it behind a note and one that shows nothing yet lets pdf.js try (ADR-0046 §Torn reads)."
+  [path ^js r ov]
+  (if (.-pending r)
+    {:pending true}
+    {:payload (clj->js (decorate-payload (cond-> {:path path :kind "pdf" :bytes (.-bytes r) :siblings (siblings-group path)}
+                                           (.-incomplete r) (assoc :incomplete true :incompleteReason (.-incomplete r)))
+                                         ov))}))
 
 (defn- local-payload [path]
   (let [ov    (doc-overrides/for-path path)
@@ -409,13 +427,17 @@
       ;; pdf — stream the bytes to the renderer's in-DOM pdf.js view (parity with markdown/source).
       ;; Live-refresh re-sends bytes through the normal watcher → the view re-renders like any doc.
       ;; (The native-PDF WebContentsView path is RETIRED in favor of in-renderer pdf.js — ADR 0013.)
+      ;; Its collocated document group (its authored sources + itself) rides along, so the renderer offers the
+      ;; Preview/Source combo over every representation (paper.pdf ↔ paper.tex/paper.org); a lone PDF's group is
+      ;; size 1 → no toggle. The read is VERIFIED (content_service readPdfLocal, ADR-0046 §Torn reads): a complete
+      ;; file is delivered synchronously as before; one caught mid-write settles first (a Promise).
       :pdf
-      (try (let [bytes (.readFileSync fs path)
-                 ;; the PDF's collocated document group (its authored sources + itself), so the renderer offers
-                 ;; the Preview/Source combo over every representation (paper.pdf ↔ paper.tex/paper.org). A lone
-                 ;; PDF's group is size 1 → the renderer shows no toggle.
-                 grp   (siblings-group path)]
-             {:payload (clj->js (decorate-payload {:path path :kind "pdf" :bytes bytes :siblings grp} ov))})
+      (try (let [r (.readPdfLocal content-service path (pdf-settle-opts path))]
+             (if (instance? js/Promise r)
+               (-> r
+                   (.then (fn [s] (pdf-result path s ov)))
+                   (.catch (fn [e] {:error (.-message e)})))
+               (pdf-result path r ov)))
            (catch :default e {:error (.-message e)}))
 
       ;; everything else (source, markdown, org, diagram, …) — read as UTF-8 text and send with its kind.
@@ -845,10 +867,40 @@
   ;; skipped — under the resident daemon a watcher outlives its window). A change during a running read only
   ;; marks it dirty: a burst costs at most one more read (vinary.main.content-flight).
   (request-content! path {:fanout? true})
+  ;; …and a PDF settling after a torn read tries again at once (content_service.settlePdf)
+  (when-let [wake (get @pdf-wakers path)]
+    (swap! pdf-wakers dissoc path)
+    (doseq [resolve wake] (resolve nil)))
   ;; Authenticated source daemons receive only an invalidation.  They re-read through their own SFTP
   ;; connection, so target file bytes never travel over the event protocol and existing content limits apply.
   (doseq [invalidate (vals (get @remote-content-owners path {}))]
     (invalidate "change")))
+
+;; ---- settling a PDF caught mid-write (ADR-0046 §Settling) ----------------------------------------------------
+(declare remote-pollers)
+;; content_service.settlePdf retries a torn PDF on a backoff schedule; these tell it whether a change notification
+;; will follow every write here (then a still-changing file is left :pending for that notification's read) and give it
+;; a Promise of the NEXT change, so a wait ends the moment the writer touches the file again.
+
+(defn- notifies?
+  "Will a change notification follow every write to `path`? A watchable local file gets a content watcher when it is
+   opened; a remote one has an ACTIVE target-daemon subscription or a fallback poller. Asked when the settle loop
+   DECIDES — a first open starts its watcher, poller or subscription after the read began."
+  [path]
+  (boolean (if (file-kind/remote-uri? path)
+             (or (remote-subs/live? @remote-event-subs path) (contains? @remote-pollers path))
+             (not (or (archive-uri? path) (doc-overrides/stdin-doc? path) (file-kind/git-graph-uri? path))))))
+
+(defn- next-change
+  "A Promise of `path`'s next change notification (resolved by send-open-content!)."
+  [path]
+  (js/Promise. (fn [resolve] (swap! pdf-wakers update path (fnil conj []) resolve))))
+
+(defn- pdf-settle-opts
+  "content_service's settle options for `path`: {notifies: () → bool, changed: () → Promise}."
+  [path]
+  #js {:notifies (fn [] (notifies? path))
+       :changed  (fn [] (next-change path))})
 
 (defn- content-owned? [path]
   (or (retained? path) (seq (get @remote-content-owners path))))
@@ -965,6 +1017,8 @@
 (defn- handle-remote-content-state! [^js state]
   (let [uri (.-subId state)]
     (when (string? uri)
+      ;; liveness is recorded ON the subscription (ignored for one no longer held — remote-subs/report)
+      (swap! remote-event-subs remote-subs/report uri (.-active state))
       (if (.-active state)
         (stop-remote-poller! uri)
         (when (retained? uri) (start-remote-poller! uri))))))
@@ -973,8 +1027,8 @@
   ;; Polling remains an opt-in compatibility fallback.  It starts while discovery/handshake runs and is
   ;; stopped as soon as the authenticated target subscription becomes active.
   (start-remote-poller! uri)
-  (when-not (contains? @remote-event-subs uri)
-    (swap! remote-event-subs conj uri)
+  (when-not (remote-subs/subscribed? @remote-event-subs uri)
+    (swap! remote-event-subs remote-subs/subscribe uri)
     (-> (.subscribeContent daemon-events uri uri (fn [_] (send-open-content! uri)))
         (.catch (fn [_] (when (retained? uri) (start-remote-poller! uri)))))))
 
@@ -1032,10 +1086,11 @@
 (defn- unwatch-file! [path]
   (release-content-watcher-if-unowned! path)
   (cancel-pending-remote-tree-opens! path)
-  (when (contains? @remote-event-subs path)
-    (swap! remote-event-subs disj path)
+  (when (remote-subs/subscribed? @remote-event-subs path)
+    (swap! remote-event-subs remote-subs/unsubscribe path)   ; …and its liveness with it
     (ignore-remote-error! (.unsubscribeContent daemon-events path path)))
   (swap! flights flight/release path)        ; nobody retains it: a read still running lands in nothing
+  (swap! pdf-wakers dissoc path)             ; (a settle wait still running ends on its own timer)
   (stop-remote-poller! path)                 ; a remote doc's poller stops when the tab can no longer reach it
   ;; a piped-stdin document's spilled snapshot dies with its last retaining tab: unlink the temp file and
   ;; its per-invocation uuid dir (rmdirSync only removes it when empty — exactly the contract we want).

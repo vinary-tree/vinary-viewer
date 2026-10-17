@@ -102,20 +102,32 @@ ok(/\(\+\d+ earlier\)/.test(streamed), 'the bounded ring dropped older lines (a 
 // ── 5b. PDF: headless pdf.js reflow renders in the TUI ─────────────────────────
 const pdf = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
 if (fs.existsSync(pdf)) {
-  ok(strip(drive('', pdf, ['--no-color', '--width', '50'])).includes('Vinary PDF Smoke'),
-     'a PDF opens in the TUI (pdf.js text extraction + reflow)');
+  const pdfFrame = strip(drive('', pdf, ['--no-color', '--width', '50']));
+  ok(pdfFrame.includes('Vinary PDF Smoke'), 'a PDF opens in the TUI (pdf.js text extraction + reflow)');
 
-  // a damaged PDF: pdf.js's warnings ("Indexing all PDF objects") are console.logs — they must not reach the screen
+  // ── 5c. ADR-0046 §Torn reads: a PDF caught mid-write is flagged in the status row once its short settle is over
+  // (VV_PDF_SETTLE_MS shortens it here); a complete one is not; pdf.js's own console warnings stay off the screen
+  ok(!pdfFrame.includes('incomplete PDF'), 'a complete PDF carries no incomplete flag');
+  const settleEnv = { ...process.env, VV_PDF_SETTLE_MS: '5' };
   const kf = path.join(tmp, 'keys-none.bin');
   fs.writeFileSync(kf, '');
   const smokeBytes = fs.readFileSync(pdf);
+  const junkTail = path.join(tmp, 'junk-tail.pdf');    // complete + 3000 bytes: no %%EOF in the final KiB
+  fs.writeFileSync(junkTail, Buffer.concat([smokeBytes, Buffer.alloc(3000, 0x42)]));
+  const jt = spawnSync('node', [TUI, '--drive', kf, '--no-color', '--width', '70', junkTail],
+                       { encoding: 'utf8', env: settleEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  const jtFrame = strip(jt.stdout || '');
+  ok(jt.status === 0 && jtFrame.includes('junk-tail.pdf [incomplete PDF — still being written?]'),
+     'an incomplete PDF is flagged in the status row');
+  ok(jtFrame.includes('Vinary PDF Smoke'), '…and shows what pdf.js can recover');
   const cut = path.join(tmp, 'cut.pdf');                // the first half of the file: unrecoverable
   fs.writeFileSync(cut, smokeBytes.subarray(0, Math.floor(smokeBytes.length / 2)));
   const ct = spawnSync('node', [TUI, '--drive', kf, '--no-color', '--width', '70', cut],
-                       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+                       { encoding: 'utf8', env: settleEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   ok(ct.status === 1 && /vv-tui: .*cut\.pdf: /.test(ct.stderr || ''),
-     'a damaged PDF is reported cleanly on stderr with a non-zero exit');
-  ok(!/Warning:/.test(ct.stdout || ''), 'pdf.js warnings ("Indexing all PDF objects") never reach the screen');
+     'an unrecoverable PDF is reported cleanly on stderr with a non-zero exit');
+  ok(!/Warning:/.test(ct.stdout || '') && !/Warning:/.test(jt.stdout || ''),
+     'pdf.js warnings ("Indexing all PDF objects") never reach the screen');
 }
 
 // ── 6. pseudo-tty teardown check (skippable: needs python3 + a Linux pty) ───────

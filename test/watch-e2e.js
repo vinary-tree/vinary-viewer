@@ -34,6 +34,8 @@ const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-wa
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
 const DOC = path.join(SCRATCH, 'shared.md');
 process.env.VV_DAEMON_EVENTS_DESCRIPTOR = path.join(SCRATCH, 'daemon-events.json');
+// a PDF caught mid-write settles on a unit-u backoff (ADR-0046 §Settling); 100 ms keeps the torn-write arm quick
+process.env.VV_PDF_SETTLE_MS = '100';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 fs.writeFileSync(DOC, '# Shared watch\n\nversion-one\n');
@@ -230,6 +232,47 @@ async function run() {
   await waitForTreeFile(first, 'tree-first-reacquired.md', true,
     'the surviving window to reacquire automatic tree refresh');
   console.log('[ok] re-expansion after owner destruction reacquires a clean sole-owner tree watcher');
+
+  // A PDF REWRITTEN IN PLACE, the way pdflatex writes it (ADR-0046 §Torn reads): main verifies every read and settles
+  // a torn one, so the window goes from v1 straight to v2 — never a torn version, a failed render or an error page in
+  // between; a write that stops half-way (a LaTeX run that died) keeps v2 on screen behind the "incomplete" note, and
+  // the finished file replaces it.
+  const { makeDeckPdf, truncatePdf } = require('./fixtures/pdf-gen.js');
+  const portrait = (pages) => makeDeckPdf({ pages, sizes: Array.from({ length: pages }, () => [300, 800]),
+    labels: null, creator: 'watch-e2e', producer: 'pdflatex-like' });
+  const DECK = path.join(SCRATCH, 'deck.pdf');
+  const pages = (win) => evalIn(win, `document.querySelectorAll('.vv-content .vv-pdf-doc .vv-pdf-page').length`);
+  fs.writeFileSync(DECK, portrait(3));
+  await openIn(first, DECK);
+  await until(() => pages(first), (n) => n === 3, 'the PDF opens (3 pages)');
+  // record, every 10 ms from now on, anything a torn read would have shown
+  await evalIn(first, `(() => { const seen = window.__vvTornSeen = [];
+    window.__vvTornProbe = setInterval(() => {
+      const n = document.querySelector('.vv-refresh-note');
+      if (n && n.dataset.kind === 'render-failed') seen.push('render-failed note');
+      if (document.querySelector('.vv-content .vv-error')) seen.push('error page');
+    }, 10);
+    return true; })()`);
+  await sleep(300);   // the content watcher for DECK is installed
+  const v2 = portrait(5);
+  fs.writeFileSync(DECK, truncatePdf(v2, 0.5));           // pdflatex is half-way through…
+  await sleep(150);
+  fs.writeFileSync(DECK, v2);                             // …and finishes
+  await until(() => pages(first), (n) => n === 5, 'the finished v2 replaces v1');
+  await sleep(500);
+  const seenTorn = await evalIn(first, `(clearInterval(window.__vvTornProbe), window.__vvTornSeen.slice())`);
+  assert.deepStrictEqual(seenTorn, [], 'no torn version, failed render or error page was ever shown');
+  assert.strictEqual(await note(first), null, 'and no note is left behind');
+  console.log('[ok] a PDF rewritten in place goes from v1 straight to v2 — the torn read is settled, never shown');
+
+  fs.writeFileSync(DECK, truncatePdf(portrait(7), 0.5)); // a run that dies half-way: the file stays torn
+  await until(() => note(first), (k) => k === 'incomplete', 'the never-finished PDF raises the incomplete note', 15000);
+  assert.strictEqual(await pages(first), 5, 'while v2 stays on screen');
+  assert.strictEqual(await errorPage(first), false, 'with no error page');
+  fs.writeFileSync(DECK, portrait(7));                    // the fixed run finishes
+  await until(() => pages(first), (n) => n === 7, 'the finished file replaces v2');
+  await until(() => note(first), (k) => k === null, 'and clears the note');
+  console.log('[ok] a PDF left half-written keeps the last complete version behind the incomplete note; the finished file replaces it');
 }
 
 app.whenReady().then(() =>

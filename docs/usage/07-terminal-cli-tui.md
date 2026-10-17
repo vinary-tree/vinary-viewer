@@ -206,7 +206,7 @@ Both terminal modes reuse every format front-end the GUI has:
 | LaTeX (`.tex`, `.latex`, `.ltx`) | Sections, text styling, lists, and tables via unified-latex; math shown as its LaTeX source. |
 | Source code | One syntax-highlighted code block in the file's language when a bundled tree-sitter grammar matches (else plain). |
 | Diff / patch (`.diff`, `.patch`) | Coloured unified diff (`+`/`-`/hunk lines). |
-| PDF (`.pdf`) | Headless pdf.js text extraction reflowed to prose, with a font-size heading outline; not rasterised pages. |
+| PDF (`.pdf`) | Headless pdf.js text extraction reflowed to prose, with a font-size heading outline; not rasterised pages. The file is read **verified** (ADR-0046): one caught half-written — LaTeX still running — gets about 4 s to finish, then renders as it stands, flagged: a warning on stderr (`vv --cli`) or `[incomplete PDF — still being written?]` in the status row (`vv --tui`). |
 | Log / plain text | Severity-coloured records; large files stream bounded-memory (§2.2, §3.4). |
 | Office (`.docx`, `.odt`, …) and tables (`.csv`, `.tsv`) | Parsed to the shared IR and rendered as prose / box-drawing tables. |
 | HTML | Parsed like an office document and rendered as prose. |

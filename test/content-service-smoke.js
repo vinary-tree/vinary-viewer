@@ -458,8 +458,167 @@ async function testRemote() {
   }
 }
 
+// ADR-0046 D5 — is a byte buffer a COMPLETE PDF, or one caught mid-write? (src/vinary/main/pdf_integrity.js)
+function testPdfIntegrity() {
+  const { verdict, tailVerdict, TAIL_WINDOW } = require('../src/vinary/main/pdf_integrity.js');
+  const { makeDeckPdf, truncatePdf } = require('./fixtures/pdf-gen.js');
+  const ok = (buf) => verdict(buf).ok;
+  const reason = (buf) => verdict(buf).reason;
+  const tail = (buf) => tailVerdict(buf.subarray(Math.max(0, buf.length - TAIL_WINDOW - 64)), buf.length);
+
+  // complete files, every cross-reference form
+  const classic = makeDeckPdf({ pages: 3 });
+  const xstream = makeDeckPdf({ pages: 3, xrefStream: true });
+  const incremental = makeDeckPdf({ pages: 3, incremental: true });
+  const real = fs.readFileSync(path.join(__dirname, 'fixtures', 'beamer-notes-right.pdf'));   // LuaLaTeX output
+  for (const [name, buf] of [['classic xref', classic], ['xref stream', xstream], ['incremental update', incremental], ['real LuaLaTeX', real]]) {
+    assert.deepStrictEqual(verdict(buf), { ok: true }, `${name}: a complete PDF`);
+    assert.strictEqual(tail(buf).ok, true, `${name}: its tail alone already says so`);
+  }
+  assert.strictEqual((incremental.toString('latin1').match(/%%EOF/g) || []).length, 2, '(the incremental fixture really has two %%EOF markers)');
+
+  // torn copies — what a read racing pdflatex sees
+  for (const [name, buf] of [['classic', classic], ['xref stream', xstream], ['real LuaLaTeX', real]]) {
+    for (const frac of [0.1, 0.5, 0.9, 0.99]) {
+      const torn = truncatePdf(buf, frac);
+      assert.strictEqual(ok(torn), false, `${name} cut at ${frac}: incomplete (${reason(torn)})`);
+      assert.strictEqual(tail(torn).ok, false, `${name} cut at ${frac}: the tail alone says so`);
+    }
+    const lastByteGone = buf.subarray(0, buf.lastIndexOf('%%EOF') + 4);       // "%%EO" — one byte short
+    assert.strictEqual(ok(lastByteGone), false, `${name}: missing even the marker's last byte is incomplete`);
+  }
+  assert.strictEqual(ok(Buffer.alloc(0)), false, 'an empty read');
+  assert.strictEqual(reason(Buffer.from('%%EOF\n')), 'no-header', 'no header');
+
+  // trailing junk after %%EOF: tolerated within 1 KiB (writers pad), not beyond (that is no longer the file's end)
+  assert.strictEqual(ok(Buffer.concat([classic, Buffer.alloc(500, 0x20)])), true, '500 bytes of padding after %%EOF');
+  assert.strictEqual(reason(Buffer.concat([classic, Buffer.alloc(2000, 0x41)])), 'no-eof', '2000 bytes after %%EOF');
+
+  // an incremental update torn shortly after the PREVIOUS revision's %%EOF is that revision plus junk — a complete
+  // (older) PDF, which is what a reader would open; torn far beyond it, it is unfinished
+  const firstEof = incremental.indexOf('%%EOF') + 6;
+  assert.strictEqual(ok(Buffer.concat([incremental.subarray(0, firstEof), Buffer.from('3 0 obj\n<< /Partial')])), true,
+    'an incremental update torn just after the previous revision: that revision');
+  assert.strictEqual(reason(Buffer.concat([incremental.subarray(0, firstEof), Buffer.alloc(3000, 0x42)])), 'no-eof',
+    'an update torn 3 KB into a large section: unfinished');
+
+  // the pointer: out of range, not a number, or in range but not at a cross-reference section
+  const repoint = (buf, to) => {
+    const s = buf.toString('latin1');
+    const i = s.lastIndexOf('startxref');
+    return Buffer.from(s.slice(0, i) + s.slice(i).replace(/startxref\s+\d+/, `startxref\n${to}`), 'latin1');
+  };
+  assert.strictEqual(reason(repoint(classic, classic.length + 100)), 'bad-startxref', 'a pointer past the end of the file');
+  assert.strictEqual(tail(repoint(classic, classic.length + 100)).reason, 'bad-startxref', '(the tail alone catches it)');
+  assert.strictEqual(reason(repoint(classic, 'xyz')), 'bad-startxref', 'a pointer that is not a number');
+  assert.strictEqual(reason(repoint(classic, 3)), 'bad-xref', 'a pointer into the middle of the header');
+  assert.strictEqual(reason(Buffer.from(classic.toString('latin1').replace(/startxref/g, 'startxreF'), 'latin1')), 'no-startxref',
+    'a %%EOF with no startxref before it');
+
+  // a LINEARIZED-like file: the final startxref points at the first-page cross-reference section near the start
+  const head = '%PDF-1.6\n1 0 obj\n<< /Linearized 1 >>\nendobj\n';
+  const firstXref = head.length;
+  const lin = Buffer.from(head + 'xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>\n' + '2 0 obj\n(body)\nendobj\n'.repeat(20) +
+    `startxref\n${firstXref}\n%%EOF\n`, 'latin1');
+  assert.deepStrictEqual(verdict(lin), { ok: true }, 'a linearized-style pointer to the first-page xref');
+  console.log('[ok] pdf integrity: complete (classic / xref stream / incremental / real LuaLaTeX) vs torn, padding, pointers, linearized');
+}
+
+// ADR-0046 D6 — a PDF caught mid-write SETTLES: complete files deliver at once, a torn file that finishes is waited
+// for, a stable-but-incomplete one is delivered flagged, a still-changing one is left pending when a notification will
+// follow (flagged when none will), and a change notification ends a wait early. Remote: a torn file costs its tail.
+async function testPdfSettle() {
+  const { makeDeckPdf, truncatePdf } = require('./fixtures/pdf-gen.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-settle-'));
+  const p = path.join(dir, 'talk.pdf');
+  const full = makeDeckPdf({ pages: 3 });
+  const torn = truncatePdf(full, 0.5);
+  let movedOnTear = null;
+  try {
+    process.env.VV_PDF_SETTLE_MS = '40';     // u = 40 ms: attempts at +40, +80, +160, +320 ms; stable after 240 ms
+
+    // 1 — a complete PDF: read SYNCHRONOUSLY (the open's vv:content keeps its place before vv:tree)
+    fs.writeFileSync(p, full);
+    const r1 = content.readPdfLocal(p, { notifies: true });
+    assert.ok(!(r1 instanceof Promise) && r1.bytes.equals(full) && !r1.incomplete, 'a complete PDF is read synchronously');
+
+    // 2 — torn, finished 60 ms later: waited for, delivered complete
+    fs.writeFileSync(p, torn);
+    setTimeout(() => fs.writeFileSync(p, full), 60);
+    const r2 = await content.readPdfLocal(p, { notifies: true });
+    assert.ok(r2.bytes && r2.bytes.equals(full) && !r2.incomplete, 'a torn PDF that finishes is waited for, then delivered whole');
+
+    // 3 — torn and never finished (a LaTeX run that died): STABLE after 6u → delivered flagged, with its bytes
+    fs.writeFileSync(p, torn);
+    const t3 = Date.now();
+    const r3 = await content.readPdfLocal(p, { notifies: true });
+    assert.strictEqual(r3.incomplete, 'no-eof', 'a stable-but-incomplete PDF is delivered flagged incomplete');
+    assert.ok(r3.bytes.equals(torn), 'with the bytes as they stand');
+    assert.ok(Date.now() - t3 >= 240, `only after it held still for 6u (${Date.now() - t3} ms)`);
+
+    // 4 — still changing at every attempt: pending when a notification will follow; flagged when none will
+    let n = 0;
+    const churn = setInterval(() => { n += 1; fs.writeFileSync(p, truncatePdf(full, 0.3 + (n % 5) * 0.1)); }, 15);
+    try {
+      const r4 = await content.readPdfLocal(p, { notifies: () => true });
+      assert.deepStrictEqual(r4, { pending: true }, 'a PDF still changing, with a notification coming: pending (nothing delivered)');
+      const r4b = await content.readPdfLocal(p, { notifies: false });
+      assert.ok(typeof r4b.incomplete === 'string' && r4b.incomplete.length > 0 && Buffer.isBuffer(r4b.bytes),
+        `…and with no notification coming: delivered flagged (${r4b.incomplete})`);
+    } finally {
+      clearInterval(churn);
+    }
+
+    // 5 — a change notification ends a wait early: u = 400 ms, but the file is finished (and announced) at 20 ms
+    process.env.VV_PDF_SETTLE_MS = '400';
+    fs.writeFileSync(p, torn);
+    let announce;
+    const changed = () => new Promise((r) => { announce = r; });
+    setTimeout(() => { fs.writeFileSync(p, full); announce(); }, 20);
+    const t5 = Date.now();
+    const r5 = await content.readPdfLocal(p, { notifies: true, changed });
+    assert.ok(r5.bytes && r5.bytes.equals(full), 'the announced finish is read');
+    assert.ok(Date.now() - t5 < 300, `at once, not at the first scheduled attempt (${Date.now() - t5} ms < 400)`);
+
+    // 6 — REMOTE: one verified attempt at a torn file reads only its tail (≤ 1 KiB + slack — H5), and a complete
+    // remote PDF reads byte-exact
+    process.env.VV_PDF_SETTLE_MS = '40';
+    const { startSftpServer } = require('./fixtures/ssh-server.js');
+    const transport = require('../src/vinary/main/ssh_transport.js');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-settle-home-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    const big = makeDeckPdf({ pages: 40, padBytes: 200000 });
+    const srv = await startSftpServer({ password: 'st-pw', files: { 'torn.pdf': truncatePdf(big, 0.6), 'whole.pdf': big } });
+    transport.configure({ homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'st-pw', onError: () => {} });
+    try {
+      const tornUri = srv.url('/torn.pdf');
+      const st = await transport.remoteStat(tornUri);
+      srv.resetStats();
+      const a = await content._readPdfAttemptRemote(tornUri, st);
+      assert.strictEqual(a.incomplete, 'no-eof', 'a torn remote PDF is judged from its tail');
+      const moved = movedOnTear = srv.stats.byPath['/torn.pdf'].readBytes;
+      assert.ok(moved <= 1088, `…which is all that crossed the network: ${moved} of ${st.size} bytes (H5)`);
+      const w = await content.readPdfRemote(srv.url('/whole.pdf'), await transport.remoteStat(srv.url('/whole.pdf')), { notifies: false });
+      assert.ok(w.bytes.equals(big) && !w.incomplete, 'a complete remote PDF reads byte-exact, verified');
+      const r6 = await content.readPdfRemote(tornUri, st, { notifies: false });
+      assert.strictEqual(r6.incomplete, 'no-eof', 'and a torn one that never finishes is delivered flagged');
+    } finally {
+      transport.closeAll();
+      await srv.close();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+    console.log(`[ok] pdf settle: complete at once (sync), a finishing tear waited for, stable-incomplete flagged, changing → pending / flagged, early wake, remote tail-only (H5: ${movedOnTear} bytes moved)`);
+  } finally {
+    delete process.env.VV_PDF_SETTLE_MS;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 main()
-  .then(() => {
+  .then(async () => {
+    testPdfIntegrity();
+    await testPdfSettle();
     console.log('content-service smoke OK');
   })
   .catch(err => {

@@ -214,8 +214,15 @@
                      ;; image branch (it's the GUI's file:// <img> path), so it would mis-return the raw bytes as
                      ;; text — go direct, mirroring the text-kinds bypass.
                      (= "image" kind) (emit-doc {:kind "image" :path file} aopts opts)
-                     ;; pdf → read the raw bytes (a Buffer; js->clj would mangle it) for headless pdf.js extraction
-                     (= "pdf" kind) (emit-doc {:kind "pdf" :path file :bytes (.readFileSync fs file)} aopts opts)
+                     ;; pdf → the raw bytes (a Buffer; js->clj would mangle it) for headless pdf.js extraction, read
+                     ;; VERIFIED (ADR-0046 §Torn reads): a PDF caught mid-write gets a few seconds to finish — no watcher
+                     ;; here to wait for — and is then rendered as it stands, with a warning, never silently torn
+                     (= "pdf" kind) (-> (js/Promise.resolve (.readPdfLocal cs file #js {:notifies false}))
+                                        (.then (fn [^js r]
+                                                 (when (.-incomplete r)
+                                                   (ewrite (str "vv-cli: " uri ": the PDF looks incomplete (" (.-incomplete r)
+                                                                ") — is it still being written?")))
+                                                 (emit-doc {:kind "pdf" :path file :bytes (.-bytes r)} aopts opts))))
                      ;; office/table/archive/directory → content_service parses them (an explicit kind threads
                      ;; through so `-t csv notes.txt` parses as delimited text, never re-classified or sniffed)
                      :else (-> (.openUri cs file (when explicit kind)

@@ -243,18 +243,31 @@ function runFull(args, env) {
   return { code: r.status, out: r.stdout || '', err: r.stderr || '' };
 }
 if (fs.existsSync(pdf)) {
-  const pout = run(['--no-color', '--width', '60', pdf]);
+  const full = runFull(['--no-color', '--width', '60', pdf]);
+  const pout = full.out;
   ok(pout.includes('Vinary PDF Smoke'), 'PDF renders its extracted text (pdf.js reflow)');
   ok(!pout.startsWith('%PDF') && !pout.includes('┌'), 'PDF is NOT dumped as raw bytes or a box-drawing table');
 
-  // a damaged PDF: pdf.js warns while it fails ("Indexing all PDF objects") — with console.log, i.e. onto stdout,
-  // which carries the document; the failure itself belongs on stderr, with a non-zero exit
+  // ── 4c′. ADR-0046 §Torn reads: a PDF is read VERIFIED. One caught mid-write gets a short settle (VV_PDF_SETTLE_MS
+  // shortens it here) and then renders as it stands, with a warning on stderr — stdout carries only the document,
+  // so pdf.js's own console warnings must not reach it either.
+  ok(full.code === 0 && !/incomplete/i.test(full.err), 'a complete PDF renders with no incomplete warning');
+  const settle = { VV_PDF_SETTLE_MS: '5' };
   const smokeBytes = fs.readFileSync(pdf);
+  const junkTail = path.join(tmp, 'junk-tail.pdf');    // complete + 3000 bytes: no %%EOF in the final KiB
+  fs.writeFileSync(junkTail, Buffer.concat([smokeBytes, Buffer.alloc(3000, 0x42)]));
+  const jt = runFull(['--no-color', '--width', '60', junkTail], settle);
+  ok(/vv-cli: .*junk-tail\.pdf: the PDF looks incomplete \(no-eof\)/.test(jt.err),
+     'a PDF whose end is missing is flagged on stderr ("looks incomplete (no-eof)")');
+  ok(jt.code === 0 && jt.out.includes('Vinary PDF Smoke'),
+     '…and still renders what pdf.js can recover (the earlier, complete revision)');
   const cut = path.join(tmp, 'cut.pdf');                // the first half of the file: unrecoverable
   fs.writeFileSync(cut, smokeBytes.subarray(0, Math.floor(smokeBytes.length / 2)));
-  const ct = runFull(['--no-color', '--width', '60', cut]);
-  ok(ct.code === 1 && /vv-cli: .*cut\.pdf: /.test(ct.err), 'a damaged PDF is reported cleanly on stderr with a non-zero exit');
-  ok(!/Warning:/.test(ct.out), 'pdf.js warnings ("Indexing all PDF objects") never reach stdout');
+  const ct = runFull(['--no-color', '--width', '60', cut], settle);
+  ok(ct.code === 1 && /looks incomplete \(no-eof\)/.test(ct.err) && /vv-cli: .*cut\.pdf: /.test(ct.err),
+     'a PDF cut in half: flagged, then pdf.js\'s failure is reported cleanly with a non-zero exit');
+  ok(!/Warning:/.test(ct.out) && !/Warning:/.test(jt.out),
+     'pdf.js warnings ("Indexing all PDF objects") never reach stdout');
 }
 
 // ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────

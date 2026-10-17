@@ -56,6 +56,13 @@ banner (its tooltip carries the exact error):
 **×** dismisses the banner; the next successful refresh removes it. A document
 that never loaded still shows the error page.
 
+How long a half-written PDF is waited for: main re-reads it after 0.25, 0.75, 1.75
+and 3.75 s (each wait ends early when the file changes again), and a file that
+holds still for 1.5 s while unfinished counts as finished-but-broken. The unit of
+that schedule is `VV_PDF_SETTLE_MS` (default `250`): a writer slower than that —
+a very large PDF on a network filesystem — can be given longer with
+`VV_PDF_SETTLE_MS=1000 vv talk.pdf`.
+
 ---
 
 ## 3. Markdown shows "Rendering..." or an error

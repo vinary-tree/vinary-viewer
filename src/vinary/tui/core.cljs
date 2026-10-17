@@ -124,8 +124,13 @@
       (load-batch (with-lang {:kind kind :path uri :text (.readFileSync fs uri "utf8")}) aopts base-dir)
       (= "image" kind)
       (load-batch {:kind "image" :path uri} aopts base-dir)
+      ;; read VERIFIED (ADR-0046 §Torn reads): a PDF caught mid-write gets a few seconds to finish, then loads as it
+      ;; stands — flagged, so the status row can say it is incomplete
       (= "pdf" kind)
-      (load-batch {:kind "pdf" :path uri :bytes (.readFileSync fs uri)} aopts base-dir)
+      (-> (js/Promise.resolve (.readPdfLocal cs uri #js {:notifies false}))
+          (.then (fn [^js r]
+                   (-> (load-batch {:kind "pdf" :path uri :bytes (.-bytes r)} aopts base-dir)
+                       (.then (fn [doc] (cond-> doc (.-incomplete r) (assoc :incomplete (.-incomplete r)))))))))
       :else
       ;; office/table/log-paged/archive/directory/remote — content_service parses them; an explicit kind
       ;; threads through (openLocal treats its presence as authoritative; openRemoteUri via opts.explicit).
@@ -162,7 +167,8 @@
 (defn- run-interactive [doc file opts key-input]
   (let [{:keys [w h]} (term/size)
         aopts   (atom (ansi-opts opts w))
-        name    (.basename path file)
+        ;; the status row's name — flagged when a PDF was still incomplete after its settle (ADR-0046 §Torn reads)
+        name    (str (.basename path file) (when (:incomplete doc) " [incomplete PDF — still being written?]"))
         ir      (atom (:ir doc))
         base    (:base-dir doc)
         st      (atom (state/init (-> (vp/viewport w (max 1 (dec h)) (when (:streaming? doc) stream-cap))
@@ -223,7 +229,7 @@
 (defn- run-drive [doc file opts drive-file]
   (let [w (or (:width opts) 80) h 24
         aopts (ansi-opts opts w)
-        name  (.basename path file)
+        name  (str (.basename path file) (when (:incomplete doc) " [incomplete PDF — still being written?]"))
         st    (atom (state/init (-> (vp/viewport w (max 1 (dec h)) (when (:streaming? doc) stream-cap))
                                     (vp/set-lines (:lines doc)))
                                 (toc/build (:toc doc) (:anchors doc))))
