@@ -571,6 +571,11 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Moving or resizing one window no longer cancels another window's
+      pending save of its position. One save timer served every window, so
+      when the second window was fullscreen -- a slide show -- the first
+      window's move was never written and it reopened where it had been
+      before. Each window now saves its own geometry.
     - A Preferences font field no longer loses characters when you pause
       between words. Each save of the setting came back to the window that
       made it about half a second later, older than what had been typed since,

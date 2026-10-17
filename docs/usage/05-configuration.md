@@ -197,7 +197,10 @@ handled entirely in the main process (`vinary.main.window`):
 A saved position that is no longer on any connected display is dropped, so the
 window can never reopen off-screen; the normal (non-maximized) bounds are stored so
 un-maximizing restores the previous size. Nothing is saved while the window is
-fullscreen (a slide show): the bounds from before it stay on disk.
+fullscreen (a slide show): the bounds from before it stay on disk. Each window saves
+its own geometry about 400 ms after it stops moving, and at once when it closes; with
+several windows open, the file holds the one that moved or closed last. Moving one
+window never cancels another's save.
 
 ---
 
