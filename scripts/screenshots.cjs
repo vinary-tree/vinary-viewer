@@ -60,6 +60,7 @@ const LOGF = path.join(SAMPLES, 'app.log');
 const DOCX = path.join(SAMPLES, 'report.docx');
 const ZIPF = path.join(SAMPLES, 'bundle.zip');
 const PDF = path.join(SAMPLES, 'fuzzy-rho.pdf');
+const SLIDES = path.join(SAMPLES, 'slides.pdf');    // a real LuaLaTeX Beamer deck; source: samples/slides.tex
 // real repo files
 const LOGO = path.join(ROOT, 'resources', 'public', 'assets', 'vinary-tree-logo.svg');
 const VIEWS = path.join(ROOT, 'src', 'vinary', 'ui', 'views.cljs');
@@ -177,6 +178,20 @@ async function dispatchWindowKey(win, key, opts = {}) {
       bubbles: true, cancelable: true });
     window.dispatchEvent(e); return e.defaultPrevented; })()`);
 }
+
+// open samples/slides.pdf and wait until it is in the Slides layout with slide 1 painted
+async function openSlides(win) {
+  win.webContents.send('vv:content', { path: SLIDES, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(SLIDES)), stamp: now() });
+  await waitCalm(win, `(() => { const s = (window.__vvdb().ui || {}).slides || {};
+    return s.layout === 'slides' && Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides #vv-pdf-page-1 canvas.vv-pdf-canvas')); })()`,
+    'the deck in the Slides layout', 25000);
+}
+
+// is 0-based page p's slot at the top of the content pane, with its canvas painted?
+const slideShown = (p) => `(() => { const s = window.__vvdb().ui.slides || {};
+  const slot = document.getElementById('vv-pdf-page-${p + 1}'); const sc = document.querySelector('.vv-content');
+  return s.page === ${p} && Boolean(slot && sc && slot.querySelector('canvas.vv-pdf-canvas'))
+    && Math.abs(slot.getBoundingClientRect().top - sc.getBoundingClientRect().top - sc.clientTop) <= 1; })()`;
 
 async function sendChord(win, keyCode, modifiers = []) {
   win.focus();
@@ -518,6 +533,26 @@ const scenes = {
     await shoot(win, 'native-pdf');
   },
 
+  // ADR-0045: a real Beamer deck is detected and opens in the Slides layout — one slide per screen, the slide bar
+  // below. Shown on the "Detection" frame fully built (page 4 of 8: its third overlay).
+  async 'slides-layout'(win, state) {
+    await openSlides(win);
+    await evalIn(win, `window.__vvslides('goto', 3); true`);
+    await waitCalm(win, slideShown(3), 'slide 4 at the top of the pane', 15000);
+    await delay(600);
+    await shoot(win, 'slides-layout');
+  },
+
+  // the overview grid (Tab in the slides key layer): one tile per FRAME — the overlays of a frame share a tile
+  async 'slides-overview'(win, state) {
+    await openSlides(win);
+    await sendChord(win, 'Tab');
+    await waitCalm(win, `document.querySelectorAll('.vv-slides-overview .vv-slides-tile-thumb canvas').length >= 5`,
+      'five frame thumbnails', 20000);
+    await delay(400);
+    await shoot(win, 'slides-overview');
+  },
+
   async 'directory-browser'(win, state) {
     await openDoc(win, state, FEATURES_DIR, await payloadFor('directory', FEATURES_DIR),
       `Boolean(document.querySelector('.vv-fb .vv-fb-body .vv-fb-row'))`, 10000);
@@ -628,6 +663,9 @@ async function main() {
   const onlyArg = process.argv.find((a) => a.startsWith('--only='));
   const only = onlyArg ? onlyArg.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean) : null;
   const names = Object.keys(scenes).filter((n) => !only || only.includes(n));
+  // a name --only does not know is a failure, not a silent no-op: `--only=sildes-layout` used to capture nothing and
+  // exit 0
+  const unknown = (only || []).filter((n) => !scenes[n]);
 
   fs.mkdirSync(OUT, { recursive: true });
 
@@ -665,6 +703,8 @@ async function main() {
       console.error('  [FAIL]', name, '-', e && e.message ? e.message : e);
     }
   }
+
+  for (const name of unknown) results.push([name, 'FAIL: no such scene']);
 
   console.log('\n=== screenshot summary ===');
   let failed = 0;

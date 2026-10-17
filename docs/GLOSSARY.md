@@ -432,7 +432,7 @@ so Org reuses the whole shared spine. *See ADR-0020/0024 and
 
 ---
 
-## Vocabulary added in 0.3.0 (common IR · streaming · terminal · Org/LaTeX/diff · remote SSH)
+## Vocabulary added in 0.3.0 (common IR · streaming · terminal · Org/LaTeX/diff · remote SSH · slide decks)
 
 Alphabetized. The mathematical foundations (semiring, transducer, WPDA, Earley) are cited with DOIs in
 [`theory/08 §7`](theory/08-common-document-ir.md) and [`theory/09 §11`](theory/09-document-streaming-and-the-wpda.md);
@@ -461,6 +461,14 @@ live DOM. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
 holds one outstanding pull, and main pauses `readline` at the batch cap, so a bounded number of batches are
 ever in flight. *First introduced in `theory/09-document-streaming-and-the-wpda.md`.*
 
+**deck (slide deck)** — A PDF that the detector (`vinary.slides.deck/classify`) classifies as slides, at one of two
+tiers: *definite*, when the PDF says so (Beamer's `Creator` tag, or `/PageMode /FullScreen`), or *probable*, when its
+geometry and producer say so (a slide tool's exact export canvas, or Beamer paper from a TeX engine). Landscape pages
+alone never make a deck. A detected deck opens in the **Slides layout**. In code, *deck* also names the deck *model*
+value `{:deck? :tier :source :pages :frames :frame-of :labels :second-screen}` built for every PDF, deck or not.
+*First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §1–§2; usage in
+[`features/35-slide-shows.md`](features/35-slide-shows.md); evaluated in `scientific/12-slide-deck-detection-and-flip-latency.md`.*
+
 **diff (unified / split)** — Two renderings of a `.diff`/`.patch`: *unified* (one column of add/del/context
 lines; GUI HTML **and** terminal ANSI) and *split* / side-by-side (two columns, GUI-only, enriched with the
 on-disk pre/post files). *First introduced in `features/28-diff-rendering.md`; ADR-0026.*
@@ -468,6 +476,14 @@ on-disk pre/post files). *First introduced in `features/28-diff-rendering.md`; A
 **Earley (over lattice)** — A general context-free parser; vinary-viewer runs Earley over a lattice with a
 packed parse forest and a semiring-weighted **Viterbi** best-parse (`ir.earley` / `ir.forest`). *First
 introduced in `theory/08-common-document-ir.md`.*
+
+**frame (Beamer)** — Beamer's unit of a presentation, one `\begin{frame}` … `\end{frame}`. A frame with overlay
+specifications compiles to several consecutive PDF pages — its **overlays** — that share the frame's number as their
+PDF page label. vinary-viewer rebuilds frames as maximal runs of *adjacent* pages with one equal, non-blank label
+(`vinary.slides.deck/frames-from-labels`), for Beamer sources only; every other PDF, a Beamer deck without page labels
+(built with XeLaTeX) and a two-screen deck get one frame per page. Shift+→ steps a whole frame, and the **overview**
+shows one tile per frame. Not to be confused with a *rendering* frame (one display refresh), the unit of experiment
+12's key → frame latency. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §2.*
 
 **frontier** — The current beam of live WPDA **configurations** — the streaming decoder's whole live state; a
 config is $`(q, \gamma, w)`$ (state, stack, weight). *First introduced in
@@ -488,13 +504,53 @@ raster images inline where supported; otherwise images degrade to a text placeho
 against `~/.ssh/known_hosts`; an unknown host prompts once and is appended on accept; a **changed** key is a
 hard reject. *First introduced in `features/29-remote-files-over-ssh.md`; ADR-0027.*
 
+**overlay (Beamer)** — One page of a Beamer **frame**: one build step, produced by `\pause` or by an overlay
+specification such as `<2->`. In the **Slides layout**, → steps one overlay and Shift+→ skips the frame's remaining
+overlays; Shift+← lands on the previous frame's *last* overlay, the slide fully built. In UI code, *overlay* also names
+a layer that owns the keyboard or covers the document (`vinary.app.overlay`: dialogs, menus, the palette, link hints)
+— a different sense. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §2.*
+
+**overview (slide overview grid)** — The grid with one tile per **frame** that Tab or `o` opens over the **Slides
+layout** (`vinary.ui.slides-overview`): a separate, focused overlay beside the content pane — not a layout of it —
+that borrows the mounted view's pdf.js document and renders thumbnails lazily (`vinary.renderer.pdf-thumbs`). A tile
+shows its frame fully built by default; Enter opens it, Shift+Enter its other end, and either is a jump that Back
+returns from. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §6;
+[`features/35-slide-shows.md`](features/35-slide-shows.md).*
+
+**presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)
+and recorded in `[:ui :presentation]`: the **Slides layout** without a margin, the app chrome hidden by CSS
+(`.vv-root.vv-presenting`) and, by default, the window made fullscreen by main — which only ever leaves a fullscreen
+it entered. The app's own prompts stay above the show; Escape unwinds it one step at a time.
+*First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §5.*
+
 **reflow (PDF)** — An opt-in view (View ▸ Reflow Text) rendering a PDF's extracted text as reflowable prose
 through the page/block/line/run IR facet, augmenting — never replacing — the faithful canvas render. *First
 introduced in `features/11-native-pdf.md`.*
 
+**refresh note** — The non-fatal live-refresh banner (`vinary.ui.refresh-note`), driven by the DataScript attribute
+`:doc/refresh-note {:kind :message …}`. When a refresh of a document the window already shows cannot be displayed —
+`"render-failed"` (pdf.js could not open the new bytes), `"refresh-failed"` (main could not re-read the file) or
+`"incomplete"` (main delivered a PDF it caught mid-write) — the last good version stays on screen and the note says
+why, with Retry and ×. Unlike `:doc/error` it never replaces the document; the next applied read clears it.
+*First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §7 and
+[ADR-0046](design-decisions/0046-reload-safe-pipelined-remote-reads.md).*
+
 **semiring** — An algebra $`(K, \oplus, \otimes, \bar0, \bar1)`$ whose choice tunes what a weighted parse
 computes (recognition, best-parse, total mass). Implemented: Boolean, Tropical, Log, Probability, Product,
 Lexicographic. *First introduced in `theory/08-common-document-ir.md`; laws in `scientific/03-semiring-algebraic-laws.md`.*
+
+**Slides layout** — The PDF engine's one-slide-per-screen layout (`vinary.renderer.pdf`, `:layout :slides`), as
+opposed to the continuous **Document layout**: every page's placeholder becomes a full-viewport **slot**, each page
+is fitted on its own, every keymap's scroll keys flip slides, and zoom is inert. A detected **deck** opens in it, and
+View ▸ View as Slide Show puts any PDF in it — a choice that belongs to that document view and comes back with it on
+Back/Forward. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §3;
+[`features/35-slide-shows.md`](features/35-slide-shows.md).*
+
+**slot** — In the **Slides layout**, the box a page's placeholder `.vv-pdf-page#vv-pdf-page-N` becomes: exactly the
+scroller's client size $`W \times H`$, stacked with no gap, so slot $`i`$ starts $`i\,H`$ below the first. The page's
+sheet (`.vv-pdf-sheet`) is centred in its slot at the page's own fit, and showing slide $`i`$ means scrolling to the
+top of slot $`i`$. Because the slots keep every page in the DOM, find, links and the Contents outline work unchanged.
+*First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §3.*
 
 **SSH / SFTP (`ssh://`, `sftp://`)** — The remote **virtual backend**: a remote URI opens through the same
 pipeline, renderers, streaming, and refresh as a local path, main-side only. *First introduced in
@@ -507,6 +563,14 @@ keyboard-interactive); on decrypting a key file it may `AddKeysToAgent`. *First 
 **StreamParser** — The pure `feed`/`finish` protocol (`vinary.stream.protocol`) that emits only
 newly-completed IR blocks and retains only the open block — the node-testable heart of streaming. *First
 introduced in `theory/09-document-streaming-and-the-wpda.md`.*
+
+**torn read** — A read of a file taken while its writer is rewriting it in place, which returns bytes that match no
+finished version — typically a prefix of the new file. pdflatex, lualatex and xelatex rewrite their PDF in place, and
+in experiment 11, 83–90 % of naive reads during real compile loops were torn; pdf.js rejected every torn copy it was
+given. Main therefore reads a PDF *verified* (`pdf_integrity.js`: the `%PDF-` header, the last `%%EOF` near the end,
+a `startxref` that points at a cross-reference section) and settles a torn file with backoff, and the verified readers
+delivered no torn PDF as complete. *First introduced in [ADR-0046](design-decisions/0046-reload-safe-pipelined-remote-reads.md);
+`scientific/11-remote-read-and-reload-safety-experiments.md` §9.7.*
 
 **tropical semiring** — The semiring $`(\mathbb{R} \cup \{\infty\},\ \min,\ +,\ \infty,\ 0)`$; ranking
 competing segmentations by least cost is a shortest-path (Viterbi) over it. *First introduced in

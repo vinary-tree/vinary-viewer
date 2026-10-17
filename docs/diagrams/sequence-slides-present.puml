@@ -1,0 +1,100 @@
+@startuml sequence-slides-present
+'' PlantUML over Mermaid: presenting is a round trip across the process boundary — a key in the renderer, a
+'' request over the IPC seam, a decision in MAIN, the window's own enter/leave event, and the report back — and
+'' the point of the design is WHO decides each step (main alone leaves only a fullscreen it entered). A sequence
+'' diagram with phase dividers and alt branches states that ordering exactly, and PlantUML takes every participant's
+'' colour from the shared theme and renders the SVG byte-reproducibly (README §4). Colours, from the shared palette:
+'' magenta = keyboard input and the keymap resolver; blue = re-frame events and effects; blue-violet = app-db;
+'' teal = the renderer's views and PDF engine; amber = the IPC seam (every IPC arrow is amber); slate = main and
+'' the BrowserWindow it owns.
+!include _vv-theme.iuml
+
+title Presenting (ADR-0045): F5 → window-level fullscreen owned by main → Escape
+
+autonumber "0:"
+
+actor "presenter" as U KEYMAP_TINT
+participant "keymap resolver\n(input.resolver ·\nF5 in every :all)" as K KEYMAP_TINT
+participant "re-frame events / fx\n(:slides/present · :slides/stop ·\n:input/escape · :view/fullscreen-changed)" as RF REFRAME_TINT
+participant "app-db\n[:ui :presentation]\n[:ui :fullscreen?]" as DB APPDB_TINT
+participant "views\n(root · pdf-view)" as V RENDERER_TINT
+participant "PDF engine\n(renderer.pdf)" as E RENDERER_TINT
+participant "preload\nwindow.vv" as P IPC_TINT
+participant "main\n(vinary.main.fullscreen)" as M MAIN_TINT
+participant "BrowserWindow\n(the sender's window)" as W MAIN_TINT
+
+== F5 — start the show ==
+U -[KEYMAP_BORDER]> K : F5
+K -> RF : commands/run :slides/present →\n[:slides/present {:from :first}]
+activate RF
+RF -> RF : slides-present-fx: a PDF is shown,\nno show is running
+RF -> DB : [:ui :presentation] ← {:active? true :tab-id :path\n:from :first :fullscreen? true}; clear a typed\nnumber and a blanking
+RF -> V : [:dom/focus :content]
+RF -[IPC_BORDER]> P : [:vv/set-fullscreen {:on true}]\n(only when :slides-fullscreen? is on)
+deactivate RF
+P -[IPC_BORDER]> M : **vv:set-fullscreen** {on: true}
+activate M
+M -> M : BrowserWindow.fromWebContents(sender) —\nonly the requesting window;\ndecide {want? yes, is? no} → {set true, owned true}
+M -> W : setFullScreen(true)
+deactivate M
+DB --> V : :slides/presenting? → .vv-root.vv-presenting\n(CSS hides the menu bar, sidebar, tabs, address bar,\nbottom bar and status bar; the slide sits on black)
+V -> E : pdf/update! {:presenting? true :present-from :first}
+activate E
+E -> E : set-layout! :slides when needed (the page is kept);\nrelayout with no margin; go-to-page! 0;\nattach click-advance and idle-pointer listeners
+deactivate E
+W --> M : 'enter-full-screen'
+M -[IPC_BORDER]> P : **vv:fullscreen-changed** {fullscreen: true, owned: true}
+P -> RF : [:view/fullscreen-changed …]
+RF -> DB : [:ui :fullscreen?] ← true
+W -> E : the window grew: the ResizeObserver resizes the slots\nat once (canvases CSS-stretched) and re-renders\nthem sharp 120 ms later
+
+== during the show (the state diagram has the details) ==
+U -[KEYMAP_BORDER]> K : → · Space · Shift+→ · digits + Enter · b / w · Tab · a click
+note over K, E #E3F2ED
+  a slide step runs at once inside the key handler (commands/dispatch-now! →
+  scroll delegate → renderer.pdf/step!); a blanked screen or a half-typed number
+  goes through [:slides/command] first, which only unblanks / forgets the digits
+end note
+
+== Escape — end the show ==
+U -[KEYMAP_BORDER]> K : Escape
+K -> RF : [:input/escape]
+activate RF
+RF -> RF : escape-fx, first match: palette? find bar?\noverview? typed number? blanking? — none,\nso the show itself → [:slides/stop]
+RF -> DB : dissoc [:ui :presentation]; clear a blanking
+RF -[IPC_BORDER]> P : [:vv/set-fullscreen {:on false}]\n(the show had asked for fullscreen)
+deactivate RF
+P -[IPC_BORDER]> M : **vv:set-fullscreen** {on: false}
+activate M
+alt main entered this fullscreen (owned)
+  M -> M : decide {want? no, is? yes, owned? yes}\n→ {set false, owned false}
+  M -> W : setFullScreen(false)
+  W --> M : 'leave-full-screen' → owned := false
+  M -[IPC_BORDER]> P : **vv:fullscreen-changed** {fullscreen: false, owned: false}
+else the user had made the window fullscreen before the show
+  M -> M : decide {want? no, is? yes, owned? no}\n→ {set nil}: leave the window alone
+  M -[IPC_BORDER]> P : **vv:fullscreen-changed** {fullscreen: true, owned: false}
+end
+deactivate M
+DB --> V : .vv-presenting removed — the chrome is back
+V -> E : pdf/update! {:presenting? false}: the 16 px margin returns;\nthe layout returns to this view's own (its choice, or detection);\nthe presenting-only listeners are detached
+
+== the window leaves fullscreen first (F11, the window manager) ==
+U -[MAIN_BORDER]> W : F11
+W --> M : 'leave-full-screen' → owned := false
+M -[IPC_BORDER]> P : **vv:fullscreen-changed** {fullscreen: false, owned: false}
+P -> RF : [:view/fullscreen-changed …]
+RF -> RF : fullscreen-changed-fx: the window WAS fullscreen,\nthe show asked for it, and now it is not →\nslides-stop-fx {:fullscreen-gone? true}
+RF -> DB : dissoc [:ui :presentation] — and no :vv/set-fullscreen\n(there is no fullscreen left to leave)
+
+legend right
+  |= Colour |= Concept |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| keyboard input, keymap resolver |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events / effects |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db state |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer: views, PDF engine |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam (preload, vv:* channels) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main: the fullscreen decision, the BrowserWindow |
+  A document's /PageMode /FullScreen never reaches this path: it is deck evidence only.
+endlegend
+@enduml

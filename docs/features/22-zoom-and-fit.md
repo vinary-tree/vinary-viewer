@@ -41,6 +41,14 @@ that surface's live zoom.
 `vinary.app.zoom/context` computes this from the active URI scheme and `:doc/kind`; everything else
 (menu, keymap, zoom bar) routes through it, so there is **one** rule, not three.
 
+**A PDF in the Slides layout does not zoom.** A slide deck shown one slide per screen
+([feature 35](35-slide-shows.md)) fits every slide to the pane itself — each page at its own fit, clamped to
+$`[0.25, 16]`$, with a 16 px margin in a tab and none while presenting. So in that layout the zoom commands
+(`:view/zoom`, `:view/zoom-set`) do nothing, the **View ▸ Fit** submenu is hidden, and the bottom bar shows the
+**slide bar** (◀ page / N ▶ · frame · overview · present) instead of the zoom bar. The engine also never reports a
+fit scale from the Slides layout, which would overwrite the window-wide `[:ui :pdf :scale]` that the other PDF tabs
+share. Switching the PDF back to **View as Document** brings the zoom bar and the shared scale back.
+
 ## 2 · How you use it
 
 **The zoom bar** sits at the bottom of the content pane and is always visible:

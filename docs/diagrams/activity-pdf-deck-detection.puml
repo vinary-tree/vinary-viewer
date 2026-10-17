@@ -1,0 +1,89 @@
+@startuml activity-pdf-deck-detection
+'' PlantUML over Mermaid because deck detection is an ordered rule table (first match wins) run on evidence
+'' gathered in parallel, followed by a second decision (which layout to mount in) — a decision-centric control
+'' flow whose steps belong to four different owners. PlantUML activity swimlanes show the owner of each step,
+'' fork/end fork shows the parallel evidence and page measure, and `elseif` chains render the rules in their
+'' exact order; the fills come from the shared theme and the SVG renders byte-reproducibly (README §4). Lanes and
+'' fills, from the shared palette: teal = the renderer's pdf.js engine (renderer.pdf);
+'' orange = the pure, process-agnostic deck model (vinary.slides.*), the "model orange" of the pure libraries;
+'' blue = re-frame + DataScript (:pdf/deck-detected → :doc/deck); blue-violet = the app-db inputs of the layout.
+!include _vv-theme.iuml
+!pragma useVerticalIf on
+
+title Deck detection and the layout a PDF opens in (ADR-0045)
+
+|#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
+start
+:the PDF's bytes: the byte cache's newest version
+(a CANDIDATE from vv:content, else the last good one);  <<RENDERER_TINT>>
+:**prepare!** — pdf.js getDocument (a copy of the bytes),
+leased through the warm cache;  <<RENDERER_TINT>>
+fork
+  :**page-sizes** — every page's size at scale 1
+  (in parallel with the evidence: Promise.all),
+  the measure the layout needs anyway;  <<RENDERER_TINT>>
+fork again
+  :**vinary.slides.evidence/gather** — getMetadata
+  (Info Creator and Producer, XMP CreatorTool) ·
+  getPageMode · getPageLabels. Each call is caught
+  on its own: a failure is nil, never a failed open;  <<IR_TINT>>
+end fork
+|#F5EAE0|pure deck model (vinary.slides.*)|
+:**deck/classify** the evidence and the sizes —
+<latex>n</latex> is the page count, <latex>s</latex> the common size when
+every page agrees within <latex>0.5\,\mathrm{bp}</latex> (uniform);  <<IR_TINT>>
+if (Creator or CreatorTool matches \\bbeamer\\b (any case)\nand (<latex>n \ge 2</latex>, or one page of a Beamer paper,\nor one doubled for a second screen)?) then (yes)
+  :deck · **definite** · :beamer;  <<IR_TINT>>
+elseif (/PageMode is FullScreen\n(ISO 32000-1 §7.7.2)?) then (yes)
+  :deck · **definite** · :fullscreen-mode;  <<IR_TINT>>
+elseif (<latex>n \ge 2</latex>, uniform, and <latex>s</latex> is a slide tool's\nexport canvas (960 × 540, 720 × 405, …)?) then (yes)
+  :deck · **probable** · :slide-export;  <<IR_TINT>>
+elseif (<latex>n \ge 2</latex>, uniform, <latex>s</latex> a Beamer paper or one doubled,\nand the Producer is a TeX engine?) then (yes)
+  :deck · **probable** · :beamer-geometry;  <<IR_TINT>>
+else (no rule matched)
+  :not a deck — landscape pages
+  alone never qualify;  <<IR_TINT>>
+endif
+:second-screen axis: does <latex>s</latex> double a Beamer paper
+in width (:horizontal) or height (:vertical)?;  <<IR_TINT>>
+if (a Beamer source (:beamer, :beamer-geometry),\nno second-screen axis, one label per page?) then (yes)
+  :**frames-from-labels** — a frame is a maximal run
+  of ADJACENT pages sharing one non-blank label;  <<IR_TINT>>
+else (no)
+  :one frame per page (an XeLaTeX deck has no labels,
+  a two-screen deck's labels are corrupt);  <<IR_TINT>>
+endif
+|#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
+:the artifact **{:doc :sizes :deck}** — no extra I/O:
+the same calls serve a local, sftp://, archive or web PDF;  <<RENDERER_TINT>>
+|#E2EBF3|re-frame + DataScript|
+:pdf-view dispatches [:pdf/deck-detected path stamp summary]
+→ :doc/deck {:deck? :tier :source :pages :frame-count
+:second-screen}, written only when it changed;  <<REFRAME_TINT>>
+|#E3E7F2|app-db: the layout request|
+:deck/effective-layout over [:ui :presentation],
+the view's :pdf-layout and :slides-open-as;  <<APPDB_TINT>>
+if (presenting?) then (yes)
+  :Slides layout;  <<APPDB_TINT>>
+elseif (this document view's explicit\nchoice (:pdf-layout)?) then (yes)
+  :that layout;  <<APPDB_TINT>>
+elseif (a deck, and :slides-open-as\nis not :document?) then (yes)
+  :Slides layout;  <<APPDB_TINT>>
+else (no)
+  :Document layout;  <<APPDB_TINT>>
+endif
+|#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
+:**mount-prepared!** in that layout — the FIRST mount
+already has it, so a deck never flashes as a document;  <<RENDERER_TINT>>
+stop
+
+legend right
+  |= Colour |= Swimlane / concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer: the pdf.js engine (renderer.pdf) |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure deck model (vinary.slides.deck / .evidence) — the model orange |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame event → DataScript :doc/deck |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db inputs of the layout choice |
+  Rules are tried in order; the first that matches decides. The tier is
+  informational: both tiers open as slides.
+endlegend
+@enduml

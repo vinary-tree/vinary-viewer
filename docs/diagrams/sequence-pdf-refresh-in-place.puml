@@ -1,0 +1,95 @@
+@startuml sequence-pdf-refresh-in-place
+'' PlantUML over Mermaid: a live refresh of a shown PDF is a race between the reader's position, the bytes in the
+'' byte cache and pdf.js, and what makes it safe is the ORDER — the new document is prepared beside the old one,
+'' swapped in only once pdf.js has opened it, and the old proxy destroyed only after the swap; a failure at any
+'' stage leaves the last good document mounted. A sequence diagram with alt branches states that ordering exactly,
+'' and PlantUML takes every participant's colour from the shared theme and renders byte-reproducibly (README §4).
+'' Colours, from the shared palette: tan = the file being written; slate = main (one verified read per change,
+'' ADR-0046); amber = the IPC seam; blue = re-frame events; purple = DataScript; teal = the renderer's PDF view,
+'' its byte cache and the pdf.js engine; red = a failure kept non-fatal.
+!include _vv-theme.iuml
+
+title Live refresh in place (ADR-0045): the new PDF swaps in under the same view, on the same slide
+
+autonumber "0:"
+
+participant "writer\n(pdflatex, latexmk)" as W FS_TINT
+participant "main\n(watcher · content-flight ·\nverified reader, ADR-0046)" as M MAIN_TINT
+participant "preload\nwindow.vv" as P IPC_TINT
+participant "re-frame events\n(:content/received ·\n:content/error)" as RF REFRAME_TINT
+participant "DataScript\n(:doc/stamp :doc/seq\n:doc/refresh-note :doc/deck)" as DS DATASCRIPT_TINT
+participant "pdf-cache\n(byte cache:\ngood · candidate)" as C RENDERER_TINT
+participant "pdf-view\n(keyed pdf:<tab>:<path>,\nno stamp)" as V RENDERER_TINT
+participant "refresh-note banner\n(ui/refresh-note)" as B RENDERER_TINT
+participant "warm cache +\npdf.js (prepare!)" as J RENDERER_TINT
+participant "PDF engine\n(renderer.pdf)" as E RENDERER_TINT
+
+== a change: main reads the file once, verified ==
+W -> M : rewrites talk.pdf in place
+activate M
+M -> M : one read per path (content-flight); tail first,\nthen body, fstat, verdict; settle a torn file after\n<latex>u, 2u, 4u, 8u</latex> (<latex>u = 250\,\mathrm{ms}</latex>) — or stay pending for the next change
+alt the PDF is complete
+  M -[IPC_BORDER]> P : **vv:content** {path, kind "pdf", bytes, seq, stamp}
+  deactivate M
+  P -> RF : [:content/received payload]
+  activate RF
+  RF -> RF : content-guard: is seq no newer than the\napplied :doc/seq? → drop it whole (never backwards)
+  RF -> C : [:pdf/cache-bytes {path bytes stamp}]\n→ put-bytes! as the CANDIDATE (good kept)
+  RF -> DS : :doc/stamp ← stamp, :doc/seq ← seq;\nretract a stale refresh note
+  deactivate RF
+  DS --> V : re-render with the new stamp — the SAME\ninstance (its key has no stamp): no remount
+  activate V
+  V -> V : pdf-view-lifecycle/update-actions\n→ the actions :update and :refresh
+  V -> E : pdf/update! the view state (always)
+  V -> J : refresh!: prepare the candidate beside\nthe live document (a new warm-cache lease)
+  note right of E #E3F2ED: the old document stays on screen,\nand the reader keeps scrolling or flipping
+  alt pdf.js opens the candidate
+    J --> V : {:doc :sizes :deck}
+    V -> E : **replace-doc!**
+    activate E
+    E -> E : keep the anchor (in the Slides layout: the slide);\ncancel tasks, :gen + 1, :doc-gen + 1; grow or shrink\nthe placeholders; relayout; restore the anchor
+    E -> E : the visible canvases stay, CSS-stretched; each\nre-render rasterizes into a DETACHED canvas and\nreplaces the old one only when complete
+    deactivate E
+    V -> J : release the previous lease → destroys the old\nPDFDocumentProxy (only now, after the swap)
+    V -> C : promote! — the candidate becomes the good version
+    V -> RF : [:pdf/deck-detected path stamp summary]\n[:pdf/refreshed path stamp]
+    RF -> DS : :doc/deck (only if changed);\nretract a "render-failed" note
+  else pdf.js cannot open it (a corrupt or torn file)
+    J -[ERROR_BORDER]-> V : rejected
+    V -> J : release the candidate's lease
+    V -> C : reject! — drop the candidate, keep the good version
+    V -[ERROR_BORDER]> RF : [:pdf/refresh-failed path stamp message]
+    RF -[ERROR_BORDER]> DS : :doc/refresh-note {:kind "render-failed"}
+    DS --> B : the :doc/refresh-note subscription → the banner shows
+    note right of E #F5E1E0: the last good render stays mounted;\nthe banner offers Retry and ×
+  end
+  deactivate V
+else stable but incomplete — this window shows a complete version
+  M -[IPC_BORDER]> P : **vv:content** {…, seq, incomplete, incompleteReason}
+  P -> RF : [:content/received payload]
+  RF -[ERROR_BORDER]> DS : only :doc/refresh-note {:kind "incomplete"} and :doc/seq —\nno stamp, no candidate: the view is not touched
+  DS --> B : the banner shows
+else main cannot read it (deleted, refused, a dropped SSH connection)
+  M -[IPC_BORDER]> P : **vv:error** {path, message, seq, refresh}
+  P -> RF : [:content/error payload]
+  RF -[ERROR_BORDER]> DS : :doc/refresh-note {:kind "refresh-failed"} and :doc/seq —\nnever :doc/error, so nothing remounts
+  DS --> B : the banner shows
+end
+
+== Retry on the banner ==
+B -> RF : Retry → [:doc/refresh-retry path] → [:vv/open path]
+RF -[IPC_BORDER]> P : **vv:open** path
+P -[IPC_BORDER]> M : main re-reads; the next applied read clears the note
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| the file being written |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main: one verified, numbered read per change (ADR-0046) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| IPC seam |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame events |
+  |<#A45BAD>&#160;&#160;&#160;&#160;| DataScript document entity |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer: pdf-view, byte cache, banner, pdf.js, PDF engine |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a failure, kept non-fatal behind the refresh note |
+  A PDF with nothing complete to keep shows what pdf.js can recover (or the error page).
+endlegend
+@enduml

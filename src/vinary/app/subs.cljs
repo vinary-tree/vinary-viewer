@@ -226,11 +226,13 @@
 ;; the active document's kind ("markdown" / "org" / "latex" / "source" / "pdf" / …) — gates the "Go to preview" jump item
 (rf/reg-sub :doc/kind :<- [:doc/active] (fn [doc _] (:doc/kind doc)))
 
-;; the shown document's non-fatal live-refresh note ({:kind :message :stamp :at}) — the last good version stays
-;; on screen; ui/refresh-note shows this over it (ADR-0045 / ADR-0046)
+;; the shown document's non-fatal live-refresh note — {:kind "render-failed" :message :stamp :at},
+;; {:kind "refresh-failed" :message :seq :at} or {:kind "incomplete" :message :seq :at :partial?} — the last good
+;; version stays on screen; ui/refresh-note shows this over it (ADR-0045 / ADR-0046)
 (rf/reg-sub :doc/refresh-note :<- [:doc/active] (fn [doc _] (:doc/refresh-note doc)))
 
-;; the shown PDF's slide-deck classification {:deck? :tier :source :pages :frame-count} | nil (ADR-0045)
+;; the shown PDF's slide-deck classification {:deck? :tier :source :pages :frame-count :second-screen} | nil
+;; (ADR-0045)
 (rf/reg-sub :doc/deck :<- [:doc/active] (fn [doc _] (:doc/deck doc)))
 
 ;; ---- slides layout (ADR-0045) — built on :doc/active + app-db slices, never a DataScript query per app-db write

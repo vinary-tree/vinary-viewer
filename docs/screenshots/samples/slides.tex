@@ -1,0 +1,58 @@
+% The slide deck behind the `slides-layout` and `slides-overview` screenshots (docs/features/35-slide-shows.md).
+% slides.pdf was compiled from this file once, on 2026-10-17 (LuaHBTeX 1.24.0, TeX Live 2026), with fixed dates:
+%   SOURCE_DATE_EPOCH=1792195200 FORCE_SOURCE_DATE=1 lualatex -interaction=nonstopmode -halt-on-error slides.tex
+%   (run twice). A rebuild matches it byte for byte except the trailer /ID, which LuaTeX derives from the output path.
+% It is a real Beamer deck (Creator "LaTeX with Beamer class"), so the viewer detects it as a deck and opens it in
+% the Slides layout; its overlays share their frame's page label, so they group into frames.
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\title{Live Slide Decks}
+\subtitle{Beamer in vinary-viewer}
+\author{vinary-viewer}
+\date{}
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Detection}
+  \begin{itemize}
+    \item<1-> Beamer's Creator tag: a \alert{definite} deck
+    \item<2-> A slide tool's exact page canvas: a \alert{probable} deck
+    \item<3-> Landscape pages alone: \alert{never} a deck
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Flip latency}
+  A key shows its slide in the next frame:
+  \[
+    L = h + U, \qquad U \sim \mathcal{U}[0, T_f), \qquad T_f = \tfrac{1000}{60}\,\mathrm{ms}
+  \]
+  \pause
+  Median $\approx 8\,\mathrm{ms}$ on a 60\,Hz display.
+\end{frame}
+
+\begin{frame}{Live refresh}
+  \begin{columns}
+    \column{0.5\textwidth}
+      \begin{block}{While LaTeX runs}
+        The last complete version stays on screen.
+      \end{block}
+    \column{0.5\textwidth}
+      \begin{block}{When it finishes}
+        The new deck swaps in place, on the same slide.
+      \end{block}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Keys}
+  \begin{tabular}{ll}
+    \(\rightarrow\), Space & next slide \\
+    Shift+\(\rightarrow\) & next frame (skip overlays) \\
+    F5 & present full screen \\
+    Tab & overview of every frame
+  \end{tabular}
+\end{frame}
+
+\end{document}

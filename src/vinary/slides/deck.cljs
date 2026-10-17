@@ -229,10 +229,11 @@
 
    :second-screen is the axis (second-screen-axis) when EVERY page doubles one Beamer paper, else nil. Such a deck
    gets one frame per page and NO labels: pgfpages' two-screen shipout corrupts Beamer's page labels, and the
-   corruption is not detectable — measured on LuaLaTeX output, five single-overlay frames with notes are labelled
-   1 1 2 2 3 3 (not 1 2 3 4 5 5), a well-formed sequence that would merge frames 1+2 and 3+4. (The `previous slide`
-   variant keeps correct labels, but its pages are indistinguishable by geometry, so it is treated alike.) The page
-   number is always right; a corrupt label would make the counter, typed-number goto and frame steps lie."
+   corruption is not detectable — measured on LuaLaTeX output, five frames with notes (the last with two overlays)
+   are labelled 1 1 2 2 3 3 (not 1 2 3 4 5 5), a well-formed sequence that would merge frames 1+2 and 3+4. (The
+   `previous slide` variant keeps correct labels, but its pages are indistinguishable by geometry, so it is treated
+   alike.) The page number is always right; a corrupt label would make the counter, typed-number goto and frame
+   steps lie."
   [evidence]
   (let [cls     (classify evidence)
         n       (count (:sizes evidence))

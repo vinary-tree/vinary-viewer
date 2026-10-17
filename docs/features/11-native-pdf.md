@@ -31,6 +31,19 @@ class drops the L/R/bottom padding so pages fill the pane (no overflow off the r
 PDF (**Fit Width** / **Fit Page**) also **re-fits when the window resizes**, so the page size tracks the
 window instead of staying frozen at its open-time size.
 
+**Two layouts: Document and Slides.** The continuous scroll above is the **Document layout**. A PDF the engine
+recognizes as a **slide deck** — a Beamer deck, or a PowerPoint, Google Slides, LibreOffice Impress or Keynote
+export — opens in the **Slides layout** instead: one slide per screen, each at its own fit, with every keymap's
+scroll keys flipping slides, Shift stepping whole Beamer frames, and **F5** presenting it full screen. Any PDF can
+switch layouts (**View ▸ View as Slide Show / View as Document**). Find, links, selection and the Contents outline
+work in both. See [feature 35 — Slide shows](35-slide-shows.md) and
+[ADR-0045](../design-decisions/0045-slide-deck-presentation.md).
+
+**Links.** URI links open in the browser; destination links (the outline, a reference) jump within the document,
+and Back/Forward-style **named actions** a PDF may carry (`NextPage`, `PrevPage`, `FirstPage`, `LastPage`, `GoBack`,
+`GoForward`, `Find`) work in both layouts, walking a jump history of the view. No other named action does anything:
+a document cannot print, save, quit or make the window fullscreen.
+
 ## 2 · How you use it
 
 Open a `.pdf` file (CLI `vv report.pdf`, the file tree, or a link). Then:
@@ -44,6 +57,8 @@ Open a `.pdf` file (CLI `vv report.pdf`, the file tree, or a link). Then:
 | Find | `Ctrl+F` |
 | Copy selection | `Ctrl+C` or right-click ▸ Copy |
 | Jump to a bookmark | **Contents** sidebar tab |
+| View as Slide Show / as Document | **View ▸ View as Slide Show** (`l`) / **View as Document** (`m`), the address bar's slides button, or right-click ▸ the layout toggle |
+| Present (full screen) | `F5` from the first slide, `Shift+F5` from the current one; `Esc` ends — [feature 35](35-slide-shows.md) |
 
 Fit-mode and invert persist across sessions (`settings.edn`).
 
@@ -59,7 +74,9 @@ behaves the same; see [feature 29](29-remote-files-over-ssh.md).)
 
 | Piece | Where |
 |---|---|
-| Bytes → renderer (over `vv:content`, `:kind "pdf" :bytes …`) | `vinary.main.service/send-content!` |
+| Bytes → renderer (over `vv:content`, `:kind "pdf" :bytes …`), read verified and delivered once per change to every window ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md)) | `vinary.main.service/local-payload` / `remote-payload` + `content_service.js` (`readPdfLocal`, `openRemoteUri`) |
+| Slide-deck detection on prepare, frames, navigation (pure) | `vinary.slides.evidence` + `vinary.slides.deck` ([feature 35](35-slide-shows.md)) |
+| The Slides layout (slots, per-page fit, the scroll delegate, presenting, the overview) | `vinary.renderer.pdf` (`set-layout!`, `command!`), `vinary.renderer.pdf-thumbs`, `vinary.ui.slides-overview` |
 | Byte cache (keyed by `:doc/path`, **not** DataScript) + find hook | `vinary.renderer.pdf-cache` |
 | Render engine (worker bootstrap, canvas/text/link layers, virtualization, zoom, outline) | `vinary.renderer.pdf` |
 | Pure geometry/zoom/outline helpers (DOM-free, unit-tested) | `vinary.renderer.pdf-layout` |

@@ -12,7 +12,7 @@
   key, Chromium renders the next frame before ordinary posted tasks. One intervention was refuted (H-sync); a second
   held (H-sync2). The median key → frame time fell from 24.3 ms to 7.9 ms, and every guard holds (§8).
 
-These experiments support ADR-0045 — Slide-deck presentation.
+These experiments support [ADR-0045 — Slide-deck presentation](../design-decisions/0045-slide-deck-presentation.md).
 Under ADR-0045, a PDF the detector recognizes as a slide deck opens in a one-slide-per-screen *Slides layout*, and keys
 flip slides. The methodology is that of [07 — Measurement methodology](07-measurement-methodology.md):
 

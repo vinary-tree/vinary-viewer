@@ -2051,7 +2051,8 @@
 
 ;; ---- slide-deck detection (ADR-0045) -------------------------------------------------------------------------
 ;; The pdf engine classifies every PDF when it prepares it (vinary.slides.deck/classify over the evidence from
-;; vinary.slides.evidence) and the pdf-view reports the SUMMARY {:deck? :tier :source :pages :frame-count} here:
+;; vinary.slides.evidence) and the pdf-view reports the SUMMARY {:deck? :tier :source :pages :frame-count
+;; :second-screen} here:
 ;; it lands on the doc entity as :doc/deck for menus, the toolbar and the slide counter. The per-page vectors
 ;; (frames, labels) stay in the prepared artifact — DataScript keeps lean entities (ADR-0010).
 (defn deck-tx
@@ -2129,7 +2130,7 @@
 (defn slides-command-fx
   "Effects of :slides/command `op`: run it on the mounted slide show, abandoning a half-typed slide number.
    While the screen is blanked (presenting), a navigation only ends the blanking — the audience sees the slide
-   they left, not the next one (pdfpc's convention)."
+   they left, not the next one."
   [db op]
   (if (slides/blank db)
     {:db (slides/clear-blank db)}
@@ -2290,10 +2291,11 @@
 
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last
-;; good version and the doc carries a non-fatal :doc/refresh-note {:kind :message :stamp :at}, shown as a small
-;; banner over the content (ui/refresh-note). Kinds: "render-failed" (the new bytes did not open in pdf.js —
-;; typically read while pdflatex was still writing), "refresh-failed" (main could not re-read the file) and
-;; "incomplete" (main delivered a PDF whose trailer is missing). A successful refresh clears it.
+;; good version and the doc carries a non-fatal :doc/refresh-note, shown as a small banner over the content
+;; (ui/refresh-note). Kinds: "render-failed" {:kind :message :stamp :at} (the new bytes did not open in pdf.js —
+;; typically read while pdflatex was still writing), "refresh-failed" {:kind :message :seq :at} (main could not
+;; re-read the file) and "incomplete" {:kind :message :seq :at :partial?} (main delivered a PDF whose trailer is
+;; missing). A successful refresh clears it.
 (defn refresh-note-tx
   "Transaction setting `path`'s :doc/refresh-note to `note` ([] when no doc entity exists)."
   [snap path note]

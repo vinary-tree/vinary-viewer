@@ -1,0 +1,87 @@
+@startuml state-slides-modes
+'' PlantUML over Mermaid because a PDF view's slide-deck modes are a small state machine whose states are held in
+'' different places and whose transitions have different initiators — and both are meant to be read off the
+'' colours. A PlantUML state diagram gives composite states, choice pseudo-states, per-state fills and
+'' per-transition arrow colours from the shared palette, and it renders byte-reproducibly; Mermaid's does not.
+'' Fills: teal = held by the PDF engine (renderer.pdf: its :layout and the slide it shows); blue-violet = an app-db
+'' key ([:ui :presentation], [:ui :slides :digits|:blank|:overview?]). Arrows: magenta = a key only; blue = a
+'' command reachable from keys, menus, the toolbar, the slide bar, the context menu or the palette (a re-frame
+'' event); slate = the window (main's vv:fullscreen-changed); teal = the view itself (mount, unmount, and the layout a
+'' show returns to, deck/effective-layout).
+!include _vv-theme.iuml
+
+title A PDF view's modes (ADR-0045): the Document layout, the Slides layout, and Presenting
+
+hide empty description
+skinparam state {
+  BackgroundColor RENDERER_TINT
+}
+
+state "a PDF view is mounted (vinary.ui.views/pdf-view → renderer.pdf controller)" as View RENDERER_FILL {
+
+  state "Document layout\ncontinuous pages · zoom and Fit apply" as Document RENDERER_TINT
+
+  state "Slides layout, in a tab\none slide per screen · 16 px margin" as Slides RENDERER_TINT {
+    state "Showing slide p" as SShow RENDERER_TINT
+    state "Typing a slide number\n[:ui :slides :digits]" as SDigits APPDB_TINT
+    state "Overview grid open\n[:ui :slides :overview?]" as SOver APPDB_TINT
+    [*] --> SShow
+    SShow -[KEYMAP_BORDER]-> SDigits : 0–9
+    SDigits -[KEYMAP_BORDER]-> SShow : Enter · Escape ·\n2.5 s idle · a slide step
+    SShow -[REFRAME_BORDER]-> SOver : Tab · o · Slide Overview ·\nthe slide bar's grid button
+    SOver -[KEYMAP_BORDER]-> SShow : Escape · Tab · o ·\nopen a tile (a jump)
+  }
+
+  state "Presenting — a slide show\n[:ui :presentation] · .vv-root.vv-presenting" as Present APPDB_FILL {
+    state "Showing slide p\nno margin · chrome hidden ·\na click advances · idle pointer hides" as PShow RENDERER_TINT
+    state "Blanked black or white\n[:ui :slides :blank]" as PBlank APPDB_TINT
+    state "Typing a slide number\n[:ui :slides :digits]" as PDigits APPDB_TINT
+    state "Overview grid open\n[:ui :slides :overview?]" as POver APPDB_TINT
+    [*] --> PShow : :from — the first slide,\nthe current one, or a page
+    PShow -[KEYMAP_BORDER]-> PBlank : b · . (black)\nw · , (white)
+    PBlank -[KEYMAP_BORDER]-> PShow : the same key · a slide step\n(it only unblanks) · click · Escape
+    PShow -[KEYMAP_BORDER]-> PDigits : 0–9
+    PDigits -[KEYMAP_BORDER]-> PShow : Enter · Escape ·\n2.5 s idle · a slide step
+    PShow -[REFRAME_BORDER]-> POver : Tab · o · palette
+    POver -[KEYMAP_BORDER]-> PShow : Escape · Tab · o ·\nopen a tile (a jump)
+  }
+
+  state mountChoice <<choice>>
+  state stopChoice <<choice>>
+
+  [*] -[RENDERER_BORDER]-> mountChoice : mount\n(deck/effective-layout)
+  mountChoice -[RENDERER_BORDER]-> Slides : a detected deck and\n:slides-open-as :slides,\nor this view's choice :slides
+  mountChoice -[RENDERER_BORDER]-> Document : otherwise
+
+  Document -[REFRAME_BORDER]-> Slides : View as Slide Show (l) ·\ntoolbar · context menu
+  Slides -[REFRAME_BORDER]-> Document : View as Document (m) ·\ntoolbar · context menu
+  Document -[REFRAME_BORDER]-> Present : F5 · Shift+F5 ·\nStart Slide Show ·\nStart From This Slide
+  Slides -[REFRAME_BORDER]-> Present : F5 · Shift+F5 ·\nPresent (slide bar)
+
+  PShow -[KEYMAP_BORDER]-> stopChoice : Escape — the last step
+  Present -[REFRAME_BORDER]-> stopChoice : End Slide Show ·\nfocus the address bar or sidebar
+  Present -[MAIN_BORDER,dashed]-> stopChoice : the window left the\nfullscreen the show asked for
+  stopChoice -[RENDERER_BORDER]-> Slides : a deck, or this view's\nchoice is :slides
+  stopChoice -[RENDERER_BORDER]-> Document : otherwise
+}
+
+View -[RENDERER_BORDER]-> [*] : unmount — a tab switch, navigation, Reflow\n(:slides/unmounted also ends a show)
+
+note left of View #FFF6D6
+  **Escape unwinds one step at a time**
+  (vinary.input.events/escape-fx), after the
+  palette and the find bar:
+  overview → typed number → blanking → the show.
+  Ending a show leaves only a fullscreen
+  main entered (vinary.main.fullscreen/decide).
+end note
+
+legend right
+  |= Colour |= Fill: where the state is held · Arrow: what triggers it |
+  |<#2D9574>&#160;&#160;&#160;&#160;| fill: the PDF engine (renderer.pdf :layout, the slide shown) · arrow: the view itself — mount, unmount, the layout a show returns to |
+  |<#7590DB>&#160;&#160;&#160;&#160;| fill: an app-db key ([:ui :presentation], [:ui :slides …]) |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| arrow: a key only (the :slides keymap layer, Escape) |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| arrow: a command — keys, menus, toolbar, slide bar, context menu or palette |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| arrow (dashed): the window — main reports vv:fullscreen-changed |
+endlegend
+@enduml
