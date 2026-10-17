@@ -60,6 +60,10 @@ browser-process input pipeline (`webContents.sendInputEvent`), at a fixed cadenc
 a 4 kB Markdown file, a 1.1 MB Markdown file (over the streaming threshold), a 40-page PDF, and this
 repository's own git tree (6 578 files) for the tree filter and palette.
 
+> **Corrected 2026-10-17 (§12).** Until then the driver measured the real main's hidden **warm-pool** window, not the
+> app's live one: `BrowserWindow.getAllWindows()` lists the pool slot first, and a hidden window draws only about one frame a second.
+> Every bench number in §3, §6 and §7 below comes from that window; §12 re-measures them in the live window.
+
 Run pinned, per the standing benchmarking rule — 32-core Threadripper PRO 5975WX, `performance` governor,
 `taskset -c 2-9`:
 
@@ -86,6 +90,11 @@ a character would wait. Everything reported as `lag` below is this figure.
 xvfb — so the gap sampler was measuring the compositor, not the app. `blockMs` (real `longtask` entries)
 and `frameGapMs` are therefore reported as separate figures; merging them made every scenario look
 blocked.
+
+> **Corrected 2026-10-17 (§12).** The observation stands; the explanation does not. The ~1017 ms period was the frame
+> rate of the HIDDEN window the driver was measuring (§2.2's correction), not of xvfb: under xvfb the live window
+> composites about 18 frames per 300 ms, and there the gap sampler is a real block signal (the bench now prints its
+> maximum as `gap max`).
 
 ### 2.4 Two harness failures, recorded
 
@@ -207,6 +216,10 @@ throttled to ~1 Hz for an occluded window — which is every window under xvfb, 
 in production. Measured: the chunked find took **380 ms to settle on a 4 kB document** and **never
 finished at all** on the 1.1 MB one.
 
+> **Corrected 2026-10-17 (§12.6).** That measurement ran in the hidden window (§2.2's correction), whose frames come
+> about once a second; xvfb does not throttle a visible window. Re-measured in the live window, a `ric`-paced find settles a cached search on the 4 kB document in 7.6–7.7 ms (`yield!`: 0.1–0.2 ms) and FINISHES the 1.1 MB document's first build in 588–602 ms (`yield!`: 452–473 ms).
+> The choice of `yield!` stands; the magnitude recorded above does not.
+
 The distinction the two primitives now carry:
 
 - **`ric`** paces work to the **display**. Correct for committing DOM as a document streams in — there is
@@ -301,6 +314,11 @@ Same harness, same machine, same pinning, cadence 150 ms:
 - `find-small`'s lag max rising 58 → 78 ms is not the search (its CPU is 0.0 ms and it reports no long
   task from find); it is the environmental floor described in §2.3, which sits around 90–100 ms under
   xvfb. Both figures are below it.
+
+> **Corrected 2026-10-17 (§12).** This table was measured in the hidden warm-pool window. Re-measured in the live
+> window (§12.5) every field still keeps every character except one: the Preferences font field, whose 1 → 0
+> clobbers above was a renderer that drew about once a second hiding a different defect — its own saved settings
+> coming back mid-typing (§13).
 - **Preferences' 189 ms is real and is by design.** The live font preview — which re-measures every figure
   and Mermaid diagram — now lands *once, 150 ms after typing stops*, instead of on every character. The
   probe window includes that settle, so the cost shows up here; it is no longer *between* keystrokes,
@@ -359,9 +377,10 @@ Recorded so none of it is re-attempted:
 2. **`event.timeStamp` as the latency instrument.** Correct for a physical keyboard, inert for an injected
    one; measured 4 ms while the thread was saturated. (§2.3)
 3. **The rAF frame-gap sampler as a block detector.** An artifact of compositor throttling under a
-   headless harness. (§2.3)
+   headless harness. (§2.3) — *Corrected (§12): an artifact of measuring a hidden window; in a window that
+   paints it detects blocks.*
 4. **`ric` (frame pacing) for chunked computation.** Caps throughput at one slice per frame and stalls
-   entirely when frames are throttled. (§6.2)
+   entirely when frames are throttled. (§6.2) — *Re-measured in the live window (§12.6): it finishes, about 30 % slower than `yield!` on a first build and a frame's wait slower on a cached search.*
 5. **One scheduler key for flatten + match.** Every keystroke discarded a partly-finished flatten, so the
    cache never engaged. (§6.4)
 6. **Incremental narrowing of a non-overlapping match set.** Unsound; counterexample in `"aaab"`. (§6.5)
@@ -596,3 +615,361 @@ mechanism itself, and they are independent of load.
 whole-repository git listings, all due at once: 2.4 s, now under 31 ms. The second was the renderer re-deriving
 every directory scope on every tree payload, which the main-side stall had hidden: 365 ms, now gone from the long
 stretches. Both are fixed, and both are gated.
+
+## 12 · The benchmark measured a window no one could see (2026-10-17)
+
+Found while re-running `npm run bench:input` after §11. Two terms first:
+
+- The **warm pool** is the real main's set of pre-booted, hidden windows (`VV_POOL`, default 1) that a new open
+  claims instead of booting a window cold. A pool window is fully loaded but never shown until it is claimed, and it
+  is deliberately left out of main's window registry so that no global action targets it.
+- A **round trip** (the `lag` columns) is the harness's own measure of perceived lag (§2.3): the time a trivial
+  `executeJavaScript('1')` takes from main and back, fired every 25 ms. It queues behind a busy renderer exactly as a
+  keystroke does.
+
+### 12.1 Symptom
+
+A full ladder at `edd3271` (load ≈ 8–10 on 64 CPUs) showed `find-large` blocking for over a second at the two fast
+cadences only:
+
+| scenario | cadence | lag max | longest task | frame gap max | find buffer at the end |
+|---|---|---|---|---|---|
+| find-large | 150 ms | 177 ms | 73 ms | 2 033 ms | 1 104 683 characters |
+| find-large | 40 ms | **1 252 ms** | 1 265 ms | 2 034 ms | 1 104 683 characters |
+| find-large | 25 ms | **1 314 ms** | 1 301 ms | 2 033 ms | **8 characters** |
+
+Two details did not fit a typing cost. At 25 ms the search had run over 8 characters — a placeholder, not the
+document. And every one of the 21 rows in that ladder, whatever its scenario, had a frame-gap maximum of 1 016–1 032
+ms (`find-large`: 2 033). The streaming and find code had not changed since `f15cbeb`/`5aca5a7`, so this was not a
+regression of the day's commits.
+
+### 12.2 Hypotheses, each registered before its run
+
+| Id | Hypothesis | Instrument | Prediction | Result |
+|---|---|---|---|---|
+| H-A | Re-opening the same document between cadences re-renders it | a solo, cold `find-large` run at 40 ms | no block | **refuted**: 1 232 and 1 218 ms |
+| H-B1 | The warm-up accepts a placeholder: it waits for the find buffer to be stable, and 8 characters are | wait first for `.vv-content[data-doc-key]` to name the fixture | lag max < 200 ms at 40 and 25 ms, 2 runs each | **refuted**: 1 244–1 272 ms in all 4 |
+| H-B2 | A second content delivery re-keys the stream view mid-window | `VV_BENCH_DIAG`: every `vv:*` main sends the window, every `vv:open`, the phase marks, warm-cache counters | a `vv:content` inside the window; warm-cache misses + 1 | **refuted**: nothing reached the window inside the measure window, yet misses + 1 |
+| H-B3 | The stream view's mount waits on animation frames that do not come until the window is focused | a renderer state probe: visibility, focus, frames in 300 ms, what the pane holds | 0 frames and the placeholder before `win.focus()` | prediction **held**, mechanism **wrong** (below) |
+| H-B4 | The harness drives the hidden warm-pool window | pick the live window; assert that it paints | lag max < 200 ms at 40 and 25 ms (2 runs each); misses + 0; the warm-up sees the whole document | **confirmed**, 5 of 5 runs |
+
+**H-B1's profile** (`VV_BENCH_PROFILE`, a renderer CPU profile over the measure window) put the block in
+`renderer.markdown/stream-blocks*` — the whole-document unified pass (parse 431 ms, stringify 356 ms, `rehype-raw`
+210 ms) — followed by 1 166 ms of the stream's drain. It was reached from `ir-stream-body`'s mount through a
+warm-cache miss, right after a Reagent animation-frame render. In every profile, find's own frames appeared only
+seconds later.
+
+**H-B2's timeline** showed the only `vv:content` for the fixture at −2 976 ms (the open). Nothing reached the window
+during the measurement, but the warm cache missed once: the stream view was mounting for the **first** time, inside
+the window. The warm-up had also ended on 8 characters, which is exactly `Loading…`. `data-doc-key` names the routed
+document before its body mounts, which is why H-B1's wait could not see it.
+
+**H-B3's probe** read `visibilityState = "visible"`, `hasFocus() = false`, 0 frames in 300 ms and the `Loading…`
+placeholder, both 1.2 s after the open and at the start of the warm-up. A follow-up experiment varied what was done
+to the window — idle, `win.focus()`, `webContents.focus()`, a mouse move, in three orders — and found that focus
+changed nothing:
+
+- the window the bench had picked reported `win.isVisible() === false` throughout;
+- it composited about one frame per 0.7–1.4 s, whatever was done to it;
+- `BrowserWindow.getAllWindows()` returned `[#2 hidden, vvHeadlessActive false, #1 visible, vvHeadlessActive true]`.
+
+Window #2 was the warm-pool slot, and `const [w] = BrowserWindow.getAllWindows()` picked it.
+
+**H-B4** picked the live window instead (`test/headless-window.js` `isLiveWindow`, which the fullscreen, tree,
+watch and remote end-to-end harnesses already used). In 5 of 5 runs:
+
+| run | cadence | lag max | longest task | frame gap max | warm-up buffer | warm-cache misses in the window |
+|---|---|---|---|---|---|---|
+| 1, 2 | 40 ms | 56, 51 ms | none ≥ 50 ms | 53, 55 ms | 1 104 683 | + 0 |
+| 3, 4 | 25 ms | 48, 57 ms | none ≥ 50 ms | 52, 52 ms | 1 104 683 | + 0 |
+| control | 150 ms | 81 ms | 77 ms | 87 ms | 1 104 683 | + 0 |
+
+The control's last search reused the flattened buffer (5 ms). In the hidden window's 150 ms row it had not (385 ms
+of CPU): the stream was still committing there, so its DOM kept changing under the buffer.
+
+### 12.3 The mechanism
+
+![bench:input before and after: the hidden warm-pool slot draws about one frame a second, so the document's first render landed in the measured window; the live window paints, the warm-up waits for the body, and typing is measured alone](../diagrams/seq-bench-hidden-window.svg)
+
+*Diagram source: [`../diagrams/seq-bench-hidden-window.puml`](../diagrams/seq-bench-hidden-window.puml).*
+
+1. The real main creates the live window, then one warm-pool window right after it. `getAllWindows()` lists the newer
+   window first.
+2. A hidden window is not drawn: `requestAnimationFrame` there runs only about once a second, although
+   `document.visibilityState` still reads `"visible"` (main creates windows with `backgroundThrottling: false`, which
+   keeps the Page Visibility API at `"visible"` but cannot make a hidden window paint).
+3. A large document mounts behind `post-paint-surface`, which waits two animation frames, followed by Reagent's
+   frame-batched render. In the hidden window that took seconds.
+4. The warm-up searched the pane, found 8 stable characters (`Loading…`), and declared the document warm. Typing then
+   began while the document's first render — `stream-blocks*` and the drain, about 1.25 s — was still to come.
+5. Which rows it hit was a race between ~1 Hz frames and the harness's timeline. At `edd3271` the 150 ms row's document
+   happened to mount during its warm-up; the 40 and 25 ms rows' did not.
+
+### 12.4 What it affected, and the fix
+
+| Harness | Picked | Since | Effect |
+|---|---|---|---|
+| `bench:input` | the hidden pool slot, never shown | `f15cbeb`, 2026-07-27 | every bench number in this document came from a window drawing about one frame a second; each Reagent render waited up to ~1 s |
+| `find-e2e` | the pool slot, then made it visible with `showForTest` | `7231025`, 2026-07-24 | measured a painting window, but not the app's registered one |
+| `bench:flip` | the only window (`VV_POOL=0`) | `37d8d41` | unaffected — docs/scientific/12 stands |
+
+The warm pool itself dates from `232f00b` (2026-07-17), so both affected harnesses had been written against it.
+
+The fix:
+
+- **Pick the live window, and prove it paints.** `test/headless-window.js` gains `assertPainting(win)`: `win` is the
+  live window and composites at least 5 frames in 300 ms, polled for up to ~3 s while it boots. A hidden window gives
+  0–1 frames however long it is polled; 60 Hz gives about 18. `bench:input`, `find-e2e` and `bench:flip` now run it
+  before measuring, and `headless-runner-smoke` tests it (a painting window, the pool slot's signature, an invisible
+  window, a window still booting, the native backend's hidden-but-live window).
+- **Warm the document's body, not its key.** The warm-up waits until the pane holds no `.vv-empty` placeholder and no
+  stream still committing, then searches until the buffer is stable.
+- **Keep the instruments** (`scripts/bench-input-latency.cjs` documents each). `VV_BENCH_DIAG=1` prints each
+  scenario's timeline — what main sent the window, what the window asked of main, the phase marks (also on
+  `CLOCK_MONOTONIC`), the worst round trip, the warm-cache counters, main's own event-loop delay over the window, and
+  the renderer's long animation frames (script against rendering time). `VV_BENCH_DIAG_STATE=1` adds H-B3's renderer
+  state probe, which shifts the prologue by ~0.4 s and so is opt-in. `VV_BENCH_DIAG_SWALLOW=<channel>` drops main's
+  sends on one channel during the measure window, as a causal control (§13). `VV_BENCH_PROFILE=<dir>` records the
+  renderer's CPU profile through DevTools — whose own start-up, ~1–1.5 s, moves what it measures (§12.7) — and
+  `VV_BENCH_PERF=<dir>` samples the renderer's every thread with Linux `perf` from outside, which moves nothing.
+  `VV_BENCH_JS_FLAGS` passes V8 flags (`--trace-gc`, `--perf-basic-prof`). `VV_BENCH_ONLY` and `VV_BENCH_CADENCE`
+  accept lists, run in order in one app. The table gains `gap max`, and the JSON gains find's `dirty` flag.
+- **A harness's own script is not a document.** The harnesses launch as `electron --no-sandbox <script>`, so the
+  script sat where the app path does. `startup/doc-specs` dropped the first two arguments, so it read the script as
+  the first document, and its repository was adopted as a watched Files-tree project in the measured window.
+  `startup/user-args` now skips the switches before the app path, and the app path itself. That also fixes a
+  container launch, `electron --no-sandbox <repo> a.md`, which opened the repository as a directory tab.
+
+### 12.5 Re-measured in the live window
+
+Two full ladders per arm, pinned, at load 6.0–8.9 on 64 CPUs (1-minute averages at each start). **Arm A** is the live window with the harness's own
+script still opened as a startup document (before `user-args`); **arm B** is every fix in this section and §13. The
+cells are the worst round trip in ms; ✗ marks a row where the field did not end holding exactly what was typed.
+
+| scenario | cadence | hidden window (`edd3271`) | live, arm A (runs 1, 2) | live, arm B (runs 1, 2) | arm B frame-gap max |
+|---|---|---|---|---|---|
+| find-small | 150 ms | 80 | 28, 35 | 28, 36 | 36, 37 |
+| find-large | 150 ms | 177 | 80, 76 | 84, 82 | 89, 89 |
+| find-pdf | 150 ms | 48 | 180, 155 | 177, 183 | 179, 194 |
+| tree | 150 ms | 43 | 73, 75 | 88, 81 | 89, 78 |
+| uri | 150 ms | 97 | 73, 67 | 74, 76 | 75, 76 |
+| palette | 150 ms | 35 | 32, 28 | 27, 30 | 47, 45 |
+| prefs | 150 ms | 21 | 22, 23 | 22, 20 | 35, 36 |
+| find-small | 40 ms | 22 | 20, 24 | 13, 16 | —, — |
+| find-large | 40 ms | 1 252 | 52, 50 | 53, 51 | 46, 54 |
+| find-pdf | 40 ms | 30 | 168, 168 | 159, 182 | 166, 205 |
+| tree | 40 ms | 43 | 57, 40 | 42, 51 | 58, 63 |
+| uri | 40 ms | 27 | 39, 46 | 45, 36 | 53, 54 |
+| palette | 40 ms | 16 | 20, 28 | 33, 23 | 40, 41 |
+| prefs | 40 ms | 15 | **✗** 28, **✗** 28 | 21, 15 | —, 37 |
+| find-small | 25 ms | 9 | 23, 21 | 23, 25 | 33, 34 |
+| find-large | 25 ms | 1 314 | 45, 51 | 53, 43 | 45, 47 |
+| find-pdf | 25 ms | 29 | 177, 174 | 155, 166 | 176, 185 |
+| tree | 25 ms | 42 | 45, 46 | 51, 52 | 64, 65 |
+| uri | 25 ms | 64 | 43, 44 | 38, 44 | 51, 52 |
+| palette | 25 ms | 21 | 21, 27 | 23, 30 | 39, 40 |
+| prefs | 25 ms | 21 | **✗** 60, **✗** 34 | 19, 20 | —, — |
+
+- **Every character survives** in arm B: 21 of 21 rows in both runs. Arm A's two ✗ rows at 40 and 25 ms are the
+  Preferences field, and §13 is about them.
+- **`find-large`'s block is gone.** 1 252 and 1 314 ms became 43–53 ms at 40 and 25 ms. At 150 ms, 177 ms became
+  76–84 ms. The last search reused the flattened buffer in every 150 ms row of both arms (4.9–5.6 ms, CPU 4.8–5.5 ms), against the
+  hidden window's rebuild (385 ms of CPU) — so ADR-0033's claims hold in the live window (`480 → 75 ms`; `450 → 5.3 ms`).
+- **The frame gap is a signal again.** Its maximum was 1 016–1 032 ms in every hidden-window row; in arm B it tracks
+  the row's own work (33–89 ms), except `find-pdf` (§12.7).
+- **Arm A against arm B.** Outside the Preferences rows, the two arms agree within their run-to-run spread, so the
+  startup document's watched repository made no measurable difference to these rows.
+- **`find-pdf` is the new maximum**: 155–183 ms in every ladder row, where the hidden window showed 29–48 ms.
+  §12.7 investigates it.
+
+### 12.6 `ric` against `yield!`, re-measured
+
+§6.2 refuted `ric` for chunked computation with two figures measured in the hidden window. **H-RIC60, registered
+before the variant was built:** in a window that paints at 60 Hz, a `ric`-paced `slice!` (R1) settles a cached
+`find-small` search within one frame (≤ 20 ms; `yield!`: ~0.2 ms), (R2) FINISHES `find-large`'s first build, in
+about 0.6–1.2 s — one 8 ms slice per 16.7 ms frame — and (R3) is slower than `yield!` in both, so the decision stands.
+
+The variant changed only `slice!`'s two resume points, `(yield! tick)` → `(ric (fn [_] (tick)))`. Both arms ran in
+one worktree of `83c65ca` (whose find and scheduler code is the current code), pinned, two runs each, at load 6.9–10.2:
+
+| row | `yield!` (as committed) | `ric` (the variant) |
+|---|---|---|
+| `find-small` at 150 ms — the last search, on a cached buffer | 0.2, 0.1 ms | 7.6, 7.7 ms |
+| `find-large` at 40 ms — the one search, a first build (16 001 nodes) | 452, 473 ms (CPU 370, 389) | 588, 602 ms (CPU 370, 393) |
+
+- **R1 holds.** A cached search waits about half a frame for its first tick.
+- **R2's claim holds; its band, narrowly, does not.** The search finishes; at 588 ms one run fell just under the
+  registered 0.6–1.2 s. The model was wrong about what a frame holds. Find's collect step walks 512 nodes, which on
+  this document costs about 11.6 ms of CPU — more than the whole 8 ms budget — so every tick runs exactly one step.
+  Then 32 collect steps plus the match make about 35 frames, $`35 \times 16.7\,\mathrm{ms} \approx 0.59\,\mathrm{s}`$,
+  which is what was measured; the registered model had assumed $`370 / 8 \approx 46`$ frames.
+- **R3 holds.** `yield!` is faster in both rows — by a frame's wait on a cached search and by about 30 % on a first
+  build — so §6.2's decision stands on live-window evidence.
+
+The same model accounts for July's figures. At about one frame a second, a first build of 35 one-step ticks takes
+about 35 s — far past the 6 s the measurement waited, which read as "never finished" — and a cached search waits for
+the next ~1 Hz frame, which averages hundreds of milliseconds, as the 380 ms did.
+
+### 12.7 `find-pdf` in a window that paints
+
+In every ladder row `find-pdf`'s worst round trip was 155–183 ms, where the hidden window had shown 29–48 ms. It is
+within the 200 ms budget and no character was lost, but it was the largest number left, so it was investigated. Each
+hypothesis was registered before its run; the raw lines are in the data file.
+
+| Step | Instrument | What it showed |
+|---|---|---|
+| 1 | the DevTools CPU profile (`VV_BENCH_PROFILE`), solo | 40 and 19 ms: no stall. The profiler's own start-up, ~1–1.5 s, moved the stall out of the window. |
+| 2 | the timeline with H-B3's state probe, solo | 26 and 22 ms: the probe also shifts the prologue — so it became opt-in (`VV_BENCH_DIAG_STATE`) |
+| 3 | the timeline alone, solo | 39, 30, 24 and 18 ms: solo, there is no stall |
+| 4 | `find-large` then `find-pdf`, `--trace-gc` (H-PDF1: needs `find-large` first; a major GC) | 33 and 30 ms. Two runs that never stall cannot test either half: **inconclusive** |
+| 5 | the ladder's first-round order, no instrument | 165 and 30 ms: the stall is **intermittent** |
+| 6 | + main's event-loop delay (H-PDF2: main is blocked) | a 168 ms stall while main's event loop never waited more than 10.7 ms: **refuted** |
+| 7 | + the renderer's long animation frames (H-PDF3: it is rendering, which the Long Tasks API does not count) | two stalls (159, 163 ms), each one 180–183 ms frame with script, rendering and blocking time all 0 ms: **refuted as stated** — and the stall comes about 4 s *after* typing ends, in the settle window |
+| 8 | + `--trace-gc` (H-PDF4: a stop-the-world GC) | stalls of 175 and 173 ms with no collection over 39 ms. The renderer's trace goes to a pipe whose last lines can be lost at exit, near which the stall falls: **not conclusive** |
+| 9 | external `perf` on every thread of the renderer (`VV_BENCH_PERF`) | a 143 ms stall: the renderer's **main thread** at 100 % CPU from its start to +140 ms, 119 of 138 samples inside `v8::Function::Call` — JavaScript run from a native callback |
+| 10 | + `--perf-basic-prof` (V8's JIT symbol map, applied by hand: `perf` did not apply it to Chromium's named `[anon:v8]` code regions) | a 74 ms worst trip: 64 of 77 main-thread samples in React's scheduler (`performWorkUntilDeadline` → `renderRootSync`) rendering **re-frame-10x**'s components — its trace views (`cljs_devtools` `simple_render`, `jsonml_style`) and their CSS (`spade`, `garden`) |
+
+re-frame-10x is the debugging panel the development build preloads (`day8.re-frame-10x.preload.react-18`, with
+re-frame tracing on in `:dev`); the release build does not contain it. §11 had already found it in the renderer's
+long stretches. That also accounts for the pattern above: the stall needs trace history to have built up (it never
+appears solo), and its time depends on when the panel next re-renders.
+
+**H-PDF5, registered before the A/B:** the stall is re-frame-10x re-rendering. Prediction: a development build
+without the preload and with tracing off keeps `find-pdf`'s worst round trip under 100 ms in 6 of 6 runs of the
+first-round order, while the stock development build stalls (≥ 120 ms) in at least 2 of 6.
+
+**The first A/B was invalid.** Its variant was built with `shadow-cljs compile renderer --config-merge
+'{:devtools {:preloads [devtools.preload]} …}'`, and it still loaded re-frame-10x: shadow-cljs 3.4.11 merges a
+config with `shadow.build.api/deep-merge`, which *concatenates* vectors, so a merge can add a preload but never
+remove one — the variant's `main.js` named `re_frame_10x` on 99 lines. Its stock arm stalled in 1 of 6 runs
+(164 ms), short of the two the registration needed, and the variant arm was stopped.
+
+**The second A/B** edited `shadow-cljs.edn` instead, in its own worktree of `724d9cc`: one worktree as configured,
+one with `:preloads [devtools.preload]` and re-frame tracing off. Each was built once and checked by its load list
+(re-frame-10x named on 2 lines of the stock `main.js`, on none of the variant's). The prediction kept its form with
+ten runs per arm — the variant under 100 ms in all ten, the stock build stalling in at least two — and the runs were
+interleaved, `find-small,find-large,find-pdf` at 150 ms, pinned:
+
+| Arm | `find-pdf`'s worst round trip, run by run (ms) | Stalls ≥ 120 ms | `find-small` (ms) | `find-large` (ms) | Frame intervals over 32 ms |
+|---|---|---|---|---|---|
+| stock — re-frame-10x loaded | 26, 31, 32, 33, 33, 34, 35, 41, 41, **177** | 1 of 10 | 28–42 | 82–163 | in every scenario of every run: 38.7–183.7 ms |
+| re-frame-10x removed | 4, 5, 5, 5, 5, 6, 6, 6, 9, 13 | 0 of 10 | 3–5 | 20–25 | none |
+
+- **H-PDF5 is inconclusive.** Its first half holds: without re-frame-10x, no run came near 100 ms. Its second half
+  fails: the stock build stalled in 1 run of 10, not 2. Over both A/Bs the stock build stalled in 2 of 16 runs and
+  the variant in none of 10. Counts that small cannot decide it: if a stall were equally likely in either build,
+  both stalls would still land in the stock build with probability
+  $`\binom{16}{2} / \binom{26}{2} = 120/325 \approx 0.37`$ (Fisher's exact test, one-sided). The three-scenario order
+  run here builds far less trace history than the ladder, in whose every row the stall had appeared.
+- **What the runs showed instead — not registered, so reported as an observation.** The two builds separate
+  completely in all three scenarios: every stock run's worst round trip is longer than every variant run's, so the
+  Mann–Whitney statistic is $`U = 0`$ in each, with exact two-sided $`p = 2 / \binom{20}{10} \approx 1.1 \times 10^{-5}`$.
+  The medians differ by 29 ms on `find-small`, 28 ms on `find-pdf` and 70 ms on the 1.1 MB `find-large`. Only the
+  stock build had frame intervals over 32 ms. At start-up the painting check counted 6–12 frames in 300 ms in the
+  stock build, against 14–17 without re-frame-10x.
+- So re-frame-10x lengthens every worst case this bench reports. Whether the rare 150–180 ms stall is also its
+  doing needs a run order that reproduces the stall reliably.
+
+### 12.8 What this changes in the record
+
+Each correction is also noted where the original claim stands, so the earlier sections still read as they were
+measured.
+
+| Where | What was recorded | What it was |
+|---|---|---|
+| §2.2, and every bench table in §3, §6 and §7 | measurements of the app | measurements of the hidden warm-pool window |
+| §2.3, §9 item 3 | a uniform ~1 017 ms frame gap, explained as xvfb throttling every window | the hidden window's frame period; in a window that paints, the gap is a block signal (the bench now prints it) |
+| §6.2, §9 item 4 | `ric`-paced find: 380 ms on 4 kB, never finishing on 1.1 MB | the hidden window's ~1 Hz frames; in a painting window 7.6–7.7 ms and 588–602 ms (§12.6) |
+| §7 | the Preferences field fixed (1 → 0 clobbers) | a different defect masked by the hidden window's slow renders (§13) |
+| `vinary.renderer.input-trace` (`summary`), `vinary.async.scheduler` (`yield!`), `vinary.renderer.profile` (`mark-first-content!`), ADR-0033 | the same explanations, in docstrings and the decision record | corrected to the measured ones |
+
+What stands: ADR-0033's interventions and their effect on find, re-measured in §12.5; the properties T1–T6 assert;
+and §10–§11, which were measured with `find-e2e` — a harness that had shown its window, so it was painting.
+
+## 13 · What the live window exposed: a field's own save coming back (2026-10-17)
+
+The first live-window ladder (§12.5) kept every character in every field but one. The Preferences font field lost
+characters at the two fast cadences in 4 of 4 rows over two runs:
+
+| run | cadence | typed `"Noto Sans"`, the field held | the clobbering writes (`from` → `to`) |
+|---|---|---|---|
+| 1 | 40 ms | `" Sans"` | `"Noto"` → `""`, `" "` → `""` |
+| 1 | 25 ms | `"ns"` | `"Noto S"` → `""`, `"a"` → `""` |
+| 2 | 40 ms | `" Sans"` | `"Noto"` → `""`, `" "` → `""` |
+| 2 | 25 ms | `"Noto Sns"` | `"Noto S"` → `""`, `"Noto Sa"` → `"Noto S"` |
+
+Every write was Reagent's controlled input, in `componentDidUpdate`, committing a model value **older** than what the
+field held. §7 had recorded this field as fixed (`1 → 0` clobbers); that was measured in the hidden window, whose
+renders came about once a second.
+
+### 13.1 H-PREF1: the field's own save comes back
+
+The path from a keystroke to the file and back, read from the code:
+
+1. `:settings/set` writes app-db at once. It also debounces `:settings/apply` by 150 ms, which debounces
+   `:vv/save-settings` by 300 ms; then `vv:settings-save` goes to main.
+2. Main writes `settings.edn`. chokidar reports the change after the size has been stable for 80 ms.
+3. Main broadcasts the file on `vv:settings` to **every** registered window — the writer included.
+4. `:settings/received` merges the file over app-db. The field (ADR-0033's `async-input`) never published that
+   older value since, so it treats it as an external push: it drops its draft and shows the older value.
+
+So a pause of more than ~450 ms followed by more typing races the writer's own echo. **Registered before any
+change:** the clobbers are that echo. Predictions: (1) a `vv:settings` send inside the typing window of every
+clobbering row; (2) a harness that drops `vv:settings` sends to the measured window removes the loss; (3) the fix
+does too, without the harness's help.
+
+**The first test was confounded.** Run solo (`VV_BENCH_ONLY=prefs`), with a fresh configuration, the field starts
+**empty**. Clearing an empty field fires no React `onChange`, so nothing is saved and nothing echoes, and all 4 rows
+were intact. In the ladder, the 40 and 25 ms rounds start from the `Noto Sans` the 150 ms round saved. Clearing it
+saves `""`, and that echo lands mid-typing. With `VV_BENCH_CADENCE=150,<c>` (both rounds in one app, on a worktree of
+the pre-fix commit `83c65ca` with this section's harness):
+
+| arm | 40 ms rows | 25 ms rows |
+|---|---|---|
+| the echo delivered | 2 of 2 lost characters | 2 of 2 lost characters |
+| the echo **dropped** by the harness (`VV_BENCH_DIAG_SWALLOW=vv:settings`) | 2 of 2 intact | 2 of 2 intact |
+
+In the 40 ms rows, a `vv:settings` send reached the window at +848/+849 ms, inside typing (+728 → +1 088). That is the
+cleared value's own save: the clear at +306, plus the two debounces, the write and ~90 ms of settle. The clobber was
+`"Noto"` → `""` — exactly the four characters typed by then. **H-PREF1 holds, and the echo is causal.**
+
+### 13.2 H-POOL1: a claimed window shows its boot-time state
+
+The same broadcast reached registered windows only, and pool windows are deliberately unregistered. **Registered
+before the experiment:** a pool window keeps every persisted state from its own boot. The experiment saved
+`{:font-variable "Exp Pool Font"}` from the live window and read both windows' settings 1.5 s later. The live window
+and `settings.edn` held it; the pool window still held `nil`. **Confirmed** — a window claimed after a Preferences,
+keymap, recent-files or connections change showed the old one.
+
+### 13.3 The fix: one store, two rules (ADR-0047)
+
+The five persisted files were five copies of one watch-and-broadcast loop. They are now one
+[`vinary.main.edn-store`](../../src/vinary/main/edn_store.cljs), with two rules:
+
+1. **A window never receives its own write back.** Main remembers the text it last wrote and the windows it wrote it
+   for (`vinary.main.edn-echo`), and skips them while the file still holds that text. A hand edit, or another
+   window's later save, reaches everyone.
+2. **Warm-pool windows receive the broadcasts**, as standby windows (`windows/add-standby!`), so a claimed window is
+   current.
+
+On the fixed build: the Preferences rows starting from a saved value were intact in 4 of 4 runs (150,40 ×2; 150,25
+×2), and the writing window received no `vv:settings` at all. In the pool experiment the pool window took the save,
+and the writer — saving through the raw preload call, so its own app-db never changed — was sent nothing.
+
+### 13.4 Gates, each shown to fail without the fix
+
+- **`find-e2e` T7.** Type `Noto`; wait until main has written it; type the space; hold the field 600 ms; then type
+  `Sans`. The field must still hold `"Noto "` after the hold, end as `"Noto Sans"`, and record no clobbering write.
+
+  A first version typed `" Sans"` straight through after the write. It passed once on the pre-fix build, because the
+  echo (≈ 82 ms after the write) is masked when it shares an animation frame with the next keystroke: Reagent renders
+  only the newest model. With nothing typed during the hold, detection does not depend on that coincidence. Pre-fix:
+  **3 of 3 failed**, with the space reverted (`Noto`): the echo at +82 ms, then the reverted state's own save echoing
+  `Noto` again at +546 ms, and the field ending `NotoSans`. Fixed build: 3 of 3 passed.
+- **`watch-e2e`.** A settings save from one live window reaches the other live window and the warm-pool window, but not
+  the writer; a hand edit reaches all three. On the pre-fix build the arm fails at "the writing window never receives
+  its own write back" and, with that assertion moved after the pool check, at "the warm-pool window adopts the save" —
+  each rule fails by name.
+- **Unit tests.** `vinary.main.edn-echo-test` covers the rule: the writer is skipped; two identical saves skip both
+  writers; a hand edit, another window's later save and a deleted file reach everyone; and a burst of saves from one
+  window.

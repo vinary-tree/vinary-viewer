@@ -343,6 +343,15 @@ Added
       Markdown and Org too.
 
 Changed
+    - The input-latency benchmark (npm run bench:input) and find-e2e now
+      measure the app's visible window. They had been picking a hidden,
+      pre-booted window that draws about one frame a second, so a large
+      document's first render could land inside a typing measurement and
+      every redraw was delayed; the benchmark's earlier numbers came from that
+      window (docs/scientific/10 section 12). Every latency harness now checks
+      that its window is on screen and painting before it measures, and
+      find-e2e adds a gate that types into Preferences across the field's own
+      save (T7).
     - Keys that move the view now show their effect a frame sooner. That covers
       flipping slides, scrolling, jumping to the top or bottom, typing a slide
       number and blanking the screen. Measured on a 50-slide deck, a slide now

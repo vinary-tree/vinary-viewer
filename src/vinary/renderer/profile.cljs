@@ -22,7 +22,8 @@
 (defn mark-first-content!
   "Fire the `rendered` mark once, the first time a content node (markdown body / pdf canvas / source editor /
    image / table / log / diagram) is painted into the pane. A `setInterval` poll (NOT requestAnimationFrame,
-   which stalls in a headless/occluded window — only the first frame fires), bounded, stopping the instant
+   which stalls in a hidden window — as under the native headless backend —
+   where only the first frame fires), bounded, stopping the instant
    content appears; on the deadline it reports the pane's fill so a miss is diagnosable."
   []
   (when on?

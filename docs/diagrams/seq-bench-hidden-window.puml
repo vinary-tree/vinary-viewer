@@ -1,0 +1,60 @@
+@startuml seq-bench-hidden-window
+'' ============================================================================
+'' vinary-viewer — Sequence: why bench:input measured a document's first render instead of typing
+'' (docs/scientific/10 §12), and the precondition that now rules it out.
+''
+'' PlantUML over Mermaid: the point is an ORDERING across the harness and two windows — the warm-up declaring a
+'' placeholder "warm" BEFORE the hidden window's frames let the document mount, so the mount lands inside the
+'' measured window. A sequence diagram with two numbered phases states exactly that.
+'' Slate = the main process (the harness runs there), red = the hidden warm-pool slot the harness wrongly
+'' picked, teal = the app's live window.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title bench:input — the window it measured (before 2026-10-17) and the one it measures now
+
+participant "benchmark harness\n(main process)" as H MAIN_TINT
+participant "BrowserWindow\n.getAllWindows()" as L MAIN_TINT
+participant "warm-pool slot\n(hidden: ~1 frame per second)" as P ERROR_TINT
+participant "live window\n(visible: ~60 frames/s)" as V RENDERER_TINT
+
+== before: const [w] = BrowserWindow.getAllWindows() ==
+H -> L : getAllWindows()
+L --> H : [#2 pool slot, #1 live]\n(the newest window is listed first)
+H -> P : __vvopen(large.md)
+activate P
+P -> P : route :stream → post-paint-surface shows "Loading…"\nand waits two animation frames, then Reagent's frame-batched render
+note right of P #F5E1E0
+  requestAnimationFrame here: about one
+  frame per 0.7–1.4 s, although
+  document.visibilityState reads "visible"
+end note
+H -> P : warm-up: search, re-search until the buffer is stable
+P --> H : 8 characters, stable — the "Loading…" placeholder
+H -> P : measure: probe round trips, type "quick brown" at 40 ms/char
+P -> P : the frames finally arrive → the stream view MOUNTS →\nwarm-cache miss → stream-blocks* (whole-document unified pass) + drain
+P --> H : worst round trip 1 212–1 314 ms — the document's first render
+deactivate P
+
+== after: isLiveWindow + assertPainting (test/headless-window.js) ==
+H -> L : getAllWindows().find(isLiveWindow)
+L --> H : the live window (#1)
+H -> V : assertPainting: ≥ 5 frames in 300 ms? (polled, ~3 s at most)
+V --> H : 18
+H -> V : __vvopen(large.md)
+activate V
+V -> V : two frames later the stream view mounts;\nits blocks commit across frames
+H -> V : warm-up: wait for the BODY (no placeholder, no stream still committing),\nthen search until stable
+V --> H : 1 104 683 characters
+H -> V : measure: probe round trips, type "quick brown" at 40 ms/char
+V -> V : one sliced search after typing stops (no long task)
+V --> H : worst round trip 48–57 ms; warm-cache misses +0
+deactivate V
+
+legend right
+  |= Colour |= Concept |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| the main process: the harness and Electron's window list |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the hidden warm-pool slot — the wrong window |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the app's live window |
+endlegend
+@enduml

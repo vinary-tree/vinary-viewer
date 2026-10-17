@@ -81,11 +81,13 @@
    • `yield!` paces work to the INPUT QUEUE. That is what chunked computation needs: give the browser a
      chance to deliver a keystroke, then carry on at once.
 
-   Using `ric` for computation caps throughput at one slice per frame — 8 ms of work per 16 ms at best,
-   and far worse than that whenever the compositor throttles animation frames (an occluded window, or any
-   headless/xvfb run, where frames arrive about once a second). Measured: the chunked find took 380 ms to
-   settle on a 4 kB document and never finished at all on a 1.1 MB one, purely from waiting for frames.
-   With `yield!` the same work runs back-to-back while still letting every keystroke through.
+   Using `ric` for computation caps throughput at one tick per frame, and far worse than that in a hidden window,
+   whose frames arrive only about once a second. Measured in a window that paints
+   (docs/scientific/10 §12.6): a cached find search settled in 7.6–7.7 ms with `ric` against 0.1–0.2 ms, and
+   the 1.1 MB document's first build took 588–602 ms against 452–473 ms — find's 512-node step outlasts the
+   8 ms budget, so each `ric` tick ran one step per frame. (The figures first recorded here — 380 ms on 4 kB,
+   never finishing on 1.1 MB — came from a hidden window: §12.) With `yield!` the same work runs back-to-back
+   while still letting every keystroke through.
 
    `setTimeout(f, 0)` is the fallback and a poor one — clamped to ≥1 ms, and to 4 ms once timers nest —
    which is precisely why MessageChannel is the primary path."

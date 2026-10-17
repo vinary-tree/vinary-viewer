@@ -1,0 +1,396 @@
+# docs/scientific/10 §12–§13 — raw record (2026-10-17).
+# Machine: the same 64-CPU workstation as §11 (32-core Threadripper PRO 5975WX), Linux, Xvfb (X11) backend, hardware
+# acceleration off, dev build, performance governor; every run pinned with taskset -c 2-9; the 1-minute load average
+# on 64 CPUs stayed between 5 and 9 throughout (logged per run in the scratch logs). Values in ms unless noted.
+# Command: [VV_BENCH_*=…] taskset -c 2-9 npm run bench:input (the knobs are documented in the script's header).
+# lagmax/p95 = main-process round-trip probe (every 25 ms); taskmax = longest longtask; gapmax = longest rAF interval.
+
+## 1. The symptom — the full ladder at edd3271, measured in the HIDDEN warm-pool window (final-bench-input.json)
+  find-small 150 intact lagmax 80 p95 22 taskmax 103 gapmax 1016.9 find ms 0.2 cpu 0 cached true chars 4253 
+  find-large 150 intact lagmax 177 p95 80 taskmax 73 gapmax 2032.6 find ms 415.6 cpu 385 cached false chars 1104683 
+  find-pdf   150 intact lagmax 48 p95 1 taskmax - gapmax 1017.4 find ms 0.2 cpu 0.1 cached true chars 4459 
+  tree       150 intact lagmax 43 p95 4 taskmax - gapmax 1017  
+  uri        150 intact lagmax 97 p95 23 taskmax 60 gapmax 1017  
+  palette    150 intact lagmax 35 p95 1 taskmax - gapmax 1017.2  
+  prefs      150 intact lagmax 21 p95 1 taskmax - gapmax 1031.7  
+  find-small  40 intact lagmax 22 p95 1 taskmax - gapmax 1017 find ms 3.1 cpu 2.9 cached false chars 4253 
+  find-large  40 intact lagmax 1252 p95 953 taskmax 1265 gapmax 2033.7 find ms 583.5 cpu 402.6 cached false chars 1104683 
+  find-pdf    40 intact lagmax 30 p95 1 taskmax - gapmax 1017.9 find ms 3.4 cpu 3.1 cached false chars 4459 
+  tree        40 intact lagmax 43 p95 16 taskmax - gapmax 1016.7  
+  uri         40 intact lagmax 27 p95 1 taskmax - gapmax 1017.1  
+  palette     40 intact lagmax 16 p95 1 taskmax - gapmax 1017.1  
+  prefs       40 intact lagmax 15 p95 1 taskmax - gapmax 1017.1  
+  find-small  25 intact lagmax 9 p95 1 taskmax - gapmax 1017 find ms 2.8 cpu 2.6 cached false chars 4253 
+  find-large  25 intact lagmax 1314 p95 1016 taskmax 1301 gapmax 2033.4 find ms 0.3 cpu 0 cached false chars 8 
+  find-pdf    25 intact lagmax 29 p95 1 taskmax - gapmax 1017.6 find ms 3.5 cpu 3.1 cached false chars 4459 
+  tree        25 intact lagmax 42 p95 1 taskmax - gapmax 1016.4  
+  uri         25 intact lagmax 64 p95 13 taskmax 58 gapmax 1023.4  
+  palette     25 intact lagmax 21 p95 1 taskmax - gapmax 1017.1  
+  prefs       25 intact lagmax 21 p95 1 taskmax - gapmax 1016.9  
+
+## 2. H-A — a cold solo find-large at 40 ms (hidden window): lag max per run
+  flarge-cold40-1.json: find-large  40 intact lagmax 1235 p95 933 taskmax 1232 gapmax 2033.3 find ms 599.7 cpu 404.1 cached false chars 1104683 
+  flarge-cold40-2.json: find-large  40 intact lagmax 1200 p95 899 taskmax 1218 gapmax 2033.2 find ms 596.2 cpu 406.1 cached false chars 1104683 
+
+## 3. H-B1 — waiting for .vv-content[data-doc-key] first (hidden window), 4 runs
+  c40-1: find-large  40 intact lagmax 1266 p95 964 taskmax 1245 gapmax 1639 find ms 616.1 cpu 418 cached false chars 1104683 
+  c40-2: find-large  40 intact lagmax 1290 p95 988 taskmax 1272 gapmax 1631.8 find ms 599.6 cpu 409.7 cached false chars 1104683 
+  c25-1: find-large  25 intact lagmax 1262 p95 959 taskmax 1244 gapmax 1629 find ms 587 cpu 401.4 cached false chars 1104683 
+  c25-2: find-large  25 intact lagmax 1262 p95 961 taskmax 1241 gapmax 1647.1 find ms 460.6 cpu 385.2 cached false chars 1104683 
+  profiles: first sample 785-806 ms after start; stream-blocks* begins 6-8 ms after it and runs ~1150 ms;
+  find frames first appear at ~3.4-3.6 s (every profile, incl. the pre-fix flarge-prof run).
+
+## 4. H-B2 / H-B3 — the IPC + phase timeline (VV_BENCH_DIAG), hidden window, find-large @ 40 ms
+  -- c40-1
+  [diag] find-large @ 40 ms warm-cache over the window: misses +1 hits +0 evictions +0 invalidations +0
+  [diag] ── find-large @ 40 ms (ms relative to the measure mark) ──
+  [diag]   -2982  mark open large.md
+  [diag]   -2976  → vv:content <scratch>/large.md stamp=1792235573521 seq=2 kind=markdown len=1124686
+  [diag]   -2964  ← vv:open <scratch>/large.md
+  [diag]   -2962  → vv:tree  stamp=undefined seq=undefined kind=undefined len=undefined
+  [diag]   -1979  → vv:tree  stamp=undefined seq=undefined kind=undefined len=undefined
+  [diag]   -1159  mark warm-up
+  [diag]    -404  mark warm (chars 8)
+  [diag]       0  mark measure
+  [diag]       1  mark cleared
+  [diag]     422  mark typing
+  [diag]     821  mark worst round trip starts (1212 ms)
+  [diag]     865  mark typed
+  [diag]    6872  mark settled
+  -- c40-2
+  [diag] find-large @ 40 ms warm-cache over the window: misses +1 hits +0 evictions +0 invalidations +0
+  [diag] ── find-large @ 40 ms (ms relative to the measure mark) ──
+  [diag]   -3390  mark open large.md
+  [diag]   -3378  → vv:content <scratch>/large.md stamp=1792235776934 seq=1 kind=markdown len=1124686
+  [diag]   -3365  ← vv:open <scratch>/large.md
+  [diag]   -3355  ← vv:open <repo>/scripts/bench-input-latency.cjs
+  [diag]   -3354  → vv:tree  stamp=undefined seq=undefined kind=undefined len=undefined
+  [diag]   -2356  → vv:tree  stamp=undefined seq=undefined kind=undefined len=undefined
+  [diag]   -2164  mark state after open + 1.2 s: visibility=visible focus=false rAF/300ms=0 pane=placeholder "Loading…"
+  [diag]   -1561  mark state at warm-up: visibility=visible focus=false rAF/300ms=0 pane=placeholder "Loading…"
+  [diag]    -401  mark warm (chars 8)
+  [diag]       0  mark measure
+  [diag]       0  mark state after win.focus(): visibility=visible focus=true rAF/300ms=0 pane=placeholder "Loading…"
+  [diag]     402  mark cleared
+  [diag]    1833  mark typing
+  [diag]    2274  mark typed
+  [diag]    3496  mark worst round trip starts (150 ms)
+  [diag]    8296  mark settled
+
+## 5. The frame experiment — what makes the picked window paint? (scratch exp-frames; three orders of steps)
+  === SEQ=idle,focus,wcfocus,mouse
+  [exp] +  401 window loaded              visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 2802 after 2 s idle             visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 3217 after focus                visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 4118 after focus + 0.5 s        visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5520 after focus + 1.5 s        visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5847 after wcfocus              visibility=visible hasFocus=true rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 6749 after wcfocus + 0.5 s      visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 8150 after wcfocus + 1.5 s      visibility=visible hasFocus=true rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 8550 after mouse                visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 9451 after mouse + 0.5 s        visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] +10853 after mouse + 1.5 s        visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  === SEQ=idle,mouse,focus
+  [exp] +  401 window loaded              visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 2782 after 2 s idle             visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 3195 after mouse                visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 4097 after mouse + 0.5 s        visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5497 after mouse + 1.5 s        visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5830 after focus                visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 6731 after focus + 0.5 s        visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 8132 after focus + 1.5 s        visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  === SEQ=idle,wcfocus,focus
+  [exp] +  407 window loaded              visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 2800 after 2 s idle             visibility=visible hasFocus=false rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 3216 after wcfocus              visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 4118 after wcfocus + 0.5 s      visibility=visible hasFocus=true rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5519 after wcfocus + 1.5 s      visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 5847 after focus                visibility=visible hasFocus=true rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 6749 after focus + 0.5 s        visibility=visible hasFocus=true rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] + 8150 after focus + 1.5 s        visibility=visible hasFocus=true rAF/300ms=1 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] +  401 window loaded              visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+  [exp] +  402 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] +  902 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] + 1402 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] + 1903 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] + 2404 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] + 2904 windows: #2 visible=false vvHeadlessActive=false loading=false picked=true | #1 visible=true vvHeadlessActive=true loading=false picked=false
+  [exp] + 5808 after 2 s idle             visibility=visible hasFocus=false rAF/300ms=0 | win.visible=false win.focused=false wc.focused=false minimized=false
+
+## 6. H-B4 — the LIVE window (isLiveWindow + assertPainting), find-large; warm-cache deltas and the state probes
+  c40-1: find-large  40 intact lagmax 56 p95 7 taskmax - gapmax 53 find ms 480 cpu 382.5 cached false chars 1104683 
+     find-large @ 40 ms warm-cache over the window: misses +0 hits +0 evictions +0 invalidations +0
+     -22083  mark state after open + 1.2 s: visibility=visible focus=true rAF/300ms=18 pane=streamed body
+     -401  mark warm (chars 1104683)
+  c40-2: find-large  40 intact lagmax 51 p95 13 taskmax - gapmax 54.6 find ms 503.1 cpu 406.6 cached false chars 1104683 
+     find-large @ 40 ms warm-cache over the window: misses +0 hits +0 evictions +0 invalidations +0
+     -21569  mark state after open + 1.2 s: visibility=visible focus=true rAF/300ms=18 pane=streamed body
+     -401  mark warm (chars 1104683)
+  c25-1: find-large  25 intact lagmax 48 p95 10 taskmax - gapmax 51.5 find ms 472.2 cpu 381.7 cached false chars 1104683 
+     find-large @ 25 ms warm-cache over the window: misses +0 hits +0 evictions +0 invalidations +0
+     -21404  mark state after open + 1.2 s: visibility=visible focus=true rAF/300ms=18 pane=streamed body
+     -402  mark warm (chars 1104683)
+  c25-2: find-large  25 intact lagmax 57 p95 8 taskmax - gapmax 51.9 find ms 476.1 cpu 383.9 cached false chars 1104683 
+     find-large @ 25 ms warm-cache over the window: misses +0 hits +0 evictions +0 invalidations +0
+     -22188  mark state after open + 1.2 s: visibility=visible focus=true rAF/300ms=18 pane=streamed body
+     -401  mark warm (chars 1104683)
+  c150-1: find-large 150 intact lagmax 81 p95 33 taskmax 77 gapmax 87.2 find ms 5.4 cpu 5.4 cached true chars 1104683 
+     find-large @ 150 ms warm-cache over the window: misses +0 hits +0 evictions +0 invalidations +0
+     -21875  mark state after open + 1.2 s: visibility=visible focus=true rAF/300ms=18 pane=streamed body
+     -402  mark warm (chars 1104683)
+
+## 7. The first live-window ladder (arm A: the harness script still opened as a startup document), 2 runs
+  -- run 1
+  find-small 150 intact lagmax 28 p95 13 taskmax - gapmax 37.3 find ms 0.1 cpu 0.1 cached true chars 4253 
+  find-large 150 intact lagmax 80 p95 20 taskmax 83 gapmax 92 find ms 4.9 cpu 4.8 cached true chars 1104683 
+  find-pdf   150 intact lagmax 180 p95 18 taskmax - gapmax 197.1 find ms 0.2 cpu 0.1 cached true chars 4459 
+  tree       150 intact lagmax 73 p95 43 taskmax 73 gapmax 80.7  
+  uri        150 intact lagmax 73 p95 41 taskmax 65 gapmax 76.5  
+  palette    150 intact lagmax 32 p95 6 taskmax - gapmax 47.4  
+  prefs      150 intact lagmax 22 p95 18 taskmax - gapmax 37.2  
+  find-small  40 intact lagmax 20 p95 2 taskmax - gapmax - find ms 3.6 cpu 3.4 cached false chars 4253 
+  find-large  40 intact lagmax 52 p95 9 taskmax - gapmax 45.9 find ms 476.3 cpu 390.1 cached false chars 1104683 
+  find-pdf    40 intact lagmax 168 p95 2 taskmax - gapmax 177.8 find ms 3.5 cpu 3.4 cached false chars 4459 
+  tree        40 intact lagmax 57 p95 18 taskmax 64 gapmax 68.7  
+  uri         40 intact lagmax 39 p95 5 taskmax 50 gapmax 54  
+  palette     40 intact lagmax 20 p95 1 taskmax - gapmax 41.2  
+  prefs       40 NOT-INTACT lagmax 28 p95 4 taskmax - gapmax 47  clobbers [["Noto",""],[" ",""]]
+  find-small  25 intact lagmax 23 p95 1 taskmax - gapmax 32.4 find ms 3.3 cpu 3.3 cached false chars 4253 
+  find-large  25 intact lagmax 45 p95 5 taskmax - gapmax 45.3 find ms 456.1 cpu 371.2 cached false chars 1104683 
+  find-pdf    25 intact lagmax 177 p95 2 taskmax - gapmax 187.6 find ms 3.3 cpu 3.2 cached false chars 4459 
+  tree        25 intact lagmax 45 p95 13 taskmax 61 gapmax 65.8  
+  uri         25 intact lagmax 43 p95 2 taskmax - gapmax 52.2  
+  palette     25 intact lagmax 21 p95 1 taskmax - gapmax 40.3  
+  prefs       25 NOT-INTACT lagmax 60 p95 17 taskmax 59 gapmax 73.6  clobbers [["Noto S",""],["a",""]]
+  -- run 2
+  find-small 150 intact lagmax 35 p95 19 taskmax - gapmax 41.7 find ms 0.2 cpu 0.2 cached true chars 4253 
+  find-large 150 intact lagmax 76 p95 21 taskmax 77 gapmax 86.7 find ms 5.6 cpu 5.5 cached true chars 1104683 
+  find-pdf   150 intact lagmax 155 p95 14 taskmax - gapmax 178.1 find ms 0.1 cpu 0 cached true chars 4459 
+  tree       150 intact lagmax 75 p95 40 taskmax 72 gapmax 80.1  
+  uri        150 intact lagmax 67 p95 24 taskmax 63 gapmax 82  
+  palette    150 intact lagmax 28 p95 2 taskmax - gapmax 43.7  
+  prefs      150 intact lagmax 23 p95 11 taskmax - gapmax 33.9  
+  find-small  40 intact lagmax 24 p95 1 taskmax - gapmax - find ms 3.4 cpu 3.2 cached false chars 4253 
+  find-large  40 intact lagmax 50 p95 10 taskmax - gapmax 52.9 find ms 455.6 cpu 379.5 cached false chars 1104683 
+  find-pdf    40 intact lagmax 168 p95 1 taskmax - gapmax 188.7 find ms 3.5 cpu 3.1 cached false chars 4459 
+  tree        40 intact lagmax 40 p95 8 taskmax 61 gapmax 65.6  
+  uri         40 intact lagmax 46 p95 3 taskmax 51 gapmax 55.4  
+  palette     40 intact lagmax 28 p95 1 taskmax - gapmax 40.7  
+  prefs       40 NOT-INTACT lagmax 28 p95 3 taskmax - gapmax 47.4  clobbers [["Noto",""],[" ",""]]
+  find-small  25 intact lagmax 21 p95 2 taskmax - gapmax 32.5 find ms 3.4 cpu 3.3 cached false chars 4253 
+  find-large  25 intact lagmax 51 p95 5 taskmax - gapmax 47.1 find ms 462.1 cpu 378.8 cached false chars 1104683 
+  find-pdf    25 intact lagmax 174 p95 1 taskmax - gapmax 190.6 find ms 3.6 cpu 3.5 cached false chars 4459 
+  tree        25 intact lagmax 46 p95 9 taskmax 58 gapmax 63.1  
+  uri         25 intact lagmax 44 p95 1 taskmax 51 gapmax 55.1  
+  palette     25 intact lagmax 27 p95 1 taskmax - gapmax 39.1  
+  prefs       25 NOT-INTACT lagmax 34 p95 10 taskmax 58 gapmax 72.4  clobbers [["Noto S",""],["Noto Sa","Noto S"]]
+
+## 8. H-PREF1 — the Preferences echo, on a worktree of the pre-fix commit 83c65ca with this harness
+  test #1 (solo, field starts empty — CONFOUNDED: clearing an empty field saves nothing):
+    diag-c25-1.json: prefs       25 intact lagmax 32 p95 7 taskmax - gapmax 42.5  
+    diag-c25-2.json: prefs       25 intact lagmax 33 p95 8 taskmax - gapmax 42.8  
+    diag-c40-1.json: prefs       40 intact lagmax 30 p95 6 taskmax - gapmax 41.6  
+    diag-c40-2.json: prefs       40 intact lagmax 32 p95 9 taskmax - gapmax 42.2  
+    swallow-c25-1.json: prefs       25 intact lagmax 28 p95 6 taskmax - gapmax 39.7  
+    swallow-c25-2.json: prefs       25 intact lagmax 27 p95 5 taskmax - gapmax 39.1  
+    swallow-c40-1.json: prefs       40 intact lagmax 23 p95 3 taskmax - gapmax 41.8  
+    swallow-c40-2.json: prefs       40 intact lagmax 25 p95 5 taskmax - gapmax 41.8  
+  test #2 (VV_BENCH_CADENCE=150,<c>: the measured round starts from the saved "Noto Sans"):
+    diag-c150-25-1.json: prefs      150 intact lagmax 37 p95 22 taskmax - gapmax 46.8  
+    diag-c150-25-1.json: prefs       25 NOT-INTACT lagmax 53 p95 8 taskmax 76 gapmax 91.3  clobbers [["Noto S",""],["Noto Sa","Noto S"]]
+    diag-c150-25-2.json: prefs      150 intact lagmax 40 p95 20 taskmax - gapmax 50.2  
+    diag-c150-25-2.json: prefs       25 NOT-INTACT lagmax 76 p95 7 taskmax 77 gapmax 91.4  clobbers [["Noto ",""],["S",""]]
+    diag-c150-40-1.json: prefs      150 intact lagmax 41 p95 20 taskmax - gapmax 49.2  
+    diag-c150-40-1.json: prefs       40 NOT-INTACT lagmax 25 p95 5 taskmax - gapmax 50.2  clobbers [["Noto",""]]
+    diag-c150-40-2.json: prefs      150 intact lagmax 39 p95 22 taskmax - gapmax 48.4  
+    diag-c150-40-2.json: prefs       40 NOT-INTACT lagmax 29 p95 5 taskmax - gapmax 51  clobbers [["Noto",""],[" ",""]]
+    swallow-c150-25-1.json: prefs      150 intact lagmax 41 p95 21 taskmax - gapmax 51.7  
+    swallow-c150-25-1.json: prefs       25 intact lagmax 13 p95 2 taskmax - gapmax -  
+    swallow-c150-25-2.json: prefs      150 intact lagmax 40 p95 25 taskmax - gapmax 48.8  
+    swallow-c150-25-2.json: prefs       25 intact lagmax 25 p95 5 taskmax - gapmax -  
+    swallow-c150-40-1.json: prefs      150 intact lagmax 41 p95 20 taskmax - gapmax 50.8  
+    swallow-c150-40-1.json: prefs       40 intact lagmax 11 p95 2 taskmax - gapmax -  
+    swallow-c150-40-2.json: prefs      150 intact lagmax 37 p95 22 taskmax - gapmax 46.9  
+    swallow-c150-40-2.json: prefs       40 intact lagmax 11 p95 1 taskmax - gapmax -  
+  timeline diag-c150-40-1.txt (the 40 ms round):
+    [diag]       0  mark measure
+    [diag]     306  mark cleared
+    [diag]     728  mark typing
+    [diag]     849  → vv:settings
+    [diag]    1088  mark typed
+    [diag]    1606  → vv:settings
+    [diag]    3591  mark settled
+  timeline diag-c150-40-2.txt (the 40 ms round):
+    [diag]       0  mark measure
+    [diag]     306  mark cleared
+    [diag]     728  mark typing
+    [diag]     848  → vv:settings
+    [diag]    1089  mark typed
+    [diag]    1588  → vv:settings
+    [diag]    3593  mark settled
+  the fixed build (main working tree), same protocol:
+    fixed-c150-25-1.json: prefs      150 intact lagmax 39 p95 27 taskmax - gapmax 47.2  
+    fixed-c150-25-1.json: prefs       25 intact lagmax 9 p95 2 taskmax - gapmax -  
+    fixed-c150-25-2.json: prefs      150 intact lagmax 37 p95 24 taskmax - gapmax 47.8  
+    fixed-c150-25-2.json: prefs       25 intact lagmax 25 p95 3 taskmax - gapmax -  
+    fixed-c150-40-1.json: prefs      150 intact lagmax 36 p95 24 taskmax - gapmax 46.3  
+    fixed-c150-40-1.json: prefs       40 intact lagmax 13 p95 2 taskmax - gapmax -  
+    fixed-c150-40-2.json: prefs      150 intact lagmax 36 p95 23 taskmax - gapmax 45.8  
+    fixed-c150-40-2.json: prefs       40 intact lagmax 10 p95 2 taskmax - gapmax -  
+
+## 9. H-POOL1 — a settings save while a warm-pool window waits (scratch exp-pool)
+  pre-fix:
+    [exp] before: live #1 {"fontVariable":null} | pool #2 {"fontVariable":null}
+    [exp] settings.edn now: {:font-variable "Exp Pool Font"}
+    [exp] after:  live #1 {"fontVariable":"Exp Pool Font"} | pool #2 {"fontVariable":null}
+  fixed:
+    [exp] before: live #1 {"fontVariable":null} | pool #2 {"fontVariable":null}
+    [exp] settings.edn now: {:font-variable "Exp Pool Font"}
+    [exp] after:  live #1 {"fontVariable":null} | pool #2 {"fontVariable":"Exp Pool Font"}
+
+## 10. find-e2e T7 (VV_FIND_TYPIST_ONLY=1) — v1 (" Sans" typed straight through) and v2 (space, 600 ms hold, "Sans")
+  v1 pre-fix (uninstrumented): ✓   
+  v1 pre-fix (marks between keys):
+    +    0 mark file holds Noto
+    +    1 mark typed " "
+    +   45 mark typed "S"
+    +   82 settings :font-variable "Noto"
+    +   86 mark typed "a"
+    +  128 mark typed "n"
+    +  169 mark typed "s"
+    +  713 settings :font-variable "Noto Sans"
+  v2 pre-fix #1: ✗  after the 600 ms hold the field holds "Noto" | +0 ms main has written "Noto"; +82 ms vv:settings :font-variable "Noto"; +546 ms vv:settings :font-variable "Noto"; +601 ms after the 600 ms hold the field holds "Noto"; +1260 ms vv:settings :font-variable "NotoSans"
+  v2 pre-fix #2: ✗  after the 600 ms hold the field holds "Noto" | +0 ms main has written "Noto"; +81 ms vv:settings :font-variable "Noto"; +544 ms vv:settings :font-variable "Noto"; +629 ms after the 600 ms hold the field holds "Noto"; +1293 ms vv:settings :font-variable "NotoSans"
+  v2 pre-fix #3: ✗  after the 600 ms hold the field holds "Noto" | +0 ms main has written "Noto"; +82 ms vv:settings :font-variable "Noto"; +545 ms vv:settings :font-variable "Noto"; +631 ms after the 600 ms hold the field holds "Noto"; +1296 ms vv:settings :font-variable "NotoSans"
+  v2 fixed  #1: ✓   
+  v2 fixed  #2: ✓   
+  v2 fixed  #3: ✓   
+
+## 11. watch-e2e store arm — negative controls on the pre-fix worktree, then the fixed build
+  pre-fix (pool check first):  Error: timed out waiting for the warm-pool window adopts the save; last=null
+  pre-fix (writer check first):  AssertionError [ERR_ASSERTION]: the writing window never receives its own write back
+  fixed: [ok] a settings save reaches the other window and the warm-pool window, never its writer; a hand edit reaches all
+
+## 12. H-RIC60 — slice! resuming through ric vs yield!, live window, worktree @83c65ca, 2 runs per arm
+  ric-find-large-c40-1.json   find-large  40 intact lagmax 53 p95 7 taskmax - gapmax 52.9 find ms 588.1 cpu 370 cached false chars 1104683  nodes 16001 count 4000 settle-p50 647.9
+  ric-find-large-c40-2.json   find-large  40 intact lagmax 41 p95 7 taskmax - gapmax 55.2 find ms 602.1 cpu 392.7 cached false chars 1104683  nodes 16001 count 4000 settle-p50 671.2
+  ric-find-small-c150-1.json  find-small 150 intact lagmax 27 p95 15 taskmax - gapmax 35.6 find ms 7.6 cpu 0.2 cached true chars 4253  nodes 241 count 60 settle-p50 62
+  ric-find-small-c150-2.json  find-small 150 intact lagmax 32 p95 16 taskmax - gapmax 42.4 find ms 7.7 cpu 0.2 cached true chars 4253  nodes 241 count 60 settle-p50 63.3
+  yield-find-large-c40-1.json find-large  40 intact lagmax 46 p95 8 taskmax - gapmax 54.8 find ms 452.2 cpu 370.1 cached false chars 1104683  nodes 16001 count 4000 settle-p50 520.1
+  yield-find-large-c40-2.json find-large  40 intact lagmax 53 p95 10 taskmax - gapmax 51.6 find ms 472.5 cpu 388.5 cached false chars 1104683  nodes 16001 count 4000 settle-p50 536.9
+  yield-find-small-c150-1.jsonfind-small 150 intact lagmax 34 p95 14 taskmax - gapmax 42.6 find ms 0.2 cpu 0.2 cached true chars 4253  nodes 241 count 60 settle-p50 49.8
+  yield-find-small-c150-2.jsonfind-small 150 intact lagmax 22 p95 17 taskmax - gapmax 39.7 find ms 0.1 cpu 0.1 cached true chars 4253  nodes 241 count 60 settle-p50 51.7
+
+## 13. The definitive live-window ladder (arm B: every fix — user-args + edn-store), 2 runs
+  -- run 1 2026-10-17T09:07:14-04:00 —  09:07:14 up 4 days, 16:34,  1 user,  load average: 7.34, 8.03, 8.35
+  find-small 150 intact lagmax 28 p95 15 taskmax - gapmax 36.4 find ms 0.3 cpu 0.2 cached true chars 4253
+  find-large 150 intact lagmax 84 p95 29 taskmax 79 gapmax 88.7 find ms 5.3 cpu 5.1 cached true chars 1104683
+  find-pdf   150 intact lagmax 177 p95 18 taskmax - gapmax 178.9 find ms 0.1 cpu 0.1 cached true chars 4459
+  tree       150 intact lagmax 88 p95 51 taskmax 68 gapmax 89.3 
+  uri        150 intact lagmax 74 p95 38 taskmax 64 gapmax 74.6 
+  palette    150 intact lagmax 27 p95 2 taskmax - gapmax 46.8 
+  prefs      150 intact lagmax 22 p95 8 taskmax - gapmax 35.2 
+  find-small  40 intact lagmax 13 p95 1 taskmax - gapmax - find ms 3.4 cpu 3.3 cached false chars 4253
+  find-large  40 intact lagmax 53 p95 7 taskmax - gapmax 46.4 find ms 449.5 cpu 370.9 cached false chars 1104683
+  find-pdf    40 intact lagmax 159 p95 1 taskmax - gapmax 166.4 find ms 3.5 cpu 3.3 cached false chars 4459
+  tree        40 intact lagmax 42 p95 17 taskmax 54 gapmax 58.2 
+  uri         40 intact lagmax 45 p95 2 taskmax - gapmax 53 
+  palette     40 intact lagmax 33 p95 1 taskmax - gapmax 39.8 
+  prefs       40 intact lagmax 21 p95 1 taskmax - gapmax - 
+  find-small  25 intact lagmax 23 p95 1 taskmax - gapmax 32.9 find ms 3.4 cpu 3.2 cached false chars 4253
+  find-large  25 intact lagmax 53 p95 6 taskmax - gapmax 44.5 find ms 461.3 cpu 372.1 cached false chars 1104683
+  find-pdf    25 intact lagmax 155 p95 3 taskmax - gapmax 176.2 find ms 3.5 cpu 3.2 cached false chars 4459
+  tree        25 intact lagmax 51 p95 20 taskmax 60 gapmax 64.4 
+  uri         25 intact lagmax 38 p95 5 taskmax - gapmax 51.2 
+  palette     25 intact lagmax 23 p95 1 taskmax - gapmax 39 
+  prefs       25 intact lagmax 19 p95 1 taskmax - gapmax - 
+  -- run 2 2026-10-17T09:14:18-04:00 —  09:14:18 up 4 days, 16:41,  1 user,  load average: 7.50, 7.50, 8.01
+  find-small 150 intact lagmax 36 p95 15 taskmax - gapmax 37.4 find ms 0.2 cpu 0.1 cached true chars 4253
+  find-large 150 intact lagmax 82 p95 26 taskmax 78 gapmax 88.5 find ms 5.2 cpu 5.1 cached true chars 1104683
+  find-pdf   150 intact lagmax 183 p95 19 taskmax - gapmax 193.7 find ms 0.1 cpu 0.1 cached true chars 4459
+  tree       150 intact lagmax 81 p95 47 taskmax 69 gapmax 77.6 
+  uri        150 intact lagmax 76 p95 41 taskmax 68 gapmax 75.7 
+  palette    150 intact lagmax 30 p95 7 taskmax - gapmax 44.5 
+  prefs      150 intact lagmax 20 p95 13 taskmax - gapmax 36.1 
+  find-small  40 intact lagmax 16 p95 2 taskmax - gapmax - find ms 3.6 cpu 3.4 cached false chars 4253
+  find-large  40 intact lagmax 51 p95 7 taskmax - gapmax 54.4 find ms 466.5 cpu 386.1 cached false chars 1104683
+  find-pdf    40 intact lagmax 182 p95 3 taskmax - gapmax 205.2 find ms 3.4 cpu 3.2 cached false chars 4459
+  tree        40 intact lagmax 51 p95 23 taskmax 59 gapmax 63.3 
+  uri         40 intact lagmax 36 p95 1 taskmax - gapmax 53.7 
+  palette     40 intact lagmax 23 p95 1 taskmax - gapmax 41 
+  prefs       40 intact lagmax 15 p95 1 taskmax - gapmax 36.5 
+  find-small  25 intact lagmax 25 p95 1 taskmax - gapmax 33.8 find ms 3.5 cpu 3.3 cached false chars 4253
+  find-large  25 intact lagmax 43 p95 6 taskmax - gapmax 47.3 find ms 452.4 cpu 375 cached false chars 1104683
+  find-pdf    25 intact lagmax 166 p95 3 taskmax - gapmax 184.9 find ms 3.5 cpu 3.4 cached false chars 4459
+  tree        25 intact lagmax 52 p95 25 taskmax 61 gapmax 65.3 
+  uri         25 intact lagmax 44 p95 5 taskmax - gapmax 52.4 
+  palette     25 intact lagmax 30 p95 1 taskmax - gapmax 40.3 
+  prefs       25 intact lagmax 20 p95 1 taskmax - gapmax - 
+
+## 14. find-pdf's worst round trip (§12.7) — every attribution run and both A/B rounds
+  profiled through DevTools (VV_BENCH_PROFILE), solo:              c150 40.0 ms, c40 19.0 ms (the profiler start moved the stall out)
+  DIAG + state probe, solo:                                          c150 26.0 ms, c40 22.0 ms
+  DIAG timeline only, solo:                                         39.0, 30.0, 24.0, 18.0 ms
+  find-large,find-pdf @150, --trace-gc:                             33.0, 30.0 ms; max GC pause 16.2 / 16.4 ms
+  find-small,find-large,find-pdf @150, no instrument:               165.0, 30.0 ms
+  same + DIAG (main event-loop delay), run 1:                       168.0 ms; main ELD max 10.7 ms
+  same + DIAG (main event-loop delay), run 2:                       29.0 ms; main ELD max 10.7 ms
+  same + DIAG (main event-loop delay), run 3:                       34.0 ms; main ELD max 11.0 ms
+  same + DIAG (main event-loop delay), run 4:                       31.0 ms; main ELD max 11.2 ms
+  same + DIAG (long animation frames), run 1:                     159.0 ms; frame of 180 ms — script 0 ms, rendering 0 ms (style+layout onward 0 ms), blocking 0 ms; worst round trip starts (159 ms) at +5993 ms (typing ended +2074)
+  same + DIAG (long animation frames), run 2:                     163.0 ms; frame of 183 ms — script 0 ms, rendering 0 ms (style+layout onward 0 ms), blocking 0 ms; worst round trip starts (163 ms) at +6023 ms (typing ended +2073)
+  same + DIAG (long animation frames), run 3:                     40.0 ms; no long animation frame; worst round trip starts (40 ms) at +1857 ms (typing ended +2073)
+  same + DIAG (long animation frames), run 4:                     36.0 ms; no long animation frame; worst round trip starts (36 ms) at +697 ms (typing ended +2074)
+  same + --trace-gc + DIAG, run 1:                                  30.0 ms; GC lines 143, max pause 18.55 ms (renderer stdout is a pipe: its last lines may be lost at exit)
+  same + --trace-gc + DIAG, run 2:                                  175.0 ms; GC lines 165, max pause 23.26 ms (renderer stdout is a pipe: its last lines may be lost at exit)
+  same + --trace-gc + DIAG, run 3:                                  32.0 ms; GC lines 163, max pause 22.50 ms (renderer stdout is a pipe: its last lines may be lost at exit)
+  same + --trace-gc + DIAG, run 4:                                  173.0 ms; GC lines 164, max pause 39.34 ms (renderer stdout is a pipe: its last lines may be lost at exit)
+
+  external perf (VV_BENCH_PERF: perf record -k CLOCK_MONOTONIC -F 999 -g -p <renderer pid>), find-small,find-large,find-pdf @150:
+    run 1: lag-max=143.0ms
+    run 2: lag-max=74.0ms (with --js-flags=--perf-basic-prof)
+    run 3: lag-max=42.0ms (with --js-flags=--perf-basic-prof)
+    run 4: lag-max=51.0ms (with --js-flags=--perf-basic-prof)
+    run 5: lag-max=41.0ms (with --js-flags=--perf-basic-prof)
+    run 1, the 143 ms stall, main thread (tid = renderer pid) per 20 ms bin from the stall start: 20 20 20 20 20 20 20 11 samples
+      (999 Hz → 20 per bin = 100 % CPU); 119 of 138 samples under v8::Function::Call; the other threads mostly idle (short bursts on thread-pool workers)
+    run 2, the 74 ms worst trip, JIT frames resolved against /tmp/perf-<pid>.map by hand (perf did not apply it to
+      Chromium's [anon:v8] regions): 64 of 77 main-thread samples under performWorkUntilDeadline → performWorkOnRoot →
+      renderRootSync; 43 in re-frame-10x's inlined reagent render path, incl. cljs_devtools simple_render (13),
+      spade ensure_style!/compile_css (21/15), garden do_compile (13) — the DEV-only re-frame-10x panel.
+
+
+  H-PDF5 A/B #1 (INVALID: the variant was built with --config-merge, which cannot remove a preload — its main.js
+  named re_frame_10x on 99 lines), find-small,find-large,find-pdf @150, stock arm only (the variant arm was stopped):
+    stock run 1: find-pdf lag-max 35.0 ms
+    stock run 2: find-pdf lag-max 34.0 ms
+    stock run 3: find-pdf lag-max 30.0 ms
+    stock run 4: find-pdf lag-max 164.0 ms
+    stock run 5: find-pdf lag-max 33.0 ms
+    stock run 6: find-pdf lag-max 36.0 ms
+
+  H-PDF5 A/B #2: two worktrees of 724d9cc (stock; shadow-cljs.edn edited: :preloads [devtools.preload], re-frame
+  tracing false), each built once and checked by its load list (re-frame-10x named on 2 / 0 lines of
+  main.js); 10 runs per arm INTERLEAVED, find-small,find-large,find-pdf @150, taskset -c 2-9. Per run: worst round
+  trip (lagmax) and longest rAF interval over 32 ms (gapmax; '-' = none) per scenario; start = the painting probe's
+  animation frames in 300 ms at start-up.
+    stock run  1: start  7 | find-small lagmax 40 gapmax 45.6 | find-large lagmax 90 gapmax 93.5 | find-pdf lagmax 31 gapmax 44.5
+    stock run  2: start 12 | find-small lagmax 31 gapmax 43.6 | find-large lagmax 163 gapmax 152.0 | find-pdf lagmax 35 gapmax 44.5
+    stock run  3: start  6 | find-small lagmax 34 gapmax 38.9 | find-large lagmax 92 gapmax 90.3 | find-pdf lagmax 26 gapmax 44.2
+    stock run  4: start  8 | find-small lagmax 28 gapmax 41.0 | find-large lagmax 91 gapmax 90.8 | find-pdf lagmax 41 gapmax 44.1
+    stock run  5: start  7 | find-small lagmax 29 gapmax 39.6 | find-large lagmax 82 gapmax 86.9 | find-pdf lagmax 33 gapmax 41.8
+    stock run  6: start  7 | find-small lagmax 33 gapmax 40.9 | find-large lagmax 97 gapmax 106.9 | find-pdf lagmax 41 gapmax 46.1
+    stock run  7: start  7 | find-small lagmax 33 gapmax 39.1 | find-large lagmax 93 gapmax 89.5 | find-pdf lagmax 32 gapmax 45.1
+    stock run  8: start 11 | find-small lagmax 42 gapmax 38.9 | find-large lagmax 85 gapmax 94.0 | find-pdf lagmax 177 gapmax 183.7
+    stock run  9: start  8 | find-small lagmax 33 gapmax 40.7 | find-large lagmax 100 gapmax 92.1 | find-pdf lagmax 34 gapmax 46.6
+    stock run 10: start 10 | find-small lagmax 32 gapmax 38.7 | find-large lagmax 94 gapmax 96.5 | find-pdf lagmax 33 gapmax 46.1
+    no10x run  1: start 15 | find-small lagmax 4 gapmax - | find-large lagmax 21 gapmax - | find-pdf lagmax 6 gapmax -
+    no10x run  2: start 16 | find-small lagmax 4 gapmax - | find-large lagmax 24 gapmax - | find-pdf lagmax 6 gapmax -
+    no10x run  3: start 15 | find-small lagmax 4 gapmax - | find-large lagmax 21 gapmax - | find-pdf lagmax 13 gapmax -
+    no10x run  4: start 16 | find-small lagmax 4 gapmax - | find-large lagmax 20 gapmax - | find-pdf lagmax 5 gapmax -
+    no10x run  5: start 17 | find-small lagmax 5 gapmax - | find-large lagmax 23 gapmax - | find-pdf lagmax 5 gapmax -
+    no10x run  6: start 15 | find-small lagmax 5 gapmax - | find-large lagmax 23 gapmax - | find-pdf lagmax 5 gapmax -
+    no10x run  7: start 15 | find-small lagmax 5 gapmax - | find-large lagmax 20 gapmax - | find-pdf lagmax 4 gapmax -
+    no10x run  8: start 16 | find-small lagmax 4 gapmax - | find-large lagmax 21 gapmax - | find-pdf lagmax 6 gapmax -
+    no10x run  9: start 14 | find-small lagmax 4 gapmax - | find-large lagmax 24 gapmax - | find-pdf lagmax 9 gapmax -
+    no10x run 10: start 15 | find-small lagmax 3 gapmax - | find-large lagmax 25 gapmax - | find-pdf lagmax 5 gapmax -

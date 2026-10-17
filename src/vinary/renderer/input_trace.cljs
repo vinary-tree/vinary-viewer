@@ -256,9 +256,11 @@
 
    `blockMs` and `frameGapMs` are reported SEPARATELY on purpose. A `longtask` entry is a real
    main-thread occupancy, whoever caused it. A rAF frame gap is only evidence of one when frames are
-   actually being served: Chromium throttles requestAnimationFrame for an occluded window — which is
-   every window under xvfb — so under a headless harness the gap sampler reports a steady ~1 s cadence
-   that has nothing to do with the app. Merging the two would have made every scenario look blocked."
+   actually being served: a HIDDEN window is not drawn, so there requestAnimationFrame runs only about
+   once a second and the gap sampler reports a steady ~1 s cadence that has nothing to do with the app —
+   which is what every scenario showed while the benchmark drove the real main's hidden warm-pool window
+   (docs/scientific/10 §12; it was first misread as xvfb throttling every window). In a window that paints
+   — under xvfb too — the gaps are a real block signal. Merging the two would hide which one moved."
   []
   (let [^js ks (:buf @keystrokes)
         ^js ws (:buf @writes)

@@ -108,6 +108,11 @@ Using `ric` for computation caps throughput at one slice per frame, and animatio
 never finished at all on a 1.1 MB one. This is recorded because the mistake is natural — `ric` was the
 tick that already existed.
 
+> **Note (2026-10-17).** Those two figures were measured in the real main's hidden warm-pool window, which
+> composites about one frame a second (docs/scientific/10 §12); a visible window, xvfb's included, is not throttled.
+> Re-measured in the live window, a `ric`-paced find settles a cached search in 7.6–7.7 ms against `yield!`'s 0.1–0.2 ms, and finishes the 1.1 MB document's first build in 588–602 ms against 452–473 ms (docs/scientific/10 §12.6). The direction of the decision is unchanged — `yield!` resumes at
+> once, `ric` waits for a frame — but the magnitude above was the hidden window's.
+
 `debounce!` keeps **one live timer per key**, replaced on each arming. The pattern it replaces —
 schedule a timer per keystroke and let the stale ones fire into a generation check — is observationally
 similar but leaves one timer per character alive and cannot express cancellation at all. The generation
@@ -186,6 +191,13 @@ keystrokes is what made those fields drop characters. The preview is kept — it
 - Worst keystroke-to-response wait on a 1.1 MB document: **480 ms → 75 ms**. Per-keystroke search CPU:
   **450 ms → 5.3 ms**.
 - No character is lost in any widget at any measured cadence (150 / 40 / 25 ms per character).
+
+> **Note (2026-10-17).** The figures above were measured in the hidden warm-pool window (docs/scientific/10 §12).
+> Re-measured in the app's live window they hold — `find-large` at 150 ms: a worst wait of 76–80 ms and 4.8–5.5 ms of
+> search CPU per keystroke — with one exception the hidden window had masked: a Preferences font field lost
+> characters typed across its own save, because main sent the window its own, older, saved settings back. That is
+> fixed by [ADR-0047](0047-persisted-state-stores.md), which applies this ADR's rule from the other side: the field
+> was right to give way to an unpublished value, so main no longer sends a window its own writes.
 - Four deferral idioms became one, with cancellation available for the first time.
 - Five matchers became one model whose semantics are a parameter and which is unit-tested per mode.
 - Two subscriptions stopped querying DataScript on every keystroke anywhere in the app.

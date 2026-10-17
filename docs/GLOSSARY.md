@@ -517,6 +517,11 @@ shows its frame fully built by default; Enter opens it, Shift+Enter its other en
 returns from. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §6;
 [`features/35-slide-shows.md`](features/35-slide-shows.md).*
 
+**painting precondition** — What every harness that measures something a user sees asserts first
+(`assertPainting` in `test/headless-window.js`): the window it measures is the app's **live** window and
+composites at least 5 animation frames in 300 ms. A hidden window draws about one frame a second, so a measurement there is of no
+window a user could see. *First introduced in `scientific/10-input-latency-experiments.md` §12.*
+
 **presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)
 and recorded in `[:ui :presentation]`: the **Slides layout** without a margin, the app chrome hidden by CSS
 (`.vv-root.vv-presenting`) and, by default, the window made fullscreen by main — which only ever leaves a fullscreen
@@ -534,6 +539,11 @@ introduced in `features/11-native-pdf.md`.*
 why, with Retry and ×. Unlike `:doc/error` it never replaces the document; the next applied read clears it.
 *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §7 and
 [ADR-0046](design-decisions/0046-reload-safe-pipelined-remote-reads.md).*
+
+**self-echo** — A persisted-state store sending a window its own write back: main writes the file a window saved,
+the file watcher fires, and the broadcast reaches the writer too, about half a second after the save began and
+possibly older than what it holds by then. ADR-0047 removes it (main skips the windows it last wrote that exact text
+for); it had clobbered a Preferences font field. *First introduced in `design-decisions/0047-persisted-state-stores.md`.*
 
 **semiring** — An algebra $`(K, \oplus, \otimes, \bar0, \bar1)`$ whose choice tunes what a weighted parse
 computes (recognition, best-parse, total mass). Implemented: Boolean, Tropical, Log, Probability, Product,
@@ -560,6 +570,11 @@ pipeline, renderers, streaming, and refresh as a local path, main-side only. *Fi
 keyboard-interactive); on decrypting a key file it may `AddKeysToAgent`. *First introduced in
 `features/29-remote-files-over-ssh.md`.*
 
+**standby window** — A hidden **warm-pool** window registered (`windows/add-standby!`) to receive the
+persisted-state broadcasts — settings, keymap, recent files, connections, extension prefs — while it waits, so the
+window a claim shows is current. No action ever targets it. *First introduced in
+`design-decisions/0047-persisted-state-stores.md`.*
+
 **StreamParser** — The pure `feed`/`finish` protocol (`vinary.stream.protocol`) that emits only
 newly-completed IR blocks and retains only the open block — the node-testable heart of streaming. *First
 introduced in `theory/09-document-streaming-and-the-wpda.md`.*
@@ -583,6 +598,12 @@ outline, and scrolling, over the same IR/streaming spine as the GUI. *First intr
 **Viterbi (best-parse)** — The $`\oplus`$-optimal derivation extracted from the packed parse forest — the
 max-weight (or, in the tropical semiring, least-cost) parse. *First introduced in
 `theory/08-common-document-ir.md`.*
+
+**warm pool** — The real main's pre-booted, hidden, fully loaded windows (`VV_POOL`, default 1): a new open
+claims one and shows it instead of booting a window cold. Pool windows are left out of main's window registry, so no
+global action targets them, and `BrowserWindow.getAllWindows()` lists the newest one first — which is how two
+harnesses came to measure one instead of the app's window (`scientific/10` §12). *First introduced in
+`optimization/cold-start/ledger.md` (Phase 3a).*
 
 **weighted tree transducer** — The IR's transformation model (`ir.transducer`): a tree-to-tree map carrying
 semiring weights, with exact composition. *First introduced in `theory/08-common-document-ir.md`.*
