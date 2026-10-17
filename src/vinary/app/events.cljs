@@ -46,6 +46,19 @@
   [uri]
   (if-let [p (uri/file-path uri)] [[:vv/open p]] []))
 
+(defn reopen-fx
+  "FX to re-open `uri` on a Back/Forward step (ADR-0046 §Re-validation), against DataScript value `snap`. A REMOTE
+   (ssh:// / sftp://) document this window still holds — its delivered :doc/meta carries a size and an mtime, and it
+   is not showing an error page — re-opens CONDITIONALLY: main stats the file and reads it only when that version
+   changed (vinary.main.revalidate). Before, every step downloaded the whole file again, and the late copy remounted
+   the view the step had just restored. Every other uri reloads as before (load-fx)."
+  [uri snap]
+  (let [p    (uri/file-path uri)
+        meta (when (and p (uri/remote? uri)) (ds/doc-attr snap p :doc/meta))]
+    (if (and (number? (:size meta)) (number? (:mtime meta)) (nil? (ds/doc-attr snap p :doc/error)))
+      [[:vv/open {:path p :if-unchanged {:size (:size meta) :mtime (:mtime meta)}}]]
+      (load-fx uri))))
+
 (defn- retention-fx
   "Sync main-process file watchers and evict unretained cached docs after a tab/history change."
   [db]
@@ -933,8 +946,9 @@
       :else        [:scroll/restore (or scroll 0)])))
 
 (defn- history-result
-  "Back/Forward (or a tab switch) landed on `entry` {:uri :scroll :line :facet}. Reload the primary doc
-   (idempotent), ensure the shown facet's sibling file is present, and restore the position facet-aware. Mirrors
+  "Back/Forward landed on `entry` {:uri :scroll :line :facet}. Reload the primary doc (idempotent; a remote doc this
+   window holds re-opens conditionally — reopen-fx), ensure the shown facet's sibling file is present, and restore the
+   position facet-aware. Mirrors
    nav-result's retention + http recent-save. The facet is already written onto the tab by nav/step, so the
    :content/received fresh-facet guard (nil? facet) is false → the restored view is not clobbered."
   [db uri entry]
@@ -945,7 +959,7 @@
       {:db db
        :fx (cond-> (retention-fx db)
              facet-path                       (conj [:facet/ensure-loaded {:path facet-path}])
-             (uri/file-path uri)              (into (load-fx uri))
+             (uri/file-path uri)              (into (reopen-fx uri (ds/snapshot)))
              (and restore (uri/file-path uri)) (conj restore)
              (and uri (uri/http? uri))        (conj [:vv/save-recent (pr-str (get-in db [:ui :recent]))]))}
       db)))

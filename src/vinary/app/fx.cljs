@@ -331,7 +331,12 @@
 (rf/reg-fx :jump/to-preview-current (fn [_] (when-let [line (cm/current-source-line)] (rf/dispatch [:preview/goto-line line]))))
 
 ;; renderer → main (over the contextBridge seam)
-(rf/reg-fx :vv/open  (fn [path] (when-let [^js vv (.-vv js/window)] (.open vv path))))
+;; a path, or {:path :if-unchanged {:size :mtime}} — a CONDITIONAL open (ADR-0046 §Re-validation; events/reopen-fx):
+;; main stats the remote file and reads it only when that version changed
+(rf/reg-fx :vv/open  (fn [x] (when-let [^js vv (.-vv js/window)]
+                               (if (map? x)
+                                 (.open vv (:path x) #js {:ifUnchanged (clj->js (:if-unchanged x))})
+                                 (.open vv x)))))
 ;; Settings ▸ File Type — main registers the override and re-sends the doc (ADR-0036). Guarded like every
 ;; newer preload fn (a stale preload from a not-yet-restarted daemon simply lacks it).
 (rf/reg-fx :vv/set-file-type

@@ -6,7 +6,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('vv', {
   // renderer → main
-  open: (path) => ipcRenderer.send('vv:open', path),
+  // opts (optional): { ifUnchanged: { size, mtime } } — a conditional re-open (ADR-0046 §Re-validation)
+  open: (path, opts) => ipcRenderer.send('vv:open', path, opts),
   close: (path) => ipcRenderer.send('vv:close', path),
   // Settings ▸ File Type — re-type an open document ({path, kind, language?}); main registers the
   // override and re-sends through the full open pipeline (ADR-0036).

@@ -726,7 +726,7 @@ request/reply effects, to their on-error path — rather than throwing.
 | `:find/cycle` | `{:dir :gen}` | `finder/cycle! dir` — move the focused match, wrapping at both ends (reconciles stale Ranges first — see `ensure-fresh!`; a mounted Source view cycles its own full-document matches) | `[:find/result {:count :idx :match-kind :gen}]` — the **count** too, because a re-collect can change it |
 | `:find/clear` | `_` | `finder/clear!` (delete both highlights, disconnect the MutationObserver, reset state) | — |
 | `:toc/scroll` | `id` | `getElementById id` inside `.vv-content` → `scroll/scroll-el-to! {:block :start :behavior "smooth"}` — a **confined** `.vv-content` scrollTo, never `el.scrollIntoView` (ADR-0032); an element outside any scroller falls back to `scrollIntoView`; no element and an `L<line>` id (a Source-outline entry) → `cm/scroll-source-to-line!` | — |
-| `:vv/open` | `path` | `window.vv.open(path)` → `vv:open` IPC (guarded on `window.vv`) | — |
+| `:vv/open` | `path`, or `{:path :if-unchanged {:size :mtime}}` | `window.vv.open(path)` → `vv:open` IPC (guarded on `window.vv`); the map form is a CONDITIONAL re-open — `open(path, {ifUnchanged})` (ADR-0046 §Re-validation, built by `events/reopen-fx` on Back/Forward to a remote document) | — |
 | `:vv/set-file-type` | `{:path :kind :language?}` | `window.vv.setFileType(req)` → `vv:set-file-type` IPC (guarded on `.-setFileType` — a stale preload lacks it): main registers the explicit type override and re-sends the doc to every retaining window (ADR-0036) | — |
 | `:vv/close` | `path` | `window.vv.close(path)` → `vv:close` IPC (guarded) | — |
 | `:vv/watch-assets` | `{:doc-path :paths}` | `window.vv.watchAssets(docPath, paths)` → `vv:watch-assets` IPC | — |

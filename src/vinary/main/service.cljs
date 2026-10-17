@@ -23,6 +23,7 @@
             [vinary.main.git :as git]
             [vinary.main.file-kind :as file-kind]
             [vinary.main.remote-subs :as remote-subs]
+            [vinary.main.revalidate :as revalidate]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
@@ -1116,14 +1117,32 @@
     (doseq [path (set/difference old new)]
       (when-not (retained? path) (unwatch-file! path)))))
 
+(defn- revalidate-open!
+  "A CONDITIONAL re-open of remote `path` (ADR-0046 §Re-validation — a Back/Forward step to a document window `wc`
+   still holds, whose delivered version is `have` {:size :mtime}). One stat decides. The same version
+   (vinary.main.revalidate) is left as the window shows it: nothing is read or sent. A changed one, or a stat that
+   fails, reads as an ordinary open — a failure then reaches the window as its refresh note. A change notification
+   arriving meanwhile triggers its own fan-out read to every retaining window, so none is lost."
+  [^js wc path have]
+  (let [read! #(request-content! path {:requester (owner-id wc)})]
+    (-> (.remoteStat ssh-transport path)
+        (.then (fn [^js st]
+                 (when-not (revalidate/same-version? have {:size (.-size st) :mtime (.-mtime st)})
+                   (read!))))
+        (.catch (fn [_] (read!))))))
+
 (defn open!
   "Send the file's content now, and watch it (once) so changes re-send live (and on re-create — many
-   editors land an atomic save that way)."
-  [^js wc path]
+   editors land an atomic save that way). `if-unchanged` ({:size :mtime}, optional) makes a REMOTE open conditional:
+   revalidate-open! — unless a read of the path is already running, which the open simply joins."
+  ([wc path] (open! wc path nil))
+  ([^js wc path if-unchanged]
   (ensure-window! wc)
   ;; this window asked: it receives the read even before its retention sync arrives (joining a running read)
   (swap! requester-wcs assoc (owner-id wc) wc)
-  (request-content! path {:requester (owner-id wc)})
+  (if (and if-unchanged (file-kind/remote-uri? path) (not (flight/in-flight @flights path)))
+    (revalidate-open! wc path if-unchanged)
+    (request-content! path {:requester (owner-id wc)}))
   (if (file-kind/remote-uri? path)
     (open-remote-tree! wc path)
     (cond
@@ -1146,7 +1165,7 @@
     (file-kind/git-graph-uri? path)
     nil
     :else
-    (ensure-content-watcher! path)))
+    (ensure-content-watcher! path))))
 
 (defn close! [^js wc path]
   (let [id (ensure-window! wc)]
@@ -1226,7 +1245,9 @@
                         :treeRefreshAll target-tree-refresh-all!
                         :releaseTreeOwner target-release-tree-owner!
                         :releaseSession target-release-session!}})
-  (.on ipcMain "vv:open"  (fn [^js e path] (open! (.-sender e) path)))
+  ;; opts (optional): {ifUnchanged: {size, mtime}} — a conditional re-open of a remote document (ADR-0046)
+  (.on ipcMain "vv:open"  (fn [^js e path ^js opts]
+                            (open! (.-sender e) path (some-> opts .-ifUnchanged (js->clj :keywordize-keys true)))))
   (.on ipcMain "vv:close" (fn [^js e path] (close! (.-sender e) path)))
   ;; Settings ▸ File Type — re-type an open document in place: register the override (kind/language replace
   ;; as a unit; a piped doc's stdin facts survive) and re-send through the FULL open pipeline to every

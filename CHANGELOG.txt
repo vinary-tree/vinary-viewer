@@ -579,6 +579,11 @@ Fixed
       instead of 26-78 s; small files are no slower. A dropped connection now
       fails a read at once instead of leaving it hanging, and the idle-
       connection reaper no longer closes a connection under a read in progress.
+    - Going Back or Forward to a remote (ssh:// / sftp://) document no longer
+      downloads it again: the viewer checks the file's size and modification
+      time (one round trip) and re-reads it only if it changed. Unchanged, the
+      document stays exactly as it was shown -- no reload, no second render.
+      Reload still always re-reads.
     - Large remote logs and tables (ssh:// and sftp://) stream and page many
       times faster: the bounded-memory streaming reader and the page-by-page
       table/log reader used to keep one 64 KiB request in flight at a time;
