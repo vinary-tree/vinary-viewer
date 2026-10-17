@@ -9,10 +9,14 @@
 // METHOD. Each VARIANT below is a LaTeX source together with the verdict expected of it: {deck, tier, source, frames,
 // secondScreen}. Those expectations are written down here, before any run, from the classifier's documented rules
 // (vinary.slides.deck/classify, deck) and Beamer's sources. Frames depend on the engine: Beamer labels each page
-// with its frame number, and the detector groups a frame's overlay pages by that label. A deck built through
-// xdvipdfmx (xelatex) is expected to carry no /PageLabels, so it gets one frame per page. Every variant is compiled
-// with every engine in a temporary directory. All the PDFs are classified in one `vv-cli --deck-info` call, and every
-// field is compared.
+// with its frame number, and the detector groups a frame's overlay pages by that label. pdflatex and lualatex write
+// /PageLabels in the run itself. hyperref's xdvipdfmx driver (hxetex.def) writes them from the labels the PREVIOUS
+// run left in the .aux file, so ONE xelatex pass has none (its log says "Rerun to get /PageLabels entry") and gets one
+// frame per page, and a SECOND pass has them. The corpus first ran xelatex once (2026-10-16), and its text then said
+// that xdvipdfmx writes no labels at all. The engine `xelatex2` (two passes) was added on 2026-10-17, with its
+// expectation written here before its first run: the same verdict and frames as pdflatex (`labelled`). Every variant
+// is compiled with every engine in a temporary directory. All the PDFs are classified in one `vv-cli --deck-info`
+// call, and every field is compared.
 //
 //   npm run compile:cli:test && node scripts/exp-deck-corpus.cjs --json=out.json | tee out.txt
 //
@@ -25,7 +29,9 @@ const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const CLI = path.join(ROOT, 'dist', 'cli', 'vv-cli.js');
-const ENGINES = ['pdflatex', 'lualatex', 'xelatex'];
+// id → the program and how many passes it gets; `xelatex2` is xelatex run twice in the same directory (above)
+const ENGINES = [{ id: 'pdflatex', cmd: 'pdflatex', passes: 1 }, { id: 'lualatex', cmd: 'lualatex', passes: 1 },
+                 { id: 'xelatex', cmd: 'xelatex', passes: 1 }, { id: 'xelatex2', cmd: 'xelatex', passes: 2 }];
 
 // 5 content frames of 3 overlays each, after a title frame: 16 pages in 6 frames
 const FRAMES = Array.from({ length: 5 }, (_, i) => `\\begin{frame}{Frame ${i + 2}}
@@ -44,7 +50,8 @@ ${FRAMES}
 \\end{document}
 `;
 const OVERRIDE = '\\hypersetup{pdfcreator={Custom slide tool}}';
-// per engine: frames = 6 where Beamer's page labels group the overlays, 16 (one per page) where the deck has none
+// per engine: frames = 6 where Beamer's page labels group the overlays, 16 (one per page) where the deck has none —
+// only a single xelatex pass (above)
 const labelled = (engine) => engine !== 'xelatex';
 
 const VARIANTS = [
@@ -101,12 +108,15 @@ Page one.\\newpage Page two.
 const FIELDS = ['deck', 'tier', 'source', 'frames', 'secondScreen'];
 
 function compile(engine, dir, name, source) {
-  const tex = path.join(dir, `${name}-${engine}.tex`);
+  const tex = path.join(dir, `${name}-${engine.id}.tex`);
   fs.writeFileSync(tex, source);
-  const r = cp.spawnSync(engine, ['-interaction=nonstopmode', '-halt-on-error', path.basename(tex)],
-    { cwd: dir, stdio: 'ignore', timeout: 300000 });
+  let status = 0;
+  for (let pass = 0; pass < engine.passes && status === 0; pass++) {
+    status = cp.spawnSync(engine.cmd, ['-interaction=nonstopmode', '-halt-on-error', path.basename(tex)],
+      { cwd: dir, stdio: 'ignore', timeout: 300000 }).status;
+  }
   const pdf = tex.replace(/\.tex$/, '.pdf');
-  return r.status === 0 && fs.existsSync(pdf) ? pdf : null;
+  return status === 0 && fs.existsSync(pdf) ? pdf : null;
 }
 
 function main() {
@@ -114,12 +124,17 @@ function main() {
   if (!fs.existsSync(CLI)) throw new Error('build the CLI first: npm run compile:cli:test');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-deck-corpus-'));
   const engines = {};
-  for (const e of ENGINES) engines[e] = cp.execFileSync(e, ['--version'], { encoding: 'utf8' }).split('\n')[0];
+  for (const e of ENGINES) {
+    const version = cp.execFileSync(e.cmd, ['--version'], { encoding: 'utf8' }).split('\n')[0];
+    engines[e.id] = e.passes === 1 ? version : `${version} (${e.passes} passes)`;
+  }
   console.log(`# exp-deck-corpus ${new Date().toISOString()}  node ${process.version}`);
-  for (const e of ENGINES) console.log(`# ${e}: ${engines[e]}`);
+  for (const e of ENGINES) console.log(`# ${e.id}: ${engines[e.id]}`);
   const cases = [];
   for (const v of VARIANTS) {
-    for (const e of ENGINES) cases.push({ variant: v.name, engine: e, why: v.why, pdf: compile(e, dir, v.name, v.source), expect: v.expect(e) });
+    for (const e of ENGINES) {
+      cases.push({ variant: v.name, engine: e.id, why: v.why, pdf: compile(e, dir, v.name, v.source), expect: v.expect(e.id) });
+    }
   }
   const built = cases.filter((c) => c.pdf);
   const out = cp.spawnSync('node', [CLI, '--deck-info', ...built.map((c) => c.pdf)],

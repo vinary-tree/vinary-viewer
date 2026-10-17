@@ -1,0 +1,175 @@
+# XeLaTeX page labels: one pass, two passes, and one pass over an edited deck (docs/scientific/12 §5.1)
+# measured 2026-10-17 on: XeTeX 3.141592653-2.6-0.999998 and LuaHBTeX 1.24.0 (TeX Live 2026/Arch Linux),
+# beamer 2026/01/22 v3.77, hyperref 2026-01-29 v7.01p (driver hxetex.def for xelatex); labels read with pdf.js
+# (pdfjs-dist getPageLabels), ranges with qpdf 12.4.2 (--json=2 --json-key=pagelabels).
+#
+# The registration below was written to a file before the first compile; it is reproduced verbatim.
+
+  H-XSTALE (registered 2026-10-17, before any run)
+  
+  Claim from hxetex.def (hyperref's xdvipdfmx driver): at \begin{document} it writes /PageLabels from the
+  \HyPL@Entry lines the PREVIOUS run left in the .aux, and only warns "Rerun to get /PageLabels entry" when
+  there are none. So a single xelatex pass over an EDITED deck carries the previous version's labels.
+  
+  Design: v1 = a title frame + 5 frames x 3 overlays (16 pages). v2 = v1 with one 2-overlay frame inserted
+  after the title (18 pages).
+    step 1: xelatex v1 (no .aux)      -> expected labels: none (null), log warns "Rerun to get /PageLabels entry"
+    step 2: xelatex v1 again          -> expected: 1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6
+    step 3: v2 replaces the source; xelatex ONCE (v1's .aux present)
+                                     -> expected: v1's labels for pages 0..15, then the last range continued:
+                                        1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 8   (stale; no Rerun warning)
+    step 4: xelatex v2 again          -> expected true labels: 1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7
+  Control: the same four steps with lualatex -> expected true labels at every step (v1 at steps 1-2, v2 at 3-4).
+  Refutation: step 3 under xelatex gives v2's true labels, or no labels.
+
+## Sources (v1 = title + 5 frames x 3 overlays; v2 = v1 with a 2-overlay frame inserted after the title)
+
+### v1.tex
+    \documentclass{beamer}
+    \title{Stale labels}
+    \begin{document}
+    \begin{frame}\titlepage\end{frame}
+    \begin{frame}{Frame 2}
+      \begin{itemize}
+        \item<1-> First point of frame 2
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 3}
+      \begin{itemize}
+        \item<1-> First point of frame 3
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 4}
+      \begin{itemize}
+        \item<1-> First point of frame 4
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 5}
+      \begin{itemize}
+        \item<1-> First point of frame 5
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 6}
+      \begin{itemize}
+        \item<1-> First point of frame 6
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \end{document}
+
+### v2.tex
+    \documentclass{beamer}
+    \title{Stale labels}
+    \begin{document}
+    \begin{frame}\titlepage\end{frame}
+    \begin{frame}{Inserted}
+      \begin{itemize}
+        \item<1-> One
+        \item<2-> Two
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 3}
+      \begin{itemize}
+        \item<1-> First point of frame 3
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 4}
+      \begin{itemize}
+        \item<1-> First point of frame 4
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 5}
+      \begin{itemize}
+        \item<1-> First point of frame 5
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 6}
+      \begin{itemize}
+        \item<1-> First point of frame 6
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \begin{frame}{Frame 7}
+      \begin{itemize}
+        \item<1-> First point of frame 7
+        \item<2-> Second point
+        \item<3-> Third point
+      \end{itemize}
+    \end{frame}
+    \end{document}
+
+## Procedure (per engine, in a fresh directory)
+
+    cp v1.tex deck.tex; ENGINE deck.tex   # step 1
+                        ENGINE deck.tex   # step 2
+    cp v2.tex deck.tex; ENGINE deck.tex   # step 3 (the .aux of step 2 is still there)
+                        ENGINE deck.tex   # step 4
+    (ENGINE -interaction=nonstopmode -halt-on-error, pinned with taskset -c 16-31)
+
+## Results: 'Rerun to get /PageLabels entry' count in the step's log, exit status, labels
+
+    == xelatex
+    step 1: 1 status=0 xelatex/step1.pdf pages=16 labels=null
+    step 2: 0 status=0 xelatex/step2.pdf pages=16 labels=1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6
+    step 3: 0 status=0 xelatex/step3.pdf pages=18 labels=1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6 6 6
+    step 4: 0 status=0 xelatex/step4.pdf pages=18 labels=1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7
+    == lualatex
+    step 1: 0 status=0 lualatex/step1.pdf pages=16 labels=1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6
+    step 2: 0 status=0 lualatex/step2.pdf pages=16 labels=1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6
+    step 3: 0 status=0 lualatex/step3.pdf pages=18 labels=1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7
+    step 4: 0 status=0 lualatex/step4.pdf pages=18 labels=1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7
+
+## The label ranges hyperref wrote (xelatex; qpdf JSON v2 marks a text string with the prefix "u:")
+
+    step 2
+      page 0 {'/P': 'u:1', '/St': 1}
+      page 1 {'/P': 'u:2', '/St': 1}
+      page 4 {'/P': 'u:3', '/St': 1}
+      page 7 {'/P': 'u:4', '/St': 1}
+      page 10 {'/P': 'u:5', '/St': 1}
+      page 13 {'/P': 'u:6', '/St': 1}
+    step 3
+      page 0 {'/P': 'u:1', '/St': 1}
+      page 1 {'/P': 'u:2', '/St': 1}
+      page 4 {'/P': 'u:3', '/St': 1}
+      page 7 {'/P': 'u:4', '/St': 1}
+      page 10 {'/P': 'u:5', '/St': 1}
+      page 13 {'/P': 'u:6', '/St': 1}
+
+## Verdict
+
+  Steps 1, 2 and 4 under xelatex and all four control steps under lualatex: as registered.
+  Step 3 under xelatex: the labels are v1's, with no Rerun warning, as registered: the staleness is confirmed.
+  The registered labels of the two pages past v1's end (7 8) were wrong: they read 6 6. hyperref writes each
+  Beamer frame number as a range with a fixed prefix (/P (6), no numbering style /S), one range per frame, so
+  every later page repeats the last prefix. The registration had assumed decimal-numbered ranges.
+
+## The stale pass is silent
+
+  Warnings in the xelatex logs: step 1 has 'Package hyperref Warning: Rerun to get /PageLabels entry.' and
+  'Package rerunfilecheck Warning: File `deck.out' has changed.'; step 3 (the stale pass) has no warning at all.
+
+## latexmk (checked after the verdict, not registered)
+
+  Latexmk 4.87 (-xelatex -interaction=nonstopmode -halt-on-error), v1 in a fresh directory, then v2 over it:
+
+    v1: xelatex runs=2  labels=1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6
+    v2: xelatex runs=2  labels=1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7
+
+  latexmk reran xelatex until the auxiliary files settled, and both PDFs carry their own labels.

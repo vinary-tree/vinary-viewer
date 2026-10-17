@@ -114,7 +114,7 @@ with no labels (xdvipdfmx writes none) or with two-screen pages (§4).
 | Instrument | Question | Output |
 |---|---|---|
 | `vv --cli --deck-info` (`src/vinary/cli/core.cljs`) | The GUI's evidence, page measure and classifier, as one JSON line per PDF. This is the instrument of §5–§7: the experiments run the product's own code, not a copy of it. | stdout |
-| [`scripts/exp-deck-corpus.cjs`](../../scripts/exp-deck-corpus.cjs) | Real Beamer output: 14 variants × pdfLaTeX / LuaLaTeX / XeLaTeX, each with its expected verdict written into the script before the run | `positive-corpus.*` |
+| [`scripts/exp-deck-corpus.cjs`](../../scripts/exp-deck-corpus.cjs) | Real Beamer output: 14 variants × pdfLaTeX / LuaLaTeX / XeLaTeX, and from 2026-10-17 XeLaTeX run twice (§5.1), each with its expected verdict written into the script before the run | `positive-corpus.*`, `positive-corpus-2026-10-17.*` |
 | [`scripts/exp-deck-local-corpus.cjs`](../../scripts/exp-deck-local-corpus.cjs) | A natural corpus, classified in batches; counts by generic category only (privacy: below). `--from-raw` re-summarizes an earlier run. | `local-corpus-summary*.*` |
 | [`scripts/exp-deck-export-corpus.cjs`](../../scripts/exp-deck-export-corpus.cjs) | LibreOffice Impress at each of its seven slide-size presets, exported headless under a throwaway profile | `export-corpus-*.*` |
 | [`scripts/bench-slide-flip.cjs`](../../scripts/bench-slide-flip.cjs) (`npm run bench:flip`) | Key → frame latency in the real app, with attribution probes and a canvas count every frame (§8.2) | `flip-*.{txt,json}` |
@@ -182,6 +182,53 @@ depends on the engine:
 article on Beamer paper from a TeX engine is indistinguishable, by this evidence, from a Beamer deck whose Creator was
 overridden. The rule accepts that false positive in exchange for the deck it recovers, and the document can always be
 switched to the Document layout.
+
+### 5.1 · Correction: XeLaTeX writes labels from its second pass (2026-10-17)
+
+**What was wrong.** §2 and §5 said that xdvipdfmx writes no `/PageLabels`, so that every XeLaTeX deck gets one frame
+per page. The corpus compiled each variant **once**, and its XeLaTeX rows are right for one pass. The explanation was
+not. hyperref's xdvipdfmx driver (`hxetex.def`) writes the labels at `\begin{document}` from the `\HyPL@Entry` lines
+that the **previous** run left in the `.aux` file. With no such lines, the driver warns *Rerun to get /PageLabels
+entry* and writes none. pdfLaTeX and LuaLaTeX write the labels in the run itself. ADR-0048 §2.4 found this while
+designing note-page detection.
+
+**A related measurement: one pass over an edited deck (H-XSTALE).** If the labels come from the previous run, then one
+XeLaTeX pass over an **edited** deck carries the previous version's labels. The hypothesis, with the labels expected at
+every step, was written to a file before the first compile, and the data file reproduces it verbatim
+([`data/12/xelatex-labels-2026-10-17.txt`](data/12/xelatex-labels-2026-10-17.txt)). The procedure:
+
+1. compile a 16-page deck (a title frame and five 3-overlay frames) twice;
+2. insert a 2-overlay frame after the title, giving 18 pages;
+3. compile once, then once more.
+
+LuaLaTeX ran the same steps as the control.
+
+| Step | XeLaTeX labels | LuaLaTeX labels (control) |
+|---|---|---|
+| 1. v1, first pass | none; *Rerun to get /PageLabels entry* | `1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6` |
+| 2. v1, second pass | `1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6` | the same |
+| 3. v2, one pass over v1's `.aux` | `1 2 2 2 3 3 3 4 4 4 5 5 5 6 6 6 6 6` — **v1's labels**, and no warning at all | `1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7` |
+| 4. v2, second pass | `1 2 2 3 3 3 4 4 4 5 5 5 6 6 6 7 7 7` | the same |
+
+**Verdict.** The staleness is **confirmed**, and the stale pass is **silent**: its log has no warning. One detail of the
+registration was refuted. It expected the two pages past v1's end to read `7 8`, a decimal range continued. They
+read `6 6`. hyperref writes each frame number as a range with a fixed prefix (`/P (6)`, with no numbering style `/S`),
+one range per frame, so every later page repeats the last prefix (the ranges are in the data file).
+
+A deck in that state is inconsistent with itself, and the detector groups it by the labels it carries: at step 3, the
+inserted frame's two pages and the next frame's first page would form one frame. A build that compiles until the
+auxiliary files settle avoids it. Latexmk 4.87 ran XeLaTeX twice for the fresh deck and twice again after the edit,
+and gave both PDFs their own labels. That check was made after the verdict and was not registered.
+
+**The re-run (H-X2), registered here before it ran.** The corpus gains a fourth engine, `xelatex2`: XeLaTeX run twice
+in the same directory. Its expected verdicts were written into `scripts/exp-deck-corpus.cjs` before the run. For every
+variant, they are pdfLaTeX's: `labelled` is false only for a single `xelatex` pass. So the six variants with overlays
+and Beamer's page labels (`aspect*`, `creator-override`, `fullscreen-beamer`) are expected to have **6** frames under
+`xelatex2`, not 16, and every other field to match.
+
+The 42 cases of the three original engines run again unchanged, as a replication, for 56 cases in all. **H-X2 is
+refuted** if any `xelatex2` case differs from its expectation, or if any of the 42 original cases differs from its
+2026-10-16 verdict. The 2026-10-16 data stay in `positive-corpus.*`, and the re-run writes `positive-corpus-2026-10-17.*`.
 
 ## 6 · The natural corpus
 

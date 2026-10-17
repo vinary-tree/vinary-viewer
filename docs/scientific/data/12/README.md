@@ -9,6 +9,7 @@ Every file is the instrument's own output, tee'd once; nothing here was edited b
 |---|---|
 | `second-screen-2026-10-16.txt` | Beamer's two-screen options: page geometry, page labels and text placement, measured on LuaLaTeX output (§4) |
 | `positive-corpus.{txt,json}` | The controlled Beamer corpus: 14 variants × pdfLaTeX / LuaLaTeX / XeLaTeX, expected verdicts written into `scripts/exp-deck-corpus.cjs` before the run (§5) |
+| `xelatex-labels-2026-10-17.txt` | XeLaTeX's page labels after one pass, two passes, and one pass over an edited deck (H-XSTALE, its registration reproduced verbatim), with LuaLaTeX as the control and a latexmk check (§5.1). Assembled by a shell block from the instruments' outputs; the verdict paragraphs at its end are written by hand. |
 | `local-corpus-summary.{txt,json}` | The natural corpus (2456 local PDFs), counts by generic category only — never a file name, path or content (§6) |
 | `local-corpus-summary-after.{txt,json}` | The same corpus re-classified in full after the export-canvas change (§7) |
 | `export-canvas-prediction.txt` | The pre-registration of the export-canvas experiment: P1–P3, and a dated correction (§7) |
