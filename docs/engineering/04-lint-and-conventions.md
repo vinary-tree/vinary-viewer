@@ -10,10 +10,10 @@ the-filesystem discipline that is half compiler-enforced and half review-enforce
 
 ---
 
-## 1. `test/lint.js` — the four checks
+## 1. `test/lint.js` — the five checks
 
 `test/lint.js` is a small CommonJS script (`'use strict'`) with **no
-dependencies** beyond Node built-ins. It performs four checks and exits non-zero
+dependencies** beyond Node built-ins. It performs five checks and exits non-zero
 on any failure. Run it with:
 
 ```bash
@@ -115,6 +115,24 @@ deliberate exception is declared in the doc itself with an HTML comment,
 
 The rule this enforces: **a commit that registers an event, effect, subscription or
 IPC channel — or adds a namespace or JS module — documents it in the same commit.**
+
+### 1.4 Check 5 — every relative link names a file that exists
+
+A Markdown link or image to a repository path is a claim about the filesystem, and
+nothing else checked it. It was found false three times on 2026-10-17: ADR-0028
+embedded a diagram (`component-feature-layers.svg`) that was never committed,
+ADR-0027 linked ADR-0019's file under ADR-0020's number, and ADR-0046 linked
+`content-guard.cljs` for the file `content_guard.cljs`.
+
+Check 5 reads every Markdown file under `docs/` plus `README.md` and `AGENTS.md`. It
+skips fenced code blocks and inline code spans. It also skips URLs (any `scheme:`)
+and in-page `#anchors`. Every other `[text](path)` or `![alt](path)` must name an
+existing file or directory, relative to the document. The path is percent-decoded,
+and a `#fragment` or `?query` is dropped first. Anchors *inside* other files are not
+checked.
+
+A negative control: the check run on the tree before those three fixes reports
+exactly those three links.
 
 ---
 

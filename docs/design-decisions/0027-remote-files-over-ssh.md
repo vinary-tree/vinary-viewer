@@ -18,7 +18,7 @@ equivalent aliases — both drive the SFTP subsystem for file operations; the sc
 display.
 
 The governing constraint, restated from [ADR-0017](0017-common-document-ir.md) /
-[ADR-0020](0020-terminal-preview-layer.md) / [ADR-0025](0025-latex-rendering-via-unified-latex.md):
+[ADR-0019](0019-terminal-preview-layer.md) / [ADR-0025](0025-latex-rendering-via-unified-latex.md):
 **reuse existing subsystems; do not rebuild.** Every capability below is layered onto machinery that
 already exists — the `vv-archive://` virtual-URI backend is the exact template.
 

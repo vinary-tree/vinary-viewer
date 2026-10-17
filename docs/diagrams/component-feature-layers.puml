@@ -1,0 +1,78 @@
+@startuml component-feature-layers
+'' ============================================================================
+'' vinary-viewer — Component: ADR-0028's composable rendering features (superseded by ADR-0029).
+''
+'' The layer model ADR-0028 recorded: recognition is the ONLY per-format layer; lowering, enrichment and
+'' capability are shared feature modules that every dialect composes, both back-ends inherit, and raw HTML
+'' crosses the one sanitize seam. ADR-0029 kept every shared layer and replaced the native recognizers with the
+'' mature parsers — the note says so, because the figure documents a reversed design.
+''
+'' PlantUML over Mermaid: packages + concept tints from the shared _vv-theme palette, and a legend in the
+'' house style (hue = concept: brown = source text, orange = IR core / features / ANSI, green = HTML,
+'' amber = the one sanitize seam, grey = what ADR-0029 replaced).
+'' ============================================================================
+!include _vv-theme.iuml
+
+'' the theme's dashed-grey «planned» look, named for what it marks here: a reversed design, not a forthcoming one
+skinparam rectangle<<superseded>> {
+  BackgroundColor PLANNED_COLOR
+  BorderColor PLANNED_BORDER
+  BorderStyle dashed
+}
+
+title Composable rendering features (ADR-0028) — recognition per format, everything downstream shared
+
+left to right direction
+
+package "Recognition — the only per-format layer" as REC {
+  rectangle "**GFM**\nnative, deterministic\nblock + inline, O(n)\n(vinary.ir.recognizer.*)" <<superseded>> as GFM
+  rectangle "**HTML**\ndelegated:\nrehype-parse + sanitizer" as HTML FS_TINT
+  rectangle "**LaTeX**\ndelegated:\nunified-latex" as TEX FS_TINT
+  rectangle "**Org**\ndelegated:\nuniorg (org-pipeline)" as ORG FS_TINT
+  rectangle "**log**\nbrace-WPDA\nStreamParser" as LOG FS_TINT
+}
+
+rectangle "**common IR**\nvinary.ir.node\n(+ streaming spine,\nvinary.stream.*)" as IR IR_TINT
+
+package "Shared feature layers — one module per construct, every dialect" as FEAT {
+  rectangle "**Lowering**\n{:html :ansi} by IR :kind\n(both back-ends inherit)" as LOW IR_TINT
+  rectangle "**Enrichment**\nordered post-lowering passes:\nmath · mermaid · figures · syntax" as ENR IR_TINT
+  rectangle "**Capability**\nIR → derived views:\nTOC / outline · find index" as CAP IR_TINT
+  rectangle "**registry/build**\nformat-spec + features → renderer\n(collision- and cycle-checked,\nmemoized once per format)" as REG IR_TINT
+}
+
+rectangle "**ir.backend.html**\n→ HTML → DOM (GUI)" as BH MARKDOWN_TINT
+rectangle "**ir.backend.ansi**\n→ ANSI → terminal" as BA IR_TINT
+rectangle "**lower-raw** — the ONE sanitize seam\nir→hast → rehype-raw →\nrehype-sanitize (GitHub allowlist) →\nstringify" as SAN IPC_TINT
+
+GFM --> IR
+HTML --> IR
+TEX --> IR
+ORG --> IR
+LOG --> IR
+IR --> REG
+REG --> LOW
+REG --> ENR
+REG --> CAP
+LOW --> BH
+LOW --> BA
+BH --> SAN : :raw-html leaves
+ENR ..> BH
+ENR ..> BA
+
+note bottom of GFM
+  **Superseded (ADR-0029).** The native recognizers were reversed
+  before they shipped: the mature parsers (remark-gfm/micromark,
+  uniorg, unified-latex) already deliver this, so the GFM box became
+  a delegated recognizer too. Every shared layer to its right survived.
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| a format's recognizer over its source text (delegated to a mature parser) |
+  |<#DDDDDD>&#160;&#160;&#160;&#160;| the native recognizer ADR-0029 replaced (dashed) |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the IR core, the shared feature layers, the ANSI back-end |
+  |<#67B11D>&#160;&#160;&#160;&#160;| the HTML back-end (GUI) |
+  |<#B1951D>&#160;&#160;&#160;&#160;| the one sanitize seam for raw HTML |
+endlegend
+@enduml

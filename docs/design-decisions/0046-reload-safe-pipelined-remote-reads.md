@@ -61,7 +61,7 @@ Explicit requesters are needed because `vv:open` can reach main before the windo
 path. Local synchronous reads still deliver synchronously, so a document's `vv:content` still precedes its
 `vv:tree`.
 
-**Ordering in the renderer.** [`vinary.app.content-guard`](../../src/vinary/app/content-guard.cljs)`/stale?` drops
+**Ordering in the renderer.** [`vinary.app.content-guard`](../../src/vinary/app/content_guard.cljs)`/stale?` drops
 a payload whose `seq` is not newer than the `:doc/seq` the document applied. Both `:content/received` and
 `:content/error` use it, so an older read's success or failure can never replace a newer one. A payload without
 `seq` — a web-linked PDF, a test stub — is never stale. Only main mints `seq`.

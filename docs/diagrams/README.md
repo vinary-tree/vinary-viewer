@@ -341,6 +341,7 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `component-ir-two-backends.puml` | component | `theory/10-terminal-rendering-second-renderer.md` |
 | `state-tui-terminal.puml` | state | `theory/10-terminal-rendering-second-renderer.md` |
 | `component-terminal-layer.puml` | component | `design-decisions/0019-terminal-preview-layer.md` |
+| `component-feature-layers.puml` | component *(superseded design)* | `design-decisions/0028-…` — superseded by ADR-0029, which kept its shared layers |
 | `component-terminal-renderer.puml` | component | `features/30-terminal-preview.md` · `architecture/07-…` · `engineering/05-terminal-build-and-launch.md` |
 | `seq-cli-render.puml` | sequence | `features/30-terminal-preview.md` · `usage/07-terminal-cli-tui.md` |
 | `component-diff-model.puml` | component | `features/28-diff-rendering.md` · `design-decisions/0026-…` |

@@ -1,5 +1,5 @@
 'use strict';
-// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Four checks:
+// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Five checks:
 //   1. every JS source parses (node --check)
 //   2. app.css / style.css braces balance
 //   3. every --vv-* variable referenced by a stylesheet is defined by EVERY theme of that surface
@@ -7,6 +7,7 @@
 //        a. docs/reference/events-effects-subs.md ↔ every re-frame registration (per section)
 //        b. docs/reference/ipc-channels.md ↔ every vv:* IPC channel in the preloads + main
 //        c. docs/reference/namespaces.md ↔ every namespace and JS module under src/vinary
+//   5. every relative link and image in the Markdown docs names a file that exists
 // Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
 const path = require('path');
@@ -195,6 +196,36 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
     `${docPath} documents all ${inCode.size} namespaces + JS modules under src/vinary` + (missing.length ? ` — MISSING: ${show(missing)}` : ''));
   log(stale.length === 0,
     `${docPath} names no removed namespace` + (stale.length ? ` — NOT IN CODE: ${show(stale)}` : ''));
+}
+
+// 5. Relative links resolve. A Markdown link or image to a repository path is a claim about the filesystem, and
+//    nothing else checks it: ADR-0028 embedded a diagram that was never committed (found 2026-10-17), and ADR-0027
+//    linked ADR-0019 under ADR-0020's number. Every `[text](path)` / `![alt](path)` outside code — fenced blocks and
+//    inline code spans are skipped, as are URLs and in-page `#anchors` — must name an existing file or directory,
+//    relative to the document. (Anchors inside other files are not checked.)
+{
+  const mdFiles = [...walkFiles(path.join(root, 'docs'), ['.md']),
+                   ...['README.md', 'AGENTS.md'].map((f) => path.join(root, f)).filter((f) => fs.existsSync(f))];
+  const linkRe = /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+  const broken = [];
+  let checked = 0;
+  for (const f of mdFiles) {
+    const text = fs.readFileSync(f, 'utf8')
+      .replace(/^(```|~~~)[\s\S]*?^\1/gm, '')        // fenced code blocks
+      .replace(/(`+)[\s\S]*?\1/g, '');                // inline code spans
+    for (const m of text.matchAll(linkRe)) {
+      const target = m[1];
+      if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(target)) continue;   // a URL (http:, mailto:, data:, …) or an in-page anchor
+      const rel = target.split('#')[0].split('?')[0];
+      if (!rel) continue;
+      checked += 1;
+      let decoded = rel;
+      try { decoded = decodeURIComponent(rel); } catch (_e) { /* keep it as written */ }
+      if (!fs.existsSync(path.resolve(path.dirname(f), decoded))) broken.push(`${path.relative(root, f)} → ${target}`);
+    }
+  }
+  log(broken.length === 0,
+    `${checked} relative links in ${mdFiles.length} Markdown docs name existing files` + (broken.length ? ` — BROKEN: ${show(broken)}` : ''));
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');
