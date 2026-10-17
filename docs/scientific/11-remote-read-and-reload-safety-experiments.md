@@ -1,8 +1,12 @@
 # 11 — Remote read and reload-safety experiments
 
 **Status: in progress.**
-- **Recorded:** the baseline and its hypotheses (this page), plus one discovery made while validating the instrument (H0).
-- **Pending:** the interventions and their re-measurement (§8, §9).
+- **Recorded:**
+  - the baseline and its hypotheses, plus one discovery made while validating the instrument (H0);
+  - E0, E1 and E2 (§9.1–§9.3).
+- **Pending:**
+  - E3: the window that refutes H2 at 32 MiB, and H6's memory (§9.4);
+  - the D-phase measurements of H4 and H5.
 
 These experiments support [ADR-0046 — Reload-safe, pipelined remote reads] and the slide-deck work of
 [ADR-0045 — Slide-deck presentation], where a remote deck (`vv sftp://host/talk.pdf`) is read whole over SFTP
@@ -313,7 +317,157 @@ per request.
 `noDelay` on, and fails above 800 ms. With the fix commented out, the same arm measured 2 067 ms (the
 one-sided stall of §4); with it, it passes in tens of milliseconds.
 
-*E1–E3 and D1–D7 are recorded below as they land.*
+### 9.2 · E1 — pipelined, preallocated whole-file reader (2026-10-16)
+
+**Intervention.** `remoteOpenFile(uri)` in `src/vinary/main/ssh_transport.js` returns a file handle with
+`readAt`, `readRange`, `readAll`, `fstat` and `close`. The handle is registered with its connection like a
+stream, so a dropped connection rejects its pending requests and the idle reaper leaves it alone.
+
+`readAll`:
+- preallocates the file (`Buffer.allocUnsafe(size)`) and refuses a file over the cap before any READ;
+- keeps at most $`D`$ requests of $`C`$ bytes in flight, with $`C = L`$ (ssh2's `_maxReadLen`) and
+  $`D = \min\!\left(64,\ \max\!\left(4,\ \lceil 2\,\text{MiB}/C \rceil\right)\right)`$. That gives $`D = 9`$ for
+  an OpenSSH ident ($`DC = 2.23`$ MiB) and $`D = 64`$ for ssh2's ($`DC = 1.95`$ MiB);
+- issues the end-of-file probe at exactly the expected size, in the same pipeline;
+- re-requests a short read's remainder, and shrinks $`C`$ only when that remainder returns data (a server that
+  caps reads);
+- lets CLOSE land in the background.
+
+`remoteReadFile`, the `stream` reader below, is OPEN → `readAll` → CLOSE. Called without a size hint, as here,
+it also pays one FSTAT.
+
+**Prediction (§8, H2).** OPEN + FSTAT + the window-bound body:
+
+```math
+\hat t_{\text{E1}} \approx 2R + R\cdot\max\!\left(\left\lceil \frac{S}{D\,C} \right\rceil,\; \frac{S}{W}\right) + \frac{S}{B_{cpu}}
+```
+
+- $`W = 2`$ MiB is ssh2's channel window (`Channel.js` `MAX_WINDOW`).
+- $`S/B_{cpu}`$ is the same cell's time at $`R = 0`$.
+- For 32 MiB at 50 ms this gives $`2R + 16R + 58.5 = 958.5`$ ms (OpenSSH) and $`2R + 17R + 80.8 = 1030.8`$ ms
+  (ssh2).
+- The headline prediction was OpenSSH 32 MiB at 50 ms: 26.3 s → ≈ 1–2 s.
+
+**Run.** Same driver, pinning and `--server-nodelay` as §9.1.
+- Readers: `stream` (now E1), `stream-legacy` (the pre-E1 algorithm, kept as `_readFileStream`) and `fastGet`.
+- Cells: 2 warm-ups, then ≤ 9 timed reads or 30 s (32 MiB: ≤ 7 or 40 s).
+- Raw data: `data/11/e1-fixed-nodelay-server-2026-10-16.txt` and its two `.json` files.
+- A first cut was **slower** than the legacy reader on small files (ssh2 ident, 64 KiB at 50 ms: 296.5 against
+  253.7 ms; `data/11/e1-prefix-nagle-server-2026-10-16.*`, fixture server with Nagle on). Three causes, all
+  fixed before the commit and pinned by request-count assertions in `ssh-transport-smoke`:
+  1. an end of file straddling the probe cost an extra round trip;
+  2. that short read shrank the pipeline;
+  3. CLOSE sat on the critical path.
+
+| Ident | $`S`$ | $`R`$ (ms) | legacy (ms) | E1 (ms) | `fastGet` (ms) | legacy / E1 | $`\hat t_{\text{E1}}`$ (ms) | E1 / $`\hat t_{\text{E1}}`$ |
+|---|---|---|---|---|---|---|---|---|
+| ssh2 | 64 KiB | 50 | 253.5 | 153.0 | 253.6 | 1.7× | 151.5 | 1.010 |
+| ssh2 | 1 MiB | 50 | 2 530.6 | 156.9 | 258.8 | 16.1× | 155.3 | 1.010 |
+| ssh2 | 32 MiB | 0 | 267.9 † | 80.8 | 129.8 | 3.3× | — | — |
+| ssh2 | 32 MiB | 50 | 78 751.7 ‡ | 1 812.9 | 1 933.3 | 43× | 1 030.8 | **1.759** |
+| OpenSSH | 64 KiB | 50 | 152.6 | 152.7 | 203.2 | 1.0× | 151.2 | 1.010 |
+| OpenSSH | 1 MiB | 50 | 914.8 | 156.0 | 207.9 | 5.9× | 154.4 | 1.010 |
+| OpenSSH | 32 MiB | 0 | 144.1 † | 58.5 | 114.8 | 2.5× | — | — |
+| OpenSSH | 32 MiB | 50 | 26 278.4 ‡ | 1 748.7 | 1 902.3 | 15.0× | 958.5 | **1.824** |
+
+† The 32 MiB legacy reads were not repeated in this run. At $`R = 0`$ the value is §9.1's (the same legacy
+algorithm, with E0). ‡ At 50 ms it is §5's; E0 changed nothing at 50 ms (§9.1).
+
+**Result.**
+- **The headline holds.** OpenSSH 32 MiB at 50 ms went from 26.3 s to **1.75 s** (15×), the ssh2 ident from
+  78.8 s to 1.81 s (43×). 1 MiB at 50 ms went from 0.91 s / 2.53 s to 0.156 s.
+- **Small files are no slower.** 64 KiB at 50 ms costs 3 R with either reader against OpenSSH (152.7 against
+  152.6 ms). The ssh2 ident's 5 R legacy read ($`k = 3`$) drops to 3 R.
+- **E1 beats `fastGet` in every cell.** `fastGet` keeps the same 2 MiB in flight but writes the file to disk and
+  reads it back.
+- **H2 holds within 1 % wherever one window covers the file**, the 64 KiB and 1 MiB cells.
+- **At 32 MiB H2 is refuted by its own criterion.** The time is 1.76× (ssh2) and 1.82× (OpenSSH) the model, more
+  than 25 % off with $`DC \ge 2`$ MiB.
+  - A post-hoc fit with one MiB per round trip, $`2R + 32R + S/B_{cpu}`$, lands within 2 %: 1 758.5 ms against
+    1 748.7 (OpenSSH), 1 780.8 against 1 812.9 (ssh2).
+  - `fastGet` (64 × 32 KiB) hits the same ceiling (1.90 / 1.93 s), so the ceiling is not this reader's.
+  - A fit is not a mechanism. §9.4 (E3) diagnoses the cause.
+- **H6 is untested here.** The run had no `--expose-gc`, so the peak `arrayBuffers` (130–161 MiB for 32 MiB,
+  every reader) includes uncollected garbage from earlier reads. E3 repeats it with `--expose-gc`.
+
+### 9.3 · E2 — the document group's stats, concurrent and overlapped with the read (2026-10-17)
+
+**Intervention.** A remote open of a group kind (PDF, Markdown, Org, LaTeX, Mermaid, diff) also looks for the
+file's same-stem companions: `talk.tex` beside `talk.pdf` is what offers the Preview/Source switch.
+- **Before:** `remoteSiblingsGroup` in `src/vinary/main/content_service.js` stat'ed the 12 candidates one after
+  another, after the read. The candidates are the stem with each of the 12 group extensions, including the
+  opened file itself.
+- **After:**
+  - it stats them **all at once** (`Promise.all`);
+  - it reuses the caller's stat of the opened file instead of stat'ing that one again;
+  - `openRemoteUri` starts the lookup **before** its read and awaits it after.
+
+**Instrument.** The `open-pdf` and `open-md` readers of §2: the whole `openRemoteUri` on a group of three files
+(`.pdf`, `.md`, `.tex`), every open SHA-256-verified and its group checked.
+
+**Model and prediction** (written before the second run: `data/11/e2-prediction.txt`).
+- **Before:** stat + read path + 12 sequential stats.
+- **After:** the 11 stats of the other candidates are one batch. It is answered in 1 R, inside a read path of at
+  least 2 R (Markdown: OPEN, body; PDF: OPEN, the verified read's tail READ, body, FSTAT), so it adds nothing to
+  the critical path:
+
+```math
+t_{\text{after}} \approx t_{\text{before}} - 12R
+```
+
+- **Refuted if,** in any cell with $`R \ge 10`$ ms, the saving differs from $`12R`$ by more than $`R`$.
+- **The baseline already fits the read paths:** at $`R = 100`$ ms, `open-md` is 15.1 R (stat + OPEN + body +
+  12) and `open-pdf` 17.2 R (stat + OPEN + tail + body + FSTAT + 12).
+
+**Run.**
+- Pinning as §9.1, `--server-nodelay`.
+- Cells: sizes 64 KiB / 1 MiB / 8 MiB, $`R \in \{0, 10, 50, 100\}`$ ms, both idents; 2 warm-ups, ≤ 9 timed
+  opens or 30 s per cell.
+- The baseline ran at `5b06fa5`, before E2; the second run with E2.
+- Raw data: `data/11/e2-baseline.{txt,json}`, `data/11/e2-after.{txt,json}`. The comparison, every cell:
+  `data/11/e2-analysis.txt`, produced by
+  [`scripts/analyze-e2-sibling-stats.cjs`](../../scripts/analyze-e2-sibling-stats.cjs).
+
+OpenSSH ident (the ssh2 ident's 18 cells agree with these within 0.3 R; see the analysis file):
+
+| $`R`$ (ms) | $`S`$ | `open-pdf` before → after (ms) | saved / $`R`$ | `open-md` before → after (ms) | saved / $`R`$ |
+|---|---|---|---|---|---|
+| 10 | 64 KiB | 180.7 → 54.8 | 12.59 | 159.4 → 33.7 | 12.57 |
+| 10 | 1 MiB | 183.3 → 57.6 | 12.57 | 162.3 → 36.8 | 12.55 |
+| 10 | 8 MiB | 271.5 → 145.5 | 12.60 | 253.1 → 128.0 | 12.50 |
+| 50 | 64 KiB | 862.2 → **254.8** | 12.15 | 761.7 → **153.8** | 12.16 |
+| 50 | 1 MiB | 867.0 → 257.9 | 12.18 | 765.8 → 157.3 | 12.17 |
+| 50 | 8 MiB | 1 237.8 → 626.0 | 12.24 | 1 141.8 → 531.2 | 12.21 |
+| 100 | 64 KiB | 1 715.3 → 507.5 | 12.08 | 1 514.5 → 305.5 | 12.09 |
+| 100 | 1 MiB | 1 718.3 → 510.1 | 12.08 | 1 517.2 → 307.6 | 12.10 |
+| 100 | 8 MiB | 2 436.0 → 1 227.5 | 12.08 | 2 236.9 → 1 028.3 | 12.09 |
+
+**Result: H3 holds in all 36 cells with $`R \ge 10`$ ms, both idents.**
+- **The saving is 12.06–12.60 R**, never more than 0.60 R from $`12R`$.
+- **It slightly exceeds $`12R`$:** by 5–6 ms at $`R = 10`$ and 6–12 ms at 50–100 ms. That is 12 requests' worth of
+  the ≈ 0.5–1 ms per-request residual of §9.1.
+- **At $`R = 0`$ the saving is 0–3 ms.**
+- **At 50 ms a remote PDF now opens in 255 ms instead of 862 ms (3.4×), and a remote Markdown file in 154 ms
+  instead of 762 ms (4.9×).**
+- **What remains is the read path alone:** 5.1 R for the PDF, 3.1 R for Markdown.
+
+**The round trips that remain, and why they stay.**
+- **The PDF's tail READ before its body** is deliberate (ADR-0046 §Torn reads). A torn file costs one ~1 KiB
+  READ instead of a download, and the settle loop may probe several times (H5).
+- **The FSTAT after the body** detects a rewrite *during* the read. Pipelining it behind the last READ would save
+  1 R, but SFTP does not order it after those READs for an *external* writer.
+  - Draft-ietf-secsh-filexfer-02 §6.1 requires only that "requests relating to the same file" give the results
+    of sequential processing, and lets "non-overlapping read/write requests to the same file" run in parallel.
+  - §7 allows responses "in a different order from the order in which the requests were sent".
+  - A server may therefore answer the FSTAT while earlier READs are still executing, and miss a writer that
+    lands between them. The fixture's asynchronous `fs` calls do exactly that.
+- **The initial stat** decides directory against file and supplies the size.
+  - Issuing the OPEN alongside it would save 1 R per open.
+  - The cost: every reader in `openRemoteUri` (and the settle loop's re-attempts) would have to accept a handle
+    opened before the kind is known, and close it on the directory and error paths.
+  - It is outside ADR-0046's interventions and is not pursued here.
+
+*E3 (§9.4) and the D-phase measurements (H4, H5) are recorded below as they land.*
 
 ## 10 · Regression guards
 
@@ -321,9 +475,24 @@ one-sided stall of §4); with it, it passes in tens of milliseconds.
   The stalled read takes ≈ 2 s, the fixed one tens of milliseconds, so the threshold separates them with a
   wide margin on either side (§9.1).
 
-*Pending:*
-- `ssh-transport-smoke` arms for the pipelined reader;
-- `remote-pdf-e2e` byte counts.
+- **Pipelined reader (E1):** `ssh-transport-smoke` `testPipelinedReader`.
+  - Byte-exact reads at sizes 0, 1, C−1, C, C+1, 3C+17 and 8 MiB, under both idents, with and without a size
+    hint.
+  - At most D requests in flight, and actually pipelined; out-of-order replies.
+  - A file that grows past the probe or shrinks mid-read; the cap refused with 0 READs; a server that caps reads.
+  - The depth-1 retry; the reaper mid-read; a dropped connection rejecting within 1 s; no leaked handles.
+  - Request-count assertions pin the three small-file fixes of §9.2.
+- **Group stats (E2):** `content-service-smoke` `testRemote`.
+  - Every group-candidate stat reply is held 400 ms. The smoke then asserts, for a PDF and for a LaTeX file:
+    - at least 11 stats in flight at once;
+    - at least one still in flight when the opened file's body is first READ;
+    - exactly one stat of the opened file.
+  - Three negative controls each fail at their own assertion:
+    1. sequential stats ("max in flight 1");
+    2. concurrent stats started after the read ("0 still in flight at its first body READ");
+    3. concurrent and overlapped, but re-stat'ing the opened file.
+
+*Pending:* `remote-pdf-e2e` byte counts.
 
 [ADR-0045 — Slide-deck presentation]: ../design-decisions/0045-slide-deck-presentation.md
 [ADR-0046 — Reload-safe, pipelined remote reads]: ../design-decisions/0046-reload-safe-pipelined-remote-reads.md

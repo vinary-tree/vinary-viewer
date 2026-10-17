@@ -1,0 +1,8 @@
+E2 prediction — written 2026-10-17 before the after-run (baseline: docs/scientific/data/11/e2-baseline.*)
+Model: before = stat + read path + 12 sequential sibling stats (12 R).
+       after  = stat + read path; the 11 non-self sibling stats are ONE parallel batch issued before the read,
+                answered in 1 R inside a read path of >= 2 R (md: OPEN + READ; pdf: OPEN + tail + body + FSTAT)
+                -> no residual on the critical path.
+Prediction: after ~= baseline - 12 R  (md 64K @100: 1514.5 -> ~315 ms; pdf 64K @100: 1715.3 -> ~515 ms)
+Refuted if, for any cell with R >= 10 ms, |(baseline - after) - 12 R| > 1 R.
+At R = 0 the saving is the local cost of 11 stats, a few ms at most (not a test of H3).

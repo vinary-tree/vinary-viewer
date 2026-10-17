@@ -929,19 +929,23 @@ async function openRemoteUri(uri, kind, opts = {}) {
   }
 
   if (k === 'markdown' || k === 'mermaid' || k === 'org' || k === 'latex' || k === 'diff' || k === 'source') {
+    // the collocated group (→ the Preview/Source combo) is discovered WHILE the text is read — H3
+    const siblings = GROUP_KINDS.has(k) ? remoteSiblingsGroup(uri, st) : null;
     const payload = { path: uri, kind: k, text: await transport.remoteReadText(uri, sized()), stamp, sourceable: true, meta };
-    if (GROUP_KINDS.has(k)) payload.siblings = await remoteSiblingsGroup(uri);   // collocated group → Preview/Source combo
+    if (siblings) payload.siblings = await siblings;
     return payload;
   }
   if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri, sized())), stamp, meta };
   if (k === 'pdf') {
+    // the PDF's collocated group (its authored sources + itself) is discovered WHILE the PDF is read — H3
+    const siblings = remoteSiblingsGroup(uri, st);
     // VERIFIED and settled (ADR-0046 §Torn reads): the tail first, then the body, then fstat on the same handle;
     // `pending` (a notification is coming) delivers nothing; `incomplete` is delivered flagged
     const r = await readPdfRemote(uri, st, opts);
     if (r.pending) return { path: uri, kind: 'pdf', pending: true, stamp, meta };
     const payload = { path: uri, kind: 'pdf', bytes: r.bytes, stamp, meta };
     if (r.incomplete) { payload.incomplete = true; payload.incompleteReason = r.incomplete; }
-    payload.siblings = await remoteSiblingsGroup(uri);   // the PDF's collocated group (its authored sources + itself)
+    payload.siblings = await siblings;
     return payload;
   }
   // Remote HTML is live-rendered in the web view via the vv-remote:// protocol (see main/service.cljs); the
@@ -983,22 +987,23 @@ function swapExtUri(uri, newExt) {
 // The document GROUP of a remote `uri`: every same-stem candidate that EXISTS and classifies to a GROUP_KIND
 // (pdf + markdown/org/latex/mermaid/diff), as [{path, kind}] with `uri` itself first. The SFTP twin of
 // service.cljs/siblings-group — lets the renderer offer the Preview/Source combo over remote representation groups.
-async function remoteSiblingsGroup(uri) {
-  const cands = [uri, ...[...GROUP_EXTS].map(e => swapExtUri(uri, e))].filter(Boolean);
-  const seen = new Set();
-  const out = [];
-  for (const cand of cands) {
-    if (seen.has(cand)) continue;
-    seen.add(cand);
-    try {
-      const s = await transport.remoteStat(cand);
-      if (s.isFile) {
-        const kind = classifyName(cand);
-        if (GROUP_KINDS.has(kind)) out.push({ path: cand, kind });
+// Every candidate is stat'ed CONCURRENTLY: one round trip for the whole group instead of one per candidate (up to
+// 12 — H3, docs/scientific/11), and openRemoteUri starts this before its read, so the round trip overlaps the
+// download. `selfStat` (the caller's stat of `uri`, when it holds one) spares re-stating the opened file. Never
+// rejects: a candidate that cannot be stat'ed is simply not in the group.
+function remoteSiblingsGroup(uri, selfStat) {
+  const cands = [...new Set([uri, ...[...GROUP_EXTS].map(e => swapExtUri(uri, e)).filter(Boolean)])];
+  return Promise.all(cands.map((cand) => (cand === uri && selfStat
+    ? selfStat
+    : transport.remoteStat(cand).catch(() => null))))
+    .then((stats) => {
+      const out = [];
+      for (let i = 0; i < cands.length; i += 1) {
+        const kind = stats[i] && stats[i].isFile ? classifyName(cands[i]) : null;
+        if (kind && GROUP_KINDS.has(kind)) out.push({ path: cands[i], kind });
       }
-    } catch (_e) { /* not present */ }
-  }
-  return out;
+      return out;
+    });
 }
 
 // A remote diff's referenced file, resolved relative to the diff's directory then walking up ancestors. Legacy

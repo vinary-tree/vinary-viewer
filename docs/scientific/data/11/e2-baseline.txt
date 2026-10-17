@@ -1,0 +1,55 @@
+ 20:31:16 up 4 days,  3:58,  1 user,  load average: 9.68, 10.77, 12.03
+# bench-remote-read 2026-10-17T00:31:16.411Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=4292211kHz max=4561833kHz  pid 741175's current affinity list: 2-5
+# sizes=64K,1M,8M rtts=0,10,50,100 idents=openssh,ssh2 readers=open-pdf,open-md runs≤9 budget=30s warmup=2 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms
+openssh    0   64K  open-pdf              9         5.2       6.1      5.4±0.4        11.94     3.7         6.5         1.4      —
+openssh    0   64K  open-md               9         4.7      15.3      6.3±3.8        13.24     3.1        13.4         1.4      —
+openssh    0    1M  open-pdf              9         7.7      11.8      8.1±2.1       129.88     7.5        41.6         3.5      —
+openssh    0    1M  open-md               9         6.8       8.3      6.7±1.3       146.40     9.5        17.6         1.6      —
+openssh    0    8M  open-pdf              9        19.1      25.5     20.2±2.4       418.03    34.9        62.5         4.9      —
+openssh    0    8M  open-md               9        20.7      24.8     21.0±1.5       385.68    37.5        49.5         5.6      —
+openssh   10   64K  open-pdf              9       180.7     181.3    180.6±0.6         0.35     5.6        31.2         1.3      —
+openssh   10   64K  open-md               9       159.4     161.5    159.5±0.9         0.39     5.0        32.8         1.4      —
+openssh   10    1M  open-pdf              9       183.3     184.5    183.5±0.6         5.46    19.3        12.4         1.9      —
+openssh   10    1M  open-md               9       162.3     162.4    162.1±0.3         6.16    18.9        15.6         1.8      —
+openssh   10    8M  open-pdf              9       271.5     278.8    271.5±4.7        29.46    56.5        43.1         2.4      —
+openssh   10    8M  open-md               9       253.1     257.7    253.4±2.1        31.61    69.1        34.5         2.4      —
+openssh   50   64K  open-pdf              9       862.2     863.5    862.3±0.8         0.07    15.4        15.0         1.1      —
+openssh   50   64K  open-md               9       761.7     763.9    761.8±0.9         0.08    15.2         2.2         1.3      —
+openssh   50    1M  open-pdf              9       867.0     870.3    867.4±1.4         1.15    30.9        12.4         1.3      —
+openssh   50    1M  open-md               9       765.8     767.2    765.6±1.0         1.31    25.9        14.4         1.4      —
+openssh   50    8M  open-pdf              9      1237.8    1239.5  1232.1±18.1         6.46    74.5        43.2         1.6      —
+openssh   50    8M  open-md               9      1141.8    1144.2   1141.3±1.6         7.01    92.3        35.5         1.7      —
+openssh  100   64K  open-pdf              9      1715.3    1716.3   1715.4±0.6         0.04    29.0        10.3         1.1      —
+openssh  100   64K  open-md               9      1514.5    1515.7   1514.6±0.6         0.04    27.1         9.9         1.1      —
+openssh  100    1M  open-pdf              9      1718.3    1720.2   1718.5±0.9         0.58    31.7        18.1         1.1      —
+openssh  100    1M  open-md               9      1517.2    1518.8   1516.8±1.2         0.66    37.6        14.3         1.1      —
+openssh  100    8M  open-pdf              9      2436.0    2439.0  2425.2±33.9         3.28    84.9        41.2         1.1      —
+openssh  100    8M  open-md               9      2236.9    2243.6  2226.4±33.4         3.58    98.2        33.0         1.2      —
+ssh2       0   64K  open-pdf              9         4.5       4.9      4.5±0.3        13.84     2.6        10.1         1.1      —
+ssh2       0   64K  open-md               9         3.4       4.4      3.5±0.6        18.13     1.6         9.7         1.6      —
+ssh2       0    1M  open-pdf              9         6.6      13.6      7.2±2.8       151.12     4.0        18.5         1.7      —
+ssh2       0    1M  open-md               9         6.3      10.8      6.7±1.8       159.77     8.2        17.9         1.6      —
+ssh2       0    8M  open-pdf              9        22.3      33.4     23.7±3.7       359.06    40.0        49.2         5.8      —
+ssh2       0    8M  open-md               9        26.6      27.7     26.4±1.3       301.27    47.0        55.3         6.6      —
+ssh2      10   64K  open-pdf              9       179.0     180.4    179.4±0.6         0.35     4.4        19.9         1.2      —
+ssh2      10   64K  open-md               9       157.8     159.1    157.9±0.5         0.40     3.8        21.9         1.4      —
+ssh2      10    1M  open-pdf              9       182.2     186.4    182.6±1.5         5.49     6.0        25.7         1.9      —
+ssh2      10    1M  open-md               9       161.7     162.6    161.7±0.6         6.18    19.7        16.4         2.0      —
+ssh2      10    8M  open-pdf              9       272.4     281.6    272.9±5.0        29.37    50.6        34.9         3.1      —
+ssh2      10    8M  open-md               9       257.3     260.5    257.1±2.6        31.09    77.7        33.2         3.1      —
+ssh2      50   64K  open-pdf              9       863.0     864.1    862.9±1.3         0.07    16.2        12.0         1.3      —
+ssh2      50   64K  open-md               9       762.1     763.5    761.9±1.0         0.08    15.2        16.1         1.2      —
+ssh2      50    1M  open-pdf              9       866.8     870.9    867.1±2.1         1.15    19.0        10.9         1.5      —
+ssh2      50    1M  open-md               9       766.5     771.8    767.4±2.1         1.30    30.7        12.0         1.4      —
+ssh2      50    8M  open-pdf              9      1235.8    1245.1  1231.9±17.5         6.47    65.8        35.1         1.7      —
+ssh2      50    8M  open-md               9      1137.5    1139.4   1137.1±2.0         7.03    90.8        33.9         1.8      —
+ssh2     100   64K  open-pdf              9      1712.6    1713.0   1712.3±0.9         0.04    24.6         9.8         1.1      —
+ssh2     100   64K  open-md               9      1510.5    1512.2   1510.6±0.9         0.04    21.1         9.8         1.1      —
+ssh2     100    1M  open-pdf              9      1716.1    1716.7   1715.8±0.8         0.58    26.3        19.7         1.1      —
+ssh2     100    1M  open-md               9      1515.6    1517.1   1515.8±0.9         0.66    35.3        14.2         1.1      —
+ssh2     100    8M  open-pdf              9      2442.6    2449.6  2432.0±33.5         3.28    88.8        35.1         1.2      —
+ssh2     100    8M  open-md               9      2241.1    2243.3   2240.7±2.5         3.57   108.1        39.1         1.4      —
+# wrote docs/scientific/data/11/e2-baseline.json
+ 20:37:58 up 4 days,  4:04,  1 user,  load average: 9.90, 9.76, 11.08

@@ -336,7 +336,9 @@ async function testRemote() {
       'data.csv': 'name,age\nAlice,30\nBob,25\n',
       'bundle.tar': Buffer.concat(chunks),
       'paper.tex': '\\documentclass{article}\\begin{document}Hi\\end{document}',
-      'paper.pdf': '%PDF-1.4\n%fake pdf bytes\n',
+      // a VALID PDF (remote PDF reads are verified — ADR-0046 §Torn reads), larger than the 1088-byte tail probe so its
+      // body READ (offset 0) is distinguishable from the tail READ
+      'paper.pdf': require('./fixtures/pdf-gen.js').makeDeckPdf({ pages: 2, padBytes: 70000 }),
       'src/greet.js': 'function greet(){ return "hello"; }',
       'src/a file#日.js': 'export const special = true;',
       'doc.md': '# Doc\n![pic](./assets/pic.png)',
@@ -381,6 +383,39 @@ async function testRemote() {
     assert.ok(Array.isArray(pdfWithSrc.siblings)
               && pdfWithSrc.siblings.some(s => s.kind === 'latex' && s.path.endsWith('/paper.tex')),
               'a remote .pdf advertises its collocated source in its siblings group');
+    assert.ok(!pdfWithSrc.incomplete && pdfWithSrc.bytes.length > 70000, 'a complete remote PDF is delivered whole, not flagged');
+
+    // E2 (H3): the group's candidates are stat'ed CONCURRENTLY, overlapped with the read. Every sibling stat reply is
+    // held 400 ms, which makes both properties observable without timing anything: a sequential discovery never has
+    // more than one stat in flight, and one run after the read has none left when the body is read. (The transport
+    // stats with LSTAT. 400 ms, because this fixture leaves Nagle on — ~40 ms per reply on loopback, H0 — and the body
+    // READ comes three replies after the stats: the OPEN, the tail READ and its own.)
+    const statOp = (op) => op === 'STAT' || op === 'LSTAT';
+    for (const [file, kind] of [['/paper.pdf', 'pdf'], ['/paper.tex', 'latex']]) {
+      const sibling = (p) => p !== file && /^\/paper\.[a-z]+$/.test(p);
+      let atBodyRead = null;
+      let selfStats = 0;
+      srv.setDelay((req) => (statOp(req.op) && sibling(req.path) ? 400 : 0));
+      srv.onRequest((req) => {
+        if (statOp(req.op) && req.path === file) selfStats += 1;
+        if (req.op === 'READ' && req.path === file && req.offset === 0 && atBodyRead === null) atBodyRead = srv.stats.inFlightStats;
+      });
+      srv.resetStats();
+      try {
+        const opened = await content.openRemoteUri(srv.url(file), kind);
+        // ≥ 11, not = 11: the PDF's own FSTAT (not held) may land while the 11 held STATs are in flight
+        assert.ok(srv.stats.maxInFlightStats >= 11,
+          `${file}: all 11 other group candidates are stat'ed at once (max in flight ${srv.stats.maxInFlightStats})`);
+        assert.ok(atBodyRead >= 1, `${file}: …while the file itself is read (${atBodyRead} still in flight at its first body READ)`);
+        assert.strictEqual(selfStats, 1, `${file}: the opened file is stat'ed once — its stat is reused for the group`);
+        assert.deepStrictEqual(opened.siblings.map((sib) => sib.path.slice(sib.path.lastIndexOf('/') + 1)),
+          file === '/paper.pdf' ? ['paper.pdf', 'paper.tex'] : ['paper.tex', 'paper.pdf'],
+          `${file}: the group — the opened file first, then its same-stem members`);
+      } finally {
+        srv.setDelay(null);
+        srv.onRequest(null);
+      }
+    }
 
     // remote diff on-disk enrichment (resolve a referenced file over SFTP, walking ancestors)
     const diffSrcs = await content.loadRemoteDiffSources(srv.url('/change.diff'), ['src/greet.js']);
