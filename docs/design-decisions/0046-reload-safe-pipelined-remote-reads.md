@@ -49,6 +49,14 @@ interprets them. It is unit-tested against four invariants:
 stamp, `max(now, last + 1)`. It then sends it to every requester still alive and to every window retaining the
 path, deduplicated.
 
+**A read always completes, and every effect runs.** *(Amended 2026-10-17.)* The model trusts its driver to finish
+every read it starts, so the driver never lets one go unfinished. A producer that throws, or a read whose Promise
+rejects, completes with that error. The driver also interprets the effects one by one (`content-flight/run-effects!`),
+so one that throws is logged and the next still runs. Each window's send stands alone too. Before this, a window
+destroyed between its liveness check and its send made `deliver!` throw. The `[:read …]` that `complete` had emitted
+after that delivery was then skipped, and the path's read stayed marked in flight with none running. Every later
+request joined it, and the document stopped refreshing in every window until its last tab closed.
+
 Explicit requesters are needed because `vv:open` can reach main before the window has told main it retains the
 path. Local synchronous reads still deliver synchronously, so a document's `vv:content` still precedes its
 `vv:tree`.

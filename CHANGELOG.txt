@@ -556,6 +556,12 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A document can no longer stop live-refreshing for good because a window
+      closed at the wrong moment. If a window was destroyed just as a new
+      version was being sent to it, the read that should have followed was
+      skipped, and every later change to that file waited behind it. The
+      document stayed stale in every window until its last tab was closed.
+      Each window's delivery now stands alone, and every read completes.
     - Typing in the Files filter no longer freezes the app. Every expanded
       directory's watcher used to re-list the whole repository with a
       synchronous git process, about twenty at once when a filter opened many

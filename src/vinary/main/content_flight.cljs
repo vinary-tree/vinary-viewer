@@ -1,5 +1,6 @@
 (ns vinary.main.content-flight
-  "PURE. One read per path at a time, delivered to everyone who asked for it (ADR-0046 §Reload safety).
+  "PURE (apart from `run-effects!`, the driver's interpreter loop, which only calls the handlers it is given). One
+   read per path at a time, delivered to everyone who asked for it (ADR-0046 §Reload safety).
 
    Before this model every window read a changed file on its own: a burst of N change notifications for a file
    retained by W windows started N·W reads, an older read finishing late could overwrite a newer one, and a remote
@@ -87,6 +88,21 @@
           (let [[flights' effects] (request idle path {:fanout? true})]
             [flights' (cond->> effects deliver (into [deliver]))])
           [idle (if deliver [deliver] [])])))))
+
+(defn run-effects!
+  "Interpret `effects` through the driver's handlers — (read! path seq) for [:read path seq], (deliver! path read
+   result) for [:deliver path read] — with `result` the finished read a [:deliver] hands out. Every effect runs even
+   when an earlier one throws; the throw goes to (on-error effect error). A skipped effect strands its path: when
+   the [:deliver …] that `complete` emits first throws (a window destroyed between its liveness check and its send),
+   the [:read …] after it never starts, so the path's read stays marked in flight with none running, and every
+   later request joins it forever."
+  [effects {:keys [read! deliver! on-error]} result]
+  (doseq [[op path x :as effect] effects]
+    (try
+      (case op
+        :read    (read! path x)
+        :deliver (deliver! path x result))
+      (catch :default e (on-error effect e)))))
 
 (defn release
   "`path` is no longer retained by anyone: forget it. A read still running for it completes into nothing."

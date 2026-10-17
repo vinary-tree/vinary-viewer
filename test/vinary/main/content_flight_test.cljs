@@ -152,3 +152,32 @@
 (deftest the-invariants-hold-over-random-interleavings
   (doseq [seed (range 1 41)]
     (is (= [] (simulate seed 400)) (str "seed " seed))))
+
+;; ---- the driver's interpreter loop ---------------------------------------------------------------------------
+
+(deftest a-failing-delivery-never-strands-the-trailing-read
+  (testing "complete emits [:deliver …] then [:read …]; a delivery that throws must not skip the read"
+    (let [[f _]  (run flight/empty-flights [[:request a {:requester 1}] [:request a {:fanout? true}]])
+          [f' effects] (flight/complete f a 1 :delivered)
+          ran    (atom [])
+          errors (atom [])]
+      (is (= [:deliver :read] (mapv first effects)) "the case in question: a delivery, then the trailing read")
+      (flight/run-effects! effects
+                           {:deliver! (fn [path read _result]
+                                        (swap! ran conj [:deliver path (:seq read)])
+                                        (throw (js/Error. "a window destroyed between its liveness check and its send")))
+                            :read!    (fn [path read-n] (swap! ran conj [:read path read-n]))
+                            :on-error (fn [effect e] (swap! errors conj [(first effect) (.-message e)]))}
+                           {:payload :the-bytes})
+      (is (= [[:deliver a 1] [:read a 2]] @ran) "the trailing read started anyway")
+      (is (= [[:deliver "a window destroyed between its liveness check and its send"]] @errors))
+      (is (= 2 (:seq (flight/in-flight f' a))) "and it is the read the flight state expects to be running"))))
+
+(deftest every-effect-runs-whatever-throws
+  (let [ran (atom [])]
+    (flight/run-effects! [[:read a 1] [:read b 2] [:deliver a {:seq 1}]]
+                         {:read!     (fn [path n] (swap! ran conj n) (when (= path a) (throw (js/Error. "boom"))))
+                          :deliver!  (fn [_ _ result] (swap! ran conj result))
+                          :on-error  (fn [_ _] (swap! ran conj :reported))}
+                         :r)
+    (is (= [1 :reported 2 :r] @ran) "in order; a throw is reported and the next effect still runs")))

@@ -577,38 +577,49 @@
   (let [explicit (keep (fn [id] (let [wc (get @requester-wcs id)] (when (live-webcontents? wc) wc))) requesters)
         targets  (vals (into {} (map (juxt owner-id identity)) (concat explicit (when fanout? (webcontents-for path)))))]
     (when (seq targets)
-      (if payload
-        (do (set! (.-seq ^js payload) read-n)
-            (set! (.-stamp ^js payload) (next-stamp!))
-            (doseq [^js wc targets] (.send wc "vv:content" payload)))
-        ;; `refresh`: a fanned-out read (a change, not an open) — the renderer keeps a document it already shows
-        (let [msg (clj->js {:path path :message (or error "Unknown content error") :seq read-n
-                            :refresh (boolean fanout?)})]
-          (doseq [^js wc targets] (.send wc "vv:error" msg)))))))
+      ;; each window on its own: one destroyed between its liveness check and its send never costs the others
+      (let [send! (fn [^js wc channel msg]
+                    (try (.send wc channel msg)
+                         (catch :default e
+                           (js/console.error "[content] sending" path "to window" (owner-id wc) "failed:" e))))]
+        (if payload
+          (do (set! (.-seq ^js payload) read-n)
+              (set! (.-stamp ^js payload) (next-stamp!))
+              (doseq [wc targets] (send! wc "vv:content" payload)))
+          ;; `refresh`: a fanned-out read (a change, not an open) — the renderer keeps a document it already shows
+          (let [msg (clj->js {:path path :message (or error "Unknown content error") :seq read-n
+                              :refresh (boolean fanout?)})]
+            (doseq [wc targets] (send! wc "vv:error" msg))))))))
 
 (declare start-read!)
 
 (defn- run-flight-effects!
-  "Interpret content-flight effects: deliver `result` (the read that just finished), start reads."
+  "Interpret content-flight effects: deliver `result` (the read that just finished), start reads — each effect on
+   its own (content-flight/run-effects!), so a failing delivery never keeps the trailing read from starting."
   [effects result]
-  (doseq [[op path x] effects]
-    (case op
-      :deliver (deliver! path x result)
-      :read    (start-read! path x))))
+  (flight/run-effects! effects
+                       {:read!     start-read!
+                        :deliver!  deliver!
+                        :on-error  (fn [[op path] e] (js/console.error "[content]" (name op) "of" path "failed:" e))}
+                       result))
 
 (defn- finish-read! [path read-n result]
   (let [[f effects] (flight/complete @flights path read-n (if (:pending result) :pending :delivered))]
     (reset! flights f)
     (run-flight-effects! effects result)))
 
-(defn- start-read! [path read-n]
-  (let [result (produce path)]
+(defn- start-read!
+  "Run read `read-n` of `path` and complete it — always: a producer that throws (or a Promise that rejects, which a
+   producer should never return) completes the read with that error, so the path's flight can never be left marked
+   in flight with no read running."
+  [path read-n]
+  (let [fail   (fn [e] {:error (or (some-> e .-message) "read failed")})
+        result (try (produce path) (catch :default e (fail e)))]
     (if (instance? js/Promise result)
       (-> result
-          (.then (fn [r] (finish-read! path read-n r)))
-          ;; producers never reject (they resolve {:error}); this catches a delivery that throws — a window
-          ;; destroyed between its liveness check and its .send — so the flight state is already advanced
-          (.catch (fn [e] (js/console.error "[content] delivering" path "failed:" e))))
+          (.then (fn [r] (finish-read! path read-n r))
+                 (fn [e] (finish-read! path read-n (fail e))))
+          (.catch (fn [e] (js/console.error "[content] completing the read of" path "failed:" e))))
       (finish-read! path read-n result))))
 
 (defn- request-content!
