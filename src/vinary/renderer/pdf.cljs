@@ -1222,8 +1222,11 @@
         (swap! state assoc :page-divs pages :sheet-divs sheets))
 
       (> have n)
+      ;; keep the first n as PERSISTENT VECTORS, not subvec views: a later grow takes them transient (above), and a
+      ;; cljs.core/Subvec is not IEditableCollection — a deck that lost pages and then gained some threw there, and
+      ;; every such refresh fell back to the last good version (docs/scientific/11 / remote-pdf-e2e arm B)
       (do (doseq [^js div (subvec page-divs n)] (.remove div))
-          (swap! state assoc :page-divs (subvec page-divs 0 n) :sheet-divs (subvec sheet-divs 0 n)))
+          (swap! state assoc :page-divs (into [] (subvec page-divs 0 n)) :sheet-divs (into [] (subvec sheet-divs 0 n))))
 
       :else nil)))
 

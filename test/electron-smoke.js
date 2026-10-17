@@ -1776,7 +1776,24 @@ async function main() {
     await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 8
       && !document.querySelector('.vv-refresh-note')`,
       'the next good refresh is shown and clears the note', 15000);
-    console.log('[ok] PDF live refresh swaps in place (position kept); a torn refresh keeps the last good render behind a note');
+
+    // 4 — a refresh that LOSES pages, then one that gains them back: both swap in place. The shrink must leave the
+    // placeholder vectors growable: it kept cljs Subvec views, which cannot go transient, so every growth after a
+    // shrink threw inside replace-doc! and fell back to the last good version (found by remote-pdf-e2e)
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(4)), stamp: delivered + 4 });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 4`,
+      'a refresh that loses pages shrinks in place', 15000);
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(6)), stamp: delivered + 5 });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 6
+      && !document.querySelector('.vv-refresh-note')`,
+      'a refresh that regains pages after a shrink grows in place, with no note', 15000);
+    assert.strictEqual(await evalIn(win, `document.querySelector('.vv-pdf-doc').__vvLiveMark === 'mounted-once'`), true,
+      'shrink-then-grow refreshes still update the same mounted view');
+    // back to the 8 pages the following arms start from (a second growth after the shrink)
+    win.webContents.send('vv:content', { path: livePath, kind: 'pdf', bytes: new Uint8Array(version(8)), stamp: delivered + 6 });
+    await waitCalm(win, `document.querySelectorAll('.vv-pdf-doc .vv-pdf-page').length === 8
+      && !document.querySelector('.vv-refresh-note')`, 'the document grows back to 8 pages in place', 15000);
+    console.log('[ok] PDF live refresh swaps in place (position kept); a torn refresh keeps the last good render behind a note; shrink then grow refreshes in place');
   }
 
   // ── a pending refresh never holds the VIEW STATE hostage (ADR-0045 §Live refresh; vinary.ui.pdf-view-lifecycle) ──

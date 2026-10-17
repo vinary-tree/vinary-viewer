@@ -632,6 +632,10 @@ Fixed
       a first open, a half-written PDF shows the finished part when one can be
       read, flagged the same way, and otherwise an error page saying it will
       appear once the file is finished.
+    - A live-refreshed PDF that lost pages and later gained some back no longer
+      gets stuck on the shorter version behind a "couldn't be displayed" note:
+      after any refresh that shrank a document, every refresh that grew it
+      failed to swap in.
     - A PDF that cannot be opened at all no longer leaves an empty view under
       a banner claiming to show "the last good version" (there was none): it
       shows the error page with pdf.js's reason.
