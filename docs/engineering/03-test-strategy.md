@@ -153,8 +153,11 @@ SSH2 servers:
   unchanged remote document costs one stat and no read; a changed one is read again. The view position survives
   Back/Forward, a tab switch and a tab close.
 
-The harness ends with `app.exit(code)`. Electron does not carry `process.exitCode` through `app.quit()`, so a
-failed run of a harness that quit that way exited 0.
+**Exit codes.** Every Electron harness ends with `app.exit(code)`, never `process.exitCode = …` followed by
+`app.quit()`: Electron does not carry `process.exitCode` out through `quit()`, so a failing run exits **0**. That
+was measured: `remote-daemon-events-e2e` with a failure injected after start-up exited 0 under its old ending and 1
+with `app.exit`. It and `scripts/screenshots.cjs` were the two harnesses that quit that way. (Plain Node scripts,
+such as the runners and `daemon-smoke`, may set `process.exitCode`: Node honours it.)
 
 ### 3.5 The one harness that runs the REAL main process
 

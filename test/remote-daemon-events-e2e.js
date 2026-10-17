@@ -208,9 +208,10 @@ async function run() {
   } finally {
     server.destroyConnections();
     await server.close();
-    process.exitCode = failed ? 1 : 0;
-    app.quit();
+    // app.exit, not process.exitCode + app.quit(): Electron does not carry exitCode out through quit(), so a failed run
+    // exited 0 — an injected failure proved it (see docs/engineering/03-test-strategy.md §Exit codes)
+    app.exit(failed ? 1 : 0);
   }
 }
 
-run().catch((error) => { console.error(error && error.stack || error); process.exitCode = 1; app.quit(); });
+run().catch((error) => { console.error(error && error.stack || error); app.exit(1); });

@@ -686,8 +686,9 @@ main()
   .then((failed) => {
     clearTimeout(hardTimeout);
     try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (_) {}
-    app.quit();
-    process.exitCode = failed > 0 ? 1 : 0;
+    // app.exit, not app.quit() + process.exitCode: Electron does not carry exitCode out through quit(), so a run with
+    // failed scenes exited 0
+    app.exit(failed > 0 ? 1 : 0);
   })
   .catch((err) => {
     clearTimeout(hardTimeout);
