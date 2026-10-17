@@ -1,0 +1,48 @@
+E3 predictions — written 2026-10-17 before any E3 run (E0–E4 in place: client TCP_NODELAY, pipelined preallocated
+reader, concurrent group stats, eager channel window). Notation: S size, R round trip, C chunk (L), D depth,
+W = 2 MiB channel window, B_cpu from the same cell at R = 0.
+
+1. MAIN MATRIX — sizes 64K/1M/8M/32M x R 0/10/50/100 ms x ident ssh2/openssh x reader stream/fastGet,
+   --server-nodelay, --expose-gc.
+   stream (remoteReadFile, no size hint: OPEN + FSTAT + body):
+       t ~= 2R + R * max(ceil(S / (D*C)), S / W) + S / B_cpu
+       OpenSSH (C = 260096, D = 9, DC = 2.23 MiB): 64K/1M -> 3R; 8M -> 6R; 32M -> 18R
+       ssh2    (C = 31952,  D = 64, DC = 1.95 MiB): 64K/1M -> 3R; 8M -> 7R; 32M -> 19R
+   H2 is REFUTED if any cell with R >= 10 ms is more than 25 % off.
+   fastGet (64 x 32 KiB = 2 MiB in flight, same channel, so E4 applies; plus a local file write and read):
+       window-bound like stream; predicted within +/-15 % of stream for S >= 8 MiB at R >= 10 ms, and slower
+       (one extra FSTAT/OPEN round trip, the disk round trip) for S <= 1 MiB.
+
+2. DEPTH — 32 MiB, R = 50 ms, both idents, pipelined:D:C with D*C ~= 0.5 / 1 / 2 / 4 MiB
+   (OpenSSH D = 2/4/8/16 at C = 260096; ssh2 D = 16/33/66/131 at C = 31952). pipelined:D:C is a size-hinted
+   readAll, so t ~= R (OPEN) + R * max(ceil(S / (D*C)), S / W) + S / B_cpu:
+       0.5 MiB -> ~65 R; 1 MiB -> ~33 R; 2 MiB -> ~17 R; 4 MiB -> ~17 R (window-bound: no faster than 2 MiB)
+   H2's structure is REFUTED if a depth-bound cell (DC < W) is more than 25 % off its model, or if DC = 4 MiB
+   gains more than 10 % over DC = 2 MiB.
+
+3. H6 MEMORY — R = 0, sizes 8M/32M, readers stream / stream-legacy / fastGet, --expose-gc (gc before each read).
+   Peak process arrayBuffers during a read, minus the at-rest value B0:
+       stream (preallocated, filled in place):     <= 1.25 S
+       stream-legacy (chunks, then a concat copy):  >= 1.75 S
+       fastGet (writes /dev/shm, then readFileSync): ~ 1 S
+   H6 is REFUTED if stream's peak exceeds 1.25 S above B0, or if it is not at least 0.5 S below legacy's.
+
+ADDENDUM — written 2026-10-17 before any E3 run, after a 3-read check of the new memory columns (8 MiB, R = 0,
+OpenSSH ident; an instrument check, not E3 data): peak − rest counted 36.2 MiB for stream and 16.5 MiB for
+stream-legacy. That metric counts every ArrayBuffer allocated DURING the read that no GC has reclaimed yet —
+ciphertext, decrypted packets, ssh2's SFTP packet assembly, the destination — so it measures GC timing, not the
+working set H6 is about. H6 is therefore tested in the bench's --live-memory mode (a full gc() before every 5 ms
+memory sample), at R = 10 ms so each read spans many samples. H6's predictions above are UNCHANGED. The
+garbage-inclusive dAB of the timed runs is reported as an observation only; no hypothesis is attached to it.
+
+ADDENDUM 2 — written 2026-10-17 before any E3 run. Validating the --live-memory instrument (n = 3–9 checks, 8 MiB,
+R = 10 ms, OpenSSH ident; instrument checks, not E3 data) found three artefacts, all fixed in the instrument:
+  (a) at-rest memory was sampled while the PREVIOUS read's buffer was still reachable — from the bench loop's own
+      suspended async frame, and (legacy) until its stream closed. Each read now runs in its own async call that
+      returns only numbers, and rest is sampled after max(100 ms, 3 R) of idle and a gc(): rest = 0.33–0.39 MiB.
+  (b) a timer sampler cannot fire inside synchronous code, so legacy's peak (Buffer.concat: chunks + result) was
+      invisible; live mode now also samples right after every Buffer.concat returns, and once after the read.
+  (c) V8 sweeps dead ArrayBuffers CONCURRENTLY after a GC, so an occasional sample still counted dead buffers (one
+      run in five read S + 5 MiB). With --no-concurrent-array-buffer-sweeping, 27 of 27 checks read S + 0.50 MiB.
+      Live mode now refuses to run without that flag.
+H6's predictions are UNCHANGED.

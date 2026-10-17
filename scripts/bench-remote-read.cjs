@@ -21,6 +21,21 @@
 //     or --budget-s seconds (min 3 runs). Every read is sha256-verified against the served bytes.
 //   • Per cell: n, median, p95 (nearest rank), mean ± sd, min, max, MiB/s, client CPU ms per read, peak
 //     process arrayBuffers during a read (2 ms sampling), event-loop-delay p99, and H1's predicted time.
+//   • Memory (H6): run with `node --expose-gc` — each timed read then starts from a collected heap, and its
+//     arrayBuffers at that moment (rest) is recorded with its peak, so dAB = peak − rest is the read's own footprint.
+//     The previous read must be unreachable by then: its buffer stays reachable until its tick ends, and the legacy
+//     stream's chunks until the stream closes (≈ a round trip), so rest is sampled after max(100 ms, 3 R) of idle.
+//     Without --expose-gc, peaks include earlier reads' uncollected garbage (the header says which).
+//     dAB still counts garbage allocated DURING the read (ciphertext, decrypted packets, SFTP packet assembly) until
+//     a GC happens to reclaim it — GC timing, not the working set. --live-memory (needs --expose-gc) makes every
+//     memory sample a full gc() first, so dAB becomes the read's LIVE footprint (H6); timings in that mode are
+//     perturbed by the collections and are not comparable. A timer cannot fire inside synchronous code, so the mode
+//     also samples right after every Buffer.concat returns (its inputs and its result are both live there: the
+//     legacy reader's peak) and once more after the read. It also needs --no-concurrent-array-buffer-sweeping: V8
+//     otherwise frees dead backing stores on a background thread after a GC, and a sample taken before that sweep
+//     finishes still counts them (seen: a few-MiB overcount in 1 run in 5).
+//         taskset -c 2-5 node --expose-gc --no-concurrent-array-buffer-sweeping scripts/bench-remote-read.cjs \
+//           --live-memory --rtts=10 --sizes=8M,32M --readers=stream,stream-legacy,fastGet
 //
 // READERS.  stream         transport.remoteReadFile — what the app does today (or, after ADR-0046, its default)
 //           stream-legacy  ssh2 createReadStream + concat — today's algorithm, kept as the baseline once the
@@ -130,6 +145,7 @@ function parseArgs(raw) {
     runs: quick ? 5 : 15, budgetS: 45, warmup: 2, json: process.env.VV_BENCH_JSON || null,
     serve: false, ident: 'ssh2', group: false,
     serverNoDelay: false, clientNoDelay: false,   // H0 controls: TCP_NODELAY on the server / client socket
+    liveMemory: false,                             // H6: gc() before every memory sample (see the header)
   };
   for (const a of raw) {
     const [k, v] = a.replace(/^--/, '').split('=');
@@ -146,6 +162,7 @@ function parseArgs(raw) {
     else if (k === 'json') o.json = v;
     else if (k === 'server-nodelay') o.serverNoDelay = true;
     else if (k === 'client-nodelay') o.clientNoDelay = true;
+    else if (k === 'live-memory') o.liveMemory = true;
   }
   return o;
 }
@@ -265,6 +282,10 @@ function makeReaders(transport, content) {
 async function main() {
   const o = parseArgs(process.argv.slice(2));
   if (o.serve) return serve(o);
+  if (o.liveMemory && !global.gc) throw new Error('--live-memory needs node --expose-gc');
+  if (o.liveMemory && !process.execArgv.includes('--no-concurrent-array-buffer-sweeping')) {
+    throw new Error('--live-memory needs node --no-concurrent-array-buffer-sweeping (a concurrent sweep leaves dead buffers counted)');
+  }
 
   const transport = require(path.join(ROOT, 'src/vinary/main/ssh_transport.js'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-bench-home-'));
@@ -284,7 +305,10 @@ async function main() {
   console.log(`# sizes=${o.sizes} rtts=${o.rtts} idents=${o.idents} readers=${o.readers} runs≤${o.runs} budget=${o.budgetS}s warmup=${o.warmup}` +
               ` TCP_NODELAY overrides: server=${o.serverNoDelay} client=${o.clientNoDelay}` +
               ' (since E0 the transport itself sets client TCP_NODELAY on every connection)');
-  console.log('ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  eld_p99_ms  h1_ms');
+  console.log(`# memory: ${o.liveMemory ? 'LIVE — gc() before every 5 ms sample: dAB = the read\'s live footprint; timings perturbed, not comparable'
+    : global.gc ? 'gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read'
+      : 'NO --expose-gc: peaks include uncollected garbage; dAB is not a footprint'}`);
+  console.log('ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms');
 
   const results = [];
   const servers = [];
@@ -307,39 +331,70 @@ async function main() {
               const d = crypto.createHash('sha256').update(buf).digest('hex');
               if (d !== s.info.digests[name]) throw new Error(`sha256 mismatch: ${ident} rtt=${rtt} ${name} ${reader} (${buf.length} bytes)`);
             };
-            for (let w = 0; w < o.warmup; w++) verify(await read(uri));
-            const walls = [], cpus = [], peaks = [];
+            // Each read runs in its OWN async call that returns only numbers: a suspended async function keeps the
+            // last awaited value in its frame, so a buffer held by this loop would stay reachable into the next
+            // read and inflate its at-rest memory. Inside oneRead, the buffer dies with the call.
+            const warmRead = async () => { verify(await read(uri)); };
+            const oneRead = async () => {
+              if (global.gc) {                                  // let the previous read become unreachable, then collect
+                await new Promise((r) => setTimeout(r, Math.max(100, 3 * rtt)));
+                global.gc();
+              }
+              const rest = process.memoryUsage().arrayBuffers;
+              let peak = rest;
+              const sampler = setInterval(() => {
+                if (o.liveMemory) global.gc();
+                peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+              }, o.liveMemory ? 5 : 2);
+              const realConcat = Buffer.concat;
+              if (o.liveMemory) {
+                Buffer.concat = function liveConcat(list, length) {    // inputs + result both live: sample here
+                  const out = realConcat.call(Buffer, list, length);
+                  global.gc();
+                  peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+                  return out;
+                };
+              }
+              const c0 = process.cpuUsage();
+              const t0 = process.hrtime.bigint();
+              let buf;
+              try { buf = await read(uri); } finally { Buffer.concat = realConcat; }
+              const t1 = process.hrtime.bigint();
+              const c1 = process.cpuUsage(c0);
+              clearInterval(sampler);
+              if (o.liveMemory) global.gc();
+              peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+              verify(buf);
+              return { wallMs: Number(t1 - t0) / 1e6, cpuMs: (c1.user + c1.system) / 1000, peak, rest };
+            };
+            for (let w = 0; w < o.warmup; w++) await warmRead();
+            const walls = [], cpus = [], peaks = [], deltas = [], rests = [];
             const eld = monitorEventLoopDelay({ resolution: 1 });
             eld.enable();
             const deadline = Date.now() + o.budgetS * 1000;
             while (walls.length < o.runs && (walls.length < 3 || Date.now() < deadline)) {
-              if (global.gc) global.gc();
-              let peak = process.memoryUsage().arrayBuffers;
-              const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().arrayBuffers); }, 2);
-              const c0 = process.cpuUsage();
-              const t0 = process.hrtime.bigint();
-              const buf = await read(uri);
-              const t1 = process.hrtime.bigint();
-              const c1 = process.cpuUsage(c0);
-              clearInterval(sampler);
-              peak = Math.max(peak, process.memoryUsage().arrayBuffers);
-              verify(buf);
-              walls.push(Number(t1 - t0) / 1e6);
-              cpus.push((c1.user + c1.system) / 1000);
-              peaks.push(peak / (1024 * 1024));
+              const one = await oneRead();
+              walls.push(one.wallMs);
+              cpus.push(one.cpuMs);
+              peaks.push(one.peak / (1024 * 1024));
+              deltas.push((one.peak - one.rest) / (1024 * 1024));
+              rests.push(one.rest / (1024 * 1024));
             }
             eld.disable();
             const w = stats(walls);
             const row = {
               ident, rtt, size: label, bytes: size, reader, wall: w, cpuMs: stats(cpus), peakArrayBuffersMiB: stats(peaks),
+              restArrayBuffersMiB: stats(rests), readArrayBuffersMiB: stats(deltas), gc: Boolean(global.gc),
               eldP99Ms: eld.percentile(99) / 1e6, mibPerS: (size / (1024 * 1024)) / (w.median / 1000),
               h1PredictMs: name.endsWith('.bin') ? h1PredictMs(size, rtt, ident) : null, file: name, samplesMs: walls,
+              restMiB: rests, peakMiB: peaks,                // per run, for the memory analysis (H6)
             };
             results.push(row);
             console.log(
               `${ident.padEnd(8)} ${String(rtt).padStart(3)} ${label.padStart(5)}  ${reader.padEnd(20)} ${String(w.n).padStart(2)}` +
               ` ${w.median.toFixed(1).padStart(11)} ${w.p95.toFixed(1).padStart(9)} ${(w.mean.toFixed(1) + '±' + w.sd.toFixed(1)).padStart(12)}` +
               ` ${row.mibPerS.toFixed(2).padStart(12)} ${stats(cpus).median.toFixed(1).padStart(7)} ${stats(peaks).max.toFixed(1).padStart(11)}` +
+              ` ${stats(deltas).max.toFixed(1).padStart(8)}` +
               ` ${row.eldP99Ms.toFixed(1).padStart(11)} ${(row.h1PredictMs == null ? '—' : row.h1PredictMs.toFixed(0)).padStart(6)}`);
           }
         }
