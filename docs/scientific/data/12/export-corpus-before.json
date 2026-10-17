@@ -1,0 +1,168 @@
+{
+ "date": "2026-10-17T06:40:48.385Z",
+ "soffice": "LibreOffice 26.8.1.1 680(Build:1)",
+ "expect": "before",
+ "cases": [
+  {
+   "preset": "Screen 4:3",
+   "cm": [
+    28,
+    21
+   ],
+   "predicted": [
+    793.7007874015748,
+    595.275590551181
+   ],
+   "exported": [
+    793.7,
+    595.28
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": false,
+   "tier": null,
+   "source": null,
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "Screen 16:9",
+   "cm": [
+    28,
+    15.75
+   ],
+   "predicted": [
+    793.7007874015748,
+    446.45669291338584
+   ],
+   "exported": [
+    793.7,
+    446.46
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": false,
+   "tier": null,
+   "source": null,
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "Screen 16:10",
+   "cm": [
+    28,
+    17.5
+   ],
+   "predicted": [
+    793.7007874015748,
+    496.06299212598424
+   ],
+   "exported": [
+    793.7,
+    496.06
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": false,
+   "tier": null,
+   "source": null,
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "Widescreen",
+   "cm": [
+    33.867,
+    19.05
+   ],
+   "predicted": [
+    960.0094488188976,
+    540
+   ],
+   "exported": [
+    960.01,
+    540
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": true,
+   "tier": "probable",
+   "source": "slide-export",
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "On-screen Show (4:3)",
+   "cm": [
+    25.4,
+    19.05
+   ],
+   "predicted": [
+    720,
+    540
+   ],
+   "exported": [
+    720,
+    540
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": true,
+   "tier": "probable",
+   "source": "slide-export",
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "On-screen Show (16:9)",
+   "cm": [
+    25.4,
+    14.288
+   ],
+   "predicted": [
+    720,
+    405.01417322834646
+   ],
+   "exported": [
+    720,
+    405.01
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": true,
+   "tier": "probable",
+   "source": "slide-export",
+   "sizeOk": true,
+   "verdictOk": true
+  },
+  {
+   "preset": "On-screen Show (16:10)",
+   "cm": [
+    25.4,
+    15.875
+   ],
+   "predicted": [
+    720,
+    450
+   ],
+   "exported": [
+    720,
+    450
+   ],
+   "pages": 3,
+   "creator": "Impress",
+   "producer": "LibreOffice 26.8.1.1 (X86_64)",
+   "deck": false,
+   "tier": null,
+   "source": null,
+   "sizeOk": true,
+   "verdictOk": true
+  }
+ ]
+}

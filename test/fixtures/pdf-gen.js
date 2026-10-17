@@ -197,8 +197,12 @@ const BEAMER_SIZES = {
   2013: [396.850, 257.953],   // 14.00 × 9.10 cm
 };
 
-/** Slide-tool export canvases (PDF points): PowerPoint 16:9 / 4:3, Google Slides 16:9. */
-const EXPORT_SIZES = { 'powerpoint-169': [960, 540], 'powerpoint-43': [720, 540], 'google-169': [720, 405] };
+/** Slide-tool export canvases (PDF points) — the keys and sizes of vinary.slides.deck/export-canvases. */
+const EXPORT_SIZES = {
+  'powerpoint-169': [960, 540], 'powerpoint-43': [720, 540], 'google-169': [720, 405], 'on-screen-1610': [720, 450],
+  'impress-43': [793.7, 595.3], 'impress-169': [793.7, 446.5], 'impress-1610': [793.7, 496.1],
+  'keynote-43': [1024, 768], 'keynote-169': [1920, 1080],
+};
 
 /** The RGB fill (0–255) makeDeckPdf paints on page index i: well-separated hues, mid lightness, never close
  *  to black/white (so a blank-screen overlay or an unpainted canvas is distinguishable from any page). */

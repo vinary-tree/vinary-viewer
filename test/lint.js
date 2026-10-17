@@ -40,8 +40,8 @@ const jsFiles = [
   // the remote whole-file read benchmark behind docs/scientific/11 (ADR-0046), and its experiments and analyses
   'scripts/bench-remote-read.cjs', 'scripts/exp-torn-pdf-reads.cjs', 'scripts/diag-sftp-window.cjs',
   'scripts/analyze-e2-sibling-stats.cjs', 'scripts/analyze-e3-remote-reads.cjs', 'scripts/analyze-s7-streaming.cjs',
-  // the deck-detection corpus instrument behind docs/scientific/12 (ADR-0045)
-  'scripts/exp-deck-corpus.cjs',
+  // the deck-detection corpus instruments behind docs/scientific/12 (ADR-0045)
+  'scripts/exp-deck-corpus.cjs', 'scripts/exp-deck-export-corpus.cjs',
   // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools
   'scripts/profile-cold-start.mjs', 'scripts/sync-assets.mjs', 'scripts/check-assets.mjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the

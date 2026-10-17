@@ -33,10 +33,19 @@
 (def export-canvases
   "Exact page canvases of slide-tool PDF exports (bp). Landscape alone is NOT evidence — a local corpus survey
    (docs/scientific/12) found hundreds of landscape figures, web print-outs and forms — but these exact sizes
-   are what the tools emit for every slide."
-  {:powerpoint-169 [960 540]
-   :powerpoint-43  [720 540]
-   :google-169     [720 405]})
+   are what the tools emit for every slide. Each entry says where it comes from: MEASURED (exported here by
+   scripts/exp-deck-export-corpus.cjs, LibreOffice Impress 26.8 at each slide-size preset), OBSERVED (an export
+   in the natural corpus), or DOCUMENTED (the vendor's published preset; no sample could be produced here)."
+  {:powerpoint-169 [960 540]        ; PowerPoint Widescreen, 13.333 × 7.5 in; Impress Widescreen (measured)
+   :powerpoint-43  [720 540]        ; PowerPoint / Impress On-screen Show (4:3), 10 × 7.5 in (Impress measured)
+   :google-169     [720 405]        ; Google Slides 16:9; Impress On-screen Show (16:9) (measured)
+   :on-screen-1610 [720 450]        ; Impress On-screen Show (16:10) (measured); PowerPoint's, 10 × 6.25 in (documented)
+   :impress-43     [793.7 595.3]    ; Impress Screen 4:3, 28 × 21 cm (measured 793.7 × 595.28; observed 794 × 595 from
+                                    ; an older Impress that rounds to whole points — both within the tolerance)
+   :impress-169    [793.7 446.5]    ; Impress Screen 16:9, 28 × 15.75 cm — Impress's default (measured)
+   :impress-1610   [793.7 496.1]    ; Impress Screen 16:10, 28 × 17.5 cm (measured)
+   :keynote-43     [1024 768]       ; Keynote Standard (observed)
+   :keynote-169    [1920 1080]})    ; Keynote Wide (documented)
 
 (def size-tolerance
   "|Δ| in bp under which two page dimensions count as equal (TeX rounds \\paperwidth to the scaled point;

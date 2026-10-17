@@ -37,6 +37,19 @@
   (testing "exact PowerPoint / Google Slides canvases, uniform, ≥ 2 pages"
     (doseq [size [[960 540] [720 540] [720 405] [960.2 539.8]]]
       (is (= :slide-export (:source (deck/classify {:sizes (pages 10 size)}))) (pr-str size))))
+  (testing "Impress's own presets as Impress 26.8 exports them (docs/scientific/12, export corpus), and the 16:10
+            on-screen show"
+    (doseq [size [[793.7 595.28] [793.7 446.46] [793.7 496.06] [720 450]]]
+      (is (= :slide-export (:source (deck/classify {:creator "Impress" :producer "LibreOffice 26.8.1.1" :sizes (pages 3 size)})))
+          (pr-str size))))
+  (testing "an older Impress's whole-point 28 × 21 cm canvas (observed in the natural corpus) is within the tolerance"
+    (is (= :slide-export (:source (deck/classify {:sizes (pages 12 [794 595])})))))
+  (testing "Keynote's Standard and Wide canvases"
+    (doseq [size [[1024 768] [1920 1080]]]
+      (is (= :slide-export (:source (deck/classify {:sizes (pages 6 size)}))) (pr-str size))))
+  (testing "A4 landscape is NOT Impress's 28 × 21 cm canvas: the widths differ by 48 bp"
+    (is (not (:deck? (deck/classify {:sizes (pages 4 a4-landscape)}))))
+    (is (nil? (deck/export-canvas a4-landscape))))
   (testing "a single exported page is not enough"
     (is (not (:deck? (deck/classify {:sizes [[960 540]]})))))
   (testing "mixed sizes are not an export"

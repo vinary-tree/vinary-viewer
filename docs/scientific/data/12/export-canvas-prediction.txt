@@ -1,0 +1,35 @@
+Experiment 12 — slide-tool export canvases: pre-registration (written 2026-10-17, BEFORE the Impress corpus ran)
+
+Finding that prompted it (the natural corpus, local-corpus-summary.txt, "Presentation-tool exports not called a deck"):
+  LibreOffice Impress @ 794.0×595.0 bp, ≥ 2 pages: 2 files — not a deck
+  Apple Keynote       @ 1024.0×768.0 bp, ≥ 2 pages: 1 file  — not a deck
+The detector's slide-export canvases are PowerPoint 960×540 and 720×540 and Google Slides 720×405 only
+(vinary.slides.deck/export-canvases).
+
+Prediction P1 — the canvases LibreOffice Impress 26.8 exports. A deck at each of Impress's slide-size presets
+(Slide ▸ Slide Properties ▸ Format), 3 slides, converted headless (soffice --convert-to pdf). Expected MediaBox,
+within the detector's 0.5 bp tolerance, from cm × 72 / 2.54:
+  Screen 4:3              28.000 × 21.000 cm   →  793.7 × 595.3
+  Screen 16:9             28.000 × 15.750 cm   →  793.7 × 446.5
+  Screen 16:10            28.000 × 17.500 cm   →  793.7 × 496.1
+  Widescreen              33.867 × 19.050 cm   →  960.0 × 540.0
+  On-screen Show (4:3)    25.400 × 19.050 cm   →  720.0 × 540.0
+  On-screen Show (16:9)   25.400 × 14.288 cm   →  720.0 × 405.0
+  On-screen Show (16:10)  25.400 × 15.875 cm   →  720.0 × 450.0
+P1 is refuted if any preset's exported size differs from its line by more than 0.5 bp in either dimension.
+
+Prediction P2 — today's verdicts on that corpus (the classifier before any change):
+  Widescreen, On-screen Show (4:3), On-screen Show (16:9)        → deck, probable, slide-export (canvases already known)
+  Screen 4:3, Screen 16:9, Screen 16:10, On-screen Show (16:10)  → not a deck (the gap)
+
+Planned change (only if P1 holds): add to export-canvases
+  Impress Screen 4:3 / 16:9 / 16:10 at the measured sizes; 720 × 450 (Impress On-screen Show 16:10, also
+  PowerPoint's On-screen Show (16:10), 10 × 6.25 in); Keynote Standard 1024 × 768 (observed in the natural
+  corpus) and Keynote Wide 1920 × 1080 (Apple's documented preset — no Keynote sample can be produced here, so this
+  entry rests on documentation, not observation).
+
+Prediction P3 — after the change: all 7 Impress presets → deck, probable, slide-export; and on the natural corpus
+exactly the 3 files above change verdict (to deck, probable, slide-export) and no other file changes. P3 is a
+DEDUCTION, not a blind prediction: the corpus summary already lists every uniform multi-page landscape file that is
+not a deck, and only those 3 lie on a new canvas (every new canvas is landscape). The re-run therefore checks the
+implementation, not the hypothesis.
