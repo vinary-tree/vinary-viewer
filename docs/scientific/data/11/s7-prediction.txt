@@ -1,0 +1,22 @@
+S7 / H7 predictions — written 2026-10-17 before any S7 run.
+
+INSTRUMENT. bench-remote-read readers: readable (transport.remoteCreateReadStream, consumed and concatenated),
+readable-legacy (ssh2's own sftp.createReadStream, consumed and concatenated), readable-discard
+(remoteCreateReadStream, each chunk hashed and dropped). BEFORE = the commit that adds these readers, where
+remoteCreateReadStream is still ssh2's createReadStream; AFTER = the S7 commit (a pipelined Readable through the
+ADR-0046 file handle: up to D requests of C bytes in flight, in-order delivery, backpressure).
+Notation as in §3: S, R, k = ceil(64 KiB / L), D, C, W = 2 MiB; W_eff = W − WINDOW_STEP = 1.906 MiB (§9.5);
+t0 = the same cell at R = 0.
+
+H7 — "a stream that keeps D requests in flight costs what the whole-file reader costs, not H1".
+  1. BEFORE: readable and readable-legacy are ssh2's stream, so both follow H1:
+         t ~= R * (1 OPEN + ceil(S / 64 KiB) * k + 1 EOF) + t0
+     REFUTED if a cell with R >= 10 ms is more than 25 % off.
+  2. AFTER: readable keeps D·C in flight and has no size hint (no FSTAT; its end-of-file probes are the requests
+     past the end, answered in the same round trip as the last body requests):
+         t ~= R (OPEN) + R * max(ceil(S / (D*C)), S / W_eff) + t0
+     REFUTED if a cell with R >= 10 ms is more than 25 % off. readable-legacy must not move (within ±10 % of BEFORE).
+     Example, 32 MiB at 50 ms: 50 + 17·50 + t0 ~= 968 ms (OpenSSH), ~= 992 ms (ssh2) — against H1's 25.7 s / 76.9 s.
+  3. MEMORY (--live-memory, R = 10 ms, 8 and 32 MiB, AFTER): readable-discard's live footprint is the stream's own
+     buffering, ~= highWaterMark + D·C + one packet in assembly, independent of S. REFUTED if it exceeds 3 MiB, or
+     grows by more than 1 MiB from 8 to 32 MiB.

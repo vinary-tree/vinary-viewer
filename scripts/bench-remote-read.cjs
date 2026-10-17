@@ -49,6 +49,12 @@
 //                          stat, the read AND the sibling discovery (H3), checks the group found, and sha256-verifies
 //                          the delivered bytes
 //           open-md        the same for the group's markdown member (openRemoteUri(…, 'markdown'), ASCII text)
+//           readable       transport.remoteCreateReadStream consumed to its end — the source of the streaming and
+//                          paging engines (large remote logs / tables), whatever the transport implements it with
+//           readable-legacy  ssh2's own sftp.createReadStream consumed to its end (one 64 KiB request in flight):
+//                          the pre-S7 streaming source, kept as the baseline
+//           readable-discard  remoteCreateReadStream consumed as a stream really is: each chunk hashed and dropped,
+//                          nothing kept — its live footprint (--live-memory) is the stream's own buffering
 //
 // FLAGS. --sizes=64K,1M,8M,32M  --rtts=0,10,50,100  --idents=ssh2,openssh  --readers=stream,ssh2-readFile,fastGet
 //        --runs=15 --budget-s=45 --warmup=2 --json=PATH (also VV_BENCH_JSON)   VV_BENCH_QUICK=1 → a small subset.
@@ -232,8 +238,19 @@ function makeReaders(transport, content) {
       const s = sftp.createReadStream(p);
       s.on('data', (c) => chunks.push(c)); s.on('error', reject); s.on('end', () => resolve(Buffer.concat(chunks)));
     }));
+  const drain = (stream, keep) => new Promise((resolve, reject) => {
+    const parts = [];
+    const hash = crypto.createHash('sha256');
+    let length = 0;
+    stream.on('data', (c) => { if (keep) parts.push(c); else { hash.update(c); length += c.length; } });
+    stream.on('error', reject);
+    stream.on('end', () => resolve(keep ? Buffer.concat(parts) : { sha256: hash.digest('hex'), length }));
+  });
   const readers = {
     stream: (uri) => transport.remoteReadFile(uri),
+    readable: async (uri) => drain(await transport.remoteCreateReadStream(uri), true),
+    'readable-legacy': (uri) => viaSftp(uri, (sftp, p) => drain(sftp.createReadStream(p), true)),
+    'readable-discard': async (uri) => drain(await transport.remoteCreateReadStream(uri), false),
     'stream-legacy': legacyStream,
     'ssh2-readFile': (uri) => viaSftp(uri, (sftp, p) => new Promise((res, rej) => sftp.readFile(p, (e, b) => (e ? rej(e) : res(b))))),
     fastGet: (uri) => viaSftp(uri, (sftp, p) => new Promise((res, rej) => {
@@ -327,9 +344,10 @@ async function main() {
             const name = file(label);
             const uri = base + name;
             const size = s.info.sizes[name];
-            const verify = (buf) => {
-              const d = crypto.createHash('sha256').update(buf).digest('hex');
-              if (d !== s.info.digests[name]) throw new Error(`sha256 mismatch: ${ident} rtt=${rtt} ${name} ${reader} (${buf.length} bytes)`);
+            // a reader returns the bytes, or (readable-discard) the digest it computed while dropping them
+            const verify = (got) => {
+              const d = Buffer.isBuffer(got) ? crypto.createHash('sha256').update(got).digest('hex') : got.sha256;
+              if (d !== s.info.digests[name]) throw new Error(`sha256 mismatch: ${ident} rtt=${rtt} ${name} ${reader} (${got.length} bytes)`);
             };
             // Each read runs in its OWN async call that returns only numbers: a suspended async function keeps the
             // last awaited value in its frame, so a buffer held by this loop would stay reachable into the next
