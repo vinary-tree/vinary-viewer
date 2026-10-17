@@ -239,7 +239,8 @@ function prng(seed) {
  *   sizes        per-page [w, h] array (mixed sizes); overrides `size`
  *   labels       'beamer' (default) → /PageLabels with each page labelled by its frame number (overlays SHARE
  *                a label — beamer's \thispdfpagelabel{\insertframenumber}); an explicit string array; or null →
- *                no /PageLabels at all (what xdvipdfmx-built decks look like)
+ *                no /PageLabels at all (what a single XeLaTeX pass writes: its driver takes the labels from the
+ *                previous run's .aux — docs/scientific/12 §5.1)
  *   creator      /Info /Creator (default "LaTeX with Beamer class"); null → omitted
  *   producer     /Info /Producer (default "LuaTeX-1.18.0"); null → omitted
  *   title        /Info /Title

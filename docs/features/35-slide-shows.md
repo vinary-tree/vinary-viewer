@@ -293,9 +293,16 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
 
 ### Limitations and troubleshooting
 
-- **A Beamer deck built with XeLaTeX steps one page at a time.** xdvipdfmx writes no page labels, so overlays cannot
-  be grouped into frames: Shift+→ moves one page, the overview shows every page, and typed numbers are page numbers.
-  pdfLaTeX and LuaLaTeX write the labels.
+- **A Beamer deck from a single XeLaTeX pass steps one page at a time.** hyperref writes XeLaTeX's page labels from
+  the ones the previous run left in the `.aux` file, so the first pass has none (its log says *Rerun to get
+  /PageLabels entry*). Overlays then cannot be grouped into frames: Shift+→ moves one page, the overview shows every
+  page, and typed numbers are page numbers. Compile a second time and the deck steps by frame. pdfLaTeX and LuaLaTeX
+  write the labels in the same run.
+- **After an edit, one XeLaTeX pass carries the previous version's labels**, and logs no warning. Frames are then
+  grouped as they were before the edit: an inserted frame's pages join the next frame's first page. Compile until
+  the auxiliary files settle, as latexmk does, and the labels match the deck. A watch loop that runs one pass per save
+  is always one version behind. The dvipdfmx and dvips drivers write labels the same way; pdfLaTeX and LuaLaTeX do
+  not ([experiment 12](../scientific/12-slide-deck-detection-and-flip-latency.md) §5.1).
 - **A paper opens as slides.** Either it asks for full-screen mode, or it is typeset on Beamer paper by a TeX engine —
   the documented false positive of the *Beamer geometry* rule. Choose View as Document (remembered for that view), or
   set *Open detected slide decks as* to *Document*.

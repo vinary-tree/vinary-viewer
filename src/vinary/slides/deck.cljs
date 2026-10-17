@@ -196,8 +196,8 @@
    page, a frame is a maximal run of ADJACENT pages with the same non-blank label — Beamer labels every overlay
    page with its frame number (\\thispdfpagelabel{\\insertframenumber}, beamerbaseframe.sty:72), so the overlays of
    a frame share a label. Only adjacency counts: \\againframe repeats a label later and must start a new frame.
-   Otherwise every page is its own frame (a deck built without page labels, e.g. by xdvipdfmx, or any non-Beamer
-   PDF)."
+   Otherwise every page is its own frame (a deck built without page labels, e.g. by a single XeLaTeX pass, whose
+   driver writes the labels the previous run left in the .aux — docs/scientific/12 §5.1 — or any non-Beamer PDF)."
   [n labels group?]
   (let [labels (when (and group? labels (= n (count labels))) labels)
         joins? (fn [i] (and labels

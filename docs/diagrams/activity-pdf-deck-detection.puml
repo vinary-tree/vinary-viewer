@@ -50,7 +50,7 @@ if (a Beamer source (:beamer, :beamer-geometry),\nno second-screen axis, one lab
   :**frames-from-labels** — a frame is a maximal run
   of ADJACENT pages sharing one non-blank label;  <<IR_TINT>>
 else (no)
-  :one frame per page (an XeLaTeX deck has no labels,
+  :one frame per page (one XeLaTeX pass writes no labels,
   a two-screen deck's labels are corrupt);  <<IR_TINT>>
 endif
 |#E3F2ED|renderer · pdf.js engine (renderer.pdf)|

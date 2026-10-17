@@ -751,8 +751,11 @@ document" in **View**. Reflow Text's access key moved from `r` to `w`, so that n
 - Zoom does nothing in the Slides layout; slides fit themselves.
 - In the Slides layout, Tab opens the overview instead of moving the focus, and Space is a slide key; both are
   rebindable under `:keymaps {:slides …}`. In Vim's normal mode Space stays the leader, so → or `j` flip there.
-- A Beamer deck built with XeLaTeX has no page labels (xdvipdfmx writes none), so it steps one page at a time and its
-  overview shows every page; so does a two-screen deck.
+- A Beamer deck from a single XeLaTeX pass has no page labels, so it steps one page at a time and its overview shows
+  every page; so does a two-screen deck. *Corrected on 2026-10-17: this said that xdvipdfmx writes no labels. hyperref
+  writes XeLaTeX's labels from the ones the previous run left in the `.aux` file, so the second pass has them, and one
+  pass over an edited deck carries the previous version's labels
+  ([experiment 12](../scientific/12-slide-deck-detection-and-flip-latency.md) §5.1).*
 - Rule 4's documented false positive: an article typeset on Beamer paper by a TeX engine opens as slides.
 - A real deck at a canvas the detector does not know opens as a document; View as Slide Show switches it, and
   `--deck-info` shows why.

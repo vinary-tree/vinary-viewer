@@ -492,7 +492,7 @@ introduced in `theory/08-common-document-ir.md`.*
 specifications compiles to several consecutive PDF pages — its **overlays** — that share the frame's number as their
 PDF page label. vinary-viewer rebuilds frames as maximal runs of *adjacent* pages with one equal, non-blank label
 (`vinary.slides.deck/frames-from-labels`), for Beamer sources only; every other PDF, a Beamer deck without page labels
-(built with XeLaTeX) and a two-screen deck get one frame per page. Shift+→ steps a whole frame, and the **overview**
+(compiled by a single XeLaTeX pass) and a two-screen deck get one frame per page. Shift+→ steps a whole frame, and the **overview**
 shows one tile per frame. Not to be confused with a *rendering* frame (one display refresh), the unit of experiment
 12's key → frame latency. *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §2.*
 

@@ -107,7 +107,7 @@ The page sizes come from the same measure the renderer lays the document out wit
 
 **Frames.** Pages are grouped into frames for Beamer sources only. A frame is a maximal run of adjacent pages that
 share one non-blank label (`frames-from-labels`). Every other deck gets one frame per page. So does a Beamer deck
-with no labels (xdvipdfmx writes none) or with two-screen pages (§4).
+with no labels (a single XeLaTeX pass writes none, §5.1) or with two-screen pages (§4).
 
 ## 3 · Instruments
 
@@ -163,11 +163,12 @@ depends on the engine:
 - pdfLaTeX and LuaLaTeX write Beamer's page labels, so a variant of five 3-overlay frames plus a title frame is
   6 frames over 16 pages;
 - XeLaTeX goes through xdvipdfmx, which writes no `/PageLabels`, so the same variant is expected to be 16 one-page
-  frames.
+  frames. *Corrected on 2026-10-17: that holds for the single pass this corpus ran. A second pass writes the labels
+  (§5.1).*
 
 | Variant | What it exercises | Expected verdict |
 |---|---|---|
-| `aspect43`, `aspect169`, `aspect1610`, `aspect141`, `aspect32` | five paper sizes, with overlays | definite / beamer; 6 frames (16 under XeLaTeX) |
+| `aspect43`, `aspect169`, `aspect1610`, `aspect141`, `aspect32` | five paper sizes, with overlays | definite / beamer; 6 frames (16 under one XeLaTeX pass) |
 | `handout` | one page per frame | definite / beamer; 6 frames |
 | `notes-right`, `notes-bottom` | two-screen pages, horizontal and vertical | definite / beamer; 16 frames; the second-screen axis |
 | `creator-override` | `\hypersetup{pdfcreator=…}` at 16:9 | probable / beamer-geometry |
@@ -229,6 +230,21 @@ and Beamer's page labels (`aspect*`, `creator-override`, `fullscreen-beamer`) ar
 The 42 cases of the three original engines run again unchanged, as a replication, for 56 cases in all. **H-X2 is
 refuted** if any `xelatex2` case differs from its expectation, or if any of the 42 original cases differs from its
 2026-10-16 verdict. The 2026-10-16 data stay in `positive-corpus.*`, and the re-run writes `positive-corpus-2026-10-17.*`.
+
+**Result (H-X2).** **Confirmed.** All 56 of 56 cases reached their expected verdict, with **0 field mismatches**
+([`data/12/positive-corpus-2026-10-17.txt`](data/12/positive-corpus-2026-10-17.txt); TeX Live 2026, the engine
+versions of §5). Under `xelatex2`, the six labelled variants have 6 frames, as under pdfLaTeX and LuaLaTeX. The 42
+cases of the three original engines replicate the 2026-10-16 verdicts exactly.
+
+**Which drivers lag.** The drivers of hyperref 7.01p fall into three groups:
+
+- four write the labels the previous run recorded, as `hxetex.def` does: `hxetex.def` (XeLaTeX), `hdvipdfm.def`
+  (dvipdfm(x)), `pdfmark.def` (loaded for dvips, whose PostScript Ghostscript turns into PDF) and `hdviwind.def`;
+- three write them in the run itself: `hpdftex.def`, `hluatex.def` and VTeX's `hvtex.def`;
+- the rest write none.
+
+So a deck from a DVI or PostScript route lags a pass, as XeLaTeX's does. This was found by reading the drivers, and
+only XeLaTeX was compiled. `Rerun to get /PageLabels entry` and the `.aux` entries occur in exactly those four.
 
 ## 6 · The natural corpus
 

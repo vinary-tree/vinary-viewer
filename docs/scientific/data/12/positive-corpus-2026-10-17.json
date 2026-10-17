@@ -1,0 +1,1407 @@
+{
+ "date": "2026-10-17T23:46:37.971Z",
+ "engines": {
+  "pdflatex": "pdfTeX 3.141592653-2.6-1.40.29 (TeX Live 2026/Arch Linux)",
+  "lualatex": "This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux)",
+  "xelatex": "XeTeX 3.141592653-2.6-0.999998 (TeX Live 2026/Arch Linux)",
+  "xelatex2": "XeTeX 3.141592653-2.6-0.999998 (TeX Live 2026/Arch Linux) (2 passes)"
+ },
+ "cases": [
+  {
+   "variant": "aspect43",
+   "engine": "pdflatex",
+   "why": "Beamer, aspectratio=43, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect43-pdflatex.pdf"
+  },
+  {
+   "variant": "aspect43",
+   "engine": "lualatex",
+   "why": "Beamer, aspectratio=43, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect43-lualatex.pdf"
+  },
+  {
+   "variant": "aspect43",
+   "engine": "xelatex",
+   "why": "Beamer, aspectratio=43, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "aspect43-xelatex.pdf"
+  },
+  {
+   "variant": "aspect43",
+   "engine": "xelatex2",
+   "why": "Beamer, aspectratio=43, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect43-xelatex2.pdf"
+  },
+  {
+   "variant": "aspect169",
+   "engine": "pdflatex",
+   "why": "Beamer, aspectratio=169, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect169-pdflatex.pdf"
+  },
+  {
+   "variant": "aspect169",
+   "engine": "lualatex",
+   "why": "Beamer, aspectratio=169, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect169-lualatex.pdf"
+  },
+  {
+   "variant": "aspect169",
+   "engine": "xelatex",
+   "why": "Beamer, aspectratio=169, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "aspect169-xelatex.pdf"
+  },
+  {
+   "variant": "aspect169",
+   "engine": "xelatex2",
+   "why": "Beamer, aspectratio=169, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect169-xelatex2.pdf"
+  },
+  {
+   "variant": "aspect1610",
+   "engine": "pdflatex",
+   "why": "Beamer, aspectratio=1610, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect1610-pdflatex.pdf"
+  },
+  {
+   "variant": "aspect1610",
+   "engine": "lualatex",
+   "why": "Beamer, aspectratio=1610, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect1610-lualatex.pdf"
+  },
+  {
+   "variant": "aspect1610",
+   "engine": "xelatex",
+   "why": "Beamer, aspectratio=1610, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "aspect1610-xelatex.pdf"
+  },
+  {
+   "variant": "aspect1610",
+   "engine": "xelatex2",
+   "why": "Beamer, aspectratio=1610, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect1610-xelatex2.pdf"
+  },
+  {
+   "variant": "aspect141",
+   "engine": "pdflatex",
+   "why": "Beamer, aspectratio=141, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect141-pdflatex.pdf"
+  },
+  {
+   "variant": "aspect141",
+   "engine": "lualatex",
+   "why": "Beamer, aspectratio=141, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect141-lualatex.pdf"
+  },
+  {
+   "variant": "aspect141",
+   "engine": "xelatex",
+   "why": "Beamer, aspectratio=141, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "aspect141-xelatex.pdf"
+  },
+  {
+   "variant": "aspect141",
+   "engine": "xelatex2",
+   "why": "Beamer, aspectratio=141, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect141-xelatex2.pdf"
+  },
+  {
+   "variant": "aspect32",
+   "engine": "pdflatex",
+   "why": "Beamer, aspectratio=32, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect32-pdflatex.pdf"
+  },
+  {
+   "variant": "aspect32",
+   "engine": "lualatex",
+   "why": "Beamer, aspectratio=32, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect32-lualatex.pdf"
+  },
+  {
+   "variant": "aspect32",
+   "engine": "xelatex",
+   "why": "Beamer, aspectratio=32, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "aspect32-xelatex.pdf"
+  },
+  {
+   "variant": "aspect32",
+   "engine": "xelatex2",
+   "why": "Beamer, aspectratio=32, overlays",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "aspect32-xelatex2.pdf"
+  },
+  {
+   "variant": "handout",
+   "engine": "pdflatex",
+   "why": "Beamer handout: one page per frame",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 6,
+    "labels": {
+     "count": 6,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "handout-pdflatex.pdf"
+  },
+  {
+   "variant": "handout",
+   "engine": "lualatex",
+   "why": "Beamer handout: one page per frame",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 6,
+    "labels": {
+     "count": 6,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "handout-lualatex.pdf"
+  },
+  {
+   "variant": "handout",
+   "engine": "xelatex",
+   "why": "Beamer handout: one page per frame",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 6,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "handout-xelatex.pdf"
+  },
+  {
+   "variant": "handout",
+   "engine": "xelatex2",
+   "why": "Beamer handout: one page per frame",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 6,
+    "labels": {
+     "count": 6,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "handout-xelatex2.pdf"
+  },
+  {
+   "variant": "notes-right",
+   "engine": "pdflatex",
+   "why": "show notes on second screen=right: pages doubled horizontally",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-right-pdflatex.pdf"
+  },
+  {
+   "variant": "notes-right",
+   "engine": "lualatex",
+   "why": "show notes on second screen=right: pages doubled horizontally",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-right-lualatex.pdf"
+  },
+  {
+   "variant": "notes-right",
+   "engine": "xelatex",
+   "why": "show notes on second screen=right: pages doubled horizontally",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal",
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "notes-right-xelatex.pdf"
+  },
+  {
+   "variant": "notes-right",
+   "engine": "xelatex2",
+   "why": "show notes on second screen=right: pages doubled horizontally",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "horizontal",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-right-xelatex2.pdf"
+  },
+  {
+   "variant": "notes-bottom",
+   "engine": "pdflatex",
+   "why": "show notes on second screen=bottom: pages doubled vertically",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-bottom-pdflatex.pdf"
+  },
+  {
+   "variant": "notes-bottom",
+   "engine": "lualatex",
+   "why": "show notes on second screen=bottom: pages doubled vertically",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-bottom-lualatex.pdf"
+  },
+  {
+   "variant": "notes-bottom",
+   "engine": "xelatex",
+   "why": "show notes on second screen=bottom: pages doubled vertically",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical",
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "notes-bottom-xelatex.pdf"
+  },
+  {
+   "variant": "notes-bottom",
+   "engine": "xelatex2",
+   "why": "show notes on second screen=bottom: pages doubled vertically",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical"
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": "vertical",
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 8
+    }
+   },
+   "mismatched": [],
+   "pdf": "notes-bottom-xelatex2.pdf"
+  },
+  {
+   "variant": "creator-override",
+   "engine": "pdflatex",
+   "why": "\\hypersetup{pdfcreator=…}: no Beamer tag, Beamer paper, a TeX producer",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "creator-override-pdflatex.pdf"
+  },
+  {
+   "variant": "creator-override",
+   "engine": "lualatex",
+   "why": "\\hypersetup{pdfcreator=…}: no Beamer tag, Beamer paper, a TeX producer",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "creator-override-lualatex.pdf"
+  },
+  {
+   "variant": "creator-override",
+   "engine": "xelatex",
+   "why": "\\hypersetup{pdfcreator=…}: no Beamer tag, Beamer paper, a TeX producer",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "creator-override-xelatex.pdf"
+  },
+  {
+   "variant": "creator-override",
+   "engine": "xelatex2",
+   "why": "\\hypersetup{pdfcreator=…}: no Beamer tag, Beamer paper, a TeX producer",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "creator-override-xelatex2.pdf"
+  },
+  {
+   "variant": "fullscreen-override",
+   "engine": "pdflatex",
+   "why": "pdfpagemode=FullScreen with the Creator overridden: the page-mode rule",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-override-pdflatex.pdf"
+  },
+  {
+   "variant": "fullscreen-override",
+   "engine": "lualatex",
+   "why": "pdfpagemode=FullScreen with the Creator overridden: the page-mode rule",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-override-lualatex.pdf"
+  },
+  {
+   "variant": "fullscreen-override",
+   "engine": "xelatex",
+   "why": "pdfpagemode=FullScreen with the Creator overridden: the page-mode rule",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-override-xelatex.pdf"
+  },
+  {
+   "variant": "fullscreen-override",
+   "engine": "xelatex2",
+   "why": "pdfpagemode=FullScreen with the Creator overridden: the page-mode rule",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "fullscreen-mode",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-override-xelatex2.pdf"
+  },
+  {
+   "variant": "fullscreen-beamer",
+   "engine": "pdflatex",
+   "why": "pdfpagemode=FullScreen with Beamer's Creator: the first rule wins",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-beamer-pdflatex.pdf"
+  },
+  {
+   "variant": "fullscreen-beamer",
+   "engine": "lualatex",
+   "why": "pdfpagemode=FullScreen with Beamer's Creator: the first rule wins",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-beamer-lualatex.pdf"
+  },
+  {
+   "variant": "fullscreen-beamer",
+   "engine": "xelatex",
+   "why": "pdfpagemode=FullScreen with Beamer's Creator: the first rule wins",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 16,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-beamer-xelatex.pdf"
+  },
+  {
+   "variant": "fullscreen-beamer",
+   "engine": "xelatex2",
+   "why": "pdfpagemode=FullScreen with Beamer's Creator: the first rule wins",
+   "expect": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "definite",
+    "source": "beamer",
+    "frames": 6,
+    "secondScreen": null,
+    "pages": 16,
+    "labels": {
+     "count": 16,
+     "distinct": 6
+    }
+   },
+   "mismatched": [],
+   "pdf": "fullscreen-beamer-xelatex2.pdf"
+  },
+  {
+   "variant": "poster",
+   "engine": "pdflatex",
+   "why": "a one-page beamerposter (A0): Beamer's Creator, but not a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null,
+    "pages": 1,
+    "labels": {
+     "count": 1,
+     "distinct": 1
+    }
+   },
+   "mismatched": [],
+   "pdf": "poster-pdflatex.pdf"
+  },
+  {
+   "variant": "poster",
+   "engine": "lualatex",
+   "why": "a one-page beamerposter (A0): Beamer's Creator, but not a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null,
+    "pages": 1,
+    "labels": {
+     "count": 1,
+     "distinct": 1
+    }
+   },
+   "mismatched": [],
+   "pdf": "poster-lualatex.pdf"
+  },
+  {
+   "variant": "poster",
+   "engine": "xelatex",
+   "why": "a one-page beamerposter (A0): Beamer's Creator, but not a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null,
+    "pages": 1,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "poster-xelatex.pdf"
+  },
+  {
+   "variant": "poster",
+   "engine": "xelatex2",
+   "why": "a one-page beamerposter (A0): Beamer's Creator, but not a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 1,
+    "secondScreen": null,
+    "pages": 1,
+    "labels": {
+     "count": 1,
+     "distinct": 1
+    }
+   },
+   "mismatched": [],
+   "pdf": "poster-xelatex2.pdf"
+  },
+  {
+   "variant": "article-landscape",
+   "engine": "pdflatex",
+   "why": "a landscape article: landscape alone is never a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null,
+    "pages": 3,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-landscape-pdflatex.pdf"
+  },
+  {
+   "variant": "article-landscape",
+   "engine": "lualatex",
+   "why": "a landscape article: landscape alone is never a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null,
+    "pages": 3,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-landscape-lualatex.pdf"
+  },
+  {
+   "variant": "article-landscape",
+   "engine": "xelatex",
+   "why": "a landscape article: landscape alone is never a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null,
+    "pages": 3,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-landscape-xelatex.pdf"
+  },
+  {
+   "variant": "article-landscape",
+   "engine": "xelatex2",
+   "why": "a landscape article: landscape alone is never a deck",
+   "expect": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": false,
+    "tier": null,
+    "source": null,
+    "frames": 3,
+    "secondScreen": null,
+    "pages": 3,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-landscape-xelatex2.pdf"
+  },
+  {
+   "variant": "article-on-beamer-paper",
+   "engine": "pdflatex",
+   "why": "an article on 16:9 Beamer paper: the documented false positive of :beamer-geometry",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null,
+    "pages": 2,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-on-beamer-paper-pdflatex.pdf"
+  },
+  {
+   "variant": "article-on-beamer-paper",
+   "engine": "lualatex",
+   "why": "an article on 16:9 Beamer paper: the documented false positive of :beamer-geometry",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null,
+    "pages": 2,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-on-beamer-paper-lualatex.pdf"
+  },
+  {
+   "variant": "article-on-beamer-paper",
+   "engine": "xelatex",
+   "why": "an article on 16:9 Beamer paper: the documented false positive of :beamer-geometry",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null,
+    "pages": 2,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-on-beamer-paper-xelatex.pdf"
+  },
+  {
+   "variant": "article-on-beamer-paper",
+   "engine": "xelatex2",
+   "why": "an article on 16:9 Beamer paper: the documented false positive of :beamer-geometry",
+   "expect": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null
+   },
+   "got": {
+    "deck": true,
+    "tier": "probable",
+    "source": "beamer-geometry",
+    "frames": 2,
+    "secondScreen": null,
+    "pages": 2,
+    "labels": null
+   },
+   "mismatched": [],
+   "pdf": "article-on-beamer-paper-xelatex2.pdf"
+  }
+ ]
+}
