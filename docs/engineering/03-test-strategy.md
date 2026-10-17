@@ -193,7 +193,7 @@ environment of §3.4. It `require`s the **real compiled main**
 auto-invokes `vinary.main.core/main` on load — so the entire production chain runs:
 
 ```
-CLI argv → startup/doc-uris → vv:open-files → [:files/opened] → [:doc/open]
+CLI argv → startup/user-args → doc-specs → vv:open-files → [:files/opened] → [:doc/open]
 __vvopen(path) ───────────────────────────────────────────────→ [:doc/open]
   → load-fx → vv:open → main open! → send-tree! → path-tree
   → repo-tree (async git) OR synthetic-tree (async walk), each through its root's listing flight
@@ -221,6 +221,10 @@ npm run test:tree-e2e     # compile main+renderer, then run the real app through
 > boots — the precondition of anything that measures what a user sees. Until 2026-10-17 `bench-input-latency`
 > measured the pool window and `find-e2e` showed it and tested it in the app's place
 > ([docs/scientific/10 §12](../scientific/10-input-latency-experiments.md#12--the-benchmark-measured-a-window-no-one-could-see-2026-10-17)).
+>
+> **A harness's own script is not a document.** These harnesses launch as `electron --no-sandbox <script>`, so the
+> script sits where the app path does; `startup/user-args` skips the switches before the app path and the app path
+> itself, so the script no longer opens as the live window's first tab.
 
 > **Poll, never single-read.** Every UI assertion in this harness goes through a polling helper.
 > Reagent re-renders on an animation frame and the IPC round-trip is async, so reading the DOM once

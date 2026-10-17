@@ -20,6 +20,30 @@
       (is (= :help (startup/help-request? (argv "--gui" "--help"))))
       (is (= :help (startup/help-request? (argv "foo.md" "--help")))))))
 
+(deftest user-args-after-the-app-path
+  (testing "`electron <app> <args…>` — the launchers' shape: everything after the app path"
+    (is (= ["a.md" "-t" "diff" "b"] (startup/user-args (argv "a.md" "-t" "diff" "b"))))
+    (is (= [] (startup/user-args (argv))))
+    (is (= [] (startup/user-args ["/node/electron"])) "no app path at all"))
+  (testing "switches BEFORE the app path are Electron's, Chromium's or Node's — never documents"
+    (is (= [] (startup/user-args ["/node/electron" "--no-sandbox" "test/find-e2e.js"]))
+        "a harness's own script is the app path, not its first document")
+    (is (= ["a.md"] (startup/user-args ["/node/electron" "--no-sandbox" "--inspect=9229" "/repo" "a.md"])))
+    (is (= ["--gui" "--help"] (startup/user-args ["/node/electron" "--no-sandbox" "/repo" "--gui" "--help"]))
+        "the user's own flags come after the app path and are kept for the grammar to read"))
+  (testing "Electron's -r/--require takes its module as the NEXT argument"
+    (is (= ["a.md"] (startup/user-args ["/node/electron" "-r" "./hook.js" "/repo" "a.md"])))
+    (is (= ["a.md"] (startup/user-args ["/node/electron" "--require" "./hook.js" "--no-sandbox" "/repo" "a.md"]))))
+  (testing "every reader of the user's arguments agrees on the switch-first shape"
+    (let [av ["/node/electron" "--no-sandbox" "/repo" "--vv-instance-id=k" "a.md" "--help"]]
+      (is (= :help (startup/help-request? av)))
+      (is (= ["/cwd/a.md"] (startup/doc-uris av #(str "/cwd/" %))))
+      (is (= "k" (startup/instance-id av))))
+    (is (= {:specs [{:uri "/cwd/a.md" :kind "diff"}]}
+           (startup/doc-specs ["/node/electron" "--no-sandbox" "/repo" "-t" "diff" "a.md"] #(str "/cwd/" %))))
+    (is (= {:specs []} (startup/doc-specs ["/node/electron" "--no-sandbox" "scripts/bench.cjs"] #(str "/cwd/" %)))
+        "the harness launch shape opens nothing (counting positions opened /cwd/scripts/bench.cjs)")))
+
 (deftest usage-and-version-text
   (testing "usage lists all three modes"
     (is (str/includes? startup/usage-text "vv [--gui]"))

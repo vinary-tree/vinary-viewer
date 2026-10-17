@@ -562,6 +562,9 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Launching with an Electron or Chromium switch before the app path
+      (electron --no-sandbox <repo> notes.md, as in a container) no longer
+      opens the app's own directory as an extra tab.
     - In a slide show, one notch of the mouse wheel now flips one slide at any
       window zoom. The wheel's scaling was not pdf.js's: a notch landed exactly
       on the flip threshold at 100 % zoom, and a zoomed-in window (125 %,

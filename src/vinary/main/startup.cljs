@@ -92,12 +92,38 @@
 
 (defn version-text [version] (str "vinary-viewer " version))
 
+(def ^:private electron-valued-options
+  "Electron's own command-line options that take their value as the NEXT argument (the default app's
+   `-r/--require <module>`) — the one exception to `--name=value` among the switches that precede the app path."
+  #{"-r" "--require"})
+
+(defn user-args
+  "The user's arguments in an argv-shaped launch, as a vector: what follows Electron's executable (argv[0]),
+   the switches Electron, Chromium and Node consume BEFORE the app path, and the app path itself.
+
+   install.sh and scripts/vv-open.mjs spawn `electron <app> <args…>`, where this is simply `(drop 2 argv)`. But a
+   switch may come first — `electron --no-sandbox test/find-e2e.js` (every Electron harness), `electron
+   --inspect=9229 . a.md`, a container's `electron --no-sandbox <repo> a.md` — and a second instance's argv may
+   arrive with switches inserted ahead of the app path (Electron documents that it can be reordered and
+   appended to). Counting positions there read the app path as the first document: each harness opened its own
+   script in the live window, and a container launch opened the repository as a directory tab.
+
+   The app path is the first argument after argv[0] that is not a switch; a switch never takes the next argument
+   as its value except Electron's `-r/--require <module>` (electron-valued-options)."
+  [argv]
+  (loop [[a & more :as args] (rest argv)]
+    (cond
+      (empty? args)                                         []
+      (contains? electron-valued-options a)                 (recur (rest more))
+      (str/starts-with? (str a) "-")                        (recur more)
+      :else                                                 (vec more))))
+
 (defn help-request?
   "Which top-level help the command line asks for, if any: :help | :version | nil — recognising -h/--help and
-   -V/--version among the user's arguments (argv from index 2, matching doc-uris' `electron <app> <args…>` shape).
+   -V/--version among the user's arguments (`user-args`: after the app path, like doc-uris).
    Lets the main process print and exit before opening a window."
   [argv]
-  (let [args (set (drop 2 argv))]
+  (let [args (set (user-args argv))]
     (cond
       (some args ["-h" "--help"])    :help
       (some args ["-V" "--version"]) :version
@@ -135,12 +161,12 @@
   "Ordered, normalized tab uris for the non-flag document arguments in `argv` — supporting any number of
    files/URIs named on the command line (`vv a.md b.pdf https://example.com`), each opened in its own tab.
 
-   argv[0]=electron, argv[1]=app path (install.sh runs `electron \"$REPO\" \"$@\"`, and `npm start` =
-   `electron .`), so the user's arguments begin at index 2. Leading-'-' flags and blank arguments are
-   dropped. `doc-specs` (below) is the full open grammar — types, stdin — built on the same normalization;
+   The user's arguments follow the app path (`user-args`: install.sh runs `electron \"$REPO\" \"$@\"`, `npm start`
+   is `electron .`, and a harness's `electron --no-sandbox <script>` puts a switch first). Leading-'-' flags and
+   blank arguments are dropped. `doc-specs` (below) is the full open grammar — types, stdin — built on the same normalization;
    this stays the flags-blind uri view (the lenient fallback for a skewed/invalid second-instance argv)."
   [argv resolve-abs]
-  (->> (drop 2 argv)
+  (->> (user-args argv)
        (remove #(str/starts-with? % "-"))
        (map (partial normalize-doc-arg resolve-abs))
        (remove nil?)
@@ -168,7 +194,7 @@
    → {:specs [{:uri :kind? :language? :delimiter? :stdin? :cwd?} …]} | {:error \"vv: …\"}"
   ([argv resolve-abs] (doc-specs argv resolve-abs nil))
   ([argv resolve-abs cwd]
-   (let [args (vec (drop 2 argv))
+   (let [args (user-args argv)
          scan (file-type/scan-open-args args)]
      (if (:error scan)
        {:error (:error scan)}
