@@ -1,13 +1,13 @@
 # 11 — Remote read and reload-safety experiments
 
-**Status: in progress.**
+**Status: complete.** Every hypothesis has been measured: H0–H7 (§4–§9).
 - **Recorded:**
   - the baseline and its hypotheses, plus one discovery made while validating the instrument (H0);
   - E0, E1 and E2 (§9.1–§9.3);
   - why H2 failed at 32 MiB, and E4, the eager channel window that fixes it (§9.4);
   - E3, the re-measurement with E0–E4 in place: H2 holds, the depth is chosen, and H6 holds (§9.5);
-  - S7, the pipelined streaming source: H7 was refuted by one round trip, fixed, then held (§9.6).
-- **Pending:** the D-phase measurements of H4 and H5.
+  - S7, the pipelined streaming source: H7 was refuted by one round trip, fixed, then held (§9.6);
+  - H4, bytes per change, and H5, torn reads during real compile loops (§9.7).
 
 These experiments support [ADR-0046 — Reload-safe, pipelined remote reads] and the slide-deck work of
 [ADR-0045 — Slide-deck presentation], where a remote deck (`vv sftp://host/talk.pdf`) is read whole over SFTP
@@ -753,7 +753,67 @@ about 2 S only because the bench concatenates everything it receives.
 | ssh2 | 1 MiB | 578.6 → 29.0 (19.9×) | 2 617.0 → 107.6 (24.3×) |
 | ssh2 | 8 MiB | 4 407.6 → 76.6 (57.5×) | 20 186.0 → 315.4 (64.0×) |
 
-*The D-phase measurements (H4, H5) are recorded below as they land.*
+### 9.7 · H4 and H5 — what a change costs, and torn reads in real compile loops (2026-10-17)
+
+**H4: bytes per change.**
+- **Instrument:** `test/remote-pdf-e2e.js` arm A, with the fixture's byte counter reset just before one rewrite of a
+  deck that three windows retain.
+- **Before:** D2's read-once fan-out was measured by running the current e2e on the commit just before D2
+  (`7bf48c2`), in an isolated export.
+- **Raw data:** `data/11/h4-bytes-per-change.txt`.
+
+| | Bytes read for one change ($`S`$ = 411 315 B, 3 windows) | |
+|---|---|---|
+| before D2 (`7bf48c2`): every window read for itself | 1 233 945 | **exactly** $`3S`$: the predicted $`N\cdot S`$ |
+| after (`7fc2283`): one read, fanned out | 412 403 | $`S`$ + one 1 088-byte tail probe, 1 OPEN |
+
+**H4 holds:** a change now costs $`1.003\,S`$ however many windows retain the file, within the predicted $`\le 2S`$.
+A burst of writes during a read costs at most one trailing read. `watch-e2e` shows that locally: a burst of six
+writes costs five reads, and both windows end on the same read number.
+
+**H5: torn reads during real compile loops.**
+- **Instrument:** [`scripts/exp-torn-pdf-reads.cjs`](../../scripts/exp-torn-pdf-reads.cjs).
+- **Pre-registration:** `data/11/h5-prediction.txt`, written before the run. One 8 s instrument check on pdflatex
+  with 10 frames preceded it.
+- **Method:** each engine recompiles a generated 40-frame Beamer deck in place, back to back, for 60 s.
+  - **Ground truth:** the sha256 of each finished compile's PDF. A read is **torn** when it matches none of them,
+    classified after the run, so the integrity check under test never judges itself.
+  - **Readers:**
+    - a naive `fs.readFileSync` every 3 ms;
+    - the verified local reader;
+    - the verified remote reader (SFTP fixture);
+    - a remote probe sampler, one verified attempt at a time on a server of its own.
+- **Raw data:** `data/11/h5-torn-reads.{txt,json}`.
+
+| Engine | Compiles (median) | Naive reads: torn | pdf.js on torn copies | Verified local: complete / flagged / **torn as complete** | Verified remote: complete / flagged / **torn as complete** | Remote probes: unfinished, max bytes |
+|---|---|---|---|---|---|---|
+| pdflatex 1.40.29 | 19 (3.28 s) | 17 353 of 19 264 (90 %) | rejected 200 of 200 | 3 237 / 14 / **0** | 253 / 14 / **0** | 2 623 of 2 888, **1 088** |
+| LuaHBTeX 1.24.0 | 16 (3.85 s) | 16 033 of 18 509 (87 %) | rejected 200 of 200 | 9 991 / 0 / **0** | 1 / 15 / **0** | 2 439 of 2 790, **1 088** |
+| XeTeX 0.999998 | 18 (3.40 s) | 15 089 of 18 276 (83 %) | rejected 200 of 200 | 14 083 / 13 / **0** | 672 / 13 / **0** | 2 291 of 2 740, **1 088** |
+
+**H5 holds on every criterion, for every engine.**
+- **(a) Naive reads tear: 83–90 % of them.** All three engines rewrite the PDF in place and keep it unfinished for
+  most of each compile.
+- **(b) The verified readers delivered no torn PDF as complete:** 0 of 27 311 local and 0 of 926 remote complete
+  deliveries.
+- **(c) An unfinished file cost every probe at most 1 088 bytes:** `TAIL_WINDOW` + 64. The maximum was reached
+  because a probe reads exactly that window.
+  - §3 worded this bound as "at most 1 KiB". The tail probe is 1 KiB plus 64 bytes of slack, so a `startxref`
+    line straddling the window edge is still parsed.
+  - This run's pre-registration therefore states the bound as 1 088 bytes. Read literally, §3's "1 KiB" is
+    exceeded by those 64 bytes.
+
+**Observations** (no hypothesis attached):
+- **pdf.js rejected every torn copy it was given** (600 of 600). A viewer that read naively would show a failed
+  render, not a silently partial deck, during most of every compile. The verified read turns that into "keep the
+  last complete version, then swap in the finished one".
+- **The post-read FSTAT comparison caught 4 rewrites that began during a read** (2, 1 and 1 probes came back
+  "changing"). That is direct evidence the comparison earns its round trip.
+- **Flagged-incomplete deliveries are what back-to-back compiling leaves.** With `notifies: false` and no gap
+  between compiles, a settle loop can find the file changing at every attempt and must then deliver it flagged.
+  The remote reader, whose attempts each cost round trips, flagged most of its LuaLaTeX deliveries this way. In the
+  app a change notification follows every write, so such a read is `pending` instead (D6).
+
 
 ## 10 · Regression guards
 
@@ -800,7 +860,12 @@ about 2 S only because the bench concatenates everything it receives.
     - the first growth check stalls;
     - the committed stream before `73e40ed` requests its remainder at the end offset.
 
-*Pending:* `remote-pdf-e2e` byte counts.
+- **Bytes per change (H4) and the reload safety of remote decks:** `remote-pdf-e2e` arm A. One change to a deck
+  that three windows retain must read at most $`2S`$ + two tail probes. Measured: $`S`$ + one; before D2 it was
+  $`3S`$.
+- **Torn reads (H5):** the verified readers' contract is unit- and smoke-tested (`content-service-smoke`
+  `testPdfIntegrity`, `testPdfSettle`) and end-to-end (`watch-e2e`, `remote-pdf-e2e` arm C).
+  `scripts/exp-torn-pdf-reads.cjs` re-runs the real compile loops on demand.
 
 [ADR-0045 — Slide-deck presentation]: ../design-decisions/0045-slide-deck-presentation.md
 [ADR-0046 — Reload-safe, pipelined remote reads]: ../design-decisions/0046-reload-safe-pipelined-remote-reads.md

@@ -1,0 +1,20 @@
+H5 predictions — written 2026-10-17 before the H5 run (one 8 s instrument check on pdflatex with 10 frames preceded it;
+it is recorded in §9.7 as such, not as data).
+
+INSTRUMENT. scripts/exp-torn-pdf-reads.cjs: each engine recompiles a generated 40-frame Beamer deck in place, back to
+back, for 60 s, while four readers sample the PDF: naive fs.readFileSync (every 3 ms), the verified local reader
+(readPdfLocal, notifies: false), the verified remote reader (readPdfRemote through the in-process SFTP fixture), and a
+remote PROBE sampler (one verified attempt at a time, on a server of its own, so its byte counts are its own).
+Ground truth: the sha256 of the PDF each compile leaves behind. A read is TORN when it matches none of them;
+classification happens after the run, so no reader is judged by the integrity check under test.
+
+H5 (§3): "During real pdflatex / lualatex / xelatex compile loops, a naive read sometimes returns a torn PDF. A
+verified reader delivers none, and an incomplete probe moves at most 1 KiB."
+  (a) For every engine, naive torn reads > 0. Otherwise H5's premise is refuted for that engine (the engine would not
+      rewrite in place, or never be caught mid-write).
+  (b) For every engine, the verified local AND remote readers deliver 0 torn PDFs flagged complete. Any such delivery
+      REFUTES H5.
+  (c) Every remote probe that found the file unfinished moved at most 1088 bytes (TAIL_WINDOW 1024 + 64 slack).
+      More REFUTES the ≤ 1 KiB claim.
+Observations, no hypothesis attached: the fraction of naive reads that tear; what pdf.js does with a torn copy
+(open — with how many pages — or reject); how many verified deliveries are flagged incomplete.

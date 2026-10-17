@@ -1,0 +1,6 @@
+# H4 — bytes read per change, one Beamer deck (S = 411315 bytes) retained by 3 windows (test/remote-pdf-e2e.js arm A)
+# fixture byte counter (srv.stats.byPath[deck].readBytes) over one fs.writeFileSync of the deck, reset just before it
+# before: commit 7bf48c2 (content-flight model, not yet wired: every window re-read for itself), isolated export + the current e2e
+AssertionError [ERR_ASSERTION]: one change cost 1233945 bytes for a 411315-byte deck in 3 windows (≤ 2·S + 2 tails — H4)
+# after: commit 7fc2283 (D2 read-once fan-out + D5/D6 verified reads) — remote-pdf-e2e run of 2026-10-17
+[ok] A: a remote Beamer deck opens as slides in 3 windows; one change = 412403 bytes, 1 open(s) (S = 411315)

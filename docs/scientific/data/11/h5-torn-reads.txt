@@ -1,0 +1,23 @@
+# exp-torn-pdf-reads 2026-10-17T05:08:40.605Z  node v26.11.1  frames=40 seconds/engine=60 naive-gap=3 ms  VV_PDF_SETTLE_MS=(default 250)
+# pdflatex: pdfTeX 3.141592653-2.6-1.40.29 (TeX Live 2026/Arch Linux)
+# lualatex: This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux)
+# xelatex: XeTeX 3.141592653-2.6-0.999998 (TeX Live 2026/Arch Linux)
+
+pdflatex: 19 compiles (0 failed), median 3278 ms; 20 complete versions (304140–306420 bytes)
+  naive     19264 reads: 1911 consistent, 17353 TORN — of 200 judged, pdf.js opened 0 (pages —), rejected 200
+  verified  3251 deliveries: 3237 complete, 14 flagged incomplete, 0 TORN-AS-COMPLETE
+  remote    267 deliveries: 253 complete, 14 flagged incomplete, 0 TORN-AS-COMPLETE
+  probes    2888 remote attempts: {"incomplete:no-eof":2623,"complete":263,"changing":2}; an incomplete probe moved at most 1088 bytes
+
+lualatex: 16 compiles (0 failed), median 3848 ms; 17 complete versions (296954–298444 bytes)
+  naive     18509 reads: 2476 consistent, 16033 TORN — of 200 judged, pdf.js opened 0 (pages —), rejected 200
+  verified  9991 deliveries: 9991 complete, 0 flagged incomplete, 0 TORN-AS-COMPLETE
+  remote    16 deliveries: 1 complete, 15 flagged incomplete, 0 TORN-AS-COMPLETE
+  probes    2790 remote attempts: {"incomplete:no-eof":2439,"complete":350,"changing":1}; an incomplete probe moved at most 1088 bytes
+
+xelatex: 18 compiles (0 failed), median 3396 ms; 19 complete versions (248875–250294 bytes)
+  naive     18276 reads: 3187 consistent, 15089 TORN — of 200 judged, pdf.js opened 0 (pages —), rejected 200
+  verified  14096 deliveries: 14083 complete, 13 flagged incomplete, 0 TORN-AS-COMPLETE
+  remote    685 deliveries: 672 complete, 13 flagged incomplete, 0 TORN-AS-COMPLETE
+  probes    2740 remote attempts: {"incomplete:no-eof":2291,"complete":448,"changing":1}; an incomplete probe moved at most 1088 bytes
+# wrote docs/scientific/data/11/h5-torn-reads.json
