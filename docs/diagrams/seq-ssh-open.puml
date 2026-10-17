@@ -9,7 +9,7 @@ title Opening `ssh://user@host/path` — resolve, verify, authenticate, read, re
 participant "renderer /\nvv-cli" as Rend RENDERER_TINT
 participant "preload seam" as Seam IPC_TINT
 participant "main.ssh" as Ssh MAIN_TINT
-participant "~/.ssh/config\n+ agent / keys" as Cfg MAIN_TINT
+participant "~~/.ssh/config\n+ agent / keys" as Cfg MAIN_TINT
 participant "remote host\n(sshd)" as Host FS_TINT
 
 == open ==
@@ -41,17 +41,23 @@ end
 Ssh -> Host : authenticate
 Host --> Ssh : success
 
-== read + render (identical to local) ==
-Ssh -> Host : sftp read path
-Host --> Ssh : bytes (large -> stream bounded-memory)
-Ssh --> Seam : `vv:content` {kind, ...}
+== read (ADR-0046: one pipelined handle) ==
+Ssh -> Host : OPEN path — the document group's sibling STATs run in parallel
+opt a PDF
+  Ssh -> Host : READ the tail first (1 KiB + 64 B)
+  note right of Ssh #F5E1E0: still being written → refused here;\nsettled with backoff, kept behind a note
+end
+Ssh -> Host : READ × D in flight (C bytes each)
+Host --> Ssh : replies in any order → each at its offset\nin the preallocated buffer (large text: a pipelined,\nbackpressured stream in bounded memory)
+Ssh -> Host : FSTAT (a PDF: size + mtime unchanged?) · CLOSE
+Ssh --> Seam : `vv:content` {kind, seq, …}
 deactivate Ssh
-Seam --> Rend : same IR pipeline + renderers
+Seam --> Rend : same IR pipeline + renderers (identical to a local read)
 
-== live refresh (opt-in polling) ==
-loop every :remote :poll-seconds
-  Ssh -> Host : re-stat / re-read
-  Ssh --> Rend : `vv:content` if changed
+== live refresh ==
+loop a target-daemon invalidation (ADR-0035) — else the opt-in :remote :poll-seconds poller
+  Ssh -> Host : ONE re-read per path (a change during it: one trailing read)
+  Ssh --> Rend : `vv:content` {seq n+1} to every retaining window\n(an older seq that lands late is dropped)
 end
 
 legend right

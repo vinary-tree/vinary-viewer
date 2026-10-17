@@ -71,6 +71,12 @@ Connections reconnect with bounded exponential backoff and restore desired conte
 daemon discovery or the channel is unavailable. Without a compatible target daemon, remote documents still
 open over SFTP but no project tree is synthesized from client-side recursive listing.
 
+> **Note (2026-10-17, [ADR-0046](0046-reload-safe-pipelined-remote-reads.md) §Settling).** A content subscription
+> that the target reports **active** announces the next write to the file. The source tracks that liveness in the
+> pure `vinary.main.remote-subs`. A remote PDF caught mid-write may then be left `pending` for that announcement,
+> where an unannounced file would be delivered flagged incomplete. A subscription that is held but not yet active
+> counts as no announcement.
+
 ## Consequences
 
 - Opening a remote file against a compatible target daemon now offers its target-side git repository or

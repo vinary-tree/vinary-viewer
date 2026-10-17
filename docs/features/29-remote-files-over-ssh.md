@@ -24,6 +24,9 @@ and remote Files trees.
 | **Host-key trust** | Verified against `~/.ssh/known_hosts` with a **trust-on-first-use** prompt on an unknown key (a native dialog in the GUI, a `yes/no` in the terminal) and a **hard reject** of a *changed* key. |
 | **Large remote logs stream** | A big remote log / text file streams in **bounded memory** over SFTP; a mid-stream connection drop keeps the partial content (never a silent truncation). |
 | **Event-driven live refresh** | When a compatible vinary-viewer daemon is running on the target, its local watcher sends authenticated invalidations; the source re-reads the changed URI over SFTP. Opt-in polling remains the no-channel content fallback. |
+| **Fast whole-file reads** | A remote file is read through one pipelined SFTP handle: up to D requests in flight, preallocated, the channel window granted eagerly. Measured: a 32 MiB file over a 50 ms link in about 1 s, where it took 26 s ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md); [docs/scientific/11](../scientific/11-remote-read-and-reload-safety-experiments.md)). |
+| **Reload-safe refresh** | A change is read once and delivered to every window that shows the file, numbered so a late read can never move the display backwards. A PDF still being written (LaTeX mid-compile) is never shown half-written. A failed or unfinished re-read keeps the last good version behind a note. |
+| **Back / Forward re-validates** | Going back to a remote document the window still holds costs one stat, not a download, when it has not changed. |
 | **Remote Files tree** | The target daemon offers the file's git repository or a synthetic containing-directory project. Expansion, add/delete/rename, `.gitignore`, manual Refresh, and Refresh All reuse the same expansion-scoped semantics as local trees. |
 | **Everything a local path does** | Relative image assets (inlined as `data:` URLs over SFTP), Document↔PDF siblings, side-by-side diff enrichment, remote archive browsing, and **live-rendered remote HTML** (via a privileged `vv-remote://` scheme). |
 | **Terminal preview** | `vv --cli ssh://…` opens remote URIs too, with TTY-gated auth prompts. The interactive TUI remains local-only. |
@@ -59,6 +62,16 @@ ever leaks into the pure router.
 `openRemoteUri` produces the **identical payload contract** and reuses every existing parser (image → dataUrl,
 pdf → bytes, office / table / log parsers, text sniff) plus the archive machinery. The grammar-aware `kind` is
 threaded from CLJS so a remote `.rs` renders as highlighted source, not sniffed text.
+
+**How the bytes travel** ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md)).
+
+- **The handle.** `ssh_transport.js/remoteOpenFile` opens one SFTP handle and keeps up to $`D`$ READs of $`C`$
+  bytes in flight. $`C`$ is at most the server's read cap; $`D = \lceil 2\,\mathrm{MiB}/C \rceil`$, clamped to
+  [4, 64]. Replies may arrive in any order, and each lands at its offset in a preallocated buffer. The handle is
+  registered with its connection, so a drop rejects it instead of hanging.
+- **PDFs.** A PDF's tail is read first, so a file still being written costs about 1 KiB before it is refused and
+  settled with backoff.
+- **Siblings.** The document group's sibling stats run concurrently with the read.
 
 ![Opening a remote file: main resolves ~/.ssh/config, connects and authenticates through the pooled ssh2 client, verifies the host key, then stats and reads over SFTP and returns the same payload a local read would](../diagrams/seq-ssh-open.svg)
 
@@ -101,8 +114,10 @@ ed25519 / RSA / ECDSA — ssh2 has no client-side agent-add).
 
 ### Streaming, paging, and event-driven live-refresh
 
-- **Streaming** substitutes an SFTP read-stream for `fs.createReadStream` — a drop-in `Readable`, so the
-  credit-1 pull cursor and the whole session are otherwise identical. Only the **transport engine** (log / text)
+- **Streaming** substitutes a pipelined, backpressured SFTP `Readable` for `fs.createReadStream`
+  (`pipelinedReadStream`: $`D`$ requests in flight through the same handle, delivered in file order, and none issued
+  while the consumer is not reading — ADR-0046). It is a drop-in, so the credit-1 pull cursor and the whole session
+  are otherwise identical. Only the **transport engine** (log / text)
   needs this; the **progressive engine** (markdown / org / latex) re-parses the already-delivered `:doc/text`
   and opens no stream.
 - **Mid-stream drop → partial, never silent truncation.** A dropped connection destroys in-flight streams
@@ -117,8 +132,9 @@ ed25519 / RSA / ECDSA — ssh2 has no client-side agent-add).
   target Chokidar event sends only an invalidation; source content bytes still travel through SFTP and all
   existing size/stream/parser bounds. Desired subscriptions reconnect with exponential backoff.
 - **Polling fallback.** When target discovery, forwarding, version negotiation, path-namespace proof, or the
-  channel is unavailable, a configured per-doc poller re-stats the URI and, on a size/mtime change, re-sends it (a fresh
-  stamp → the renderer remounts / re-streams). It is **opt-in** via `settings.edn` `:remote {:poll-seconds …}`,
+  channel is unavailable, a configured per-doc poller re-stats the URI and, on a size/mtime change, re-reads it
+  through the same content flight as a daemon event. That is one read per path, numbered and fanned out; a PDF
+  refreshes in place and keeps the slide. It is **opt-in** via `settings.edn` `:remote {:poll-seconds …}`,
   with exponential backoff (to 60 s) and ±25 % jitter so a downed host is not hammered; directory listings poll
   slower or not at all. The schedule, seeded at the configured base `$`d_0`$`:
 

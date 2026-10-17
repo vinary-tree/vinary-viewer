@@ -1,0 +1,61 @@
+@startuml seq-reload-safe-refresh
+'' PlantUML over Mermaid: the point is the ORDER of events across a writer, main's single-flight read and two
+'' windows — a burst of writes during one read, a torn PDF settled with backoff, one read fanned out, and a late
+'' read dropped by its number. A sequence diagram with alt branches states exactly that. Brown = the file being
+'' written, slate = main (the watcher, the content-flight model, the verified reader), teal = the windows.
+!include _vv-theme.iuml
+
+title ADR-0046 — a deck rewritten while two windows show it: one read, verified, numbered, fanned out
+
+participant "writer\n(pdflatex)" as W FS_TINT
+participant "change source\n(chokidar · ADR-0035 daemon)" as N MAIN_TINT
+participant "content-flight\n(pure model)" as F MAIN_TINT
+participant "verified reader\n(readPdf* · settlePdf)" as R MAIN_TINT
+participant "window A" as A RENDERER_TINT
+participant "window B" as B RENDERER_TINT
+
+== a burst of writes: one read, one trailing read ==
+W -> N : write (compile starts)
+N -> F : change
+F -> R : [:read path seq=7]
+activate R
+W -> N : write, write, write (during the read)
+N -> F : change × 3 → the read is marked DIRTY\n(exactly one trailing read, however many)
+
+== the verified read ==
+R -> R : tail first: no final %%EOF → torn
+loop backoff u, 2u, 4u, 8u (woken early by a change)
+  R -> R : tail → body → fstat on the same handle:\nsize + mtime unchanged? verdict complete?
+end
+alt complete
+  R --> F : bytes
+  F -> A : vv:content {seq 7}
+  F -> B : vv:content {seq 7}
+  note right of B #E3F2ED: one read delivered to every\nretaining window (1.003 S per change)
+else still changing, and a notification will announce the next write
+  R --> F : pending — the requesters wait for the next read
+else stable but incomplete (a LaTeX error), or changing with no notification coming
+  R --> F : incomplete {reason}
+  F -> A : vv:content {seq 7, incomplete}
+  note right of A #F5E1E0: A shows a complete version:\nit KEEPS it, behind a note
+end
+deactivate R
+
+== the trailing read, and a late arrival ==
+F -> R : [:read path seq=8] (the dirty mark)
+activate R
+R --> F : bytes (complete)
+deactivate R
+F -> A : vv:content {seq 8}
+F -> B : vv:content {seq 8}
+A -> A : content-guard: 8 > applied 7 → apply;\npdf replace-doc! in place, the slide kept
+note over A, B #E3F2ED: a read that lands late with seq ≤ the applied one is DROPPED —\nthe display never moves backwards
+
+legend right
+  |= Colour |= Concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| the file being written |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main: change source, content-flight, verified reader |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer windows |
+  u = 250 ms; seq is minted only by main.
+endlegend
+@enduml

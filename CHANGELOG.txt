@@ -659,12 +659,13 @@ Fixed
       connection orphaned: it stayed open but forgotten, never closed until
       the server gave up on it, and the next request dialled a third
       connection -- asking for the password again.
-    - A changed file is read ONCE and delivered to every window showing it,
-      instead of once per window: a remote (ssh:// / sftp://) document open in
-      three windows now costs one download per change, not three, and a burst
-      of saves arriving while a read is still running costs one more read, not
-      one per save. Every delivery carries its read number, and a window drops
-      a read (or a read's failure) older than the version it already shows.
+    - A changed file is read ONCE and delivered to every window showing it
+      (ADR-0046), instead of once per window: a remote (ssh:// / sftp://)
+      document open in three windows now costs one download per change, not
+      three, and a burst of saves arriving while a read is still running costs
+      one more read, not one per save. Every delivery carries its read number,
+      and a window drops a read (or a read's failure) older than the version it
+      already shows.
     - A file that is deleted, renamed away or unreadable during live refresh
       no longer replaces its document with an error page: the last version
       stays on screen with a small banner saying the file couldn't be reloaded

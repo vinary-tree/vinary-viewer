@@ -94,6 +94,15 @@ opens without a Files tree. `complete` gains an async remote-directory branch fo
 `vv:load-pdf-bytes` was later removed in `7015251`; a remote group's sibling PDF now loads through the ordinary
 `vv:open` flow, which reads it over SFTP.)*
 
+*(Amended 2026-10-17, [ADR-0046](0046-reload-safe-pipelined-remote-reads.md):*
+
+- *`openRemoteUri` reads through a pipelined file handle (`remoteOpenFile().readAll`): up to D requests in flight,
+  the file preallocated, and the handle registered with its connection. That replaces ssh2's one-request-at-a-time
+  stream.*
+- *A PDF is read verified (`readPdfRemote`: the tail first, then the body, then `fstat` on the same handle).*
+- *The document group's sibling stats run concurrently, overlapped with the read.*
+- *Measured: OpenSSH 32 MiB at 50 ms, 26.3 s → 0.99 s (docs/scientific/11 §9.5).)*
+
 ### 4. Streaming, paging, and polling live-refresh
 
 - **Streaming** (`streamOpen`): a remote source substitutes an SFTP read-stream for `fs.createReadStream` —
@@ -115,6 +124,12 @@ opens without a Files tree. `complete` gains an async remote-directory branch fo
   or not at all. Lifecycle is tied to `unwatch-file!`, so closing a tab stops the poll — the same guarantee
   as watchers (ADR-0006). ADR-0035 later made authenticated target-daemon invalidations the preferred path;
   this opt-in poller remains the compatibility fallback.
+- *(Amended 2026-10-17, [ADR-0046](0046-reload-safe-pipelined-remote-reads.md):*
+  - *The streaming and paging source is now a pipelined, backpressured `Readable` through the same handle as the
+    whole-file reader, not ssh2's stream (S7).*
+  - *A poller's or daemon's change now goes through the content flight: one read per path, fanned out and numbered
+    `seq`. The stamp is strictly increasing per process, but ordering is `seq`'s job.*
+  - *A PDF refreshes in place and keeps the slide (ADR-0045), rather than remounting.)*
 
 ### 5. Authentication, host-key trust, and `~/.ssh/config`
 

@@ -251,6 +251,29 @@ invalidations and bounded tree payloads, not file bytes—the source re-fetches 
 not defend against compromise of the target user account, which can already read that user's files, private
 descriptor, and daemon memory.
 
+**Remote reads and refreshes (ADR-0046).** A remote host controls the bytes it serves, its read cap, its reply
+order and its timing. The reader bounds what a hostile or broken host can make the viewer do:
+
+- **Memory.** Memory is preallocated only after the file's size passes the size cap (1 GiB, `maxBytes`; larger text
+  streams instead). A file over the cap is
+  refused before any READ is sent, and the buffer never exposes uninitialised bytes, because a short or failed
+  read is an error, not a partial buffer.
+- **In flight.** At most $`D \le 64`$ requests of at most the server's read cap are outstanding per handle. The
+  channel window the client grants never exceeds 2 MiB (`WINDOW_MAX`), so a host cannot make the client buffer
+  without limit.
+- **Retries.** A PDF caught mid-write is retried at most four times on a fixed backoff, about 3.75 s in all, then
+  delivered flagged or left pending. A host that keeps a file changing cannot hold a read open indefinitely.
+- **Ordering.** Read numbers (`seq`) are minted only by main. A renderer payload cannot claim to be newer than
+  main's last read, and a slow or replayed reply cannot move a window's display backwards.
+- **Coalescing.** Opens of one path coalesce into one read, so many windows or repeated opens do not multiply the
+  traffic to a host.
+- **Integrity, not authenticity.** The torn-read verdict checks that a PDF is structurally complete — header,
+  final `%%EOF`, a `startxref` inside the file. It says nothing about who wrote the file, and pdf.js still parses
+  the bytes as untrusted input (§4, local parser exposure).
+- **Freshness blind spot.** Back/Forward re-validates a remote document by size and mtime. SFTP times have
+  one-second resolution, so a same-size rewrite within the same second is not seen until the next live refresh.
+  This is a freshness limit, not an integrity one: the bytes shown are a version the host really served.
+
 **Where this would be a problem:** if the renderer were ever to load **remote or untrusted web content**
 that could script `window.vv.open("/etc/passwd")` (or any readable path) and exfiltrate the returned
 `vv:content` text. Today the renderer loads only the local, first-party bundle from `index.html`, so

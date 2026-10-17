@@ -50,7 +50,7 @@ The options not taken, and why.
 What we gave up to get what we gained.
 ```
 
-The next free number is **0045**.
+The next free number is **0047**.
 
 ---
 
@@ -102,6 +102,7 @@ The next free number is **0045**.
 | [0042](0042-derived-open-commit-highlight.md) | The opened-commit row highlight DERIVES from the active document instead of stored click-state (the stale-highlight-after-Back bug class becomes unrepresentable): `handle-open-diff` registers `:range?` ("highlight both endpoints" — true only for an explicit FROM; empty-tree root commits single-highlight naturally), the decorate seams attach `git {root from to range}` to kind-diff `vv:content` payloads → `:doc/git` (kind-guarded, retract-on-absence, pull-list add) → pure `commits/open-set` → a `-open` class on both surfaces. The stored selection narrows to Ctrl/Shift multi-select marking: `commits/select` loses `:single`, panel plain click activates only, graph plain click is cursor-only (`:commits/cursor-set`), `:move-only?` is gone, Escape in the graph clears marks keeping the cursor, `:git-graph/shown` records `last-root`; `-sel` restyles as a dashed accent ring distinct from `-open`'s strong `.vv-file-active`-family fill | Accepted |
 | [0043](0043-width-adaptive-split-default.md) | An UNCHOSEN diff's layout follows the content-pane width live (amending 0026's unconditional-Unified opt-in invariant): one debounced ResizeObserver on the identity-stable `.vv-content` mirrors clientWidth into `[:ui :content-width]` (stable top-level `:ref` fn + defonce'd observer; immediate first measure; value-guarded handler; boolean `:ui/split-wide?` dedups churn), `effective-diff-view` becomes pure `(tab-view wide?)` with threshold `split-min-content-width` = 1000 CSS px (≈53 mono cols/side after the pane's 171px chrome; VS Code's 900px breakpoint + ~100px more chrome; zoom falls back naturally), and one idempotent `:diff/ensure-split` funnel fires from exactly two sites — the unified surface's mount (`diff-unified-body`, covering every navigation path incl. `:tab/activate` to a cached diff) and `:ui/content-width` (live crossings). Explicit picks stay sticky; the toggle/checkmark work off the EFFECTIVE view; first paint of a fresh wide diff is Unified until the build lands; no "Auto" menu row (nil IS auto) | Accepted |
 | [0044](0044-browser-link-gesture-family.md) | ONE browser link-gesture family across every link-like surface: Ctrl+click and middle-click open a BACKGROUND tab (new `nav/add-tab-background` — every prior path focused; `:tab/open-background` skips the view-pos cofx and scroll restore, degenerating to `:tab/open` with no active tab), Ctrl+Shift+click opens focused, and middle-click on a tab closes it. The tree/dir/breadcrumbs gained gestures they never had (archaeology: the tree NEVER had middle-click — only the preview did, so docs promising it globally were the actual defect); the new gestures are ALWAYS-new, with focus-existing preserved under Ctrl+Shift. The web view stops opening NATIVE windows: `setWindowOpenHandler` denies everything and routes http(s) popups to app tabs over `vv:web-open-tab` per Chromium's disposition (pure `vinary.main.web-policy`, node-tested). `:content/received`'s fresh-facet resolution becomes owner-tab-scoped so a backgrounded group doc loads its facet. Handlers stay per-surface (never window-level — X11 middle-click paste, CM6); ctx menus/anchors/`:files/opened`/tree dirs unchanged | Accepted |
+| [0046](0046-reload-safe-pipelined-remote-reads.md) | Reload-safe, pipelined remote reads (amends 0006; notes on 0027 and 0035): ONE read per path at a time, delivered to every window that asked or retains it — a pure `vinary.main.content-flight` model where an open JOINS the running read, a change during it allows exactly one trailing read, a still-settling PDF carries its requesters forward, and every read is numbered (`seq`); the renderer's `vinary.app.content-guard` drops a read older than the one it applied. A refresh that fails keeps the last good version behind a non-fatal `:doc/refresh-note` instead of an error page. A PDF is read VERIFIED (header, the last `%%EOF` in the final KiB, a parseable `startxref`, an unchanged fstat across the read — `pdf_integrity.js`), and one caught mid-write SETTLES on a notification-aware backoff (≤ 5 tries) or is delivered flagged `incomplete`. Remote reads go through a pipelined, preallocated SFTP handle (`remoteOpenFile`: $`D = \lceil 2\,\mathrm{MiB}/C \rceil`$ requests in flight, out-of-order replies, drop-safe and reaper-safe) with TCP_NODELAY, an eagerly granted 2 MiB window, concurrent sibling stats and a pipelined streaming source — OpenSSH 32 MiB at 50 ms: 26.3 s → 0.99 s (experiment 11). Back/Forward to an unchanged remote document costs one stat | Accepted |
 
 ---
 
@@ -177,6 +178,13 @@ The **later decisions** build capability on that core without disturbing it:
 - **0035** carries that same ownership model over a host-key-verified SSH tunnel: a compatible target
   daemon authenticates with a private HMAC capability and owns the local content/tree watchers, while the
   source preserves `ssh://`/`sftp://` identities and re-reads changed bytes through SFTP.
+- **0046** amends **0006**'s one-watcher-many-windows refresh into one *read* per change, fanned out to every window
+  and ordered by a read number main alone mints, so a slow read can no longer overwrite a newer one; it makes
+  **0027**'s remote reads pipelined (a round trip per 64 KiB became a window's worth in flight) and drop-safe, and
+  keeps **0035**'s target daemon as the notifier while the bytes still travel over SFTP. Its refresh note is the one
+  **0045**'s in-place PDF refresh writes when pdf.js cannot open new bytes; and **0034**'s Files-tree listings, made
+  asynchronous in that ADR's 2026-10-17 amendment, follow the opposite rule on purpose — a tree refresh never joins
+  a running listing, because it is prompted by a change the running listing may predate.
 
 Together, **0017**'s IR is the hinge: every 0.3 capability is a new *edge* (a front-end or a back-end) on one
 core, which is why they compose without conflict.

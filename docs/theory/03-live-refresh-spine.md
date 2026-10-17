@@ -51,18 +51,30 @@ The main process reconciles watchers whenever the renderer sends
 
 | Mechanism | Reason |
 |-----------|--------|
-| `awaitWriteFinish` | Avoid reading a partially written file. |
+| `awaitWriteFinish` | Coalesce a multi-syscall save into one event. It does **not** guarantee a finished file: a writer that pauses mid-write for longer than its 80 ms stability window — LaTeX rewriting a PDF in place does, for most of each compile — fires events on a partial file. |
 | `change` | In-place saves. |
 | `add` | Atomic-save rename patterns. |
 | retained reconciliation | Release watchers when paths leave every tab history. |
 
+A PDF is therefore read **verified**: the tail trailer first, then the body, then size and mtime again on the same
+handle. A torn file is retried on a backoff until it settles (ADR-0046 §Torn reads, §Settling). Naive reads during
+real compile loops were torn 83–90 % of the time; the verified readers delivered none as complete
+(docs/scientific/11 §9.7).
+
 ---
 
-## 4. Render stamp
+## 4. Ordering: `seq` for reads, the stamp for renders
 
-Markdown rendering is asynchronous. Each content payload carries a stamp. A render
-commit is accepted only when the stamp still matches the cached document. This
-prevents an older slow render from overwriting newer content.
+Two mechanisms guard against stale data, at two different points.
+
+- **Reads are ordered by `seq`.** Main numbers every read with a process-wide `seq`, and the renderer
+  (`content-guard/stale?`) drops a payload whose `seq` is not newer than the one its document applied. An older
+  read that lands late — a slow remote read, a retried PDF — can therefore never replace a newer one (ADR-0046).
+  The stamp cannot do this job: payloads are stamped by more than one clock, and two reads in one millisecond
+  would collide.
+- **Renders are matched by stamp.** Markdown rendering is asynchronous. A render commit is accepted only when its
+  stamp still matches the cached document, so an older slow render cannot overwrite newer content. Stamps are
+  strictly increasing per process (`max(now, last + 1)`).
 
 ---
 

@@ -1,6 +1,7 @@
 # 0006 — One `chokidar` watcher per retained path for live-refresh
 
-- **Status:** Accepted, refined by [ADR-0010](0010-bounded-content-retention-and-render-metadata.md)
+- **Status:** Accepted, refined by [ADR-0010](0010-bounded-content-retention-and-render-metadata.md); amended by
+  [ADR-0046](0046-reload-safe-pipelined-remote-reads.md) (2026-10-17 — see the amendment below)
 - **Date:** 2026-06-24
 - **Deciders:** vinary-viewer maintainers
 
@@ -60,6 +61,23 @@ The watcher lifecycle is tied to the aggregate retained-file set: `open!` starts
 and `sync-retained!` replaces only the sending window's ownership. A watcher closes only after no live
 window retains its path. Each change is fanned out to every retaining `WebContents`, and a window's
 `destroyed` event releases its ownership even when renderer cleanup IPC can no longer run.
+
+> **Amendment (2026-10-17, [ADR-0046](0046-reload-safe-pipelined-remote-reads.md)).** The watcher set above is
+> unchanged, but what a change *triggers* is not.
+>
+> - **One read per path.** `send-open-content!` no longer reads the file once per retaining window. It asks the
+>   pure `vinary.main.content-flight` model for one read of the path. A change during that read marks it dirty,
+>   which allows exactly one trailing read.
+> - **Fan-out and ordering.** `deliver!` sends that one read to every retaining window, numbered by a
+>   process-wide `seq`, and the renderer drops a read older than the one it applied.
+> - **`awaitWriteFinish` does not prevent torn reads.** It only coalesces saves. A PDF that LaTeX rewrites in place
+>   pauses mid-write for longer than the 80 ms stability window: naive reads during real compile loops were torn
+>   83–90 % of the time (docs/scientific/11 §9.7). PDFs are therefore read *verified* and settled (ADR-0046 §Torn
+>   reads, §Settling).
+> - **Failures.** A failed re-read keeps the last good version behind a note instead of replacing it with an error
+>   page.
+>
+> The "avoids firing mid-write" consequence below holds for an editor's save, not for a long-running writer.
 
 ## Consequences
 

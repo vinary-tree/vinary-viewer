@@ -191,11 +191,31 @@ fabricated. Content polling remains an **opt-in fallback**, off by default. Enab
           :poll-dirs? false}}  ; also poll open directory listings (heavier); default false
 ```
 
-The fallback poller re-stats the open remote URI and, on a size/mtime change, re-sends it
-(re-rendering or re-streaming the document). It backs off (to 60 s) and jitters by
-±25 % on error, so a downed host is not hammered, and closing the tab stops the
-poll. A successfully authenticated target subscription stops the poller; a later channel loss restarts it when
-configured.
+The fallback poller re-stats the open remote URI and, on a size/mtime change, re-reads it. It backs off (to 60 s)
+and jitters by ±25 % on error, so a downed host is not hammered, and closing the tab stops the poll. A successfully
+authenticated target subscription stops the poller; a later channel loss restarts it when configured.
+
+### What a refresh guarantees ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md))
+
+Whether a daemon or the poller noticed the change, a refresh behaves the same way.
+
+- **One read, every window.** The changed file is read once and delivered to every window that shows it. Several
+  saves in quick succession cost at most one more read.
+- **Never backwards.** Every read is numbered, and a window ignores one older than what it shows. A slow read
+  that finishes late cannot replace a newer version.
+- **Never half-written.** A PDF that LaTeX is still writing is refused after its first KiB and tried again for
+  about 4 s. If it is still unfinished after that, the window keeps the last complete version.
+  - If the target daemon will announce the next write, the window simply waits for it.
+  - Otherwise it shows a note such as *"The PDF on disk is incomplete: it has no end-of-file marker yet."* The
+    LaTeX run either has not finished or failed and left the file unfinished.
+- **Never an error page for a refresh.** If a re-read fails — the connection dropped, the file was deleted or
+  became unreadable — the version on screen stays, with a note offering **Retry**.
+- **The slide stays.** A slide deck refreshes in place, on the slide you were showing (ADR-0045).
+
+**Back and Forward** to a remote document the window still holds re-validate it: one stat, and a download only
+if its size or modification time changed. SFTP times have one-second resolution, so a rewrite that keeps the
+size within the same second is shown as the earlier copy. History may show an earlier copy, as a browser's Back
+button does; live refresh still delivers the change.
 
 ---
 
