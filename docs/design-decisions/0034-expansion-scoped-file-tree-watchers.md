@@ -69,3 +69,53 @@ payloads into the existing renderer protocol.
 Expansion now crosses an asynchronous IPC gate, so a slow or unreadable directory opens later (or
 stays closed) instead of toggling immediately. The ownership protocol and controlled disclosure state
 add bookkeeping, in exchange for bounded subscriptions and an atomic visible result.
+
+## Amendment — 2026-10-17: asynchronous listings, one per root at a time, applied in listing order
+
+**Context.** Every listing behind this ADR — an open's, an expansion's, a Refresh's, and each watcher's
+refresh — ran `git` with `execFileSync` on the main process, and each watcher re-listed the whole repository
+for its own scope. A Files filter forces hundreds of directories open; their watchers' ready-time refreshes
+expired together, and about twenty synchronous whole-repository listings ran back to back. Under machine-wide
+load that held main's event loop for 2.4 s while typing in the filter, and every IPC reply waited behind it
+([docs/scientific/10 §11](../scientific/10-input-latency-experiments.md)).
+
+**Decision.**
+
+1. **Main runs no git synchronously.** `vinary.main.tree-listing` spawns git asynchronously (argv array, no
+   shell, stdin and stderr ignored, 64 MiB and 120 s bounds), and the synthetic walk
+   ([ADR-0030](0030-fallback-project-roots.md)) is asynchronous too. A gate in `test/git-tree-smoke.js` keeps any
+   synchronous child process out of main's ClojureScript, and find-e2e / tree-e2e count main's git processes.
+2. **One listing per root at a time.** Every listing request goes to a listing FLIGHT keyed by root
+   (`vinary.main.listing-flight`, pure). At most one listing per key runs, and a request **never joins** the
+   running listing — that listing may have started before the change that prompted the request. Requests made
+   meanwhile share ONE trailing listing, so a burst costs at most two listings per root, and every request is
+   served by the first listing launched after it.
+3. **Watcher refreshes are delivered together.** A watcher's debounced refresh requests a listing of its root;
+   when the listing completes, every refresh it serves is delivered at once. For a git root each owner receives
+   its outermost due scopes, projected from the one listing in one pass; for a synthetic root, every due directory
+   (each walked from itself), shortest first. A per-watcher generation drops refreshes of watchers that stopped
+   or were replaced meanwhile.
+4. **Entries are applied in listing order.** Each entry carries its listing's stamp, `:listing {:epoch :n}`, and
+   the renderer's project model keeps the stamp that last wrote each scope, so an entry arriving after a newer
+   one — a Refresh All reply that waited for its slowest root, a target daemon's reply trailing its own push —
+   never overwrites it: the result is the one applying every entry in stamp order would give.
+5. **Removal stays authoritative.** A listing begun before its root was removed from Files is not delivered
+   (`removed-since?`, a per-window roots-sync generation); a Files restore no longer re-adds a project removed
+   while it was in flight.
+
+**Alternatives considered.**
+
+- **Join the running listing** (as ADR-0046's content reads join a running read). Rejected: a tree refresh is
+  prompted by a change, and the running listing may predate it — the refresh would show the old tree.
+- **A per-root debounce.** Rejected: a steady stream of changes keeps postponing it (starvation), and it delays
+  even an isolated change.
+- **Cache listings.** Rejected: a cached listing is stale by construction once a change is reported, and a
+  monorepo's listing is megabytes held per root.
+- **A git utility process.** Rejected for now: it needs the same per-root serialization, plus a process boundary
+  to maintain; the measured residual cost of asynchronous `spawn` on main is under 1 % of the phase.
+- **Order entries by arrival.** Rejected: aggregated and forwarded replies arrive late by design.
+
+**Consequences.** A tree arrives one asynchronous listing after its document's content (the renderer already
+handled either order). The ownership checks this ADR describes now also run when a listing completes, since a
+window, a scope or a project can go away while it runs. The cost of the bursts this amendment coalesces is
+measured in docs/scientific/10 §11, before and after.

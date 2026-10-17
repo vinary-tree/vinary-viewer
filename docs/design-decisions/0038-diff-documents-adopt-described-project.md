@@ -154,9 +154,11 @@ nothing for the same reason.
 - `vv:tree`'s payload gains `:extras`, which round-trips exactly as `:synthetic?` did in ADR-0030
   (`clj->js` → structured clone → `js->clj :keywordize-keys true`; the `?`-suffixed keys survive
   keywordization intact).
-- Seam 2 spends synchronous `rev-parse`/`ls-files` calls on the main process — bounded to one per
-  distinct target directory / one per adoption, and amortized to zero by the `adopted-diff-roots`
-  guard (the same synchronous-git trade-off features 04 records for `repo-tree`).
+- Seam 2 spends `rev-parse`/`ls-files` calls — bounded to one per distinct target directory / one per
+  adoption, the listing skipped by the `adopted-diff-roots` guard. *(Amended 2026-10-17, ADR-0034's
+  amendment: these calls are asynchronous now, after the `vv:load-diff-sources` reply, so a re-render still
+  pays its `rev-parse`s but never blocks main; the guard is claimed before the listing starts, given back if it
+  fails, and a project removed from Files meanwhile is not re-added.)*
 - Test surface: pure seams in `core_test` (`diff-extra-entries`, `dominant-root-selection`);
   merge/prune/filter/scope semantics in `projects_test` (four extras deftests, including the
   dedupe and extras-less-refresh cases), `tree_model_test` (`filtering-extras`), and

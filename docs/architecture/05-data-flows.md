@@ -14,9 +14,11 @@ re-frame events/effects, DataScript, and views.
 3. Navigation code updates app-db tabs/history and computes retained paths.
 4. Local file destinations emit `[:vv/open path]`.
 5. Preload sends `vv:open`.
-6. Main `service/open!` reads/classifies the path, sends `vv:content`, sends
-   `vv:tree` — the file's git root, or its containing directory as a synthetic
-   root when it belongs to no repository — and ensures the file is watched.
+6. Main `service/open!` reads/classifies the path, sends `vv:content`, and ensures the file is watched;
+   it also requests the file's tree — its git root, or its containing directory as a synthetic root when it
+   belongs to no repository — from the root's listing flight (`vinary.main.tree-listing`), and sends
+   `vv:tree` once that asynchronous listing completes, if the window is still open and has not removed the
+   root from Files meanwhile. Main runs no git synchronously (docs/scientific/10 §11).
 7. Renderer receives `vv:tree`; `:tree/received` merges the project, declaratively opens the active
    file's known ancestor scopes, and schedules a coalesced post-render scroll after the row commits.
    This also covers command-line activation that happened before the asynchronous tree payload.
@@ -49,11 +51,18 @@ keybindings, or scroll.
    filter-forced paths, ancestor state, pending refresh gates, and visible projects.
 2. The Files component sends those scopes through `vv:tree-expanded`; main reconciles them into shared,
    depth-0 Chokidar watchers. Collapse or unmount sends a smaller/empty set and releases ownership.
-3. A direct `add`, `unlink`, `addDir`, `unlinkDir`, or `.gitignore` change schedules a scoped re-list.
-4. Main sends `vv:tree` with root-relative `:scope`; `projects/apply-tree-update` replaces only that subtree.
+3. A direct `add`, `unlink`, `addDir`, `unlinkDir`, or `.gitignore` change schedules (debounced 150 ms) a
+   listing request to the root's flight: at most one listing per root runs at a time, a request never joins
+   the running one, and requests made meanwhile share one trailing listing.
+4. When the listing completes, every watcher refresh it serves is delivered together: each owner still holding
+   a current watcher of a due scope gets `vv:tree` with root-relative `:scope` — for a git root only its outermost
+   due scopes — and `projects/apply-tree-update` replaces only those subtrees, in listing order (each payload's
+   `:listing` stamp; an older listing never overwrites a newer one).
 5. A direct user expansion first invokes `vv:tree-refresh`. `:tree/expand-ready` commits both the new
    subtree and open scope, so stale contents never render expanded.
-6. Directory/project/Files-tab context menus invoke scoped, full-root, or all-visible-root refreshes.
+6. Directory/project/Files-tab context menus invoke scoped, full-root, or all-visible-root refreshes; Refresh
+   All lists the visible roots concurrently, and the stamps keep a reply that waited from overwriting a newer
+   push.
 
 Ordinary file-content saves stay on §2's retained-document path and do not re-list the Files tree.
 

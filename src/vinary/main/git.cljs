@@ -6,9 +6,10 @@
 
    Electron-free by design (webContents arrive as arguments; the service registers the ipcMain
    handlers), like dir-walk and service-util — argv building and text parsing live one layer lower
-   still, in the pure vinary.git.log. Every subprocess here is ASYNC (`run-git` wraps execFile):
-   log/diff output can be large and the sync `git` helper in vinary.main.service must never be used
-   for it — that helper stays for tiny calls (rev-parse toplevel) on interactive paths.
+   still, in the pure vinary.git.log. Every subprocess here is ASYNC (`run-git` wraps execFile), like
+   every git process main starts: the Files tree lists repositories through vinary.main.tree-listing,
+   and main runs no git synchronously (a synchronous call blocks the event loop for as long as git
+   runs — docs/scientific/10 §11).
 
    Spilled commit diffs are ADR-0036 citizens: the diff text lands in a private
    `$XDG_RUNTIME_DIR/vinary-viewer/git-diff/<uuid>/<shortA..shortB>.diff` file (twin of

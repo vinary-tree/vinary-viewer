@@ -8,7 +8,6 @@
             ["path" :as path]
             ["os" :as os]
             ["crypto" :as crypto]
-            ["child_process" :as cp]
             ["chokidar" :refer [watch]]
             ["./content_service.js" :as content-service]
             ["./daemon_events.js" :as daemon-events]
@@ -26,6 +25,7 @@
             [vinary.main.revalidate :as revalidate]
             [vinary.main.retention :as retention]
             [vinary.main.service-util :as service-util]
+            [vinary.main.tree-listing :as tree-listing]
             ;; [vinary.main.pdf :as pdf]  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
             [vinary.main.grammars :as grammars]))
 
@@ -47,40 +47,54 @@
             :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))
 
 ;; ---- git file-tree (sidebar) ----
-(declare directory? reconcile-tree-watchers!)
+;; Every listing runs ASYNCHRONOUSLY through one listing runner (vinary.main.tree-listing; docs/scientific/10 §11):
+;; at most one listing per root at a time, a request never joining the listing already running (it may predate the
+;; change that prompted the request), and a burst of requests meanwhile sharing ONE trailing listing. The synchronous
+;; `git`/`repo-files` helpers that used to live here blocked main's event loop for as long as git ran; their logic
+;; moved, asynchronous, to tree-listing. Every entry carries its listing's :listing stamp, so the renderer applies a
+;; root's entries in listing order whatever order they arrive in (vinary.app.projects).
+(declare directory? reconcile-tree-watchers! deliver-watched! live-webcontents?)
 
-(defn- git [args cwd]
-  (try
-    (str/trim (cp/execFileSync "git" (clj->js args)
-                               (clj->js {:cwd cwd :encoding "utf8"
-                                         :maxBuffer (* 64 1024 1024) :stdio ["ignore" "pipe" "ignore"]})))
-    (catch :default _ nil)))
+(defonce ^:private listings
+  (tree-listing/make-runner {:list!    tree-listing/list-key
+                             :defer!   js/setImmediate
+                             :on-watch (fn [k n due result] (deliver-watched! k n due result))}))
 
-(defn- repo-files
-  "The navigable file listing for an already-resolved git root, or nil when git fails."
-  [root]
-  (when-let [out (git ["ls-files" "--cached" "--others" "--exclude-standard"] root)]
-    ;; `--cached` describes the index, so a tracked path deleted/renamed only in the working tree remains
-    ;; in that output. Remove git's deleted set while keeping the rename destination from `--others`.
-    (when-let [deleted-out (git ["ls-files" "--deleted"] root)]
-      (let [deleted (into #{} (remove str/blank?) (str/split deleted-out #"\n"))]
-        (into []
-              (comp (remove str/blank?) (remove deleted))
-              (str/split out #"\n"))))))
+(defn- listing-key
+  "The listing-flight key of a root: tagged, so a directory that became a repository is a different key."
+  [root synthetic?]
+  [(if synthetic? :walk :git) root])
 
 (defn- repo-tree
-  "The git repository containing file-path, as {:root <abs> :files [repo-relative…]}, or nil if not
-   in a repo / git unavailable."
+  "A Promise of the git repository containing file-path, as {:root <abs> :files [repo-relative…] :listing}, or of nil
+   when it is in no repository or git is unavailable."
   [file-path]
-  (let [dir  (if (directory? file-path) file-path (path/dirname file-path))
-        root (git ["rev-parse" "--show-toplevel"] dir)]
-    (when (and root (not (str/blank? root)))
-      ;; --cached (tracked) + --others (untracked) --exclude-standard (drop .gitignore'd/excluded clutter):
-      ;; shows files you're actively creating — including the one you just opened — while keeping build
-      ;; output / node_modules out. repo-files also subtracts --deleted because the index still names a
-      ;; tracked path whose working-tree file was deleted or renamed without being staged.
-      (when-let [files (repo-files root)]
-        {:root root :files files :synthetic? false}))))
+  (-> (tree-listing/toplevel (if (directory? file-path) file-path (path/dirname file-path)))
+      (.then (fn [root]
+               (when root
+                 (-> (tree-listing/listing! listings (listing-key root false) root)
+                     (.then (fn [{s :seq files :result}]
+                              (when files
+                                {:root root :files files :synthetic? false :listing (tree-listing/stamp s)})))))))))
+
+(defn- synthetic-tree
+  "A Promise of the synthetic project for a path in no git repository — its directory (or itself, for a directory),
+   walked — or of nil when there is no sane root (vinary.main.dir-walk/synthetic-root)."
+  [file-path]
+  (-> (dir-walk/synthetic-root file-path (directory? file-path))
+      (.then (fn [root]
+               (when root
+                 (-> (tree-listing/listing! listings (listing-key root true) root)
+                     (.then (fn [{s :seq files :result}]
+                              (when files
+                                {:root root :files files :synthetic? true :listing (tree-listing/stamp s)})))))))))
+
+(defn- path-tree
+  "A Promise of the sidebar tree for a path: its git repository when it has one, else its containing directory as a
+   synthetic project root, so a file outside every repo still gets a Files tab."
+  [file-path]
+  (-> (repo-tree file-path)
+      (.then (fn [t] (or t (synthetic-tree file-path))))))
 
 (defn- kind-of [^String path]
   (file-kind/kind-of grammars/source? path))
@@ -96,6 +110,22 @@
   (try (and (not (archive-uri? path)) (.isDirectory (.statSync fs path))) (catch :default _ false)))
 
 (defn- empty-tree-owner [] {:offered {} :visible #{} :expanded #{}})
+
+(defn- roots-gen
+  "How many roots syncs owner `id` has reported (vv:tree-roots, or a source daemon's treeRoots)."
+  [id]
+  (get-in @tree-windows [id :roots-gen] 0))
+
+(defn- removed-since?
+  "Did owner `id` take `root` out of its sidebar after its roots generation `g0` — a root it was offered and no longer
+   shows, as reported by a roots sync newer than g0? A listing that began before such a removal is not delivered:
+   Remove from Files is authoritative for the sidebar as it stands, and opening a file under the root afterwards
+   brings it back."
+  [id root g0]
+  (let [{:keys [offered visible] :as owner} (get @tree-windows id)]
+    (boolean (and (> (get owner :roots-gen 0) g0)
+                  (contains? offered root)
+                  (not (contains? visible root))))))
 
 (defn- offer-tree-owner! [id entry source]
   (swap! tree-windows update id
@@ -124,12 +154,17 @@
                             {:backend :remote :connection-uri uri :remote-owner-id remote-owner-id})))
 
 (defn- send-tree!
-  "Send the sidebar tree for a path: its git repository when it has one, else its containing directory as a
-   synthetic project root, so a file outside every repo still gets a Files tab. The fallback walk lives in
-   vinary.main.dir-walk, which is Electron-free and therefore node-testable."
+  "Send the sidebar tree for a path (path-tree) once it is listed — to a window that is still open: a closed window's
+   tree owner is gone, and sending would offer it a root again. An open's vv:content is already on its way: the
+   tree follows it."
   [^js wc file-path]
-  (when-let [t (or (repo-tree file-path) (dir-walk/dir-tree file-path (directory? file-path)))]
-    (send-tree-entry! wc t)))
+  (let [id (.-id wc)
+        g0 (roots-gen id)]
+    (-> (path-tree file-path)
+        (.then (fn [t]
+                 (when (and t (live-webcontents? wc) (contains? @tree-windows id) (not (removed-since? id (:root t) g0)))
+                   (send-tree-entry! wc t))))
+        (.catch (fn [e] (js/console.error "[tree] listing" file-path "failed:" e))))))
 
 (defn- remote-relative-scope [root directory]
   (try
@@ -158,27 +193,29 @@
                  (not (str/starts-with? rel (str ".." (.-sep path)))))
         (str/replace rel #"\\" "/")))))
 
-(defn- prefix-files [scope files]
-  (if (str/blank? scope)
-    (vec files)
-    (let [prefix (str scope "/")]
-      (filterv #(str/starts-with? % prefix) files))))
+(defn- scoped-entry
+  "The tree entry for scope `rel` (root-relative; \"\" for the root) of `root` from listing `s`'s `files`. A git
+   listing is the whole repository, projected onto the scope; a synthetic one is the walk of the scope's own directory,
+   re-based onto the root. Every file stays root-relative, so the renderer's replacement needs no platform path logic.
+   The root scope carries no :scope — a full entry."
+  [root synthetic? rel s files]
+  (cond-> {:root       root
+           :files      (cond (not synthetic?)  (service-util/prefix-files rel files)
+                             (str/blank? rel)  files
+                             :else             (mapv #(str rel "/" %) files))
+           :synthetic? (boolean synthetic?)
+           :listing    (tree-listing/stamp s)}
+    (not (str/blank? rel)) (assoc :scope rel)))
 
-(defn- tree-entry-for
-  "List one visible project root, optionally scoped to an expanded descendant directory. Scoped
-   payloads keep every file root-relative so renderer replacement never needs platform path logic."
+(defn- list-scope
+  "A Promise of one visible project root's entry, optionally scoped to an expanded descendant directory — listed by
+   the root's flight, so it reflects every change made before the call — or of nil when the directory escapes the
+   root or the listing failed."
   [root synthetic? directory]
-  (when-let [scope (relative-scope root directory)]
-    (if synthetic?
-      (let [subfiles (dir-walk/walk-dir directory)
-            files    (if (str/blank? scope)
-                       subfiles
-                       (mapv #(str scope "/" %) subfiles))]
-        (cond-> {:root root :files files :synthetic? true}
-          (not (str/blank? scope)) (assoc :scope scope)))
-      (when-let [files (repo-files root)]
-        (cond-> {:root root :files (prefix-files scope files) :synthetic? false}
-          (not (str/blank? scope)) (assoc :scope scope))))))
+  (if-let [rel (relative-scope root directory)]
+    (-> (tree-listing/listing! listings (listing-key root synthetic?) directory)
+        (.then (fn [{s :seq files :result}] (when files (scoped-entry root synthetic? rel s files)))))
+    (js/Promise.resolve nil)))
 
 ;; ── ADR-0038: diff documents adopt the project they describe ────────────────────────────────────────
 ;; A diff (an on-disk .patch, or `git diff | vv -t diff`) belongs to the repository it was generated
@@ -209,38 +246,66 @@
    `git diff | vv -t diff` shows the repo in Files with the diff listed like an ordinary member.
    Non-diff stdin docs keep the ADR-0036 skip (a spill dir is not a project), and only a git repo is
    ever adopted — a synthetic root of an arbitrary shell cwd ($HOME from `curl | vv -t diff`) would
-   be pure noise."
+   be pure noise. The listing is asynchronous: the adoption lands only while the window is open, the
+   spill still exists (unwatch-file! unlinks it when its last tab closes) and the repository was not
+   removed from the sidebar meanwhile."
   [^js wc spill-path]
   (when (and (= "diff" (doc-overrides/effective-kind kind-of spill-path))
              (nil? (doc-overrides/git-info spill-path)))
     (when-let [cwd (doc-overrides/stdin-base-dir spill-path)]
-      (when-let [entry (repo-tree cwd)]
-        (record-adoption! (.-id wc) spill-path (:root entry))
-        (send-tree-entry! wc (with-diff-extra entry spill-path))))))
+      (let [g0 (roots-gen (.-id wc))]
+        (-> (repo-tree cwd)
+            (.then (fn [entry]
+                     (when (and entry (live-webcontents? wc) (doc-overrides/stdin-doc? spill-path)
+                                (not (removed-since? (.-id wc) (:root entry) g0)))
+                       (record-adoption! (.-id wc) spill-path (:root entry))
+                       (send-tree-entry! wc (with-diff-extra entry spill-path)))))
+            (.catch (fn [e] (js/console.error "[tree] adopting the repository of" spill-path "failed:" e))))))))
+
+(defn- resolve-roots
+  "A Promise of the git root of each directory of `dirs`, in order (nil for one in no repository): one rev-parse per
+   directory not already under a root found earlier in the walk."
+  [dirs]
+  (letfn [(walk [ds known out]
+            (loop [ds ds out out]
+              (if-let [d (first ds)]
+                (if-let [r (some (fn [k] (when (some? (relative-scope k d)) k)) known)]
+                  (recur (rest ds) (conj out r))
+                  (-> (tree-listing/toplevel d)
+                      (.then (fn [r] (walk (rest ds) (cond-> known (some? r) (conj r)) (conj out r))))))
+                (js/Promise.resolve out))))]
+    (walk dirs [] [])))
 
 (defn- adopt-diff-project!
   "Seam 2 (vv:load-diff-sources): after a local diff's referenced paths resolve, adopt the git
    repository that owns most of the resolved targets — an on-disk .patch stored OUTSIDE the repo it
-   describes gets that repo into Files too. Cost is bounded: one rev-parse per distinct target
-   directory not already under a found root, one ls-files per adoption, and the per-window guard
-   makes Split rebuilds and re-renders free."
+   describes gets that repo into Files too. Asynchronous, after the handler has replied. Cost is bounded:
+   one rev-parse per distinct target directory not already under a found root (a re-render pays these
+   again; they never block main), and one listing per adoption — the per-window guard skips the listing
+   when the window already adopted that root for this diff. The guard is CLAIMED before the listing
+   starts, so re-renders arriving meanwhile skip too; a failed listing gives the claim back, and a claim
+   released meanwhile (the window closed, or the diff's last tab) is not delivered — nor is a root
+   removed from the sidebar meanwhile."
   [^js wc diff-path resolved]
   (when (and wc (nil? (doc-overrides/git-info diff-path)))
-    (let [targets (into [] (keep (fn [[_ v]] (when (map? v) (:path v)))) resolved)
-          dirs    (into [] (distinct) (map #(.dirname path %) targets))
-          roots   (loop [ds dirs, known [], out []]
-                    (if-let [d (first ds)]
-                      (if-let [r (some (fn [k] (when (some? (relative-scope k d)) k)) known)]
-                        (recur (rest ds) known (conj out r))
-                        (let [r (git ["rev-parse" "--show-toplevel"] d)]
-                          (recur (rest ds) (cond-> known (some? r) (conj r)) (conj out r))))
-                      out))
-          root    (service-util/dominant-root roots)]
-      (when (and root
-                 (not= root (get-in @adopted-diff-roots [(.-id wc) diff-path])))
-        (when-let [entry (repo-tree root)]
-          (record-adoption! (.-id wc) diff-path (:root entry))
-          (send-tree-entry! wc (with-diff-extra entry diff-path)))))))
+    (let [id       (.-id wc)
+          g0       (roots-gen id)
+          targets  (into [] (keep (fn [[_ v]] (when (map? v) (:path v)))) resolved)
+          dirs     (into [] (distinct) (map #(.dirname path %) targets))
+          claimed? (fn [root] (= root (get-in @adopted-diff-roots [id diff-path])))]
+      (-> (resolve-roots dirs)
+          (.then (fn [roots]
+                   (let [root (service-util/dominant-root roots)]
+                     (when (and root (not (claimed? root)))
+                       (record-adoption! id diff-path root)
+                       (-> (repo-tree root)
+                           (.then (fn [entry]
+                                    (cond
+                                      (not (claimed? root))         nil
+                                      (nil? entry)                  (swap! adopted-diff-roots update id dissoc diff-path)
+                                      (removed-since? id root g0)   nil
+                                      (live-webcontents? wc)        (send-tree-entry! wc (with-diff-extra entry diff-path))))))))))
+          (.catch (fn [e] (js/console.error "[tree] adopting the project of" diff-path "failed:" e)))))))
 
 (defn- entry->map
   "One directory child as plain data for the renderer's directory view. Symlinks are flagged and
@@ -328,9 +393,10 @@
 
 ;; ---- content producers ------------------------------------------------------------------------------------
 ;; A producer reads `path` ONCE and returns the result — {:payload js} (a vv:content payload) or {:error message}
-;; — synchronously for the local kinds, so an open's vv:content still goes out BEFORE its vv:tree, or as a Promise
-;; of one for the parsed and remote reads. Producers never send: the content-flight driver below delivers each
-;; result to every window that asked for it (ADR-0046), stamping it on the way out.
+;; — synchronously for the local kinds, so an open's vv:content goes out at once (its vv:tree follows, listed
+;; asynchronously), or as a Promise of one for the parsed, remote, settling-PDF and Commit Graph reads. Producers
+;; never send: the content-flight driver below delivers each result to every window that asked for it (ADR-0046),
+;; stamping it on the way out.
 
 (declare pdf-settle-opts)   ; the PDF settle options (ADR-0046 §Settling), defined with the content watchers below
 
@@ -394,14 +460,14 @@
                                :archive?   (archive-uri? path)
                                :kind       kind})
       ;; the Commit Graph virtual document (ADR-0040): validate + canonicalize the wrapped repo root
-      ;; (the sync git helper is fine — one rev-parse on an interactive open) and send a tiny payload;
+      ;; (one asynchronous rev-parse — main runs no git synchronously) and send a tiny payload;
       ;; the commit data itself flows through [:ui :commits], shared with the sidebar panel.
       :git-graph
-      (let [req-root (subs path (count "vv-git-graph://"))
-            root     (git ["rev-parse" "--show-toplevel"] req-root)]
-        (if (and root (not (str/blank? root)))
-          {:payload (clj->js {:path path :kind "git-graph" :git {:root root}})}
-          {:error "Not a git repository"}))
+      (-> (tree-listing/toplevel (subs path (count "vv-git-graph://")))
+          (.then (fn [root]
+                   (if root
+                     {:payload (clj->js {:path path :kind "git-graph" :git {:root root}})}
+                     {:error "Not a git repository"}))))
 
       ;; directory — a filesystem listing rendered in-pane (not shelled out to the OS file manager).
       ;; Routed FIRST (in service-util/route) so a real directory lists even when its extensionless name
@@ -557,6 +623,10 @@
 
 (def ^:private tree-refresh-debounce-ms 150)
 
+;; A watcher's GENERATION: a refresh requested by a watcher that has since stopped (its scope collapsed, its root
+;; hidden, its owners gone) or been replaced is not delivered — the replacement's ready-time refresh covers it.
+(defonce ^:private tree-watcher-gen (atom 0))
+
 (defn- stop-tree-watcher! [scope]
   (when-let [{:keys [watcher timer]} (get @tree-watchers scope)]
     (when timer (js/clearTimeout timer))
@@ -582,7 +652,8 @@
                        (when (= ".gitignore" (path/basename changed))
                          (schedule-tree-refresh! scope))))
     (swap! tree-watchers assoc scope {:watcher w :owners owners :timer nil
-                                      :synthetic? (boolean synthetic?)})
+                                      :synthetic? (boolean synthetic?)
+                                      :gen (swap! tree-watcher-gen inc)})
     ;; `ignoreInitial` deliberately suppresses the directory's existing children, but that also creates a
     ;; listing→subscription race: an entry created after expansion's explicit listing and before chokidar is
     ;; ready can be classified as initial. One ready-time reconciliation closes that gap.
@@ -618,19 +689,61 @@
                 (start-tree-watcher! scope owners synthetic?)))
           (start-tree-watcher! scope owners synthetic?))))))
 
-(defn- refresh-watched-tree! [[root directory :as scope]]
-  (when-let [{:keys [owners synthetic?]} (get @tree-watchers scope)]
+(defn- refresh-watched-tree!
+  "A watcher's debounced refresh: ask the root's flight for a listing. Every watcher refresh due when that listing
+   completes is delivered at once (deliver-watched!) — ~20 timers expiring together cost one listing, not ~20."
+  [[root _directory :as scope]]
+  (when-let [{:keys [synthetic? gen]} (get @tree-watchers scope)]
     (swap! tree-watchers assoc-in [scope :timer] nil)
-    (when-let [entry (tree-entry-for root synthetic? directory)]
-      (let [entry (cond-> entry
-                    ;; The root listing is complete, but marking it as the empty relative scope tells the
-                    ;; renderer this is an automatic exact-root replacement, not a new-project arrival.
-                    (= root directory) (assoc :scope ""))]
-        (doseq [id owners]
-          (when (contains? (get-in @tree-windows [id :expanded] #{}) scope)
-            (let [source (select-keys (get-in @tree-windows [id :offered root])
-                                      [:backend :connection-uri])]
-              (send-tree-owner-entry! id entry source))))))))
+    (tree-listing/request-watch! listings (listing-key root synthetic?) scope gen)))
+
+(defn- deliver-watched!
+  "Deliver one listing of root key `k` to the watcher refreshes it serves (`due`, a set of [scope gen]): to each owner
+   that, NOW, owns a scope's current watcher (same generation) and still has the scope expanded — a scope collapsed,
+   a window closed or a watcher replaced meanwhile gets nothing. Every payload is scoped, the root's own as \"\": an
+   automatic exact-root replacement, never a new-project arrival.
+
+   A git listing is the whole repository, so an owner is sent only its OUTERMOST due scopes (service-util
+   maximal-scopes): an ancestor's payload already carries its descendants' files from this same listing. All the
+   payloads are projected in ONE pass over the files (service-util/bucket-files). A synthetic listing walked each due
+   directory from itself (its own depth and entry bounds), so every due scope is sent, shortest first: a deeper
+   walk lands over the shallower one."
+  [[kind root] n due result]
+  (when result
+    (let [synthetic? (= :walk kind)
+          live       (filter (fn [[scope gen]] (= gen (get-in @tree-watchers [scope :gen]))) due)
+          by-owner   (reduce (fn [m [scope _]]
+                               (reduce (fn [m id]
+                                         (if (contains? (get-in @tree-windows [id :expanded] #{}) scope)
+                                           (update m id (fnil conj #{}) scope)
+                                           m))
+                                       m
+                                       (get-in @tree-watchers [scope :owners])))
+                             {}
+                             live)
+          rel-of     (fn [[r d]] [(relative-scope r d) d])
+          ;; owner → its payload scopes, as [rel directory] pairs (a scope that escapes its root is never watched)
+          sends      (into {}
+                           (map (fn [[id scopes]]
+                                  (let [pairs (into [] (comp (map rel-of) (filter first)) scopes)]
+                                    [id (if synthetic?
+                                          (sort-by (comp count second) pairs)
+                                          (let [outer (service-util/maximal-scopes (map first pairs))]
+                                            (sort (filter #(contains? outer %) (distinct (map first pairs))))))])))
+                           by-owner)
+          buckets    (when-not synthetic?
+                       (service-util/bucket-files (into #{} (mapcat val) sends) result))]
+      (doseq [[id scopes] sends
+              scope       scopes]
+        (let [entry (if synthetic?
+                      (let [[rel directory] scope]
+                        (when-let [files (get result directory)]
+                          (assoc (scoped-entry root true rel n files) :scope rel)))
+                      {:root root :files (get buckets scope) :synthetic? false
+                       :listing (tree-listing/stamp n) :scope scope})]
+          (when entry
+            (send-tree-owner-entry! id entry (select-keys (get-in @tree-windows [id :offered root])
+                                                          [:backend :connection-uri]))))))))
 
 (defn- offered-visible-root [id root]
   (when (contains? (get-in @tree-windows [id :visible] #{}) root)
@@ -644,6 +757,7 @@
            (fn [window]
              (-> (or window owner)
                  (assoc :visible visible)
+                 (update :roots-gen (fnil inc 0))
                  (update :expanded #(into #{} (filter (fn [[root _]] (contains? visible root))) %)))))
     (reconcile-tree-watchers!)))
 
@@ -691,10 +805,17 @@
               (and (= id _id) (= remote-owner-id owner-id)))
             @remote-tree-pending)))
 
+(defn- forget-open-gen!
+  "Drop the roots generation recorded when `id` opened remote `uri` (open-remote-tree!)."
+  [id uri]
+  (when (contains? @tree-windows id)
+    (swap! tree-windows update-in [id :open-gens] dissoc uri)))
+
 (defn- discard-pending-remote-tree-open! [id uri remote-owner-id]
   (let [key [id uri]]
     (when (= remote-owner-id (get @remote-tree-pending key))
       (swap! remote-tree-pending dissoc key)
+      (forget-open-gen! id uri)
       (ignore-remote-error! (.cancelTreeOpen daemon-events uri remote-owner-id uri))
       (when-not (remote-owner-needed? id remote-owner-id)
         (swap! remote-owner-windows dissoc remote-owner-id)))))
@@ -704,12 +825,15 @@
           :when (= uri opened-uri)]
     (discard-pending-remote-tree-open! (first key) opened-uri remote-owner-id)))
 
-(defn- deliver-pending-remote-tree-open! [^js wc uri remote-owner-id entry]
+(defn- deliver-pending-remote-tree-open! [^js wc uri remote-owner-id ^js entry]
   (let [id  (.-id wc)
         key [id uri]]
     (when (= remote-owner-id (get @remote-tree-pending key))
-      (swap! remote-tree-pending dissoc key)
-      (send-remote-tree-entry! wc uri remote-owner-id entry))))
+      (let [g0 (get-in @tree-windows [id :open-gens uri] 0)]
+        (swap! remote-tree-pending dissoc key)
+        (forget-open-gen! id uri)
+        (when-not (removed-since? id (some-> entry .-root) g0)
+          (send-remote-tree-entry! wc uri remote-owner-id entry))))))
 
 (defn- sync-tree-roots! [^js wc roots]
   (let [id (ensure-window! wc)]
@@ -730,7 +854,15 @@
         (ignore-remote-error!
          (.treeExpanded daemon-events uri remote-owner-id (clj->js remote-scopes)))))))
 
-(defn- refresh-tree-request [^js wc {:keys [root path]}]
+(defn- listed-or-throw
+  "The JS form of a listed entry; a failed listing rejects the invoke (the renderer's :on-failure)."
+  [entry]
+  (clj->js (or entry (throw (js/Error. "tree listing failed")))))
+
+(defn- refresh-tree-request
+  "vv:tree-refresh: one visible root's (optionally scoped) listing, as a Promise. The request is validated
+   synchronously; a remote root is refreshed by its target daemon."
+  [^js wc {:keys [root path]}]
   (when-not (and (string? root) (string? path))
     (throw (js/Error. "invalid tree refresh request")))
   (let [id (.-id wc)
@@ -740,27 +872,33 @@
       (throw (js/Error. "tree refresh path escapes its project root")))
     (if (= :remote (:backend offer))
       (.treeRefresh daemon-events (:connection-uri offer) (:remote-owner-id offer) root path)
-      (clj->js (or (tree-entry-for root (:synthetic? offer) path)
-                   (throw (js/Error. "tree listing failed")))))))
+      (-> (list-scope root (:synthetic? offer) path) (.then listed-or-throw)))))
 
-(defn- refresh-all-tree-requests [^js wc]
-  (let [id      (.-id wc)
-        visible (get-in @tree-windows [id :visible] #{})
-        local   (into []
-                      (keep (fn [root]
-                              (let [offer (get-in @tree-windows [id :offered root])]
-                                (when (not= :remote (:backend offer))
-                                  (tree-entry-for root (:synthetic? offer) root)))))
-                      visible)
-        calls   (mapv (fn [[remote-owner-id {:keys [uri]}]]
-                        (.treeRefreshAll daemon-events uri remote-owner-id))
-                      (remote-offers-by-owner id))]
-    (if (seq calls)
-      (-> (js/Promise.all (clj->js calls))
-          (.then (fn [groups]
-                   (clj->js (into local (mapcat #(js->clj % :keywordize-keys true))
-                                  (array-seq groups))))))
-      (js/Promise.resolve (clj->js local)))))
+(defn- root-entries
+  "A Promise of the full-root entries of `owner`'s visible local roots, listed concurrently — a failed listing is
+   left out. Each carries its listing's stamp, so the renderer never lets one of them overwrite a newer listing
+   pushed while the others were still being listed."
+  [owner]
+  (let [roots (into []
+                    (keep (fn [root]
+                            (let [offer (get-in @tree-windows [owner :offered root])]
+                              (when (not= :remote (:backend offer))
+                                (list-scope root (:synthetic? offer) root)))))
+                    (get-in @tree-windows [owner :visible] #{}))]
+    (-> (js/Promise.all (into-array roots))
+        (.then (fn [entries] (into [] (keep identity) (array-seq entries)))))))
+
+(defn- refresh-all-tree-requests
+  "vv:tree-refresh-all: every visible root's full entry — the local ones listed here, the remote ones by their target
+   daemons, all concurrently — as a Promise."
+  [^js wc]
+  (let [id    (.-id wc)
+        calls (mapv (fn [[remote-owner-id {:keys [uri]}]]
+                      (.treeRefreshAll daemon-events uri remote-owner-id))
+                    (remote-offers-by-owner id))]
+    (-> (js/Promise.all #js [(root-entries id) (js/Promise.all (clj->js calls))])
+        (.then (fn [[local groups]]
+                 (clj->js (into local (mapcat #(js->clj % :keywordize-keys true)) (array-seq groups))))))))
 
 (defn- release-tree-owner! [id]
   (swap! tree-windows dissoc id)
@@ -801,15 +939,20 @@
 (defn- target-tree-owner-id [session-id owner-id]
   [:remote-session (str session-id) (str owner-id)])
 
-(defn- target-tree-open! [session-id owner-id file-path send]
+(defn- target-tree-open!
+  "A source daemon's tree-open: a Promise of the path's tree (path-tree), which the response carries — only later
+   watcher refreshes use :send. daemon_events awaits the handler while it keeps serving other frames, so the owner
+   can be released (release-owner, releaseSession) during the listing: the root is then not offered again."
+  [session-id owner-id file-path send]
   (let [id (target-tree-owner-id session-id owner-id)]
     (swap! tree-windows update id
            #(assoc (or % (empty-tree-owner)) :send (fn [entry] (send (clj->js entry)))))
-    (when-let [entry (or (repo-tree file-path)
-                         (dir-walk/dir-tree file-path (directory? file-path)))]
-      ;; The request response carries the initial tree; only subsequent watcher refreshes use :send.
-      (offer-tree-owner! id entry {:backend :local})
-      (clj->js entry))))
+    (-> (path-tree file-path)
+        (.then (fn [entry]
+                 (when entry
+                   (when (contains? @tree-windows id)
+                     (offer-tree-owner! id entry {:backend :local}))
+                   (clj->js entry)))))))
 
 (defn- target-tree-roots! [session-id owner-id roots]
   (sync-tree-owner-roots! (target-tree-owner-id session-id owner-id) roots))
@@ -823,17 +966,10 @@
     (when-not offer (throw (js/Error. "tree root is not visible for this authenticated session")))
     (when-not (some? (relative-scope root path))
       (throw (js/Error. "tree refresh path escapes its project root")))
-    (clj->js (or (tree-entry-for root (:synthetic? offer) path)
-                 (throw (js/Error. "tree listing failed"))))))
+    (-> (list-scope root (:synthetic? offer) path) (.then listed-or-throw))))
 
 (defn- target-tree-refresh-all! [session-id owner-id]
-  (let [id (target-tree-owner-id session-id owner-id)]
-    (clj->js
-     (into []
-           (keep (fn [root]
-                   (let [offer (get-in @tree-windows [id :offered root])]
-                     (tree-entry-for root (:synthetic? offer) root))))
-           (get-in @tree-windows [id :visible] #{})))))
+  (-> (root-entries (target-tree-owner-id session-id owner-id)) (.then clj->js)))
 
 (defn- target-release-tree-owner! [session-id owner-id]
   (release-tree-owner! (target-tree-owner-id session-id owner-id)))
@@ -852,6 +988,7 @@
         owner-id (renderer-tree-owner-id wc uri)]
     (swap! remote-owner-windows assoc owner-id wc)
     (swap! remote-tree-pending assoc [id uri] owner-id)
+    (swap! tree-windows assoc-in [id :open-gens uri] (roots-gen id))   ; open! ensured the window's tree owner
     (-> (.treeOpen daemon-events uri owner-id uri)
         (.then (fn [entry]
                  (if entry

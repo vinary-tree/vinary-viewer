@@ -35,7 +35,7 @@
 ;; A file outside every git repository still deserves a sidebar tree, so its containing directory is
 ;; adopted as a project root of its own. A git repo is self-delimiting and self-filtering (ls-files
 ;; --exclude-standard); an arbitrary directory is neither, so the walk needs its own bounds and its own
-;; exclusions. Those policies are pure and live here; the fs walk itself lives in vinary.main.service.
+;; exclusions. Those policies are pure and live here; the fs walk itself lives in vinary.main.dir-walk.
 
 (def heavy-dirs
   "Non-hidden directories a synthetic root never descends into: build output and dependency trees. They
@@ -84,6 +84,53 @@
   (let [root (if directory? path parent)]
     (when (and root (not (str/blank? root)) (not (filesystem-root? root)))
       root)))
+
+;; ---- projecting one listing onto expanded scopes ----
+;; A scope is a root-relative directory, "/"-joined, with "" for the root. A git listing is the whole repository, so
+;; one listing answers every expanded directory of the root at once; these project it.
+
+(defn prefix-files
+  "The files of `files` (root-relative) under directory `scope` — all of them for the root scope \"\"."
+  [scope files]
+  (if (str/blank? scope)
+    (vec files)
+    (let [prefix (str scope "/")]
+      (filterv #(str/starts-with? % prefix) files))))
+
+(defn- strict-ancestors
+  "The scopes strictly containing `scope`: \"\" and each proper \"/\"-prefix of it (none for the root itself)."
+  [scope]
+  (when-not (str/blank? scope)
+    (loop [i (.indexOf scope "/") out [""]]
+      (if (neg? i) out (recur (.indexOf scope "/" (inc i)) (conj out (subs scope 0 i)))))))
+
+(defn maximal-scopes
+  "The outermost of `scopes`: those no OTHER member contains. When one listing serves a directory and its
+   descendants, the ancestor's payload already carries the descendants' files, and the renderer replacing the
+   ancestor's subtree leaves exactly what replacing it and then each descendant's would — so only these need
+   sending. O(n × depth): each scope looks its ancestors up in a set."
+  [scopes]
+  (let [ss (set scopes)]
+    (into #{} (remove (fn [s] (some ss (strict-ancestors s)))) ss)))
+
+(defn- containing-dirs
+  "The directories containing root-relative FILE path `f`: \"\" and each \"/\"-prefix of it."
+  [f]
+  (loop [i (.indexOf f "/") out [""]]
+    (if (neg? i) out (recur (.indexOf f "/" (inc i)) (conj out (subs f 0 i))))))
+
+(defn bucket-files
+  "{scope → (prefix-files scope files)} for every scope in `scopes`, built in ONE pass over `files`: each file joins
+   the bucket of every wanted directory containing it, in `files` order. O(files × depth) rather than the
+   O(files × scopes) of projecting scope by scope — a Files filter can hold hundreds of directories open."
+  [scopes files]
+  (let [wanted  (set scopes)
+        buckets (reduce (fn [m f]
+                          (reduce (fn [m d] (if (contains? wanted d) (assoc! m d (conj! (get m d) f)) m))
+                                  m (containing-dirs f)))
+                        (reduce (fn [m s] (assoc! m s (transient []))) (transient {}) wanted)
+                        files)]
+    (persistent! (reduce (fn [m s] (assoc! m s (persistent! (get buckets s)))) (transient {}) wanted))))
 
 (defn diff-extra
   "The Files-tree :extras entry for a diff document adopted into a project (ADR-0038), or nil when the

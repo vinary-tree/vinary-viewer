@@ -556,6 +556,26 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - Typing in the Files filter no longer freezes the app. Every expanded
+      directory's watcher used to re-list the whole repository with a
+      synchronous git process, about twenty at once when a filter opened many
+      directories; under machine-wide load that held the main process for 2.4 s,
+      and every window waited. Now git and the directory walk run in the
+      background, one listing per repository at a time: the refreshes that pile
+      up meanwhile share one more listing. Opening a file, going Back/Forward and
+      adopting a diff's repository no longer wait for git either.
+    - The Files tree no longer redoes its whole-tree bookkeeping for every
+      update. Each update re-derived every directory of every project, twice,
+      and every redraw once more; now a project's directories are derived once
+      per change to its listing, about 9x faster when they are.
+    - A tree refresh can no longer undo a newer one. Refresh All, which waits
+      for its slowest project, could overwrite a directory a watcher had just
+      updated with its older listing (and a remote host's reply could trail its
+      own update); every tree update now carries its listing number, and an
+      older one never overwrites a newer one.
+    - Removing a project from Files while its listing was still running no
+      longer brings it back when the listing arrives, and neither does
+      returning to the Files tab.
     - A wheel notch while a slide show's screen is blanked now only ends the
       blanking, as a key does. Before, it moved to another slide behind the black
       (or white) screen, and the audience saw a different slide when the screen

@@ -1,10 +1,11 @@
 'use strict';
 
 // Proves the v0.2 sidebar file-tree fix end-to-end at the seam the fix touches:
-// repo-tree (src/vinary/main/service.cljs) lists the repo with
+// repo-files (src/vinary/main/tree_listing.cljs, called through repo-tree in service.cljs) lists the repo with
 //   git ls-files --cached --others --exclude-standard
 // so a newly-created, uncommitted, not-.gitignore'd file (the one you just opened) APPEARS,
-// while .gitignore'd clutter does NOT.
+// while .gitignore'd clutter does NOT. (tree_listing's own suite runs the shipped lister against real git:
+// test/vinary/main/tree_listing_test.cljs; this file also pins how service.cljs wires it.)
 //
 // Why a Node harness (not electron-smoke / a cljs -test): electron-smoke.js mocks vv:open and
 // injects content via state.contentByPath / vv:open-files, so the real main open!/send-tree!/
@@ -24,6 +25,8 @@ const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const SERVICE = path.join(ROOT, 'src', 'vinary', 'main', 'service.cljs');
+const TREE_LISTING = path.join(ROOT, 'src', 'vinary', 'main', 'tree_listing.cljs');
+const MAIN_DIR = path.join(ROOT, 'src', 'vinary', 'main');
 
 // Hermetic git: ignore host global/system config (so a global core.excludesFile can't perturb
 // --exclude-standard) and give commits a deterministic identity. HOME is repointed at the temp dir
@@ -39,7 +42,7 @@ function gitEnv(tmp) {
   };
 }
 
-// The exact repo-tree invocation contract (mirrors the `git` helper in service.cljs).
+// The exact listing invocation contract (mirrors tree_listing's git-stdout: an argv array, stdin and stderr ignored).
 function git(args, cwd, env) {
   return execFileSync('git', args, {
     cwd, env, encoding: 'utf8',
@@ -118,19 +121,38 @@ function main() {
     assert.ok(effectiveAfterRename.has('docs/persistence/renamed-note.md'),
       'repo-files keeps the unstaged rename destination');
 
-    // bind this behavioral test to the shipped code: repo-tree must still issue these exact flags
+    // bind this behavioral test to the shipped code: repo-files must still issue these exact flags
     const src = fs.readFileSync(SERVICE, 'utf8');
-    assert.ok(/\[\s*"ls-files"\s+"--cached"\s+"--others"\s+"--exclude-standard"\s*\]/.test(src),
-      'service.cljs repo-tree must call git with --cached --others --exclude-standard');
-    assert.ok(/\[\s*"ls-files"\s+"--deleted"\s*\]/.test(src),
-      'service.cljs repo-files must subtract tracked paths deleted from the working tree');
+    const lister = fs.readFileSync(TREE_LISTING, 'utf8');
+    assert.ok(/\[\s*"ls-files"\s+"--cached"\s+"--others"\s+"--exclude-standard"\s*\]/.test(lister),
+      'tree_listing.cljs repo-files must call git with --cached --others --exclude-standard');
+    assert.ok(/\[\s*"ls-files"\s+"--deleted"\s*\]/.test(lister),
+      'tree_listing.cljs repo-files must subtract tracked paths deleted from the working tree');
+    assert.ok(/:git\s+\(repo-files\s+root\)/.test(lister),
+      "tree_listing.cljs list-key must list a git key's repository with repo-files");
+    assert.ok(/\(tree-listing\/make-runner\s+\{:list!\s+tree-listing\/list-key/.test(src),
+      "service.cljs's listing runner must list with tree-listing/list-key");
 
-    // …and that a file in NO repo still gets a tree: send-tree! must fall back to the synthetic root.
+    // …and that a file in NO repo still gets a tree: path-tree must fall back to the synthetic root.
     // The fallback's own behavior is covered against real directories by the node :test build
     // (test/vinary/main/dir_walk_test.cljs); what can only be checked here is that main still WIRES it,
-    // since repo-tree returning nil is silent — the sidebar would simply go missing again.
-    assert.ok(/\(or\s+\(repo-tree\s+file-path\)\s+\(dir-walk\/dir-tree\s+file-path/.test(src),
-      'service.cljs send-tree! must fall back to dir-walk/dir-tree when there is no repo');
+    // since repo-tree resolving to nil is silent — the sidebar would simply go missing again.
+    assert.ok(/\(repo-tree\s+file-path\)\s*\(\.then\s+\(fn\s+\[t\]\s+\(or\s+t\s+\(synthetic-tree\s+file-path\)\)\)\)/.test(src),
+      'service.cljs path-tree must fall back to synthetic-tree when there is no repo');
+    assert.ok(/\(dir-walk\/synthetic-root\s+file-path/.test(src),
+      'service.cljs synthetic-tree must adopt dir-walk/synthetic-root');
+    assert.ok(/\(-> \(path-tree file-path\)/.test(src),
+      'service.cljs send-tree! must send path-tree');
+
+    // docs/scientific/10 §11: a synchronous child process blocks main's event loop for as long as it runs — the
+    // Files-filter stall. Main's ClojureScript starts none (its git runs through tree_listing's git-stdout and
+    // vinary.main.git's run-git, both asynchronous).
+    for (const name of fs.readdirSync(MAIN_DIR).filter((f) => f.endsWith('.cljs'))) {
+      const text = fs.readFileSync(path.join(MAIN_DIR, name), 'utf8')
+        .split('\n').filter((line) => !/^\s*;/.test(line)).join('\n');   // a comment may name what was retired
+      assert.ok(!/\b(?:execFileSync|spawnSync|execSync)\b/.test(text),
+        `src/vinary/main/${name} must not start a child process synchronously`);
+    }
 
     // ADR-0038: diff documents adopt the project they describe. The seams' behavior is covered by the
     // node :test build (projects/tree-model/tree-state/service-util suites) and tree-e2e; what only this

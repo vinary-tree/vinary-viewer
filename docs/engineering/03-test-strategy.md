@@ -59,6 +59,7 @@ The suite (39 namespaces at time of writing) covers these subsystems:
 | **TUI** (`tui.*`) | `tui/{find,keys,state,toc,viewport}_test` | The pure keys→state→frame pipeline: find, key binding, viewport ring, TOC overlay. |
 | **Terminal** (`terminal.*`) | `terminal/graphics_test` | The kitty/sixel graphics encoding logic. |
 | **Main** (pure) | `main/file_kind_test`, `main/startup_test` | File-kind classification and startup argument handling — the pure slices of the main process. |
+| **Files-tree listings** | `main/listing_flight_test`, `main/tree_listing_test`, `main/dir_walk_test`, `main/service_util_test`, `app/projects_test`, `app/tree_state_test` | The listing flights' rules (one listing per root at a time; a request never joins the running listing; one trailing listing per burst) by hand and over seeded random interleavings; the runner against a hand-driven fake lister (same-turn coalescing, failures caching nothing, one delivery per round) and the listers against REAL git in a hermetic environment, with a fake `git` on `PATH` for a hang and an output flood; the asynchronous walk against the synchronous one it replaced, kept verbatim as an oracle; one-pass scope projection against per-scope projection; listing order (an entry applied out of order ends where stamp order would) over seeded random histories; and the fast directory-scope derivation against its definition. docs/scientific/10 §11. |
 | **UI / misc** | `ui/icons_test`, `core_test`, `diff_test`, `grammar_catalog_test` | Icon mapping, the virtual-layout geometry helpers ([ADR-0023](../design-decisions/0023-streaming-scrollbar-and-pacing.md)), the diff parser, and the grammar-catalog reader. |
 
 Two examples show why the unit layer is where invariants live:
@@ -90,7 +91,7 @@ framework. They fall into three groups by host.
 | Harness | Drives |
 |---------|--------|
 | [`electron-smoke.js`](../../test/electron-smoke.js) | The flagship. Boots the **real renderer** (`resources/public/index.html`) in Electron, wires `vv:stream-*` to the **real** `content_service.js` (genuine `createReadStream`/`readline` batching + the session registry), and asserts: streamed `innerHTML` is **byte-identical** to batch over a corpus; the mid-stream scrollbar spacer sizes the whole document ([ADR-0023](../design-decisions/0023-streaming-scrollbar-and-pacing.md)); the session registry returns to `0` after teardown (**no fd/session leak**); DevTools opens with no main-process crash; and re-frame-10x is hidden by default. |
-| [`tree-e2e.js`](../../test/tree-e2e.js) | Boots the compiled renderer and **real main service** against synthetic and git fixtures. It covers scoped structural refresh, add/delete/rename (including unstaged tracked git paths), refresh-before-open DOM ordering, watcher release, watcher-ready reconciliation, directory/project context-menu Refresh, and the Files rail-icon Refresh All. |
+| [`tree-e2e.js`](../../test/tree-e2e.js) | Boots the compiled renderer and **real main service** against synthetic and git fixtures. It covers scoped structural refresh, add/delete/rename (including unstaged tracked git paths), refresh-before-open DOM ordering, watcher release, watcher-ready reconciliation, directory/project context-menu Refresh, and the Files rail-icon Refresh All. A spawn census installed before main ([`fixtures/spawn-census.js`](../../test/fixtures/spawn-census.js)) gates the whole run: main starts no git process synchronously, and never two listings of one repository at once. |
 | [`watch-e2e.js`](../../test/watch-e2e.js) | Boots two real windows over the same path and proves one shallow tree watcher fans out to every retaining renderer, releases owners independently on collapse/window destruction, coexists with retained-document watchers, and is reacquired on expansion. |
 | [`extensions-smoke.js`](../../test/extensions-smoke.js) | The Chrome-extension + ad-block runtime ([ADR-0015](../design-decisions/0015-scoped-extension-runtime-gpl-free.md)): `session.extensions.loadExtension` loads the unpacked MV3 fixture, its content script injects into a matched HTTP page, its action popup loads with native `chrome.*` (runtime/storage/action), and the native ad-blocker fetches filter lists (network-gated). |
 | [`daemon-smoke.js`](../../test/daemon-smoke.js) | The resident-daemon control seam ([IPC §6](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)): `vv1 ping` reports the pid/version/**loaded-bundle mtime**/window count `install.sh` verifies against; the v0.2 open message still opens a window; an unknown command opens none; `vv1 stop` exits the process and frees the socket **and** the single-instance lock; and `vv` retires a stale **idle** daemon but never one with a window open. It also guards the backward-compatibility contract that makes all this safe — a control frame must not parse as JSON, or probing a pre-`vv1` daemon would open a stray window on it. A **stale** socket file (an owner killed with SIGKILL) is replaced (step 0). A **live** socket is never taken: a second primary with its own config home finds the owner answering, runs without the socket, and leaves the owner's path in place when it quits (step 9; [IPC §6, socket ownership](../architecture/03-ipc-protocol.md#6-the-daemon-socket-process--process)). Spawns real daemons under a private `XDG_RUNTIME_DIR`, a renamed mirror app (its own userData → its own lock) and a disabled password bridge, so it cannot disturb the developer's live daemon or password managers. |
@@ -108,10 +109,10 @@ framework. They fall into three groups by host.
 | Harness | Drives |
 |---------|--------|
 | [`content-service-smoke.js`](../../test/content-service-smoke.js) | `content_service.js` — the main-process file reader — against real archives (`tar-stream`, `zlib`, `yauzl`) with a hand-rolled `crc32`, proving archive listing/extraction and content classification. |
-| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The sidebar file-tree git seam: `repo-files` lists with `git ls-files --cached --others --exclude-standard` and subtracts `git ls-files --deleted`, so new non-ignored files appear while ignored clutter and deleted/unstaged-renamed tracked paths do not linger. It exercises both exact commands against a throwaway repo and asserts `send-tree!` still falls back to `dir-walk/dir-tree` when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)). |
+| [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The sidebar file-tree git seam: `repo-files` (`vinary.main.tree-listing`) lists with `git ls-files --cached --others --exclude-standard` and subtracts `git ls-files --deleted`, so new non-ignored files appear while ignored clutter and deleted/unstaged-renamed tracked paths do not linger. It exercises both exact commands against a throwaway repo, asserts `path-tree` still falls back to the synthetic root when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)), and gates every ClojureScript file of main against a synchronous child process (`execFileSync`/`spawnSync`/`execSync` — docs/scientific/10 §11). |
 | [`ssh-config-smoke.js`](../../test/ssh-config-smoke.js) | Hermetic unit tests for `ssh_config.js` (pure, no fs/net): `parseSshUri` for `ssh://` / `sftp://` authority, port, user, and home-relative path handling ([ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)). |
 | [`ssh-transport-smoke.js`](../../test/ssh-transport-smoke.js) | `ssh_transport.js` end-to-end against the **hermetic in-process ssh2 SFTP fixture** (no network, no external host); also asserts ssh2 runs **pure-JS** (no native crypto addon) and that `AddKeysToAgent` adds a key to a throwaway ssh-agent. |
-| [`daemon-events-smoke.js`](../../test/daemon-events-smoke.js) | The authenticated target-daemon protocol: private descriptor lifecycle, both negative sides of mutual HMAC + SFTP-namespace proof, framed requests, SSH direct forwarding, invalidations, remote tree conversion, reconnect restoration, in-flight cancellation/owner release, and no-target SFTP fallback. |
+| [`daemon-events-smoke.js`](../../test/daemon-events-smoke.js) | The authenticated target-daemon protocol: private descriptor lifecycle, both negative sides of mutual HMAC + SFTP-namespace proof, framed requests, SSH direct forwarding, invalidations, remote tree conversion, reconnect restoration, in-flight cancellation/owner release, and no-target SFTP fallback. Tree handlers return Promises (the target lists asynchronously): a delayed resolution replies `ok:true` with its value, a rejection `ok:false` with its message, and every entry's `listing` stamp crosses the wire. |
 
 ### 3.4 What `npm test` actually runs
 
@@ -181,7 +182,7 @@ orphans were observed: from a `daemon-smoke` run, a Wayland-backend run and two 
 
 `electron-smoke.js` and `scripts/screenshots.cjs` both **mock** the `vv:open` IPC seam — they inject
 content through `state.contentByPath` / `vv:open-files` — so main's real `open!` → `send-tree!` →
-`repo-tree` / `dir-walk` chain never executes in them. That left the sidebar's project-root logic
+listing runner (`repo-tree` / the synthetic walk) chain never executes in them. That left the sidebar's project-root logic
 verifiable only in pieces.
 
 [`tree-e2e.js`](../../test/tree-e2e.js) was the first harness to close that gap, and the one described here.
@@ -194,8 +195,9 @@ auto-invokes `vinary.main.core/main` on load — so the entire production chain 
 ```
 CLI argv → startup/doc-uris → vv:open-files → [:files/opened] → [:doc/open]
 __vvopen(path) ───────────────────────────────────────────────→ [:doc/open]
-  → load-fx → vv:open → main open! → send-tree!
-  → repo-tree (git) OR dir-walk/dir-tree (synthetic) → vv:tree → [:tree/received]
+  → load-fx → vv:open → main open! → send-tree! → path-tree
+  → repo-tree (async git) OR synthetic-tree (async walk), each through its root's listing flight
+  → vv:tree → [:tree/received]
   → projects/merge-project → [:ui :projects] → ui.tree renders <details.vv-project>
 ```
 

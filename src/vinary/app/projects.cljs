@@ -53,21 +53,98 @@
     (when (under? child parent)
       (if (= child parent) "" (subs child (count (child-prefix parent)))))))
 
-(defn- rebase-prefix
-  "The path of `root` relative to the `parent` that contains it, with a trailing \"/\" — the prefix that
-   turns root-relative paths into parent-relative ones. `parent` must strictly contain `root`."
-  [parent root]
-  (str (relative-path root parent) "/"))
+;; ---- listing order ------------------------------------------------------------------------------------------
+;; Main numbers every listing and stamps each entry built from it, :listing {:epoch :n} (vinary.main.tree-listing).
+;; Entries can arrive out of order — a Refresh All reply waits for its slowest root while a watcher pushes a newer
+;; listing of another; a target daemon's forwarded reply can trail its own push — so a project remembers, per SCOPE
+;; (a root-relative directory, \"\" for the root), the stamp of the listing that last wrote it: :listings
+;; {scope → [epoch n]}. Writing scope S with stamp t then gives exactly what applying every entry in stamp order would:
+;;   • a scope written by a NEWER listing at or above S makes the write a no-op (that listing already covers S);
+;;   • directories inside S written by newer listings keep their files (they are protected), the rest of S takes the
+;;     incoming files;
+;;   • the stamps of S and everything inside it that t supersedes are forgotten, so :listings holds only scopes no
+;;     newer write covers.
+;; An unstamped entry (an older daemon) writes as entries always did, and drops the stamps it covers. A project with
+;; no stamps has no :listings key.
+
+(defn- stamp-of
+  "An entry's listing stamp as [epoch n], or nil."
+  [{:keys [listing]}]
+  (let [{:keys [epoch n]} listing]
+    (when (and (number? epoch) (number? n)) [epoch n])))
+
+(defn- newer? [a b] (pos? (compare a b)))
+
+(defn- scope-within?
+  "Is directory scope `t` at or inside scope `s`?"
+  [t s]
+  (or (str/blank? s) (= t s) (str/starts-with? t (str s "/"))))
+
+(defn- file-within?
+  "Is root-relative file `f` inside scope `s`?"
+  [f s]
+  (or (str/blank? s) (str/starts-with? f (str s "/"))))
+
+(defn- write-scope
+  "`project` with scope `scope` replaced by `incoming` (root-relative files, all inside it) from the listing stamped
+   `t` (nil: unstamped), or nil when a newer listing already wrote a scope containing it (see above)."
+  [{:keys [files listings] :as project} scope t incoming]
+  (cond
+    (nil? t)
+    (let [kept     (filterv #(not (file-within? % scope)) files)
+          listings (into {} (remove (fn [[s _]] (scope-within? s scope))) listings)]
+      (cond-> (-> project (assoc :files (into kept incoming)) (dissoc :listings))
+        (seq listings) (assoc :listings listings)))
+
+    (some (fn [[s u]] (and (scope-within? scope s) (newer? u t))) listings)
+    nil
+
+    :else
+    (let [protected  (into [] (keep (fn [[s u]] (when (and (not= s scope) (scope-within? s scope) (newer? u t)) s)))
+                           listings)
+          protected? (fn [f] (some #(file-within? f %) protected))]
+      (assoc project
+             :files    (into (filterv #(or (not (file-within? % scope)) (protected? %)) files)
+                             (if (seq protected) (remove protected?) identity)
+                             incoming)
+             :listings (-> (into {} (remove (fn [[s u]] (and (scope-within? s scope) (not (newer? u t))))) listings)
+                           (assoc scope t))))))
+
+(defn- rebase
+  "Root-relative path `p` of the root `child`, re-based onto the `parent` root that contains it."
+  [parent child p]
+  (let [r (relative-path child parent)]
+    (cond (str/blank? r) p
+          (str/blank? p) r
+          :else          (str r "/" p))))
 
 (defn- merge-subtree
   "Refresh `parent`'s listing with a freshly walked subtree rooted at `entry`'s root: every existing path
-   under that subtree is replaced by the incoming paths, re-based onto the parent. This is what keeps a
-   synthetic root from going stale — `git ls-files --others` guarantees the file you just opened is in
-   the tree, and a covered synthetic root must not be staler than that."
-  [parent entry]
-  (let [prefix (rebase-prefix (:root parent) (:root entry))
-        kept   (filterv #(not (str/starts-with? % prefix)) (:files parent))]
-    (assoc parent :files (into kept (map #(str prefix %)) (:files entry)))))
+   under that subtree is replaced by the incoming paths, re-based onto the parent — unless a newer listing already
+   wrote it (write-scope). This is what keeps a synthetic root from going stale — `git ls-files --others` guarantees
+   the file you just opened is in the tree, and a covered synthetic root must not be staler than that."
+  [parent entry t]
+  (or (write-scope parent
+                   (rebase (:root parent) (:root entry) "")
+                   t
+                   (mapv #(rebase (:root parent) (:root entry) %) (:files entry)))
+      parent))
+
+(defn- reapply-absorbed
+  "`project` (just built from an entry stamped `t`) after re-applying what each absorbed synthetic root holds from
+   listings NEWER than `t`, oldest first — the state applying every entry in stamp order would have produced (the
+   absorbed root's entry would then have arrived second, and merged into the broader one)."
+  [project t absorbed]
+  (if (nil? t)
+    project
+    (->> (for [{:keys [root files listings]} absorbed
+               [s u] listings
+               :when (newer? u t)]
+           {:stamp u
+            :scope (rebase (:root project) root s)
+            :files (into [] (comp (filter #(file-within? % s)) (map #(rebase (:root project) root %))) files)})
+         (sort-by :stamp)
+         (reduce (fn [p {:keys [stamp scope files]}] (or (write-scope p scope stamp files) p)) project))))
 
 (defn- merge-extras
   "Union two :extras vectors (ADR-0038 attached documents — a diff adopted into the project), deduped
@@ -101,7 +178,8 @@
    project in its own right and must survive."
   [projects {:keys [root synthetic?] :as entry}]
   (let [projects (vec projects)
-        entry    (-> entry (update :files vec) (update :synthetic? boolean))
+        t        (stamp-of entry)
+        entry    (-> entry (update :files vec) (update :synthetic? boolean) (dissoc :listing))
         idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))
         ;; the most specific covering root — nested synthetic roots cannot coexist (see the absorb rule),
         ;; so at most one synthetic and any number of git roots can cover, and the deepest one wins
@@ -111,14 +189,18 @@
                          first))]
     (cond
       idx
-      (let [merged (merge-extras (:extras (nth projects idx)) (:extras entry))]
-        (assoc projects idx (cond-> (dissoc entry :extras) merged (assoc :extras merged))))
+      (let [old     (nth projects idx)
+            merged  (merge-extras (:extras old) (:extras entry))
+            ;; superseded (a newer listing wrote the root): the project keeps that listing's files and metadata
+            written (write-scope old "" t (:files entry))]
+        (assoc projects idx (cond-> (dissoc (if written (merge written (dissoc entry :files)) old) :extras)
+                              merged (assoc :extras merged))))
 
       (and cover-idx (:synthetic? (nth projects cover-idx)))
       (update projects cover-idx
               (fn [parent]
                 (let [merged (merge-extras (:extras parent) (:extras entry))]
-                  (cond-> (merge-subtree parent entry)
+                  (cond-> (merge-subtree parent entry t)
                     merged (assoc :extras merged)))))
 
       cover-idx                                        ; covered by a git root — it refreshes itself
@@ -131,8 +213,9 @@
                         (filterv #(not (and (:synthetic? %) (under? (:root %) root))) projects)
                         projects)
             inherited (reduce (fn [acc p] (merge-extras acc (:extras p))) nil absorbed)
-            merged    (merge-extras inherited (:extras entry))]
-        (conj projects' (cond-> (dissoc entry :extras) merged (assoc :extras merged)))))))
+            merged    (merge-extras inherited (:extras entry))
+            project   (cond-> (dissoc entry :extras) t (assoc :listings {"" t}))]
+        (conj projects' (cond-> (reapply-absorbed project t absorbed) merged (assoc :extras merged)))))))
 
 (defn prune-extras
   "Drop :transient? extras whose :path is no longer in the `retained` document set — their spilled
@@ -152,19 +235,19 @@
   "Apply a main-process tree payload. A payload without :scope is a full project entry and follows
    `merge-project`'s root/containment rules. A scoped payload keeps the exact project identity and
    replaces only root-relative files beneath that directory; if the project disappeared while an
-   async refresh was in flight, the stale scoped reply is ignored."
+   async refresh was in flight, the stale scoped reply is ignored. Either way the write is ordered by
+   the payload's listing stamp (write-scope): an entry older than what a scope already shows changes
+   nothing there."
   [projects {:keys [root scope files] :as entry}]
   (if (nil? scope)
     (merge-project projects entry)
     (let [projects (vec projects)
-          idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))
-          prefix   (when-not (str/blank? scope) (str scope "/"))]
+          idx      (first (keep-indexed #(when (= (:root %2) root) %1) projects))]
       (if (nil? idx)
         projects
-        (let [old  (:files (nth projects idx))
-              keep? (if prefix #(not (str/starts-with? % prefix)) (constantly false))]
-          (assoc-in projects [idx :files]
-                    (into (filterv keep? old) (vec files))))))))
+        (if-let [p (write-scope (nth projects idx) scope (stamp-of entry) (vec files))]
+          (assoc projects idx p)
+          projects)))))
 
 (defn remove-project
   "Drop the project rooted at `root` from the list. The root returns if a file under it is opened again —

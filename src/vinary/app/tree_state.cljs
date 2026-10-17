@@ -7,7 +7,9 @@
             [vinary.app.projects :as projects]))
 
 (defn file-directory-scopes
-  "Every directory scope implied by one root-relative file, including the project root."
+  "Every directory scope implied by one root-relative file, including the project root. The DEFINITION of a
+   project's directory scopes — project-directory-scopes computes the same union faster, and is tested against
+   this."
   [root file]
   (let [dirs (butlast (str/split (str file) #"/"))]
     (into [[root root]]
@@ -15,11 +17,51 @@
                  [root (projects/join-path root (str/join "/" (take n dirs)))])
                (range 1 (inc (count dirs)))))))
 
-(defn project-directory-scopes [{:keys [root files]}]
-  (into #{[root root]} (mapcat #(file-directory-scopes root %)) files))
+(defn- relative-directories
+  "The root-relative directories `files` imply: every \"/\"-prefix of every path, found by scanning for separators
+   instead of splitting and re-joining each path at each depth. Separators at the very end are ignored, as
+   str/split ignores the empty segments they leave."
+  [files]
+  (persistent!
+   (reduce (fn [acc f]
+             (let [f   (str f)
+                   end (loop [e (count f)] (if (and (pos? e) (= "/" (.charAt f (dec e)))) (recur (dec e)) e))]
+               (loop [i (.indexOf f "/") acc acc]
+                 (if (or (neg? i) (>= i end))
+                   acc
+                   (recur (.indexOf f "/" (inc i)) (conj! acc (subs f 0 i)))))))
+           (transient #{})
+           files)))
+
+;; Directory scopes are derived from a project's files on every tree payload (prune-tree-ui), every expansion and every
+;; Files render (effective-expanded) — for a repository of thousands of files, the renderer's longest task while typing
+;; in the Files filter (docs/scientific/10 §11). Projects are immutable values and an unchanged project keeps its
+;; identity across updates (vinary.app.projects replaces only the one that changed), so both derivations are memoized
+;; on identity: only a project whose listing changed pays again.
+(defonce ^:private project-scopes-memo (js/WeakMap.))
+(defonce ^:private projects-scopes-memo (js/WeakMap.))
+
+(defn- memoized
+  "(f), cached in WeakMap `memo` under the value `k` — any object can key a WeakMap, and a collection is one (a string
+   or nil is not: those are computed every time)."
+  [^js memo k f]
+  (if (contains? #{"object" "array" "function"} (goog/typeOf k))
+    (let [v (.get memo k)]
+      (if (undefined? v) (let [v (f)] (.set memo k v) v) v))
+    (f)))
+
+(defn project-directory-scopes
+  "Every directory scope of one project: [root root] and one per directory its files imply — the union of
+   file-directory-scopes over its files."
+  [{:keys [root files] :as project}]
+  (memoized project-scopes-memo project
+            #(into #{[root root]}
+                   (map (fn [rel] [root (projects/join-path root rel)]))
+                   (relative-directories files))))
 
 (defn directory-scopes [projects]
-  (into #{} (mapcat project-directory-scopes) projects))
+  (memoized projects-scopes-memo projects
+            #(into #{} (mapcat project-directory-scopes) projects)))
 
 (defn ancestor-scopes
   "The root→directory scope chain for an absolute directory under `root`, inclusive."

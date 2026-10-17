@@ -29,6 +29,12 @@
   Beamer deck, → flips and Home/End jumps timed from the key's dispatch to the frame that shows the slide,
   live canvases counted every frame. Pin it: `taskset -c 2-9 npm run bench:flip | tee …`;
   `VV_BENCH_JSON=<path>` writes every sample, and `node scripts/analyze-flip-runs.cjs` pools and compares runs.
+- `npm run bench:tree-scopes`: the Files tree's directory-scope derivation behind docs/scientific/10 §11, old against
+  new, on this repository's own listing (the compiled test build, its tests not run). Pin it:
+  `taskset -c 2 npm run bench:tree-scopes | tee …`; `VV_BENCH_JSON=<path>` writes the summary.
+- `VV_FIND_E2E_DIAG=<dir> npm run test:find-e2e` attributes a tree-filter stall: main's event-loop delay, CPU
+  profiles of main AND the renderer, and main's git processes; `node scripts/analyze-cpuprofile.cjs <profile>`
+  reads a profile (self time, longest runs, longest busy stretches).
 
 ## Coding Style & Naming Conventions
 Use idiomatic ClojureScript with two-space indentation, kebab-case vars/functions, and namespace-to-file mapping such as `vinary.input.keymaps-registry` in `src/vinary/input/keymaps_registry.cljs`. Keep renderer filesystem access behind the existing `contextBridge`/IPC boundary; the renderer should operate on plain JSON/EDN data. JavaScript files use CommonJS, `'use strict'`, and minimal dependencies. CSS custom properties use the `--vv-*` prefix and must be defined by every theme in `resources/public/css/themes/`.

@@ -1819,15 +1819,17 @@
 (rf/reg-event-fx
  :tree/restore-ready
  (fn [{:keys [db]} [_ results]]
-   (let [db' (reduce (fn [state {:keys [entry]}]
-                       (if entry (apply-tree-entry state entry) state))
-                     db results)
-         db' (reduce (fn [state {:keys [scope error]}]
-                       (if error
-                         (update-in state [:ui :tree-open] disj [(:root scope) (:path scope)])
-                         state))
-                     db' results)
-         db' (assoc-in db' [:ui :tree-restoring?] false)]
+   ;; As with Refresh All, a project removed while the restore was in flight stays removed.
+   (let [present (into #{} (map :root) (get-in db [:ui :projects]))
+         db'     (reduce (fn [state {:keys [entry]}]
+                           (if (and entry (contains? present (:root entry))) (apply-tree-entry state entry) state))
+                         db results)
+         db'     (reduce (fn [state {:keys [scope error]}]
+                           (if error
+                             (update-in state [:ui :tree-open] disj [(:root scope) (:path scope)])
+                             state))
+                         db' results)
+         db'     (assoc-in db' [:ui :tree-restoring?] false)]
      {:db db'
       :fx [(tree-root-sync-fx (get-in db' [:ui :projects]))
            [:dispatch [:tree/reveal-active]]]})))

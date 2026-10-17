@@ -5,6 +5,7 @@
    SYNTHETIC root (the containing directory of a file in no repository) yields to containment, which is
    what keeps browsing several files under one directory from stacking up overlapping trees."
   (:require [cljs.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [vinary.app.projects :as projects]))
 
 (defn- git  [root & files] {:root root :files (vec files) :synthetic? false})
@@ -188,3 +189,102 @@
                            {:root "/repo" :scope "" :files ["fresh.md"]}))))))
   (testing "a late scoped reply cannot resurrect a removed project"
     (is (= [] (projects/apply-tree-update [] {:root "/gone" :scope "sub" :files ["sub/a"]})))))
+
+;; ---- listing order (docs/scientific/10 §11) ------------------------------------------------------------------------
+;; Main stamps each entry with the listing it came from; whatever order entries arrive in, the project must end up as
+;; if they had been applied in stamp order.
+
+(defn- stamped [entry n] (assoc entry :listing {:epoch 1 :n n}))
+
+(deftest an-older-reply-never-overwrites-a-newer-push
+  (testing "a watcher's push (listing 5) for src/ lands before an aggregated reply's root (listing 4)"
+    (let [p0 (projects/merge-project [] (stamped (git "/repo" "a.md" "src/old.md") 3))
+          p1 (projects/apply-tree-update p0 (stamped {:root "/repo" :scope "src" :files ["src/new.md"]} 5))
+          p2 (projects/merge-project p1 (stamped (git "/repo" "a.md" "b.md" "src/old.md") 4))]
+      (is (= #{"a.md" "b.md" "src/new.md"} (set (:files (first p2))))
+          "src/ keeps listing 5's files; everything else takes listing 4's")))
+  (testing "a scope written by a newer listing at or ABOVE it makes an older write a no-op"
+    (let [p0 (projects/merge-project [] (stamped (git "/repo" "a.md" "new.md") 6))
+          p1 (projects/apply-tree-update p0 (stamped {:root "/repo" :scope "src" :files ["src/x.md"]} 5))
+          p2 (projects/merge-project p1 (stamped (git "/repo" "a.md") 4))]
+      (is (= p0 p1 p2)))))
+
+(deftest equal-stamps-are-one-listing
+  (let [p0 (projects/merge-project [] (stamped (git "/repo" "a.md" "src/x.md") 7))
+        p1 (projects/apply-tree-update p0 (stamped {:root "/repo" :scope "src" :files ["src/x.md"]} 7))]
+    (is (= (set (:files (first p0))) (set (:files (first p1)))) "the same listing projected twice changes nothing")))
+
+(deftest unstamped-entries-write-as-before
+  (testing "an older daemon's entries carry no stamp: they replace their scope as entries always did"
+    (let [p0 (projects/merge-project [] (stamped (git "/repo" "a.md" "src/x.md") 9))
+          p1 (projects/apply-tree-update p0 {:root "/repo" :scope "src" :files ["src/y.md"]})]
+      (is (= #{"a.md" "src/y.md"} (set (:files (first p1)))))
+      (is (= {"" [1 9]} (:listings (first p1))) "and forget the stamps inside the scope they wrote")))
+  (testing "a project with no stamps has no :listings key"
+    (is (not (contains? (first (projects/merge-project [] (git "/r" "a.md"))) :listings)))))
+
+(deftest a-superseded-full-entry-still-attaches-its-extras
+  (let [e  (extra "/patches/fix.patch")
+        p0 (projects/merge-project [] (stamped (git "/repo" "a.md" "new.md") 8))
+        p1 (projects/merge-project p0 (assoc (stamped (git "/repo" "a.md") 2) :extras [e]))]
+    (is (= ["a.md" "new.md"] (:files (first p1))) "the files are listing 8's")
+    (is (= [e] (:extras (first p1))) "an adoption's diff is an attachment, not a listing: it always lands")))
+
+(deftest a-covered-synthetic-subtree-is-ordered-too
+  (let [p0 (projects/merge-project [] (stamped (syn "/notes" "a.md" "sub/old.md") 1))
+        p1 (projects/merge-project p0 (stamped (syn "/notes/sub" "new.md") 5))
+        p2 (projects/merge-project p1 (stamped (syn "/notes/sub" "older.md") 3))]
+    (is (= #{"a.md" "sub/new.md"} (set (:files (first p1)))))
+    (is (= p1 p2) "an older walk of the subtree changes nothing")))
+
+(deftest absorption-keeps-what-the-absorbed-root-holds-from-newer-listings
+  (testing "/notes/sub (listing 6) then a broader /notes walked by listing 4: sub/ keeps listing 6's files"
+    (let [p0 (projects/merge-project [] (stamped (syn "/notes/sub" "fresh.md") 6))
+          p1 (projects/merge-project p0 (stamped (syn "/notes" "a.md" "sub/stale.md") 4))]
+      (is (= ["/notes"] (roots p1)))
+      (is (= #{"a.md" "sub/fresh.md"} (set (:files (first p1)))))
+      (is (= {"" [1 4] "sub" [1 6]} (:listings (first p1))))))
+  (testing "an absorbed root older than the broader walk contributes nothing"
+    (let [p0 (projects/merge-project [] (stamped (syn "/notes/sub" "stale.md") 2))
+          p1 (projects/merge-project p0 (stamped (syn "/notes" "a.md" "sub/fresh.md") 4))]
+      (is (= #{"a.md" "sub/fresh.md"} (set (:files (first p1))))))))
+
+(defn- lcg [seed]
+  (let [s (atom (bit-and seed 0x7fffffff))]
+    (fn [n] (swap! s #(bit-and (+ (* % 1103515245) 12345) 0x7fffffff)) (mod @s n))))
+
+(defn- shuffle-with [rnd xs]
+  (let [a (to-array xs)]
+    (doseq [i (range (dec (alength a)) 0 -1)]
+      (let [j (rnd (inc i)) t (aget a i)] (aset a i (aget a j)) (aset a j t)))
+    (vec a)))
+
+(def ^:private universe
+  ["top.md" "a/1.md" "a/2.md" "a/b/3.md" "a/b/4.md" "ab/5.md" "c/6.md" "c/d/7.md" "c/d/8.md" "c/9.md"])
+
+(def ^:private scopes ["" "a" "a/b" "ab" "c" "c/d"])
+
+(defn- under [scope files]
+  (filterv #(or (= "" scope) (str/starts-with? % (str scope "/"))) files))
+
+(deftest out-of-order-arrival-equals-in-order-application
+  (doseq [seed (range 1 61)]
+    (let [rnd      (lcg seed)
+          ;; listing i's snapshot and its entries
+          history  (vec (for [i (range 1 9)
+                              :let [snapshot (filterv (fn [_] (pos? (rnd 2))) universe)
+                                    chosen   (filterv (fn [_] (zero? (rnd 3))) scopes)]
+                              scope chosen]
+                          (let [entry (if (and (= "" scope) (zero? (rnd 2)))
+                                        (git "/repo")
+                                        {:root "/repo" :scope scope :synthetic? false})]
+                            (stamped (assoc entry :files (under scope snapshot)) i))))
+          initial  (projects/merge-project [] (stamped (apply git "/repo" universe) 0))
+          strip    #(dissoc % :listing)
+          in-order (reduce projects/apply-tree-update
+                           (projects/merge-project [] (apply git "/repo" universe))
+                           (map strip (sort-by #(get-in % [:listing :n]) history)))
+          arrived  (reduce projects/apply-tree-update initial (shuffle-with rnd history))
+          files    (:files (first arrived))]
+      (is (= (set (:files (first in-order))) (set files)) (str "seed " seed))
+      (is (= (count files) (count (set files))) (str "no file twice, seed " seed)))))

@@ -54,8 +54,8 @@ channel exposed by `resources/preload.js` (this list is authoritative and comple
 | `vv:watch-assets` | `watchAssets(docPath, paths)` | `{docPath, paths}` | `vinary.main.service` | Watch embedded local assets referenced by a document. |
 | `vv:tree-roots` | `syncTreeRoots(roots)` | visible root vector | `vinary.main.service` | Reconcile this window's visible project roots; only roots previously offered by main are accepted, and remote roots are forwarded to their authenticated target owner. |
 | `vv:tree-expanded` | `syncTreeExpanded(scopes)` | `[{root, path}]` | `vinary.main.service` | Reconcile shallow file-tree watchers to effective mounted directories, locally or on a compatible target daemon. |
-| `vv:tree-refresh` *(invoke)* | `refreshTree(request)` | `{root, path}` → tree payload | `vinary.main.service` | Explicitly list one visible local/remote root or directory. The path must remain beneath its offered root. |
-| `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every visible local and authenticated remote project root. |
+| `vv:tree-refresh` *(invoke)* | `refreshTree(request)` | `{root, path}` → tree payload | `vinary.main.service` | Explicitly list one visible local/remote root or directory. The path must remain beneath its offered root. Listed asynchronously by the root's listing flight. |
+| `vv:tree-refresh-all` *(invoke)* | `refreshAllTrees()` | none → tree payload vector | `vinary.main.service` | Re-list every visible local and authenticated remote project root, concurrently; every entry is stamped with its listing. |
 | `vv:content-page` *(invoke)* | `contentPage(request)` | page request map | `content_service` | Fetch one bounded page of a large log/table preview. Accepts `ssh://` paths. |
 | `vv:complete-path` *(invoke)* | `completePath(input)` | string prefix | `vinary.main.service` | Address-bar path completion (local + async remote-directory branch). |
 | `vv:load-diff-sources` *(invoke)* | `loadDiffSources(req)` | `{diffPath, files, includePaths?, includeContent?}` | `content_service` | Resolve existing referenced files from disk/SFTP (absolute directly, relative by ancestor walk). Structured opt-in returns `{rel → {path, content?}}` for eager path-only header links or lazy Split enrichment; the optionless legacy response remains `{rel → content}`. |
@@ -152,7 +152,7 @@ Every `on*` API returns an unsubscribe function.
 |---------|-----------------|---------|----------------|
 | `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?, git?}` | `[:content/received payload]` — `git` is `{root, from, to, range}` on a git-produced commit diff (the derived open-commit highlight, [ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) and `{root}` on a Commit Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)) |
 | `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
-| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement |
+| `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, listing, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement, in listing order (`listing` = `{epoch, n}`) |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated payload]` |

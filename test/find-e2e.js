@@ -59,9 +59,11 @@ if (!GPU) app.disableHardwareAcceleration();
 // VV_FIND_E2E_DIAG=<dir> attributes a tree-filter T3 stall (docs/scientific/10 §10, 12): around the tree-filter
 // typist it records this MAIN process's event-loop delay (perf_hooks.monitorEventLoopDelay, 10 ms resolution — is
 // main the side that is blocked?) and a V8 CPU profile of main (inspector Profiler, 1 ms sampling — what runs while
-// it is), written to <dir>/main-tree-filter.cpuprofile. Off by default: it costs nothing then.
+// it is), written to <dir>/main-tree-filter.cpuprofile, and — given the renderer's webContents — a CPU profile of
+// the RENDERER over the same span (DevTools protocol Profiler, 1 ms sampling), <dir>/renderer-tree-filter.cpuprofile:
+// once main is no longer the blocked side, what blocks the renderer. Off by default: it costs nothing then.
 const DIAG_DIR = process.env.VV_FIND_E2E_DIAG || null;
-async function mainDiagnostics(label, body) {
+async function mainDiagnostics(label, body, wc) {
   if (!DIAG_DIR) return body();
   const { monitorEventLoopDelay } = require('perf_hooks');
   const inspector = require('inspector');
@@ -71,6 +73,19 @@ async function mainDiagnostics(label, body) {
     session.post(method, params || {}, (err, res) => (err ? reject(err) : resolve(res))));
   const lag = monitorEventLoopDelay({ resolution: 10 });
   const censusFrom = CENSUS.mark();
+  // the Files-tree listing runner's counters, once it exists (global: the dev build's goog.global; ^:export in release)
+  const listing = () => {
+    const ns = global.vinary && global.vinary.main && global.vinary.main.tree_listing;
+    return ns && ns.stats ? ns.stats() : null;
+  };
+  const listingFrom = listing();
+  const rendererProfiling = Boolean(wc && wc.debugger);
+  if (rendererProfiling) {
+    wc.debugger.attach('1.3');
+    await wc.debugger.sendCommand('Profiler.enable');
+    await wc.debugger.sendCommand('Profiler.setSamplingInterval', { interval: 1000 });
+    await wc.debugger.sendCommand('Profiler.start');
+  }
   await post('Profiler.enable');
   await post('Profiler.setSamplingInterval', { interval: 1000 });
   await post('Profiler.start');
@@ -85,13 +100,27 @@ async function mainDiagnostics(label, body) {
     fs.mkdirSync(DIAG_DIR, { recursive: true });
     const file = path.join(DIAG_DIR, `main-${label}.cpuprofile`);
     fs.writeFileSync(file, JSON.stringify(profile));
+    if (rendererProfiling) {
+      const { profile: rendererProfile } = await wc.debugger.sendCommand('Profiler.stop');
+      wc.debugger.detach();
+      const rfile = path.join(DIAG_DIR, `renderer-${label}.cpuprofile`);
+      fs.writeFileSync(rfile, JSON.stringify(rendererProfile));
+      console.log(`[diag] ${label}: renderer CPU profile ${rfile}`);
+    }
     const ms = (ns) => (ns / 1e6).toFixed(1);
     console.log(`[diag] ${label}: main event-loop delay over ${Date.now() - t0} ms — max ${ms(lag.max)} ms, p99 ${ms(lag.percentile(99))} ms, ` +
                 `mean ${ms(lag.mean)} ms; CPU profile ${file}`);
     console.log(`[diag] ${label}: main's git processes ${JSON.stringify(CENSUS.summary(censusFrom))}`);
-    // the Files-tree listing runner's counters, once it exists (global: the dev build's goog.global; ^:export in release)
-    const listing = global.vinary && global.vinary.main && global.vinary.main.tree_listing;
-    if (listing && listing.stats) console.log(`[diag] ${label}: tree listings ${JSON.stringify(listing.stats())}`);
+    // the runner's counters are process-wide: report this phase's share (peaks are since boot)
+    const listingTo = listing();
+    if (listingTo) {
+      const delta = (to, from) => (typeof to === 'number'
+        ? to - (typeof from === 'number' ? from : 0)
+        : Object.fromEntries(Object.keys(to).map((k) => [k, delta(to[k], from ? from[k] : undefined)])));
+      const phase = delta(listingTo, listingFrom);
+      phase['peak-running'] = listingTo['peak-running'];
+      console.log(`[diag] ${label}: tree listings during the phase ${JSON.stringify(phase)} (peak-running since boot)`);
+    }
   }
 }
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -932,8 +961,21 @@ async function run() {
     if (files) files.click(); return Boolean(files); })()`);
   await until(wc, `Boolean(document.querySelector('.vv-tree-filter'))`, (v) => v === true, 'tree filter mounts');
   await sleep(500);
+  const treeCensusFrom = CENSUS.mark();
   latency.tree = await mainDiagnostics('tree-filter', () => typistCheck(win, {
-    label: 'file-tree filter', selector: '.vv-tree-filter', phrase: 'views', check, settleMs: 2000 }));
+    label: 'file-tree filter', selector: '.vv-tree-filter', phrase: 'views', check, settleMs: 2000 }), wc);
+  // T5/T6 (docs/scientific/10 §11): deterministic, so they gate under any machine load — unlike T3's tail latency.
+  // The filter forces directories open, and every one's watcher refreshes the tree: main must list them without a
+  // synchronous git (which blocks its event loop for as long as git runs) and one listing per repository at a time.
+  const treeCensus = CENSUS.summary(treeCensusFrom);
+  check('file-tree filter: ASSERT T5 — main starts no git process synchronously', () => {
+    assert.strictEqual(treeCensus.sync, 0,
+      `${treeCensus.sync} synchronous git process(es) of ${treeCensus.git}: ${JSON.stringify(treeCensus.bySubcommand)}`);
+  });
+  check('file-tree filter: ASSERT T6 — at most one listing of the repository runs at a time', () => {
+    assert.ok(treeCensus.peakListingsPerCwd <= 1,
+      `${treeCensus.peakListingsPerCwd} concurrent \`git ls-files --cached\` in one repository`);
+  });
   await evalIn(wc, CLEAR_FIELD('.vv-tree-filter'));
 
   if (failed.length > seen) {

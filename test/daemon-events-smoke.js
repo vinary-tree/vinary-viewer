@@ -266,19 +266,25 @@ async function sshBridge() {
         calls.push(['content-subscribe', subId, p]); pushInvalidate = push;
       },
       contentUnsubscribe: (_session, subId) => calls.push(['content-unsubscribe', subId]),
-      treeOpen: (_session, ownerId, p) => {
+      // The target's tree handlers list asynchronously (docs/scientific/10 §11): they return Promises, which the
+      // dispatch awaits — a resolution replies ok:true with its value, a rejection ok:false with its message.
+      treeOpen: async (_session, ownerId, p) => {
         calls.push(['tree-open', ownerId, p]);
-        return { root: path.join(sshHome, 'repo'), files: ['a b.md', 'src/100%.clj'], synthetic: false };
+        return { root: path.join(sshHome, 'repo'), files: ['a b.md', 'src/100%.clj'], synthetic: false,
+          listing: { epoch: 7, n: 1 } };
       },
       treeRoots: (_session, ownerId, roots) => calls.push(['tree-roots', ownerId, roots]),
       treeExpanded: (_session, ownerId, scopes) => calls.push(['tree-expanded', ownerId, scopes]),
       treeRefresh: (_session, ownerId, request) => {
         calls.push(['tree-refresh', ownerId, request]);
-        return { root: request.root, scope: 'src', files: ['src/new file.clj'], synthetic: false };
+        if (request.path.endsWith(`${path.sep}fails`)) return Promise.reject(new Error('tree listing failed'));
+        return new Promise((resolve) => setTimeout(() => resolve(
+          { root: request.root, scope: 'src', files: ['src/new file.clj'], synthetic: false,
+            listing: { epoch: 7, n: 2 } }), 50));
       },
-      treeRefreshAll: (_session, ownerId) => {
+      treeRefreshAll: async (_session, ownerId) => {
         calls.push(['tree-refresh-all', ownerId]);
-        return [{ root: path.join(sshHome, 'repo'), files: ['all.md'], synthetic: false }];
+        return [{ root: path.join(sshHome, 'repo'), files: ['all.md'], synthetic: false, listing: { epoch: 7, n: 3 } }];
       },
       releaseTreeOwner: (_session, ownerId) => calls.push(['release-owner', ownerId]),
       releaseSession: () => {},
@@ -309,11 +315,18 @@ async function sshBridge() {
     const refreshed = await events.treeRefresh(uri, 'window-7', tree.root, `${tree.root}/src`);
     eq(refreshed.root, tree.root, 'manual tree refresh maps the target root back to its remote URI');
     eq(refreshed.files, ['src/new%20file.clj'], 'manual tree refresh URI-encodes returned file segments');
+    eq(tree.listing, { epoch: 7, n: 1 }, "a target's listing stamp crosses the wire with its tree");
+    eq(refreshed.listing, { epoch: 7, n: 2 }, 'an awaited (delayed) handler replies with its resolved entry');
+    let refusal = null;
+    await events.treeRefresh(uri, 'window-7', tree.root, `${tree.root}/fails`).catch((e) => { refusal = e; });
+    ok(refusal && /tree listing failed/.test(refusal.message),
+      "a rejecting handler's message reaches the source as the request's failure");
     ok(calls.some((c) => c[0] === 'tree-refresh'
       && c[2].root === path.join(sshHome, 'repo') && c[2].path === path.join(sshHome, 'repo', 'src')),
     'manual tree refresh maps the source request into target-local paths');
     const refreshedAll = await events.treeRefreshAll(uri, 'window-7');
     eq(refreshedAll[0].root, tree.root, 'Refresh All maps every target entry back to the source URI namespace');
+    eq(refreshedAll[0].listing, { epoch: 7, n: 3 }, 'Refresh All entries keep their listing stamps');
 
     events.stopServer();
     await events.startServer({ version: 'ssh-test-restarted' });

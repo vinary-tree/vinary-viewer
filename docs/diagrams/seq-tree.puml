@@ -14,6 +14,7 @@ autonumber "0:"
 
 actor User #white
 participant "main.service" as Svc MAIN_TINT
+participant "main.tree-listing\nrunner + flights" as Run MAIN_TINT
 participant "git CLI" as Git FS_TINT
 participant "main.dir-walk\n(fs)" as Walk FS_TINT
 participant "Chokidar\n(depth 0)" as Watch FS_TINT
@@ -23,25 +24,33 @@ participant "app.db\n(:ui :projects /\n :ui :tree-filter)" as Db APPDB_TINT
 participant "ui.tree\nfile-tree" as Tree RENDERER_TINT
 
 == delivery (on open) ==
-Svc -> Git : `rev-parse --show-toplevel`\n(cwd = file's dir)
-Git --> Svc : repo root, or nothing
+Svc ->> Git : async `rev-parse --show-toplevel`\n(cwd = file's dir)
+Git -->> Svc : repo root, or nothing
 
 alt the file is inside a git repository
-  Svc -> Git : `ls-files --cached --others --exclude-standard`\n(cwd = repo root)
-  Git --> Svc : tracked & untracked-not-ignored paths
-  Svc -> Git : `ls-files --deleted`
-  Git --> Svc : tracked paths absent from worktree
-  Svc -> Svc : subtract deleted paths
-  Svc -> Svc : {root, files, synthetic?=**false**}
+  Svc ->> Run : `listing! [:git root]`
+  Run -> Run : request joins the round queued for this\nevent-loop turn; `start` runs on the next macrotask
+  Run ->> Git : `ls-files --cached --others --exclude-standard`\n(cwd = repo root)
+  Git -->> Run : tracked & untracked-not-ignored paths
+  Run ->> Git : `ls-files --deleted`
+  Git -->> Run : tracked paths absent from worktree
+  Run -> Run : subtract deleted paths
+  Run -->> Svc : {seq n, files}
+  Svc -> Svc : {root, files, synthetic?=**false**,\nlisting {epoch, n}}
 else no repo / git unavailable
-  Svc -> Walk : adopt the containing directory\n(a directory is its own root;\na filesystem root is refused)
-  Walk -> Walk : breadth-first walk, bounded\n(<latex>D \le 6</latex>, <latex>N \le 5000</latex>);\nskip dotted + heavy dirs;\nresolve symlinks, never descend them
-  Walk --> Svc : {root=**realpath**'d, files,\nsynthetic?=**true**}
+  Svc ->> Walk : `synthetic-root`: the containing directory\n(a directory is its own root; a filesystem\nroot is refused), **realpath**'d
+  Svc ->> Run : `listing! [:walk root]`
+  Run ->> Walk : `walk-dir` per needed directory, one after another
+  Walk -> Walk : breadth-first, a level's directories read one at a time,\nbounded (<latex>D \le 6</latex>, <latex>N \le 5000</latex>; a level stops at the cap);\nskip dotted + heavy dirs; resolve symlinks, never descend them
+  Walk -->> Run : files
+  Run -->> Svc : {seq n, files}
+  Svc -> Svc : {root, files, synthetic?=**true**,\nlisting {epoch, n}}
 end
 
-Svc -> Vv : `webContents.send`\n**vv:tree** {root, files, synthetic?}
+Svc -> Svc : the window still open, and the root not\nremoved from Files since the open began?
+Svc -> Vv : `webContents.send`\n**vv:tree** {root, files, synthetic?, listing}
 Vv -> RF : `onTree` → dispatch `[:tree/received]`
-RF -> Db : `projects/merge-project`\n(upsert by root; a covered synthetic\nroot MERGES into its coverer)
+RF -> Db : `projects/merge-project` in **listing order**\n(upsert by root; a covered synthetic root\nMERGES into its coverer; an older listing\nnever overwrites a newer one)
 Db -> Tree : `:ui/projects` sub fires
 Tree -> Tree : per project: `build-tree`\n(flat paths → nested map)\n→ collapsible `<details>` hiccup
 Tree --> User : sidebar shows one controlled tree per project
@@ -52,12 +61,13 @@ Tree -> Tree : prevent native toggle\n(render stays closed + busy)
 Tree -> RF : `[:tree/expand root directory]`
 RF -> Vv : invoke `vv:tree-refresh`
 Vv -> Svc : validate offered + visible root\nand lexical containment
-Svc -> Git : re-list repository
-note right of Svc
-  Synthetic roots use the bounded
-  directory walk instead.
+Svc ->> Run : `listing!` — the first listing of the root\nlaunched after this request
+note right of Run
+  Synthetic roots walk the
+  directory instead.
 end note
-Svc --> Vv : scoped {root, files, scope}
+Run -->> Svc : {seq n, files}
+Svc --> Vv : scoped {root, files, scope, listing}
 Vv --> RF : `[:tree/expand-ready]`
 RF -> Db : replace subtree + add open scope\nin one event
 Db -> Tree : render refreshed children `open`
@@ -69,10 +79,15 @@ RF -> Vv : `syncTreeExpanded(scopes)`
 Vv -> Svc : `vv:tree-expanded`
 Svc -> Watch : reconcile one shallow watcher\nper effective [root, directory]
 Watch --> Svc : add / unlink / addDir / unlinkDir\n(or `.gitignore` change)
-Svc -> Svc : debounce + scoped re-list
-Svc -> Vv : `vv:tree` {root, files, scope}
+Svc -> Svc : debounce 150 ms
+Svc ->> Run : `request-watch!` [scope, generation]\n(every watcher of the root, however many)
+Run ->> Git : ONE listing for all of them\n(a burst during it: ONE trailing listing)
+Git -->> Run : repository paths
+Run -> Svc : `deliver-watched!` — every due [scope, generation] at once
+Svc -> Svc : per owner: current-generation watchers it still has expanded;\ngit: its outermost scopes, projected in one pass;\nsynthetic: every scope, shortest first
+Svc -> Vv : `vv:tree` {root, files, scope, listing}
 Vv -> RF : `[:tree/received]`
-RF -> Db : exact subtree replacement
+RF -> Db : subtree replacement; directories written\nby newer listings keep their files
 Db -> Tree : re-render expanded directory
 
 alt collapse / ancestor collapse / Files unmount / project removal
@@ -92,15 +107,19 @@ User -> Tree : right-click Files tab → Refresh All
 Tree -> RF : `[:tree/refresh-all]`
 RF -> Vv : invoke `vv:tree-refresh-all`
 Vv -> Svc : re-list every visible offered root
-Svc --> Vv : payload(s) through Promise reply
+Svc ->> Run : `listing!` per root, concurrently\n(remote roots: their target daemons, alongside)
+Run -->> Svc : {seq n, files} per root
+Svc --> Vv : payload(s) through Promise reply,\neach stamped with its listing
 Vv --> RF : `[:tree/refresh-*-ready]`
 RF -> Db : scoped/full replacement;\nremoved projects stay removed
 
 == diff adoption (ADR-0038) ==
 User -> Svc : `git diff | vv -t diff`\n(stdin spilled + typed, ADR-0036)
 Svc -> Svc : open! → stdin doc →\n`send-stdin-diff-tree!`\n(effective kind = "diff";\ncommit diffs (`git-info`) skipped)
-Svc -> Git : `rev-parse --show-toplevel`\n(cwd = the INVOKING dir,\n`doc-overrides/stdin-base-dir`)
-Git --> Svc : repo root — else the\nADR-0036 skip stands (no tree)
+Svc ->> Git : async `rev-parse --show-toplevel`\n(cwd = the INVOKING dir,\n`doc-overrides/stdin-base-dir`)
+Git -->> Svc : repo root — else the\nADR-0036 skip stands (no tree)
+Svc ->> Run : `listing! [:git root]`
+Run -->> Svc : {seq n, files}
 Svc -> Vv : **vv:tree** {root, files, extras:\n[{path, name "**(piped diff)**",\nkind "diff", transient? **true**}]}
 Vv -> RF : `[:tree/received]`
 
@@ -108,9 +127,12 @@ User -> Tree : open an on-disk `.patch`\n(stored outside its repo)
 Tree -> RF : `:diff/render` resolves\nnavigable headers
 RF -> Vv : invoke `vv:load-diff-sources`\n{diffPath, files, includePaths}
 Vv -> Svc : resolve targets\n(diff's dir + ancestor walk)
-Svc -> Git : `rev-parse --show-toplevel`\nper distinct target dir\n(short-circuit under found roots)
-Git --> Svc : toplevels
-Svc -> Svc : `dominant-root` (majority,\nfirst-seen tie-break) →\n`adopt-diff-project!` (guarded:\n`adopted-diff-roots`, repeat-free)
+Svc --> Vv : the resolved targets (the reply);\nadoption continues asynchronously
+Svc ->> Git : async `rev-parse --show-toplevel`\nper distinct target dir\n(short-circuit under found roots)
+Git -->> Svc : toplevels
+Svc -> Svc : `dominant-root` (majority,\nfirst-seen tie-break) →\n`adopt-diff-project!` (guarded:\n`adopted-diff-roots`, CLAIMED\nbefore the listing, repeat-free)
+Svc ->> Run : `listing! [:git root]`
+Run -->> Svc : {seq n, files}
 Svc -> Vv : **vv:tree** {root, files, extras:\n[{path, name = basename,\nkind "diff", transient? **false**}]}
 Vv -> RF : `[:tree/received]`
 RF -> Db : `merge-project` — extras **UNION**\n(dedupe by path, incoming wins;\nan extras-less refresh never wipes them)
@@ -129,6 +151,14 @@ note over Svc, Walk
   else the containing directory as a **synthetic** root. Archive
   (`vv-archive://`) and remote (`ssh://`) URIs are excluded before
   `send-tree!` is reached, so they synthesize nothing.
+end note
+
+note over Run, Git
+  **Listing flights** (docs/scientific/10 §11): per root, at most ONE
+  listing runs at a time, and a request NEVER joins the running one —
+  it may predate the change that prompted the request. Requests made
+  meanwhile share ONE trailing listing, so a burst costs <latex>\le 2</latex>
+  listings (<latex>\le 4</latex> git processes) per root. Main runs no git synchronously.
 end note
 
 note over RF, Db

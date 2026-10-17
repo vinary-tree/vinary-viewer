@@ -319,6 +319,12 @@ Same harness, same machine, same pinning, cadence 150 ms:
 | **T2** | the tracer reports zero programmatic writes that discarded characters |
 | **T3** | the worst main-process round trip stays under 200 ms while typing |
 | **T4** | the flattened buffer is actually being reused across keystrokes |
+| **T5** | main starts **no** git process synchronously during the tree-filter phase (§11) |
+| **T6** | at most **one** listing of a repository runs at a time during the tree-filter phase (§11) |
+
+T5 and T6 count main's git processes ([`test/fixtures/spawn-census.js`](../../test/fixtures/spawn-census.js),
+installed before main is required). Unlike T3's tail latency they are deterministic, so they gate under any
+machine load; tree-e2e asserts the same two properties over its whole run.
 
 The 200 ms budget is derived, not guessed: the pre-fix engine measured 440–480 ms on this fixture, the
 fixed one 29–75 ms, and the environmental floor is ~90 ms. It sits above the floor with margin and below
@@ -499,3 +505,24 @@ the synchronous spawns, so the instrument is shown to see what it is meant to se
   listings. At most one ran at a time, as synchronous calls must. Main's event loop was blocked for up to 2 682 ms.
 - **T3 passed in that run** (worst round trip 171 ms), because the block fell outside the probing window. T3 is a
   noisy proxy for this stall; P1's event-loop delay measures it directly.
+
+**The fix** (ADR-0034's 2026-10-17 amendment; [features/04](../features/04-git-file-tree-and-filter.md#main-process-one-listing-per-repository-at-a-time)).
+
+- Every listing runs **asynchronously** (`vinary.main.tree-listing`: git through `spawn`; the synthetic walk through
+  `fs.promises`), and main's ClojureScript starts no child process synchronously — a gate in
+  `test/git-tree-smoke.js`.
+- Listings are **coalesced per root** by a pure flight model (`vinary.main.listing-flight`): at most one runs, a
+  request never joins the running listing, and the requests made meanwhile share one trailing listing. The watcher
+  refreshes one listing serves are delivered together.
+- Entries carry their listing's stamp, and the renderer applies a root's entries in stamp order, so the replies that
+  now wait (Refresh All, concurrent roots) never overwrite a newer push.
+- The renderer derives directory scopes by scanning for separators, memoized on project identity
+  (`vinary.app.tree-state`). This part answers a second hypothesis, registered when P2 still failed after the
+  main-side fix while P1 held; its registration and test are recorded with the results.
+
+**Instruments added with the fix.** `VV_FIND_E2E_DIAG` also records a CPU profile of the RENDERER over the same
+phase (DevTools protocol `Profiler`, 1 ms sampling), and prints the listing runner's census for the phase;
+`analyze-cpuprofile.cjs` reports a profile's longest busy stretches with their heaviest frames (a renderer's long
+task is many leaves, not one blocking call); and
+[`scripts/bench-tree-scopes.cjs`](../../scripts/bench-tree-scopes.cjs) times the directory-scope derivation on
+this repository's listing, old against new.

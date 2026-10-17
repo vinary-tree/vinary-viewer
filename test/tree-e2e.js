@@ -111,6 +111,9 @@ function writeFixture() {
 // `electron <app> <document>`, the shape startup/doc-uris intentionally parses (user args begin at index 2).
 // Chromium has already consumed its switch, so normalize only the argv presented to the required real main.
 process.argv.splice(1, process.argv.length - 1, __filename, CLI_DOC);
+// which git processes main starts, and how (test/fixtures/spawn-census.js) — installed BEFORE main is required. The
+// fixture's own git commands above are made by this harness, which the census does not count.
+const CENSUS = require('./fixtures/spawn-census').install();
 require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app with one genuine CLI document arg
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -838,6 +841,15 @@ async function run() {
                        'still no extra BrowserWindow');
   });
   await wc.executeJavaScript('window.vv.httpHide()');
+
+  // docs/scientific/10 §11: every listing above — CLI open, synthetic roots, expansion, watcher refreshes, Refresh,
+  // diff adoption — ran without one synchronous git process (each would block main's event loop while git runs)
+  check('main ran every git process of the session asynchronously, one listing per repository at a time', () => {
+    const census = CENSUS.summary(0);
+    assert.ok(census.git > 0, 'the census saw main list repositories (the instrument works)');
+    assert.strictEqual(census.sync, 0, `synchronous git processes: ${JSON.stringify(census.bySubcommand)}`);
+    assert.ok(census.peakListingsPerCwd <= 1, `${census.peakListingsPerCwd} concurrent listings of one repository`);
+  });
 
   console.log(`\ntree-e2e: ${passed.length} checks passed`);
 }

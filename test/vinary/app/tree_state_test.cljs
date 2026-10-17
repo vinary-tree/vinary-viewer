@@ -1,5 +1,6 @@
 (ns vinary.app.tree-state-test
   (:require [cljs.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [vinary.app.tree-state :as tree-state]))
 
 (def projects
@@ -72,3 +73,50 @@
             [root "C:\\work\\repo/sub"]
             [root "C:\\work\\repo/sub/deep"]]
            (tree-state/ancestor-scopes root "C:\\work\\repo\\sub\\deep")))))
+
+;; ---- the fast derivation equals the definition (docs/scientific/10 §11) --------------------------------------------
+
+(defn- by-definition
+  "A project's directory scopes as file-directory-scopes DEFINES them: the union over its files."
+  [{:keys [root files]}]
+  (into #{[root root]} (mapcat #(tree-state/file-directory-scopes root %)) files))
+
+(defn- lcg [seed]
+  (let [s (atom (bit-and seed 0x7fffffff))]
+    (fn [n] (swap! s #(bit-and (+ (* % 1103515245) 12345) 0x7fffffff)) (mod @s n))))
+
+(defn- random-path
+  "A seeded random root-relative path, including the odd shapes a listing could carry: doubled, leading and trailing
+   separators, and names that share prefixes."
+  [rnd]
+  (let [parts ["a" "ab" "b" "" "c.md" "d"]
+        body  (str/join "/" (repeatedly (inc (rnd 4)) #(nth parts (rnd (count parts)))))]
+    (case (rnd 6)
+      0 (str "/" body)
+      1 (str body "/")
+      2 (str body "//")
+      body)))
+
+(deftest project-directory-scopes-equals-its-definition
+  (testing "hand cases"
+    (doseq [files [[] ["top.md"] ["a/b/c.md"] ["a//b.md"] ["/lead.md"] ["trail/"] ["x//"] [""] ["a/b" "a/bc/d"]]]
+      (is (= (by-definition {:root "/r" :files files}) (tree-state/project-directory-scopes {:root "/r" :files files}))
+          (pr-str files))))
+  (testing "seeded random listings"
+    (doseq [seed (range 1 101)]
+      (let [rnd     (lcg seed)
+            project {:root (if (zero? (rnd 2)) "/repo" "/") :files (vec (repeatedly (rnd 30) #(random-path rnd)))}]
+        (is (= (by-definition project) (tree-state/project-directory-scopes project)) (str "seed " seed))))))
+
+(deftest directory-scopes-is-memoized-on-identity-and-only-on-identity
+  (let [p  {:root "/repo" :files ["a/x.md"]}
+        ps [p]]
+    (is (identical? (tree-state/directory-scopes ps) (tree-state/directory-scopes ps))
+        "the same projects vector answers from the memo")
+    (is (identical? (tree-state/project-directory-scopes p) (tree-state/project-directory-scopes p)))
+    (testing "an equal but distinct value is computed afresh — and agrees"
+      (let [ps' [(assoc p :files ["a/x.md"])]]
+        (is (= (tree-state/directory-scopes ps) (tree-state/directory-scopes ps')))))
+    (testing "a changed listing is never served a stale answer"
+      (is (contains? (tree-state/directory-scopes [(update p :files conj "b/y.md")]) ["/repo" "/repo/b"]))
+      (is (not (contains? (tree-state/directory-scopes ps) ["/repo" "/repo/b"]))))))

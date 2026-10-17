@@ -23,8 +23,9 @@
         :active-tab nil
         :activation 0               ; monotonic count of active-tab changes (nav/set-active) — sees A → B → A in one frame
         :next-tab-id 0
-        :projects []                ; [{:root :files :synthetic?} …] — one file tree per open project: a
-                                    ; git root, or (:synthetic?) a directory adopted for a file in no repo
+        :projects []                ; [{:root :files :synthetic? :extras? :listings?} …] — one file tree per open
+                                    ; project: a git root, or (:synthetic?) a directory adopted for a file in no
+                                    ; repo; :listings orders its updates by listing (vinary.app.projects)
         ;; menu bar / dialogs / context menu (Phase 5)
         :ssh-prompt nil             ; a pending SSH auth-prompt request (non-secret) shown by the prompt modal
         :ssh-error nil              ; the last SSH connection error (for the dismissable toast)

@@ -97,6 +97,7 @@ Main owns privileged operations:
 |-----------|----------------|
 | `vinary.main.core` / `vinary.main.startup` / `vinary.main.window` | App/window lifecycle and initial (multi-arg) file handling. |
 | `vinary.main.service` (+ `service_util`, `file_kind`) | File reading, kind classification, retained content/tree watcher reconciliation, git/synthetic trees, embedded asset watchers, target-daemon ownership, and fallback remote polling. |
+| `vinary.main.tree_listing` (+ `listing_flight`, `dir_walk`) | The Files tree's listings: asynchronous git and directory walks, one listing per root at a time (a request never joins the running listing; a burst meanwhile shares one trailing listing), each stamped so the renderer applies them in listing order. |
 | `vinary.main.content_service` (JS) | The Electron-free file reader / bounded-preview pager / stream-session registry, shared with the CLI/TUI. |
 | `vinary.main.ssh` (+ `ssh_config`, `ssh_transport`, `ssh_agent` JS) | SSH/SFTP connection pool, auth chain, host-key trust, direct-TCP forwarding, and the `vv:ssh-*` seam (ADR-0027/0035). |
 | `vinary.main.daemon_events` (JS) | Private target descriptor/listener, mutual HMAC handshake, framed content/tree events, heartbeat, reconnect, and desired-state restoration (ADR-0035). |
