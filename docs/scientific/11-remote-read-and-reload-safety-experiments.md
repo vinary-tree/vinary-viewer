@@ -59,6 +59,17 @@ channel window.
   - Each cell uses a warm connection and 1 warm-up read, then up to 7 timed reads or 30 s (minimum 3).
   - Statistics: median, p95 (nearest rank), mean ± sample sd; plus client CPU ms, peak `arrayBuffers` and
     event-loop-delay p99.
+- **Whole remote opens (H3): the `open-pdf` and `open-md` readers.**
+  - They time the open the app performs, `content_service.openRemoteUri`, rather than a bare read. That
+    covers the stat, the read (verified for a PDF, ADR-0046 §Torn reads) and the discovery of the document
+    group.
+  - The server serves a group next to each size: `group-<size>.pdf`, `group-<size>.md` and a small
+    `group-<size>.tex`.
+    - The PDF is valid and padded to about `<size>`. The read is verified, so random bytes would time the
+      settle loop instead.
+    - The markdown file is `<size>` bytes of ASCII text, so its UTF-8 decode is lossless and its SHA-256
+      still verifies.
+  - Every timed open also checks the group it found: the opened file first, then its same-stem members.
 - **Host.** AMD Ryzen Threadripper PRO 5975WX (64 threads), `performance` governor, boost to 4.56 GHz. Software:
   Node v26.11.1, ssh2 1.17.0, Linux 7.2.9.
 - **Raw data.**
