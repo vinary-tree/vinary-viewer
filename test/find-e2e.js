@@ -56,8 +56,9 @@ const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 const GPU = process.env.VV_FIND_E2E_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 
-// VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates T1–T6 (in-page find, the tree filter), skipping the find
-// scenarios before them; VV_FIND_SOURCE_ONLY / VV_FIND_FLEX_DOM_ONLY run only those scenarios.
+// VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates T1–T7 (in-page find, the tree filter, a Preferences font field
+// typed across its own save), skipping the find scenarios before them; VV_FIND_SOURCE_ONLY / VV_FIND_FLEX_DOM_ONLY run
+// only those scenarios.
 //
 // VV_FIND_E2E_DIAG=<dir> attributes a tree-filter T3 stall (docs/scientific/10 §10–§11): around the tree-filter
 // typist it records this MAIN process's event-loop delay (perf_hooks.monitorEventLoopDelay, 10 ms resolution — is
@@ -836,6 +837,92 @@ async function typistCheck(win, { label, selector, phrase, check, settleMs = 400
   return { maxLag, probes: trips.length, finalValue, clobbers };
 }
 
+// Open a top-menu item the way a user does: Alt+<access key> opens the menu, then click the item by its label.
+async function openMenuItem(wc, menuKey, itemText) {
+  await evalIn(wc, `(() => { window.dispatchEvent(new KeyboardEvent('keydown',
+    { key: ${JSON.stringify(menuKey)}, altKey: true, bubbles: true, cancelable: true })); return true; })()`);
+  await until(wc, `Boolean(document.querySelector('.vv-menu-dropdown'))`, (v) => v === true, `the Alt+${menuKey} menu`);
+  const clicked = await evalIn(wc, `(() => {
+    const it = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item, .vv-menu-subdropdown .vv-menu-item'))
+      .find((n) => n.textContent.includes(${JSON.stringify(itemText)}));
+    if (it) it.click();
+    return Boolean(it);
+  })()`);
+  assert.strictEqual(clicked, true, `the menu has a ${JSON.stringify(itemText)} item`);
+}
+
+/**
+ * T7: type `Noto`, wait for main to WRITE it to settings.edn, type the space at once, then hold the field for 600 ms
+ * before typing `Sans`. If main sends the saved file back to this window, that echo (≥ 80 ms behind the write: the
+ * watcher's settle) holds `Noto` — older than the field's `Noto ` — and lands in the hold, with no keystroke to mask
+ * it. (Typing the second word straight through instead made detection depend on the echo NOT sharing a frame with a
+ * keystroke: the old build passed one such run of two.) Asserts the space survives the hold, the field ends holding
+ * every character, and no programmatic write took any back; a failure prints what the window received when.
+ */
+async function prefsAcrossSaveCheck(win, check) {
+  const wc = win.webContents;
+  const SETTINGS_EDN = path.join(CONFIG_HOME, 'vinary-viewer', 'settings.edn');
+  const FIELD = '.vv-pref-input';   // the first is the variable-width font family
+  const FAST_MS = 40;               // the rest of the second word
+  const HOLD_MS = 600;              // after the space: far past the echo's ≥ 80 ms, with no keystroke to mask it
+  const fileText = () => { try { return fs.readFileSync(SETTINGS_EDN, 'utf8'); } catch (_) { return ''; } };
+  // poll the file main writes (every 5 ms, up to 5 s) until it satisfies `pred`; true when it did
+  const fileUntil = async (pred) => {
+    for (const t0 = Date.now(); Date.now() - t0 < 5000; await sleep(5)) if (pred(fileText())) return true;
+    return false;
+  };
+  win.focus();
+  wc.focus();
+  await openMenuItem(wc, 's', 'Preferences');
+  await until(wc, `Boolean(document.querySelector(${JSON.stringify(FIELD)}))`, (v) => v === true, 'Preferences opens');
+  assert.strictEqual(await evalIn(wc, FOCUS_FIELD(FIELD)), true, 'could not focus the font field');
+  await evalIn(wc, CLEAR_FIELD(FIELD));
+  // the CLEARED value's save lands first (and any echo of it while the field is idle), so it is not the write the
+  // second word races
+  await fileUntil((t) => t.includes(':font-variable ""'));
+  await sleep(600);
+  await evalIn(wc, FOCUS_FIELD(FIELD));
+  await evalIn(wc, `window.__vvinputtrace && window.__vvinputtrace().clear()`);
+  // what this window receives on vv:settings during the check, and when — printed if T7 fails
+  await evalIn(wc, `(() => { window.__vvT7 = [];
+    window.vv.onSettings((t) => window.__vvT7.push([performance.now(), 'vv:settings ' + ((t.match(/:font-variable "[^"]*"/) || [''])[0])]));
+    return true; })()`);
+  const mark = (label) => evalIn(wc, `(window.__vvT7.push([performance.now(), ${JSON.stringify(label)}]), true)`);
+  const fieldValue = () => evalIn(wc,
+    `(() => { const e = document.querySelector(${JSON.stringify(FIELD)}); return e ? e.value : null; })()`);
+  for (const ch of 'Noto') { typeChar(win, ch); await sleep(TYPE_CADENCE_MS); }
+  const saved = await fileUntil((t) => t.includes(':font-variable "Noto"'));
+  await mark('main has written "Noto"');
+  typeChar(win, ' ');
+  await sleep(HOLD_MS);
+  const afterHold = await fieldValue();
+  await mark(`after the ${HOLD_MS} ms hold the field holds ${JSON.stringify(afterHold)}`);
+  for (const ch of 'Sans') { typeChar(win, ch); await sleep(FAST_MS); }
+  await sleep(2000);   // every debounce and any echo has landed
+  const finalValue = await fieldValue();
+  const timeline = await evalIn(wc, `window.__vvT7.slice()`);
+  const t0 = timeline.length ? timeline[0][0] : 0;
+  const timelineText = timeline.map(([t, what]) => `+${Math.round(t - t0)} ms ${what}`).join('; ');
+  const clobbers = await evalIn(wc,
+    `window.__vvinputtrace ? window.__vvinputtrace().clobbers().map((w) => ({ field: w.field, from: w.from, to: w.to })) : []`);
+  check('Preferences font field: the first word was saved before the second was typed (the race is armed)', () => {
+    assert.strictEqual(saved, true, 'settings.edn never held "Noto" — the save path did not run, so T7 tests nothing');
+  });
+  check('Preferences font field: ASSERT T7 — every character survives typing across the field\'s own save', () => {
+    assert.strictEqual(afterHold, 'Noto ',
+      `the space typed after main wrote "Noto" is gone after the hold (the field holds ${JSON.stringify(afterHold)}): ` +
+      `the window's own saved settings came back and were merged over it — ${timelineText}`);
+    assert.strictEqual(finalValue, 'Noto Sans',
+      `typed "Noto" + " " + "Sans" but the field holds ${JSON.stringify(finalValue)} (programmatic writes seen: ` +
+      `${JSON.stringify(clobbers)}) — ${timelineText}`);
+    assert.deepStrictEqual(clobbers, [], 'a programmatic .value write discarded characters the user had already typed');
+  });
+  await evalIn(wc, `(() => { const p = document.querySelector('.vv-modal');
+    if (p) p.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    return true; })()`);
+  return { afterHold, finalValue, clobbers, saved, timeline: timelineText };
+}
+
 // ---- run --------------------------------------------------------------------------------------------
 
 async function run() {
@@ -876,7 +963,7 @@ async function run() {
   const MD_READY = `Boolean(document.querySelector('.markdown-body h1'))`;
   const PDF_READY = `Boolean(document.querySelector('.vv-pdf-doc canvas.vv-pdf-canvas'))`;
 
-  // VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates below (T1–T6) — the quick loop when one of them is the
+  // VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates below (T1–T7) — the quick loop when one of them is the
   // thing under test, as the find scenarios take minutes to reach them
   const TYPIST_ONLY = process.env.VV_FIND_TYPIST_ONLY === '1';
   let mdProbe = null;
@@ -994,6 +1081,14 @@ async function run() {
       `${treeCensus.peakListingsPerCwd} concurrent \`git ls-files --cached\` in one repository`);
   });
   await evalIn(wc, CLEAR_FIELD('.vv-tree-filter'));
+
+  // (c) a Preferences font field, typed ACROSS ITS OWN SAVE. The field's value is persisted (settings.edn); main
+  //     used to send the saved file back to the window that wrote it, and that echo — older than what had been
+  //     typed since — was merged mid-word: `Noto` + ` Sans` became ` Sans`, the tracer recording `Noto` → ``
+  //     (docs/scientific/10 §12, ADR-0047). The hidden window the benchmark once measured rendered about once a
+  //     second, which hid it. Deterministic: the second word starts the moment main has WRITTEN the first, so a
+  //     returning echo (≥ 80 ms behind the write) would land mid-word.
+  latency.prefs = await prefsAcrossSaveCheck(win, check);
 
   if (failed.length > seen) {
     console.error('\n--- typist diagnostics ---');

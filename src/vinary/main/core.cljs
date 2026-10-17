@@ -166,6 +166,7 @@
     ;; and release its instance-id so `served` never outgrows the live windows
     (.on win "closed" (fn []
                         (windows/remove! win)
+                        (windows/remove-standby! win)
                         (forget-instance! win)
                         (swap! pool (fn [ps] (vec (remove #(= % win) ps))))))
     ;; (pdf/init! win)  ; RETIRED — native PDF WebContentsView superseded by in-renderer pdf.js (ADR 0013)
@@ -195,10 +196,13 @@
      win)))
 
 (defn- boot-pool-window!
-  "Pre-boot one hidden, fully-warmed window into the pool (no file). `booting` is held until it lands in `pool`."
+  "Pre-boot one hidden, fully-warmed window into the pool (no file). `booting` is held until it lands in `pool`.
+   Landing also makes it a STANDBY window: the persisted-state broadcasts reach it from then on, so the window a
+   claim shows is current. `on-ready` runs in the same did-finish-load handler as the stores' initial pushes, so
+   no broadcast can fall between the two."
   []
   (swap! booting inc)
-  (wire-window! false (fn [win] (swap! booting dec) (swap! pool conj win))))
+  (wire-window! false (fn [win] (swap! booting dec) (swap! pool conj win) (windows/add-standby! win))))
 
 (defn- refill-pool!
   "Top the warm pool back up to `pool-target` (counting windows still booting), one hidden window per slot."
@@ -215,6 +219,7 @@
   (if-let [^js win (peek @pool)]
     (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
         (set! (.-vvHeadlessActive win) true)
+        (windows/remove-standby! win)
         (windows/add! win)                          ; it is now a real, tracked, on-screen window
         (profile/mark! "claim")
         (open-files! win args)

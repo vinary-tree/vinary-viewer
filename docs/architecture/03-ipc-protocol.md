@@ -104,6 +104,28 @@ without creating a tab. (The byte-only `loadPdfBytes` invoke channel that ADR-00
 | `vv:recent-request` / `vv:recent-save` | `requestRecent()` / `saveRecent(edn)` | none / EDN | `vinary.main.recent` | Push / persist `recent.edn` (trail + MRU). |
 | `vv:grammars-request` | `requestGrammars()` | none | `vinary.main.grammars` | Push grammar registry. |
 
+`keybindings.edn`, `settings.edn`, `recent.edn`, `connections.edn` (§2.4) and `extensions.edn` (§2.6) are each one
+watched EDN store ([ADR-0047](../design-decisions/0047-persisted-state-stores.md), `vinary.main.edn-store`). A save is
+written verbatim and remembered with the window that sent it; when the file changes, main broadcasts its text on the
+store's channel (§3: `vv:keymap`, `vv:settings`, `vv:recent`, `vv:connections`, `vv:ext-config`) to every window
+holding the state — the live windows and the hidden warm-pool windows — except the windows it last wrote exactly that
+text for:
+
+```
+renderer A ──vv:settings-save {text T}──▶ main: write settings.edn; last-write = {T, writers #{A}}
+                                            │ chokidar "change" (≥ 80 ms settle) → read the file
+                                            ▼
+                     text = T  → send to every live + warm-pool window EXCEPT A   (A holds T, or newer)
+                     text ≠ T  → send to every window, A too                       (a hand edit, another save)
+```
+
+A window never receives its own write back — that echo, older than what had been typed since, once clobbered a
+Preferences font field — and a window claimed from the pool shows the current state, not its boot-time copy.
+
+![The store's delivery rules: the writer is skipped while the file holds its write; the other live window and the warm-pool window receive it; a hand edit reaches everyone](../diagrams/seq-edn-store-echo.svg)
+
+*Diagram source: [`../diagrams/seq-edn-store-echo.puml`](../diagrams/seq-edn-store-echo.puml).*
+
 ### 2.6 Extensions and ad-blocking
 
 | Channel | `window.vv` API | Payload | Main owner | Purpose |
@@ -156,7 +178,7 @@ Every `on*` API returns an unsubscribe function.
 | `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?, seq?, incomplete?, incompleteReason?, git?}` | `[:content/received payload]` — `seq` numbers main's reads ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md)): a read older than the one the window applied is dropped (`vinary.app.content-guard`); `incomplete` flags a PDF caught mid-write, kept behind the last complete version's note; `git` is `{root, from, to, range}` on a git-produced commit diff (the derived open-commit highlight, [ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) and `{root}` on a Commit Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)) |
 | `vv:error` | `onError(cb)` | `{path, message, seq?, refresh?}` | `[:content/error payload]` — a numbered failure of a fanned-out read (`refresh`) for a document the window already shows becomes a refresh note over the last good version, not an error page (ADR-0046) |
 | `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, listing, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement, in listing order (`listing` = `{epoch, n}`) |
-| `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
+| `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` — on request, and on a change to the live and warm-pool windows except its writer (§2.5) |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
 | `vv:http-navigated` | `onHttpNavigated(cb)` | `{url}` | `[:http/navigated payload]` |
 | `vv:web-open-tab` | `onWebOpenTab(cb)` | `{url, mode}` | `[:web/open-tab payload]` — a denied web-view popup becomes an app tab (`mode` = `"background"` \| `"focused"`, [ADR-0044](../design-decisions/0044-browser-link-gesture-family.md)) |
@@ -164,12 +186,13 @@ Every `on*` API returns an unsubscribe function.
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | id or nil | `[:web/active-heading id]` |
 | `vv:history-nav` | `onHistoryNav(cb)` | direction | history event |
 | `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened payload]` |
-| `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received text]` |
+| `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received text]` — on request, and on a change to the live and warm-pool windows except its writer (§2.5) |
 | `vv:ssh-prompt` | `onSshPrompt(cb)` | `{promptId, kind, host, user, attempt, keyPath?, prompt?}` (non-secret request) | `[:ssh/prompt req]` |
 | `vv:ssh-error` | `onSshError(cb)` | `{connKey, host, kind, message}` | `[:ssh/error info]` |
 | `vv:ssh-status` | `onSshStatus(cb)` | `{connKey, host, state}` | `[:ssh/status info]` |
-| `vv:connections` | `onConnections(cb)` | EDN string | `[:connections/received text]` |
-| `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received text]` |
+| `vv:connections` | `onConnections(cb)` | EDN string | `[:connections/received text]` — same delivery as `vv:settings` |
+| `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received text]` — same delivery as `vv:settings` |
+| `vv:ext-config` | `onExtConfig(cb)` | EDN string | `[:ext-config/received text]` — persisted ad-block + extension prefs; same delivery as `vv:settings` |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata | `[:app-info/received info]` |
 | `vv:zoom-changed` | `onZoomChanged(cb)` | `{context, factor}` | `[:view/zoom-changed …]` — the resolved app-window (`"window"`) or web-view (`"web"`) zoom factor |
 | `vv:fullscreen-changed` | `onFullscreenChanged(cb)` | `{fullscreen, owned}` | `[:view/fullscreen-changed …]` — this window entered or left fullscreen; leaving one a slide show asked for ends the show (ADR-0045) |

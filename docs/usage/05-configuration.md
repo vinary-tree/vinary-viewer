@@ -24,6 +24,14 @@ these files; the renderer receives plain EDN text or plain data over the
 The installer does not remove this directory. `./uninstall.sh` removes only the
 launchers.
 
+**Editing these files by hand, and several windows.** `settings.edn`, `keybindings.edn`,
+`recent.edn`, `connections.edn` and `extensions.edn` are watched: save one in an editor and every
+open window picks the change up, including the windows pre-booted in the background for instant
+opens. A change you make in one window reaches the others the same way, but is never sent back to
+the window that made it, which already shows it — so a font name typed with a pause between words
+in Preferences keeps every character
+([ADR-0047](../design-decisions/0047-persisted-state-stores.md)).
+
 ---
 
 ## 2. Settings

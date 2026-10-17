@@ -562,6 +562,17 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A Preferences font field no longer loses characters when you pause
+      between words. Each save of the setting came back to the window that
+      made it about half a second later, older than what had been typed since,
+      and replaced it: "Noto Sans" typed with a pause could end as " Sans".
+      A window is no longer sent its own saved settings, keymap, recent files,
+      connections or extension prefs; other windows and hand edits of the files
+      still reach it (ADR-0047).
+    - A new window no longer opens with stale settings. Windows are pre-booted
+      in the background to open instantly, and one that had been waiting since
+      before a theme, font, keymap or recent-files change showed the old state
+      when it opened. Waiting windows now receive every change.
     - Launching with an Electron or Chromium switch before the app path
       (electron --no-sandbox <repo> notes.md, as in a container) no longer
       opens the app's own directory as an extra tab.

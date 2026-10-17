@@ -6,11 +6,14 @@
    they always serve the window the user is actually looking at.
 
    Hidden pool windows are deliberately NOT registered (core adds a window only when it is claimed/shown), so a
-   global or session action can never be routed to a window that isn't on screen. This is a leaf namespace — it
-   depends on nothing else in the app, so every service and core can require it without a cycle."
+   global or session action can never be routed to a window that isn't on screen. They are kept separately as
+   STANDBY windows (`add-standby!`): no action targets them, but the persisted-state broadcasts (`broadcast!`)
+   do, because a pool window holds that state from its own boot and is shown, as is, when claimed. This is a leaf
+   namespace — it depends on nothing else in the app, so every service and core can require it without a cycle."
   (:require ["electron" :refer [BrowserWindow]]))
 
 (defonce ^:private registry (atom []))   ; real, on-screen app windows, most-recently-registered LAST
+(defonce ^:private standby  (atom []))   ; hidden warm-pool windows, fully loaded, waiting to be claimed
 
 (defn add!
   "Register `win` as a live app window (idempotent; moves it to most-recent)."
@@ -26,6 +29,18 @@
   "All live app windows, most-recently-registered last."
   []
   @registry)
+
+(defn add-standby!
+  "Register `win`, a hidden warm-pool window that has finished loading, to receive the persisted-state broadcasts
+   until it is claimed (`remove-standby!`) — so the window a claim shows is current, not as of its own boot
+   (docs/scientific/10 §12). Idempotent."
+  [^js win]
+  (swap! standby (fn [ws] (conj (vec (remove #(identical? % win) ws)) win))))
+
+(defn remove-standby!
+  "Drop `win` from the standby windows (claimed, or closed while pooled)."
+  [^js win]
+  (swap! standby (fn [ws] (vec (remove #(identical? % win) ws)))))
 
 (defn live
   "`wc` when it is a USABLE webContents, else nil — the one liveness predicate every service shares for the
@@ -71,18 +86,20 @@
     false))
 
 (defn broadcast!
-  "Send `channel` + `payload` to EVERY live window's renderer, skipping any destroyed webContents. For GLOBAL
-   state that a file-watcher re-pushes (recent files, settings, keymap, connections, extension config): the
-   watcher outlives any single window — especially under the resident daemon, which survives window-all-closed —
-   so it must target the live windows dynamically here, never a `webContents` captured when the watcher was
-   created (that window may since have closed → `WebContents.send` throws \"Object has been destroyed\"). Pool /
-   hidden windows are not registered, so they are never targeted; closed windows are already removed via core's
-   `closed` handler → `remove!`."
-  [^String channel payload]
-  (doseq [^js win (all)]
-    (let [^js wc (.-webContents win)]
-      (when (and wc (not (.isDestroyed wc)))
-        (.send wc channel payload)))))
+  "Send `channel` + `payload` to EVERY window holding the process's global state — the live windows and the
+   standby (warm-pool) windows — skipping any destroyed webContents and, when given, the webContents ids in
+   `skip-ids`. For GLOBAL state that a file-watcher re-pushes (recent files, settings, keymap, connections,
+   extension config — vinary.main.edn-store, which skips the window a write came from): the watcher outlives any
+   single window — especially under the resident daemon, which survives window-all-closed — so it must target the
+   windows dynamically here, never a `webContents` captured when the watcher was created (that window may since
+   have closed → `WebContents.send` throws \"Object has been destroyed\"). Closed windows are already removed via
+   core's `closed` handler → `remove!` / `remove-standby!`."
+  ([^String channel payload] (broadcast! channel payload #{}))
+  ([^String channel payload skip-ids]
+   (doseq [^js win (distinct (concat (all) @standby))]
+     (let [^js wc (.-webContents win)]
+       (when (and wc (not (.isDestroyed wc)) (not (contains? skip-ids (.-id wc))))
+         (.send wc channel payload))))))
 
 (defn from-wc
   "The BrowserWindow that owns `wc` (e.g. `event.sender`), or nil — used to bind a shared native view/popup to

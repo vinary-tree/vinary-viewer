@@ -54,15 +54,23 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | Channel | Preload method | Payload | Main receiver | Purpose |
 |---------|----------------|---------|---------------|---------|
 | `vv:keymap-request` | `requestKeymap()` | none | `config/push!` | Request persisted `keybindings.edn`. |
-| `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `config/save!` | Persist keybinding registry EDN. |
+| `vv:keymap-save` | `saveKeymap(edn)` | EDN string | `edn-store` (config's store) | Persist keybinding registry EDN. |
 | `vv:grammars-request` | `requestGrammars()` | none | `grammars/push!` | Request user grammar registry and filetype mappings. |
 | `vv:settings-request` | `requestSettings()` | none | `settings/push!` | Request persisted `settings.edn`. |
-| `vv:settings-save` | `saveSettings(edn)` | EDN string | `settings/save!` | Persist settings EDN. |
+| `vv:settings-save` | `saveSettings(edn)` | EDN string | `edn-store` (settings' store) | Persist settings EDN. |
 | `vv:recent-request` | `requestRecent()` | none | `recent/push!` | Request persisted `recent.edn` (trail + recent-files + web-history). |
-| `vv:recent-save` | `saveRecent(edn)` | EDN string | `recent/save!` | Persist recent-navigation EDN (debounced 300 ms in the renderer). |
+| `vv:recent-save` | `saveRecent(edn)` | EDN string | `edn-store` (recent's store) | Persist recent-navigation EDN (debounced 300 ms in the renderer). |
 | `vv:ext-config-request` / `vv:ext-config-save` | `requestExtConfig()` / `saveExtConfig(edn)` | none / EDN | `ext-config` | Request / persist `extensions.edn` (ad-block + extension prefs). |
 | `vv:connections-request` | `requestConnections()` | none | `connections/push!` | Request persisted `connections.edn` (non-secret SSH host entries). |
-| `vv:connections-save` | `saveConnections(edn)` | EDN string | `connections/save!` | Persist SSH connection metadata EDN. |
+| `vv:connections-save` | `saveConnections(edn)` | EDN string | `edn-store` (connections' store) | Persist SSH connection metadata EDN. |
+
+> **One store, two delivery rules ([ADR-0047](../design-decisions/0047-persisted-state-stores.md)).** The five
+> persisted files above are each one [`vinary.main.edn-store`](../../src/vinary/main/edn_store.cljs): a `*-request` is
+> answered with a push to the asking window; a `*-save` is written verbatim and remembered with the window it came
+> from; and when the file changes, its text is broadcast on the matching §2.1 channel to every window holding the
+> state — the live windows **and** the hidden warm-pool windows — **except** the windows main last wrote exactly that
+> text for. A window therefore never receives its own write back (it holds that state or a newer one), while a hand
+> edit or another window's save reaches everyone.
 
 ### 1.3 In-app HTTP web view
 
@@ -148,9 +156,9 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 | `vv:error` | `onError(cb)` | `{path?, message, stamp?, seq?, refresh?}` | `[:content/error …]` | Deliver read/render errors. A failed main-side read carries its read number `seq` (ordered with the `vv:content` reads of the same path) and `refresh` — true when the read was a change's fan-out rather than an open. |
 | `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, listing, scope?, extras?}` | `[:tree/received …]` | Deliver a full project listing or a scoped automatic update. `root` may be local or `ssh://`/`sftp://`; `scope` and files remain root-relative. `synthetic? true` marks an inferred non-git root. `listing` = `{epoch, n}`, the stamp of the listing the payload came from (the listing process's start time, and its listing number): the renderer applies a root's payloads in stamp order, whatever order they arrive in (`vinary.app.projects`); a payload without it (an older target daemon) applies as it arrives. `extras` = `[{path, name, kind, transient?}]`, attached documents ADR-0038 adopts into a project (a diff listed inside the repository it describes; absolute `path`, pinned rendering, `transient?` extras pruned with document retention) — full entries only, never on scoped payloads. |
 | `vv:git-changed` | `onGitChanged(cb)` | `{root}` | Commits surfaces (`[:commits/git-changed …]`) | Debounced (300 ms) notice that a repository's `HEAD`/`refs`/`packed-refs` changed — a commit, fetch, tag, or branch switch. Watch targets resolve via `rev-parse --absolute-git-dir`/`--git-common-dir`, so worktrees notify correctly; ownership arrives over `vv:git-watch`. ADR-0039. |
-| `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. |
+| `vv:keymap` | `onKeymap(cb)` | EDN **text** (registry) | `[:keymap/config-received …]` | Deliver persisted keybinding config. Like `vv:settings`, `vv:recent`, `vv:ext-config` and `vv:connections`, a change is broadcast to the live and warm-pool windows, never back to the window whose save made it (§1.2, ADR-0047); a deleted `keybindings.edn` broadcasts `""` (the bundled keymaps). |
 | `vv:grammars` | `onGrammars(cb)` | EDN **text** `{:grammars [...] :filetypes {...}}` | `syntax/register-user!` | Deliver user tree-sitter grammar entries and filetype mappings. |
-| `vv:settings` | `onSettings(cb)` | EDN **text** | `[:settings/received …]` | Deliver persisted settings. |
+| `vv:settings` | `onSettings(cb)` | EDN **text** | `[:settings/received …]` | Deliver persisted settings — on request, and on a change to every window holding them except the writer (§1.2). |
 | `vv:recent` | `onRecent(cb)` | EDN **text** | `[:recent/received …]` | Deliver persisted recent-navigation state (`{:trail … :recent-files [...] :web-history [...]}`). |
 | `vv:ext-config` | `onExtConfig(cb)` | EDN **text** | `[:ext-config/received …]` | Deliver persisted ad-block + extension prefs. |
 | `vv:connections` | `onConnections(cb)` | EDN **text** | `[:connections/received …]` | Deliver persisted (non-secret) SSH connection metadata. |

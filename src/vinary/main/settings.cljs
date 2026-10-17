@@ -1,47 +1,15 @@
 (ns vinary.main.settings
-  "Persisted user settings (~/.config/vinary-viewer/settings.edn): theme + fonts. Mirrors config.cljs
-   (chokidar watch + EDN-text push over vv:settings) and adds a renderer→main write (vv:settings-save) so
-   the Preferences dialog persists changes; the watcher then re-pushes, closing the loop. EDN crosses as
-   raw text (the renderer parses it) so keyword keys survive."
-  (:require ["electron" :refer [ipcMain]]
-            ["fs" :as fs]
-            ["path" :as path]
-            ["os" :as os]
-            ["chokidar" :refer [watch]]
-            [vinary.main.windows :as windows]))
+  "Persisted user settings (~/.config/vinary-viewer/settings.edn): theme + fonts. One watched EDN store
+   (vinary.main.edn-store) on vv:settings: the renderer pulls it (vv:settings-request), the Preferences dialog
+   writes it back (vv:settings-save), and the watcher re-pushes a hand edit or another window's save to every
+   window — never a window's own write back to it (ADR-0047). EDN crosses as raw text (the renderer parses it)
+   so keyword keys survive."
+  (:require [vinary.main.edn-store :as edn-store]))
 
-(defonce ^:private watcher (atom nil))
-(defonce ^:private inited  (atom false))
+(defonce ^:private store
+  (edn-store/store {:file "settings.edn" :channel "vv:settings"
+                    :request "vv:settings-request" :save "vv:settings-save"}))
 
-(defn- conf-dir []
-  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
-    (path/join home "vinary-viewer")))
-(defn- settings-path [] (path/join (conf-dir) "settings.edn"))
+(defn push! [^js wc] (edn-store/push! store wc))
 
-(defn- settings-text []
-  (let [p (settings-path)]
-    (try (if (.existsSync fs p) (.readFileSync fs p "utf8") "")
-         (catch :default _ ""))))
-
-(defn- save! [text]
-  (try
-    (when-not (.existsSync fs (conf-dir)) (.mkdirSync fs (conf-dir) (clj->js {:recursive true})))
-    (.writeFileSync fs (settings-path) (str text))
-    (catch :default _ nil)))
-
-(defn push! [^js wc] (when (and wc (not (.isDestroyed wc))) (.send wc "vv:settings" (settings-text))))
-
-(defn init! [^js wc]
-  (push! wc)                               ; initial push (the renderer also pulls via requestSettings)
-  (let [p (settings-path)]
-    (when-not @watcher
-      ;; re-push global settings to ALL live windows, never the `wc` captured here (may have closed)
-      (let [w (watch p (clj->js {:ignoreInitial true
-                                 :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-        (.on w "change" (fn [_] (windows/broadcast! "vv:settings" (settings-text))))
-        (.on w "add"    (fn [_] (windows/broadcast! "vv:settings" (settings-text))))
-        (reset! watcher w))))
-  (when-not @inited
-    (reset! inited true)
-    (.on ipcMain "vv:settings-request" (fn [^js e] (push! (.-sender e))))
-    (.on ipcMain "vv:settings-save"    (fn [_e text] (save! text)))))
+(defn init! [^js wc] (edn-store/init! store wc))   ; initial push (the renderer also pulls via requestSettings)

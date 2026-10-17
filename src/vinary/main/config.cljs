@@ -1,51 +1,18 @@
 (ns vinary.main.config
-  "Main-process loader for the user keymap config ~/.config/vinary-viewer/keybindings.edn. Mirrors
-   vinary.main.service (chokidar watch + push), so editing the file live-rebinds the keymap. The config
-   crosses the IPC seam as raw EDN TEXT (not clj->js) — the renderer parses it with cljs.reader so the
-   keyword command-ids survive (clj->js would flatten them to strings)."
-  (:require ["electron" :refer [ipcMain]]
-            ["fs" :as fs]
-            ["path" :as path]
-            ["os" :as os]
-            ["chokidar" :refer [watch]]
-            [vinary.main.windows :as windows]))
+  "Main-process loader for the user keymap config ~/.config/vinary-viewer/keybindings.edn — one watched EDN
+   store (vinary.main.edn-store) on vv:keymap, so editing the file live-rebinds the keymap, and a keymap the
+   renderer saves (vv:keymap-save) reaches every other window but never comes back to the one that saved it
+   (ADR-0047; the round trip used to re-run the keymap install, and its mode reset, in the saving window). The
+   config crosses the IPC seam as raw EDN TEXT (not clj->js) — the renderer parses it with cljs.reader so the
+   keyword command-ids survive (clj->js would flatten them to strings). Deleting the file broadcasts \"\", and
+   the renderer falls back to the bundled keymaps."
+  (:require [vinary.main.edn-store :as edn-store]))
 
-(defonce ^:private watcher (atom nil))
-(defonce ^:private inited  (atom false))
+(defonce ^:private store
+  (edn-store/store {:file "keybindings.edn" :channel "vv:keymap"
+                    :request "vv:keymap-request" :save "vv:keymap-save"
+                    :unlink-text ""}))
 
-(defn- conf-dir []
-  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
-    (path/join home "vinary-viewer")))
-(defn- config-path [] (path/join (conf-dir) "keybindings.edn"))
+(defn push! [^js wc] (edn-store/push! store wc))
 
-(defn- config-text []
-  (let [p (config-path)]
-    (try (if (.existsSync fs p) (.readFileSync fs p "utf8") "")
-         (catch :default _ ""))))
-
-(defn- save!
-  "Write the keymap registry EDN back to keybindings.edn (the chokidar watcher then re-pushes; the
-   renderer's normalize-config is idempotent so the round-trip is a no-op). Mirrors settings.cljs save!."
-  [text]
-  (try
-    (when-not (.existsSync fs (conf-dir)) (.mkdirSync fs (conf-dir) (clj->js {:recursive true})))
-    (.writeFileSync fs (config-path) (str text))
-    (catch :default _ nil)))
-
-(defn push! [^js wc] (when (and wc (not (.isDestroyed wc))) (.send wc "vv:keymap" (config-text))))
-
-(defn init! [^js wc]
-  (push! wc)                                   ; initial push (the renderer also pulls via requestKeymap)
-  (let [p (config-path)]
-    (when-not @watcher
-      ;; re-push the global keymap to ALL live windows, never the `wc` captured here (may have closed)
-      (let [w (watch p (clj->js {:ignoreInitial true
-                                 :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-        (.on w "change" (fn [_] (windows/broadcast! "vv:keymap" (config-text))))
-        (.on w "add"    (fn [_] (windows/broadcast! "vv:keymap" (config-text))))
-        (.on w "unlink" (fn [_] (windows/broadcast! "vv:keymap" "")))
-        (reset! watcher w))))
-  (when-not @inited
-    (reset! inited true)
-    (.on ipcMain "vv:keymap-request" (fn [^js e] (push! (.-sender e))))
-    (.on ipcMain "vv:keymap-save"    (fn [_e text] (save! text)))))
+(defn init! [^js wc] (edn-store/init! store wc))   ; initial push (the renderer also pulls via requestKeymap)

@@ -1,0 +1,62 @@
+@startuml seq-edn-store-echo
+'' ============================================================================
+'' vinary-viewer — Sequence: a persisted-state save and its broadcast (ADR-0047, vinary.main.edn-store).
+''
+'' PlantUML over Mermaid: the defect and its fix are an ORDERING — the writer's own save coming back after newer
+'' typing — across a renderer, main's store and the file watcher. Two numbered phases show the old broadcast that
+'' clobbered a Preferences font field and the rule that replaces it; a third shows that external changes still
+'' reach everyone. Teal = renderer windows, slate = main (the store and its watcher), brown = the file on disk,
+'' red = the clobber.
+'' ============================================================================
+!include _vv-theme.iuml
+
+title ADR-0047 — a window's save reaches every other window, never itself
+
+participant "window A\n(Preferences: the writer)" as A RENDERER_TINT
+participant "window B\n(live)" as B RENDERER_TINT
+participant "warm-pool window\n(hidden, standby)" as P RENDERER_TINT
+participant "edn-store\n(settings)" as M MAIN_TINT
+participant "settings.edn" as F FS_TINT
+
+== before: the watcher broadcast to every REGISTERED window ==
+A -> A : type "Noto" → :settings/set (app-db at once)
+A -> M : vv:settings-save {"Noto"} (150 + 300 ms debounces)
+M -> F : write
+A -> A : type " " → the field and app-db hold "Noto "
+F -> M : chokidar change (≥ 80 ms settle)
+M -> A : vv:settings {"Noto"} — its OWN, now older, write
+M -> B : vv:settings {"Noto"}
+note right of P #F5E1E0: not registered → never sent:\na later claim shows boot-time state
+A -> A : :settings/received merges "Noto" over "Noto "
+note left of A #F5E1E0
+  async-input (ADR-0033): "Noto" was never
+  published since → an external push →
+  the draft is dropped: the space is GONE
+end note
+
+== now: main remembers what it wrote, and for whom ==
+A -> M : vv:settings-save {"Noto"}
+M -> F : write
+M -> M : last-write = {"Noto", writers #{A}}  (edn-echo/record-write)
+A -> A : type " " → "Noto "
+F -> M : chokidar change → read the file: "Noto"
+M -> M : skipped = #{A}  (the file still holds A's write)
+M -> B : vv:settings {"Noto"}
+M -> P : vv:settings {"Noto"}  (standby: windows/add-standby!)
+note left of A #E3F2ED: A is sent nothing: it holds\n"Noto" or newer — here "Noto "
+
+== an external change reaches everyone, the writer too ==
+F -> F : a hand edit writes {"Fira"}
+F -> M : chokidar change → read the file: "Fira" ≠ last-write
+M -> A : vv:settings {"Fira"}
+M -> B : vv:settings {"Fira"}
+M -> P : vv:settings {"Fira"}
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| renderer windows (live, or hidden in the warm pool) |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| main: the store, its watcher, the echo rule |
+  |<#9F8766>&#160;&#160;&#160;&#160;| the persisted file |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the defect the rules remove |
+endlegend
+@enduml

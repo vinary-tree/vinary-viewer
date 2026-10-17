@@ -1,51 +1,19 @@
 (ns vinary.main.connections
   "Persisted SSH connection metadata (~/.config/vinary-viewer/connections.edn): non-secret host entries
    (alias, hostname, user, port, last-used, last-path, per-host prefs) and a recent-remote MRU surfaced in
-   File ▸ Open Recent. Mirrors recent.cljs — the EDN crosses the IPC seam as raw text (the renderer owns it
-   and parses/writes it), with a chokidar re-push on external edits and a renderer→main write.
+   File ▸ Open Recent. One watched EDN store (vinary.main.edn-store) on vv:connections — the EDN crosses the IPC
+   seam as raw text (the renderer owns it and parses/writes it, vv:connections-save), and the watcher re-pushes
+   an external edit or another window's save to every window, never a window's own write back to it (ADR-0047).
 
    SECRETS ARE NEVER STORED HERE. Passwords, passphrases, private-key contents, and host-key material live
    only in the transport's main-process memory (for the connection lifetime) and in the user's existing
    ~/.ssh (keys, known_hosts). This file holds addresses and preferences only."
-  (:require ["electron" :refer [ipcMain]]
-            ["fs" :as fs]
-            ["path" :as path]
-            ["os" :as os]
-            ["chokidar" :refer [watch]]
-            [vinary.main.windows :as windows]))
+  (:require [vinary.main.edn-store :as edn-store]))
 
-(defonce ^:private watcher (atom nil))
-(defonce ^:private inited  (atom false))
+(defonce ^:private store
+  (edn-store/store {:file "connections.edn" :channel "vv:connections"
+                    :request "vv:connections-request" :save "vv:connections-save"}))
 
-(defn- conf-dir []
-  (let [home (or (.. js/process -env -XDG_CONFIG_HOME) (path/join (os/homedir) ".config"))]
-    (path/join home "vinary-viewer")))
-(defn- connections-path [] (path/join (conf-dir) "connections.edn"))
+(defn push! [^js wc] (edn-store/push! store wc))
 
-(defn- connections-text []
-  (let [p (connections-path)]
-    (try (if (.existsSync fs p) (.readFileSync fs p "utf8") "")
-         (catch :default _ ""))))
-
-(defn- save! [text]
-  (try
-    (when-not (.existsSync fs (conf-dir)) (.mkdirSync fs (conf-dir) (clj->js {:recursive true})))
-    (.writeFileSync fs (connections-path) (str text))
-    (catch :default _ nil)))
-
-(defn push! [^js wc] (when (and wc (not (.isDestroyed wc))) (.send wc "vv:connections" (connections-text))))
-
-(defn init! [^js wc]
-  (push! wc)
-  (let [p (connections-path)]
-    (when-not @watcher
-      ;; re-push global connection metadata to ALL live windows, never the `wc` captured here (may have closed)
-      (let [w (watch p (clj->js {:ignoreInitial true
-                                 :awaitWriteFinish {:stabilityThreshold 80 :pollInterval 20}}))]
-        (.on w "change" (fn [_] (windows/broadcast! "vv:connections" (connections-text))))
-        (.on w "add"    (fn [_] (windows/broadcast! "vv:connections" (connections-text))))
-        (reset! watcher w))))
-  (when-not @inited
-    (reset! inited true)
-    (.on ipcMain "vv:connections-request" (fn [^js e] (push! (.-sender e))))
-    (.on ipcMain "vv:connections-save"    (fn [_e text] (save! text)))))
+(defn init! [^js wc] (edn-store/init! store wc))

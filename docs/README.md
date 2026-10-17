@@ -128,7 +128,7 @@ Then read the **architecture pillar** for the concrete realisation:
   [`css-variables.md`](reference/css-variables.md),
   [`namespaces.md`](reference/namespaces.md).
 - [`design-decisions/`](design-decisions/README.md) — the numbered ADR-style log
-  (`0001`…`0046`) recording *why* each pivotal choice was made: rendering in the
+  (`0001`…`0047`) recording *why* each pivotal choice was made: rendering in the
   renderer, the hand-rolled `:ds/rev` bridge over re-posh, imperative `innerHTML` over
   VDOM, the IPC mediator, bounded content retention, the common document IR, the
   streaming pipeline, the terminal second-renderer, Org/LaTeX/diff, remote SSH, and slide decks.
@@ -165,7 +165,7 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`architecture/05-data-flows.md`](architecture/05-data-flows.md) | architecture | Open / refresh / find / history flows end-to-end |
 | [`architecture/06-renderer-runtime.md`](architecture/06-renderer-runtime.md) | architecture | Renderer boot order, reagent mount, dev hooks |
 | [`architecture/07-common-ir-streaming-and-terminal.md`](architecture/07-common-ir-streaming-and-terminal.md) | architecture | Concrete IR / streaming / terminal component realization |
-| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0046` | design | Why each pivotal choice was made (ADRs) |
+| [`design-decisions/README.md`](design-decisions/README.md) + `0001`…`0047` | design | Why each pivotal choice was made (ADRs) |
 | [`engineering/00..10`](engineering/00-overview.md) | engineering | Build system, asset vendoring, test strategy, lint, release, CI, contribution, bounded-memory |
 | [`scientific/00..12`](scientific/00-overview.md) | scientific | Byte-parity, bounded-memory validation, semiring laws, sanitizer context-freedom, experiments, methodology, in-page find & scroll ownership, text-input latency, remote reads & reload safety, slide-deck detection & flip latency |
 | [`usage/01..08`](usage/) | usage | Getting started, install/build, files & tabs, shortcuts, config, troubleshooting, terminal CLI/TUI, remote SSH |

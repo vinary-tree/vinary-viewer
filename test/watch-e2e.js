@@ -215,6 +215,36 @@ async function run() {
     'a collapsed window must not receive another owner\'s automatic tree refresh');
   console.log('[ok] collapsing one window releases only its tree-watcher ownership');
 
+  // The persisted-state stores (vinary.main.edn-store, ADR-0047): one window's save reaches every OTHER window —
+  // the second live window AND the hidden warm-pool slot, so the window a later claim shows is current — but never
+  // comes back to the window that wrote it (that echo, merged mid-typing, clobbered a Preferences font field:
+  // docs/scientific/10 §12). A hand edit of the file is nobody's own write: it reaches every window.
+  const poolWin = await until(
+    async () => BrowserWindow.getAllWindows()
+      .find((w) => !w.isDestroyed() && !isLiveWindow(w) && !w.webContents.isLoading()) || null,
+    Boolean, 'a loaded warm-pool window', 20000);
+  const fontOf = (win) => evalIn(win, `(((window.__vvdb() || {}).ui || {}).settings || {})['font-variable'] ?? null`);
+  const settingsSeen = (win) => evalIn(win, `window.__vvSettingsSeen.slice()`);
+  for (const win of [first, second, poolWin]) {
+    await until(() => evalIn(win, `typeof window.__vvdb`), (v) => v === 'function', `window #${win.id} DEV bridge`);
+    await evalIn(win, `(() => { window.__vvSettingsSeen = [];
+      window.vv.onSettings((text) => window.__vvSettingsSeen.push(text)); return true; })()`);
+  }
+  const saved = '{:font-variable "Watch E2E Font"}';
+  await evalIn(first, `window.vv.saveSettings(${JSON.stringify(saved)}); true`);
+  await until(() => fontOf(second), (f) => f === 'Watch E2E Font', 'the other live window adopts the save');
+  await sleep(600);   // far past the watcher's 80 ms settle: an echo to the writer would have landed by now
+  // each rule is asserted on its own, writer first, so either one regressing fails here by name
+  assert.deepStrictEqual(await settingsSeen(first), [], 'the writing window never receives its own write back');
+  const toSecond = await settingsSeen(second);
+  assert.ok(toSecond.length >= 1 && toSecond.every((t) => t === saved),
+    `the other live window receives the saved text (a watcher may report one write twice): ${JSON.stringify(toSecond)}`);
+  await until(() => fontOf(poolWin), (f) => f === 'Watch E2E Font', 'the warm-pool window adopts the save');
+  fs.writeFileSync(path.join(CONFIG_HOME, 'vinary-viewer', 'settings.edn'), '{:font-variable "Hand Edited Font"}');
+  await Promise.all([first, second, poolWin].map((win) =>
+    until(() => fontOf(win), (f) => f === 'Hand Edited Font', `the hand edit reaches window #${win.id}`)));
+  console.log('[ok] a settings save reaches the other window and the warm-pool window, never its writer; a hand edit reaches all');
+
   // The old implementation's single destination was the most recent opener. Destroy it without renderer-side
   // cleanup IPC, then prove the surviving owner still receives the next edit and therefore still owns the watch.
   second.close();
