@@ -60,13 +60,14 @@ const CONFIG_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-be
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;     // never the developer's real ~/.config/vinary-viewer
 // …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
 const RUNTIME = require('../test/fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
-process.env.VV_POOL = '0';                     // no hidden warm window: the first window is the one measured
+process.env.VV_POOL = '0';                     // no hidden warm window: the recorded runs (docs/scientific/12) had none
 const GPU = process.env.VV_BENCH_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 if (OZONE) app.commandLine.appendSwitch('ozone-platform', OZONE);
 
 const { makeDeckPdf } = require('../test/fixtures/pdf-gen');
+const { isLiveWindow, assertPainting } = require('../test/headless-window');
 // the pre-registered run is 50 slides and 10 jumps (docs/scientific/data/12/flip-prediction.txt); smaller values only
 // check the instrument
 const SLIDES = Number(process.env.VV_FLIP_SLIDES) || 50;
@@ -168,9 +169,11 @@ async function run() {
   const report = { date: new Date().toISOString(), slides: SLIDES, gpu: GPU, restMs: REST_MS, flips: [], jumps: [] };
   try {
     const win = await waitFor(async () => {
-      const [w] = BrowserWindow.getAllWindows();
-      return w && !w.webContents.isLoading() ? w : null;
+      // the app's live window, never a warm-pool slot (getAllWindows() lists a pool slot first)
+      return BrowserWindow.getAllWindows().find((w) => isLiveWindow(w) && !w.webContents.isLoading()) || null;
     }, 'the renderer window', 30000);
+    // flip latency is measured in frames: refuse a window that is not painting (docs/scientific/10 §12)
+    report.paintingFrames = await assertPainting(win);
     const js = (src) => win.webContents.executeJavaScript(src, true);
     await waitFor(() => js('typeof window.__vvopen === "function"'), 'renderer hooks');
     await js(`window.__vvopen(${JSON.stringify(DECK)}); true`);

@@ -65,8 +65,29 @@ assert.equal(nativeWindow.isLiveWindow({ isDestroyed: () => false, isVisible: ()
   vvHeadlessActive: true }), true);
 const x11Window = loadWindowHelper('x11');
 assert.deepEqual(x11Window.browserWindowOptions({ show: true }), { show: true });
+
+// assertPainting — every latency harness's precondition (docs/scientific/10 §12). A fake window answers the frame
+// count its renderer would; the real one runs COUNT_FRAMES, which must at least parse as a function expression.
+assert.equal(typeof new Function(`return (${x11Window.COUNT_FRAMES});`)(), 'function');
+assert.equal(x11Window.MIN_PAINTING_FRAMES, 5);
+const fakeWindow = (answer, { visible = true, live } = {}) => ({
+  id: 7, isDestroyed: () => false, isVisible: () => visible, vvHeadlessActive: live,
+  webContents: { executeJavaScript: async (src) => { assert.match(src, /requestAnimationFrame/); return answer(); } },
+});
+assert.equal(await x11Window.assertPainting(fakeWindow(() => 18)), 18);
+// the hidden warm-pool slot's signature: 0-1 frames however long it is polled
+await assert.rejects(x11Window.assertPainting(fakeWindow(() => 1), 3),
+                     /window #7 is not painting \(live=true, 1 animation frames in 300 ms; need >= 5\)/);
+// painting but not the live window (an invisible window on X11)
+await assert.rejects(x11Window.assertPainting(fakeWindow(() => 18, { visible: false }), 3), /live=false/);
+// a window still booting passes on the first poll that paints, and no later one runs
+let polls = 0;
+assert.equal(await x11Window.assertPainting(fakeWindow(() => (++polls < 3 ? 2 : 12)), 5), 12);
+assert.equal(polls, 3);
+// native backend: hidden, but flagged live by the real main
+assert.equal(await nativeWindow.assertPainting(fakeWindow(() => 18, { visible: false, live: true })), 18);
 if (oldHeadless === undefined) delete process.env.VV_HEADLESS; else process.env.VV_HEADLESS = oldHeadless;
 if (oldBackend === undefined) delete process.env.VV_HEADLESS_BACKEND;
 else process.env.VV_HEADLESS_BACKEND = oldBackend;
 
-console.log('headless-runner-smoke: Linux X11/Wayland + macOS/Windows native-hidden plans OK');
+console.log('headless-runner-smoke: Linux X11/Wayland + macOS/Windows native-hidden plans, painting precondition OK');

@@ -44,6 +44,8 @@ Use idiomatic ClojureScript with two-space indentation, kebab-case vars/function
 ## Testing Guidelines
 ClojureScript tests use `cljs.test`; place pure logic tests in `test/vinary/*_test.cljs` with namespaces ending in `-test` so the `:ns-regexp "-test$"` build finds them. Keep DOM-free unit coverage in the shadow-cljs test build. Use JS harnesses such as `test/test-sidebar.js` for Node browser/Electron shims. There is no numeric coverage gate; add regression tests for navigation, keybindings, rendering helpers, and IPC-facing behavior.
 
+A harness that boots the real main must pick the app's window with `test/headless-window.js` `isLiveWindow` — never `BrowserWindow.getAllWindows()[0]`, which is the hidden warm-pool window that draws about one frame a second — and anything measuring what a user sees asserts `assertPainting(win)` first (docs/scientific/10 §12). A gate that targets a defect is shown to FAIL on the code before the fix (a negative control) before it is trusted.
+
 ## Commit & Pull Request Guidelines
 Recent history follows Conventional Commit style: `fix: ...`, `feat(scope): ...`, and `docs(scope): ...`. Keep commits focused and imperative. Pull requests should explain user-visible behavior, list validation commands run, link related issues, and include screenshots or short recordings for UI, theme, sidebar, tab, or renderer changes.
 

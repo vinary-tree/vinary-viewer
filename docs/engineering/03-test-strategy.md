@@ -212,6 +212,16 @@ separate throwaway directories removed by the harness.
 npm run test:tree-e2e     # compile main+renderer, then run the real app through the headless backend
 ```
 
+> **Measure the LIVE window, and prove it paints.** The real main keeps a hidden warm-pool window beside the live
+> one (`VV_POOL`, default 1), and `BrowserWindow.getAllWindows()` lists that newest slot **first**. A hidden window
+> is not drawn: `requestAnimationFrame` runs only about once a second there while `document.visibilityState`
+> still reads `"visible"`, so every Reagent render waits on it. Pick the window with
+> [`test/headless-window.js`](../../test/headless-window.js) `isLiveWindow`, and make
+> `assertPainting(win)` — the live window composites at least 5 frames in 300 ms, polled for up to ~3 s while it
+> boots — the precondition of anything that measures what a user sees. Until 2026-10-17 `bench-input-latency`
+> measured the pool window and `find-e2e` showed it and tested it in the app's place
+> ([docs/scientific/10 §12](../scientific/10-input-latency-experiments.md#12--the-benchmark-measured-a-window-no-one-could-see-2026-10-17)).
+
 > **Poll, never single-read.** Every UI assertion in this harness goes through a polling helper.
 > Reagent re-renders on an animation frame and the IPC round-trip is async, so reading the DOM once
 > immediately after an app-db assertion races the re-render — which is exactly how the

@@ -36,7 +36,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { app, BrowserWindow } = require('electron');
-const { showForTest } = require('./headless-window.js');
+const { showForTest, isLiveWindow, assertPainting } = require('./headless-window.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const SCRATCH = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vv-find-e2e-')));
@@ -56,7 +56,10 @@ const RUNTIME = require('./fixtures/hermetic-env').hermeticRuntime(CONFIG_HOME);
 const GPU = process.env.VV_FIND_E2E_GPU === '1';
 if (!GPU) app.disableHardwareAcceleration();
 
-// VV_FIND_E2E_DIAG=<dir> attributes a tree-filter T3 stall (docs/scientific/10 §10, 12): around the tree-filter
+// VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates T1–T6 (in-page find, the tree filter), skipping the find
+// scenarios before them; VV_FIND_SOURCE_ONLY / VV_FIND_FLEX_DOM_ONLY run only those scenarios.
+//
+// VV_FIND_E2E_DIAG=<dir> attributes a tree-filter T3 stall (docs/scientific/10 §10–§11): around the tree-filter
 // typist it records this MAIN process's event-loop delay (perf_hooks.monitorEventLoopDelay, 10 ms resolution — is
 // main the side that is blocked?) and a V8 CPU profile of main (inspector Profiler, 1 ms sampling — what runs while
 // it is), written to <dir>/main-tree-filter.cpuprofile, and — given the renderer's webContents — a CPU profile of
@@ -180,13 +183,16 @@ require(path.join(ROOT, 'dist', 'main', 'main.js'));   // boots the real app
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The LIVE window — never the first one listed: getAllWindows() lists the real main's hidden warm-pool slot (VV_POOL,
+// default 1) first, and showForTest() below would then put that unregistered pool window on screen and test it in
+// place of the app's window (docs/scientific/10 §12).
 async function waitForWindow() {
   for (let i = 0; i < 300; i++) {
-    const [w] = BrowserWindow.getAllWindows();
-    if (w && !w.webContents.isLoading()) return w;
+    const w = BrowserWindow.getAllWindows().find((x) => isLiveWindow(x) && !x.webContents.isLoading());
+    if (w) return w;
     await sleep(100);
   }
-  throw new Error('no renderer window appeared');
+  throw new Error('no live renderer window appeared');
 }
 
 async function until(wc, expr, pred, label, tries = 150) {
@@ -842,6 +848,9 @@ async function run() {
   await sleep(200);
   win.focus();
   wc.focus();
+  // every latency assertion below is about a window a user could be typing into: refuse to run in one that
+  // is not painting (docs/scientific/10 §12)
+  console.log(`find-e2e: window #${win.id} painting (${await assertPainting(win)} animation frames in 300 ms)`);
 
   const passed = [];
   const failed = [];
@@ -867,56 +876,64 @@ async function run() {
   const MD_READY = `Boolean(document.querySelector('.markdown-body h1'))`;
   const PDF_READY = `Boolean(document.querySelector('.vv-pdf-doc canvas.vv-pdf-canvas'))`;
 
-  // vim first: it is the user's configuration, and `/` `n` `N` are the bare printable keys the focus-flag
-  // leak swallows. default second: it proves the fixes are keymap-independent.
-  const mdProbe = await scenario(win, { file: MD, kind: 'markdown', check, keymap: 'vim', ready: MD_READY });
+  // VV_FIND_TYPIST_ONLY=1 runs only the typist-latency gates below (T1–T6) — the quick loop when one of them is the
+  // thing under test, as the find scenarios take minutes to reach them
+  const TYPIST_ONLY = process.env.VV_FIND_TYPIST_ONLY === '1';
+  let mdProbe = null;
+  let pdfProbe = null;
   let seen = failed.length;
-  if (seen) await dumpDiagnostics(wc, 'markdown/vim');
+  if (!TYPIST_ONLY) {
+    // vim first: it is the user's configuration, and `/` `n` `N` are the bare printable keys the focus-flag
+    // leak swallows. default second: it proves the fixes are keymap-independent.
+    mdProbe = await scenario(win, { file: MD, kind: 'markdown', check, keymap: 'vim', ready: MD_READY });
+    seen = failed.length;
+    if (seen) await dumpDiagnostics(wc, 'markdown/vim');
 
-  const pdfProbe = await scenario(win, { file: PDF, kind: 'pdf', check, keymap: 'vim', ready: PDF_READY });
-  if (failed.length > seen) await dumpDiagnostics(wc, 'pdf/vim');
-  seen = failed.length;
+    pdfProbe = await scenario(win, { file: PDF, kind: 'pdf', check, keymap: 'vim', ready: PDF_READY });
+    if (failed.length > seen) await dumpDiagnostics(wc, 'pdf/vim');
+    seen = failed.length;
 
-  await scenario(win, { file: MD, kind: 'markdown', check, keymap: 'default', ready: MD_READY });
-  if (failed.length > seen) await dumpDiagnostics(wc, 'markdown/default');
-  seen = failed.length;
+    await scenario(win, { file: MD, kind: 'markdown', check, keymap: 'default', ready: MD_READY });
+    if (failed.length > seen) await dumpDiagnostics(wc, 'markdown/default');
+    seen = failed.length;
 
-  // "the needle phrase" renders as `the <code>needle</code> phrase` — three text nodes
-  await correctnessScenario(win, { file: MD, kind: 'markdown', check, ready: MD_READY,
-                                   phrase: 'the needle phrase', other: 'paragraph' });
-  // "quick brown" is emitted as two separate Tj operators, so pdf.js renders it as two <span>s
-  await correctnessScenario(win, { file: PDF, kind: 'pdf', check, ready: PDF_READY,
-                                   phrase: 'quick brown', other: 'page' });
-  await sourceFindScenario(win, check);
-  await originalSourceRepro(win, check);
-  await flexibleDomScenario(win, check);
+    // "the needle phrase" renders as `the <code>needle</code> phrase` — three text nodes
+    await correctnessScenario(win, { file: MD, kind: 'markdown', check, ready: MD_READY,
+                                     phrase: 'the needle phrase', other: 'paragraph' });
+    // "quick brown" is emitted as two separate Tj operators, so pdf.js renders it as two <span>s
+    await correctnessScenario(win, { file: PDF, kind: 'pdf', check, ready: PDF_READY,
+                                     phrase: 'quick brown', other: 'page' });
+    await sourceFindScenario(win, check);
+    await originalSourceRepro(win, check);
+    await flexibleDomScenario(win, check);
 
-  // ---- text that exists ONLY in MathJax's hidden screen-reader duplicate must not be found ----------
-  await open(wc, MD);
-  await until(wc, MD_READY, (v) => v === true, 'markdown back for the math check');
-  const mathProbe = await evalIn(wc, `(() => {
-    const a = document.querySelector('.vv-content mjx-assistive-mml');
-    return { present: Boolean(a), inAssistive: Boolean(a && /zzqqx/.test(a.textContent || '')),
-             rawVisible: /\\$\\\\alpha/.test(document.querySelector('.markdown-body').textContent || '') };
-  })()`);
-  if (mathProbe.inAssistive && !mathProbe.rawVisible) {
-    await sendChord(win, 'F', ['control']);
-    await openFindOrForce(win, 'find bar for the math check');
-    await evalIn(wc, SET_QUERY('zzqqx'));
-    await sleep(400);
-    const mathHits = await evalIn(wc, `${VVFIND}.count`);
-    check('markdown: ASSERT H11 — MathJax\'s hidden assistive-MathML duplicate is not searched', () => {
-      assert.strictEqual(mathHits, 0,
-        `found ${mathHits} match(es) for text that exists only in the screen-reader copy — the counter ` +
-        'would be inflated and cycling would land on an invisible node');
-    });
-    await sendChord(win, 'F', ['control']);
-    await until(wc, FIND_OPEN, (v) => v === false, 'find closes after the math check');
-  } else {
-    console.log(`  · skipped ASSERT H11 (no assistive MathML to exclude: ${JSON.stringify(mathProbe)})`);
+    // ---- text that exists ONLY in MathJax's hidden screen-reader duplicate must not be found ----------
+    await open(wc, MD);
+    await until(wc, MD_READY, (v) => v === true, 'markdown back for the math check');
+    const mathProbe = await evalIn(wc, `(() => {
+      const a = document.querySelector('.vv-content mjx-assistive-mml');
+      return { present: Boolean(a), inAssistive: Boolean(a && /zzqqx/.test(a.textContent || '')),
+               rawVisible: /\\$\\\\alpha/.test(document.querySelector('.markdown-body').textContent || '') };
+    })()`);
+    if (mathProbe.inAssistive && !mathProbe.rawVisible) {
+      await sendChord(win, 'F', ['control']);
+      await openFindOrForce(win, 'find bar for the math check');
+      await evalIn(wc, SET_QUERY('zzqqx'));
+      await sleep(400);
+      const mathHits = await evalIn(wc, `${VVFIND}.count`);
+      check('markdown: ASSERT H11 — MathJax\'s hidden assistive-MathML duplicate is not searched', () => {
+        assert.strictEqual(mathHits, 0,
+          `found ${mathHits} match(es) for text that exists only in the screen-reader copy — the counter ` +
+          'would be inflated and cycling would land on an invisible node');
+      });
+      await sendChord(win, 'F', ['control']);
+      await until(wc, FIND_OPEN, (v) => v === false, 'find closes after the math check');
+    } else {
+      console.log(`  · skipped ASSERT H11 (no assistive MathML to exclude: ${JSON.stringify(mathProbe)})`);
+    }
+    if (failed.length > seen) await dumpDiagnostics(wc, 'correctness');
+    seen = failed.length;
   }
-  if (failed.length > seen) await dumpDiagnostics(wc, 'correctness');
-  seen = failed.length;
 
   // ---- typist latency: the two properties the async-input rewrite exists to guarantee ---------------
   console.log('\n=== typist latency ===');
