@@ -1,0 +1,65 @@
+# diag-sftp-window 2026-10-17T01:32:11.444Z  node v26.11.1  policy=eager ident=ssh2 rtt=50 ms size=32 MiB  shape={"chunk":31952,"depth":64}
+# total 1045.4 ms = 20.9 R; server max READs in flight 64; grants 262
+bucket(t/R)   rx_KiB  grants  granted_KiB  server_READs  min_window_KiB
+          1        0       0            0            64            2048
+          2     1998      16         1998            33            1954
+          3     1998      16         1998            44            1954
+          4     1998      16         1998            51            1954
+          5     1998      16         1998            64            1954
+          6     1998      16         1998            64            1954
+          7      905       7          874            64            1954
+          8     1767      14         1748            64            1954
+          9     1323      11         1373            64            1954
+         10     1998      16         1998            64            1954
+         11     1998      16         1998            21            1954
+         12     1998      16         1998            64            1954
+         13     1093       9         1124            43            1954
+         14     1561      12         1498            64            1954
+         15     1998      16         1998            64            1954
+         16     1998      16         1998            64            1954
+         17     1342      11         1373            21            1954
+         18     1998      16         1998            64            1954
+         19     1998      16         1998            64            1954
+         20      816       6          749             7            1954
+
+# first 40 events (t in ms)
+{"kind":"data","t":52.16,"bytes":17,"window":2097058}
+{"kind":"read","t":82.46,"offset":0,"bytes":31952}
+{"kind":"read","t":82.53,"offset":31952,"bytes":31952}
+{"kind":"read","t":82.57,"offset":63904,"bytes":31952}
+{"kind":"read","t":82.61,"offset":95856,"bytes":31952}
+{"kind":"read","t":82.66,"offset":127808,"bytes":31952}
+{"kind":"read","t":82.7,"offset":159760,"bytes":31952}
+{"kind":"read","t":82.73,"offset":191712,"bytes":31952}
+{"kind":"read","t":82.78,"offset":223664,"bytes":31952}
+{"kind":"read","t":82.83,"offset":255616,"bytes":31952}
+{"kind":"read","t":82.88,"offset":287568,"bytes":31952}
+{"kind":"read","t":82.91,"offset":319520,"bytes":31952}
+{"kind":"read","t":82.93,"offset":351472,"bytes":31952}
+{"kind":"read","t":82.95,"offset":383424,"bytes":31952}
+{"kind":"read","t":82.96,"offset":415376,"bytes":31952}
+{"kind":"read","t":82.98,"offset":447328,"bytes":31952}
+{"kind":"read","t":83,"offset":479280,"bytes":31952}
+{"kind":"read","t":83.01,"offset":511232,"bytes":31952}
+{"kind":"read","t":83.03,"offset":543184,"bytes":31952}
+{"kind":"read","t":83.04,"offset":575136,"bytes":31952}
+{"kind":"read","t":83.07,"offset":607088,"bytes":31952}
+{"kind":"read","t":83.09,"offset":639040,"bytes":31952}
+{"kind":"read","t":83.11,"offset":670992,"bytes":31952}
+{"kind":"read","t":83.12,"offset":702944,"bytes":31952}
+{"kind":"read","t":83.14,"offset":734896,"bytes":31952}
+{"kind":"read","t":83.15,"offset":766848,"bytes":31952}
+{"kind":"read","t":83.17,"offset":798800,"bytes":31952}
+{"kind":"read","t":83.19,"offset":830752,"bytes":31952}
+{"kind":"read","t":83.2,"offset":862704,"bytes":31952}
+{"kind":"read","t":83.22,"offset":894656,"bytes":31952}
+{"kind":"read","t":83.24,"offset":926608,"bytes":31952}
+{"kind":"read","t":83.25,"offset":958560,"bytes":31952}
+{"kind":"read","t":83.26,"offset":990512,"bytes":31952}
+{"kind":"read","t":83.28,"offset":1022464,"bytes":31952}
+{"kind":"read","t":83.29,"offset":1054416,"bytes":31952}
+{"kind":"read","t":83.3,"offset":1086368,"bytes":31952}
+{"kind":"read","t":83.31,"offset":1118320,"bytes":31952}
+{"kind":"read","t":83.32,"offset":1150272,"bytes":31952}
+{"kind":"read","t":83.34,"offset":1182224,"bytes":31952}
+{"kind":"read","t":83.35,"offset":1214176,"bytes":31952}

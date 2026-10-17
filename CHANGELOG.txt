@@ -574,6 +574,12 @@ Fixed
       instead of 26-78 s; small files are no slower. A dropped connection now
       fails a read at once instead of leaving it hanging, and the idle-
       connection reaper no longer closes a connection under a read in progress.
+    - Large remote files (ssh:// and sftp://) download up to 1.8x faster on
+      distant hosts: the client now tops up the SSH channel's flow-control
+      window as soon as a little of it is used, as OpenSSH's own client does,
+      instead of waiting until half of it is gone -- which had left only half
+      the window in flight. A 32 MiB deck on a host 50 ms away arrives in
+      about 1.0 s instead of 1.8 s.
     - Opening a remote PDF, Markdown, Org, LaTeX, Mermaid or diff file no
       longer looks for its same-name companions (talk.tex beside talk.pdf,
       which offer the Preview/Source switch) one at a time after the

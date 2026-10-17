@@ -1,0 +1,80 @@
+# diag-sftp-window 2026-10-17T01:32:05.665Z  node v26.11.1  policy=ssh2 ident=openssh rtt=50 ms size=32 MiB  shape={"chunk":260096,"depth":9}
+# total 1769.2 ms = 35.4 R; server max READs in flight 9; grants 31
+bucket(t/R)   rx_KiB  grants  granted_KiB  server_READs  min_window_KiB
+          1        0       0            0             9            2048
+          2     2048       1         1048             8            1000
+          3     1048       1         1032             0            1016
+          4     1032       1         1048             4            1000
+          5     1048       1         1032             4            1016
+          6     1032       1         1048             4            1000
+          7     1048       1         1032             4            1016
+          8     1032       1         1048             4            1000
+          9        0       0            0             4               —
+         10     1048       1         1032             4            1016
+         11     1032       1         1048             4            1000
+         12     1048       1         1032             4            1016
+         13     1032       1         1031             0            1017
+         14     1031       1         1049             5             999
+         15     1049       1         1031             4            1017
+         16     1031       1         1049             4             999
+         17        0       0            0             4               —
+         18     1049       1         1031             4            1017
+         19     1031       1         1049             4             999
+         20     1049       1         1031             4            1017
+         21     1031       1         1049             4             999
+         22     1049       1         1031             4            1017
+         23     1031       1         1049             4             999
+         24     1049       1         1031             0            1017
+         25     1031       1         1031             4            1017
+         26     1031       1         1049             5             999
+         27     1049       1         1031             4            1017
+         28     1031       1         1049             4             999
+         29     1049       1         1031             4            1017
+         30        0       0            0             4               —
+         31     1031       1         1049             4             999
+         32     1049       1         1031             4            1017
+         33     1031       1         1049             4             999
+         34     1049       1         1031             0            1017
+         35      571       1         1049             0             999
+
+# first 40 events (t in ms)
+{"kind":"data","t":51.48,"bytes":17,"window":2097058}
+{"kind":"read","t":78.74,"offset":0,"bytes":260096}
+{"kind":"read","t":78.81,"offset":260096,"bytes":260096}
+{"kind":"read","t":78.85,"offset":520192,"bytes":260096}
+{"kind":"read","t":78.88,"offset":780288,"bytes":260096}
+{"kind":"read","t":78.9,"offset":1040384,"bytes":260096}
+{"kind":"read","t":78.94,"offset":1300480,"bytes":260096}
+{"kind":"read","t":78.97,"offset":1560576,"bytes":260096}
+{"kind":"read","t":79,"offset":1820672,"bytes":260096}
+{"kind":"read","t":79.04,"offset":2080768,"bytes":260096}
+{"kind":"data","t":112.28,"bytes":32768,"window":2064290}
+{"kind":"data","t":112.45,"bytes":32768,"window":2031522}
+{"kind":"data","t":112.55,"bytes":32768,"window":1998754}
+{"kind":"data","t":112.71,"bytes":32768,"window":1965986}
+{"kind":"data","t":112.79,"bytes":32768,"window":1933218}
+{"kind":"data","t":112.94,"bytes":32768,"window":1900450}
+{"kind":"data","t":113.14,"bytes":32768,"window":1867682}
+{"kind":"data","t":113.51,"bytes":30733,"window":1836949}
+{"kind":"data","t":113.6,"bytes":32768,"window":1804181}
+{"kind":"data","t":114.12,"bytes":32768,"window":1771413}
+{"kind":"data","t":114.18,"bytes":32768,"window":1738645}
+{"kind":"data","t":114.33,"bytes":32768,"window":1705877}
+{"kind":"data","t":114.4,"bytes":32768,"window":1673109}
+{"kind":"data","t":114.53,"bytes":32768,"window":1640341}
+{"kind":"data","t":114.6,"bytes":32768,"window":1607573}
+{"kind":"data","t":114.87,"bytes":30733,"window":1576840}
+{"kind":"data","t":114.93,"bytes":32768,"window":1544072}
+{"kind":"data","t":115.11,"bytes":32768,"window":1511304}
+{"kind":"data","t":115.18,"bytes":32768,"window":1478536}
+{"kind":"data","t":115.28,"bytes":32768,"window":1445768}
+{"kind":"data","t":115.35,"bytes":32768,"window":1413000}
+{"kind":"data","t":115.47,"bytes":32768,"window":1380232}
+{"kind":"data","t":115.55,"bytes":32768,"window":1347464}
+{"kind":"data","t":115.73,"bytes":30733,"window":1316731}
+{"kind":"data","t":115.79,"bytes":32768,"window":1283963}
+{"kind":"data","t":115.99,"bytes":32768,"window":1251195}
+{"kind":"data","t":116.06,"bytes":32768,"window":1218427}
+{"kind":"data","t":116.17,"bytes":32768,"window":1185659}
+{"kind":"data","t":116.23,"bytes":32768,"window":1152891}
+{"kind":"data","t":116.39,"bytes":32768,"window":1120123}

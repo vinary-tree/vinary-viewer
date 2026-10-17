@@ -3,9 +3,10 @@
 **Status: in progress.**
 - **Recorded:**
   - the baseline and its hypotheses, plus one discovery made while validating the instrument (H0);
-  - E0, E1 and E2 (§9.1–§9.3).
+  - E0, E1 and E2 (§9.1–§9.3);
+  - why H2 failed at 32 MiB, and E4, the eager channel window that fixes it (§9.4).
 - **Pending:**
-  - E3: the window that refutes H2 at 32 MiB, and H6's memory (§9.4);
+  - E3: the re-measurement with E0–E4 in place, the pipeline depth, and H6's memory (§9.5);
   - the D-phase measurements of H4 and H5.
 
 These experiments support [ADR-0046 — Reload-safe, pipelined remote reads] and the slide-deck work of
@@ -244,6 +245,7 @@ of payload. H6 will be tested against a preallocated reader.
 | E0 | `client.setNoDelay(true)` on every pooled SSH connection | H0 (client half) | $`R \le 10`$ ms cells drop to H1, e.g. OpenSSH 1 MiB at 10 ms: 935 → ≈ 190 ms; no change at $`R \ge 50`$ ms |
 | E1 | Pipelined, preallocated whole-file reader (`remoteOpenFile().readAll`, depth $`D = \lceil 2\,\text{MiB}/C \rceil`$) | H2, H6 | OpenSSH 32 MiB at 50 ms: 26.3 s → ≈ 1–2 s; peak ≈ 1 S |
 | E2 | Sibling stats in parallel, overlapped with the read | H3 | −12 R on a remote open of a `.tex`/`.pdf` group |
+| E4 | Grant the SFTP channel window eagerly, as OpenSSH does (added after §9.4's trace) | H2′ | A large read keeps ≈ 2 MiB in flight per round trip, not ≈ 1 MiB; H2's model holds again |
 | D1–D7 | Single-flight read-once fan-out, sequence ordering, torn-read detection, keep-last-good | H4, H5 | ≤ 2 S per burst; 0 torn PDFs delivered |
 
 ## 9 · Results after the interventions
@@ -467,7 +469,97 @@ OpenSSH ident (the ssh2 ident's 18 cells agree with these within 0.3 R; see the 
     opened before the kind is known, and close it on the directory and error paths.
   - It is outside ADR-0046's interventions and is not pursued here.
 
-*E3 (§9.4) and the D-phase measurements (H4, H5) are recorded below as they land.*
+### 9.4 · Why H2 failed at 32 MiB, and E4: the eager channel window (2026-10-17)
+
+**Question.** §9.2 left H2 refuted at 32 MiB: 1.76–1.82× its model, about 1 MiB per round trip. `fastGet` hit the
+same ceiling, so the ceiling sits below both readers.
+
+**Instrument.** [`scripts/diag-sftp-window.cjs`](../../scripts/diag-sftp-window.cjs) traces one whole-file read
+through the real transport and the latency proxy, logging both sides of the protocol:
+- every READ as the server receives it;
+- every channel-data packet the client's SFTP channel consumes, with the client's receive window after it;
+- every window grant (`SSH_MSG_CHANNEL_WINDOW_ADJUST`) the client sends.
+
+It counts them per round-trip bucket. It is a trace, not a benchmark: one read, no repetition.
+
+**Hypothesis H2′: ssh2 keeps only half its window in flight.**
+- **The basis is ssh2 1.17.0's flow control.**
+  - `lib/Channel.js` defines `MAX_WINDOW` = 2 MiB and `WINDOW_THRESHOLD` = `MAX_WINDOW / 2`.
+  - In `lib/client.js`, every channel-data packet debits the receive window, and a grant goes out only when the
+    window has fallen to the threshold or below.
+  - The grant is `MAX_WINDOW − window`, i.e. it tops the window back up to 2 MiB.
+- **A first derivation predicted no loss at all, and was wrong.** It assumed both 1 MiB grants of an arriving
+  2 MiB burst would go out together, keeping 2 MiB circulating.
+- **The trace refuted that derivation and confirmed H2′.** With ssh2's policy, OpenSSH ident, 50 ms
+  (`data/11/e4-window-trace-ssh2-openssh.txt`):
+  - The first round trip carries the initial 2 MiB window.
+  - Every later round trip carries **≈ 1 MiB** (1 032–1 048 KiB), with **exactly one** grant of ≈ 1 MiB.
+  - Only four READs reach the server per round trip, although nine (2.23 MiB) are kept outstanding.
+- **The mechanism.**
+  - After the first burst the client's window sits just above the threshold, ≈ 1 048 KiB.
+  - The next burst's first packet takes it to ≈ 1 016 KiB, and the one grant tops up just that deficit,
+    ≈ 1 MiB.
+  - The rest of the burst leaves the window above the threshold again, so no second grant follows.
+  - From then on a single ≈ 1 MiB credit circulates: the server spends it in one burst, and that burst triggers
+    the next grant, one round trip later.
+  - The effective window is $`W - T = W/2`$, where $`T`$ is the threshold.
+
+**Reference behaviour.** OpenSSH's client sends a grant as soon as more than three maximum-size packets are
+owed, or the window falls below half (`channels.c` `channel_check_window`: `local_window_max − local_window >
+local_maxpacket*3` or `local_window < local_window_max/2`, provided `local_consumed > 0`). That keeps nearly the
+whole window in flight.
+
+**Intervention E4.** `eagerWindow` in `src/vinary/main/ssh_transport.js` applies OpenSSH's policy to the
+transport's SFTP channel.
+- After each channel-data packet the SFTP parser has consumed, once more than `WINDOW_STEP` = 3 × 32 KiB is owed,
+  it tops the window back up to `WINDOW_MAX` = 2 MiB.
+- It grants **no more credit than ssh2 itself would**. The server can still have at most 2 MiB outstanding, so
+  the memory bound is unchanged; credit is only granted sooner.
+- It relies on ssh2 private fields: the channel-emulating SFTP object's `push`, `incoming.window` and
+  `outgoing.{id, state}`, and `_protocol.channelWindowAdjust`.
+  - If any of them is missing, ssh2's own policy stays in place: correct, only slower.
+  - `transport.configure({ eagerWindow: false })` selects ssh2's policy on purpose; the trace's control arm and
+    the smoke's control arm use it.
+
+**Prediction.** If H2′ is right, granting eagerly restores H2's own model. For this size-hinted read (OPEN plus
+the body, no FSTAT):
+
+```math
+\hat t \approx R + R\cdot\max\!\left(\left\lceil \frac{S}{D\,C} \right\rceil,\; \frac{S}{W}\right) + \frac{S}{B_{cpu}}
+```
+
+That gives 50 + 16 · 50 + 58.5 = **908.5 ms** for OpenSSH and 50 + 17 · 50 + 80.8 = **980.8 ms** for the ssh2
+ident. H2's criterion still applies: E4 is refuted if a read is more than 25 % off.
+
+**Result** (`data/11/e4-window-trace-{ssh2,eager}-{openssh,ssh2}.txt`; client pinned to cores 2–5, 32 MiB at
+50 ms):
+
+| Ident | Window policy | Total (ms) | Round trips | Grants | Steady volume per round trip | Total / $`\hat t`$ |
+|---|---|---|---|---|---|---|
+| OpenSSH | ssh2's | 1 769.2 | 35.4 | 31 | ≈ 1 MiB | 1.947 |
+| OpenSSH | eager (E4) | **980.2** | 19.6 | 269 | ≈ 2 MiB | **1.079** |
+| ssh2 | ssh2's | 1 797.7 | 36.0 | 31 | ≈ 1 MiB | 1.833 |
+| ssh2 | eager (E4) | **1 045.4** | 20.9 | 262 | ≈ 2 MiB | **1.066** |
+
+- **H2′ holds and E4 restores H2.** Both idents land within 8 % of the model.
+- **The read is 1.72–1.80× faster.**
+- **The cost is about eight times as many grants.** Each is a few dozen bytes on the wire, ≈ 13 KiB upstream per
+  32 MiB read, or 0.04 %.
+- **A first, scratch prototype measured 1 001.5 ms** (OpenSSH ident) before the transport changed; it monkeypatched
+  the same policy into the diagnostic.
+- **The timed matrix repeats this for every reader** with E4 in place (§9.5). `fastGet` shares the channel, so it
+  benefits too.
+
+**Found on the way: a pre-existing connection-pool race** (fixed separately in `486b9ea`).
+- **How it surfaced:** the smoke guarding E4 reconnected to one fixture server and then hung in `server.close()`.
+  `ss` showed an ESTABLISHED client connection while the transport's pool was empty.
+- **The cause:**
+  - A closed connection's late `close` event deleted its pool entry *by key*.
+  - A reconnect pools its successor before the successor's handshake, so the late `close` evicted the successor.
+  - The successor was leaked open, and the next request dialled a third connection.
+
+*E3, the re-measurement with E0–E4 in place (§9.5), and the D-phase measurements (H4, H5) are recorded
+below as they land.*
 
 ## 10 · Regression guards
 
@@ -491,6 +583,17 @@ OpenSSH ident (the ssh2 ident's 18 cells agree with these within 0.3 R; see the 
     1. sequential stats ("max in flight 1");
     2. concurrent stats started after the read ("0 still in flight at its first body READ");
     3. concurrent and overlapped, but re-stat'ing the opened file.
+
+- **Eager channel window (E4):** `ssh-transport-smoke` `testEagerWindow`.
+  - Every grant the client sends on the SFTP channel during an 8 MiB read is recorded. This counts grants rather
+    than timing anything:
+    - with the policy, at least 48 grants, none larger than `WINDOW_STEP` + one packet;
+    - with `eagerWindow: false` (the control arm), at most 9 grants of ≈ 1 MiB.
+  - It pins `WINDOW_MAX` and `WINDOW_STEP` against ssh2's own `MAX_WINDOW` and `PACKET_SIZE`, and the private
+    surface the policy uses.
+- **Connection pool (found in §9.4):** `ssh-transport-smoke` `testStaleCloseKeepsSuccessor`. After `closeAll`
+  and a reconnect, the server must hold exactly one live connection, and none after the final `closeAll`.
+  Deleting by key fails it with two.
 
 *Pending:* `remote-pdf-e2e` byte counts.
 

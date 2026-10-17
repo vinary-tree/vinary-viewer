@@ -80,6 +80,65 @@ async function testStaleCloseKeepsSuccessor() {
   }
 }
 
+// docs/scientific/11 §9.4 — the SFTP channel window is granted EAGERLY, as OpenSSH's client does. ssh2 alone tops it
+// up only once HALF of it (1 MiB) is used, so a pipelined read moved ≈ 1 MiB per round trip whatever its depth.
+// Deterministic, not timed: every WINDOW_ADJUST the client sends on the SFTP channel during an 8 MiB read is
+// recorded. With the policy (the default) the grants are many and small — a little over three maximum packets each;
+// with ssh2's own policy (eagerWindow: false — the control arm, which shows the assertions discriminate) they are
+// ≈ 1 MiB each. The private ssh2 surface the policy uses is pinned, and its constants against ssh2's own.
+async function testEagerWindow() {
+  const size = 8 * 1024 * 1024;
+  const big = crypto.randomBytes(size);
+  const ssh2Channel = require('ssh2/lib/Channel.js');
+  eq(transport._WINDOW_MAX, ssh2Channel.MAX_WINDOW, "WINDOW_MAX is ssh2's MAX_WINDOW, the receive window it advertises");
+  eq(transport._WINDOW_STEP, 3 * ssh2Channel.PACKET_SIZE, "WINDOW_STEP is three of ssh2's maximum packets (OpenSSH's threshold)");
+  const srv = await startSftpServer({ password: 'ew-pw', files: { 'big.bin': big }, noDelay: true, ident: 'OpenSSH_9.6' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-ew-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  const grantsFor = async (eager) => {
+    transport.closeAll();               // a fresh connection → a fresh SFTP channel, set up under this policy
+    transport.configure({
+      homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'ew-pw', onError: () => {}, eagerWindow: eager,
+    });
+    await transport.remoteStat(srv.url('/big.bin'));
+    const { sftp } = await transport._resolvePath(srv.url('/big.bin'));
+    ok(typeof sftp._protocol.channelWindowAdjust === 'function' && typeof sftp.incoming.window === 'number'
+       && typeof sftp.outgoing.id === 'number' && typeof sftp.outgoing.state === 'string' && typeof sftp.push === 'function',
+       "ssh2 still exposes the SFTP channel's push / incoming.window / outgoing.{id,state} / _protocol.channelWindowAdjust");
+    eq(sftp.push.name === 'pushThenGrant', eager, `eagerWindow ${eager}: the policy is ${eager ? '' : 'NOT '}installed`);
+    const grants = [];
+    const proto = sftp._protocol;
+    const own = Object.prototype.hasOwnProperty.call(proto, 'channelWindowAdjust');
+    const original = proto.channelWindowAdjust;
+    proto.channelWindowAdjust = function recordGrant(id, amount) {
+      if (id === sftp.outgoing.id) grants.push(amount);
+      return original.call(this, id, amount);
+    };
+    try {
+      const got = await transport.remoteReadFile(srv.url('/big.bin'), { size });
+      ok(got.equals(big), `eagerWindow ${eager}: the 8 MiB read is byte-exact`);
+    } finally {
+      if (own) proto.channelWindowAdjust = original; else delete proto.channelWindowAdjust;
+    }
+    return grants;
+  };
+  try {
+    const eager = await grantsFor(true);
+    const lazy = await grantsFor(false);
+    const kib = (xs) => `${xs.length} grants, largest ${(Math.max(...xs) / 1024).toFixed(0)} KiB`;
+    // a grant tops up what is owed the moment it passes WINDOW_STEP: at most WINDOW_STEP + one packet
+    ok(eager.length >= 48 && Math.max(...eager) <= transport._WINDOW_STEP + ssh2Channel.PACKET_SIZE,
+      `with the policy, window credit is granted in small steps (${kib(eager)})`);
+    ok(lazy.length <= 9 && Math.max(...lazy) >= 900 * 1024,
+      `with ssh2's own policy, in ≈ 1 MiB steps (${kib(lazy)}) — the control arm`);
+  } finally {
+    transport.closeAll();
+    transport.configure({ eagerWindow: true });
+    await srv.close();
+  }
+}
+
 // ADR-0046 E1 — the pipelined, preallocated whole-file reader (remoteOpenFile → readAll), against BOTH server
 // identities (ssh2's own, whose reads are capped at 31 952 bytes, and OpenSSH's, at 260 096): byte-exact results at
 // every chunk boundary, at most D requests in flight, short reads from a capping server, out-of-order replies, a file
@@ -346,6 +405,9 @@ async function main() {
 
   // 9h. a closed connection's late 'close' event never evicts its successor from the pool
   await testStaleCloseKeepsSuccessor();
+
+  // 9i. the SFTP channel window granted eagerly, as OpenSSH does (docs/scientific/11 §9.4)
+  await testEagerWindow();
 
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);

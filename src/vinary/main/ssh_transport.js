@@ -38,6 +38,8 @@ const opts = {
   agentSock: undefined,  // override SSH_AUTH_SOCK ('' disables the agent; undefined → env)
   maxBytes: 1024 * 1024 * 1024,   // whole-file read ceiling (1 GiB); large logs/text stream instead
   idleMs: 5 * 60 * 1000,          // reap a pooled connection after this long idle with no open streams
+  eagerWindow: true,              // grant SFTP channel window as OpenSSH does (see eagerWindow); false → ssh2's own
+                                  // policy (docs/scientific/11 §9.4's control arm)
   systemConfigPath: '/etc/ssh/ssh_config',        // overridable ('' skips) so tests stay hermetic
   systemKnownHostsPath: '/etc/ssh/ssh_known_hosts',
 };
@@ -443,10 +445,51 @@ function getConn(uri, inboundSock, depth) {
 
 // ───────────────────────────── SFTP session + path resolution ─────────────────────────────
 
+// ssh2 tops a channel's receive window back up only once HALF of it is used (lib/Channel.js: WINDOW_THRESHOLD =
+// MAX_WINDOW / 2), and then only to MAX_WINDOW (2 MiB). A server that always has data to send — a pipelined read —
+// therefore holds ONE MiB of credit per round trip in steady state: ≈ 1 MiB per RTT however many requests are in
+// flight (docs/scientific/11 §9.4, traced; ssh2's fastGet hits the same ceiling). OpenSSH's client grants credit as
+// soon as more than three maximum-size packets are owed (channels.c channel_check_window), keeping nearly the whole
+// window in flight. eagerWindow applies that policy to our SFTP channel: after each CHANNEL_DATA the SFTP parser has
+// consumed, once more than WINDOW_STEP bytes are owed it tops the window back up to WINDOW_MAX. It grants no more
+// than ssh2 itself would — the server can still have at most WINDOW_MAX bytes outstanding — only sooner.
+// ssh2 PRIVATE surface: the channel-emulating SFTP object's push / incoming.window / outgoing.{id, state} and
+// _protocol.channelWindowAdjust. When any piece is missing (a future ssh2) this leaves ssh2's own policy in place —
+// correct, only slower; test/ssh-transport-smoke.js watches every piece, and the constants against ssh2's own.
+const WINDOW_MAX = 2 * 1024 * 1024;       // ssh2's MAX_WINDOW — the receive window it advertises on every channel
+const WINDOW_STEP = 3 * 32 * 1024;        // OpenSSH's threshold: 3 × the maximum packet (ssh2's PACKET_SIZE, 32 KiB)
+
+function eagerWindow(sftp) {
+  const proto = sftp && sftp._protocol;
+  const incoming = sftp && sftp.incoming;
+  const outgoing = sftp && sftp.outgoing;
+  if (!proto || typeof proto.channelWindowAdjust !== 'function' || typeof sftp.push !== 'function'
+      || !incoming || typeof incoming.window !== 'number' || !outgoing || typeof outgoing.id !== 'number') return false;
+  const push = sftp.push;
+  sftp.push = function pushThenGrant(data) {
+    const ret = push.call(this, data);
+    // ssh2 has already debited incoming.window for `data` (client.js CHANNEL_DATA); ssh2's own windowAdjust skips a
+    // closed channel, and so does this
+    if (data && outgoing.state !== 'closed') {
+      const owed = WINDOW_MAX - incoming.window;
+      if (owed > WINDOW_STEP) {
+        incoming.window += owed;
+        proto.channelWindowAdjust(outgoing.id, owed);
+      }
+    }
+    return ret;
+  };
+  return true;
+}
+
 function getSftp(conn) {
   if (!conn.sftpP) {
     conn.sftpP = new Promise((resolve, reject) => {
-      conn.client.sftp((err, sftp) => (err ? reject(err) : resolve(sftp)));
+      conn.client.sftp((err, sftp) => {
+        if (err) { reject(err); return; }
+        if (opts.eagerWindow !== false) eagerWindow(sftp);
+        resolve(sftp);
+      });
     });
   }
   return conn.sftpP;
@@ -895,5 +938,6 @@ module.exports = {
   _resolveForUri: resolveForUri, _childUri: childUri, _execCapture: execCapture, _resolvePath: resolvePath,
   // the ADR-0046 reader's knobs + the pre-ADR-0046 baseline, for the benchmark and the white-box smoke
   _readAllPipelined: readAllPipelined, _readFileStream: readFileStream, _maxReadLenOf: maxReadLenOf,
-  _pipelineShape: pipelineShape, _reapIdle: reapIdle,
+  _pipelineShape: pipelineShape, _reapIdle: reapIdle, _eagerWindow: eagerWindow,
+  _WINDOW_MAX: WINDOW_MAX, _WINDOW_STEP: WINDOW_STEP,
 };
