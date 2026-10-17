@@ -587,6 +587,10 @@ Fixed
       refreshes it and removes the banner. The same holds for a File Type
       re-type that fails and for Reload of a vanished file. A document that
       never loaded still shows the error page.
+    - vv --cli and vv --tui no longer print pdf.js's own warnings (such as
+      "Warning: Indexing all PDF objects" for a damaged PDF) into the
+      document: they went to standard output, mixed into `vv --cli file.pdf >
+      out.txt` and drawn over the TUI's screen.
     - A PDF still being written (LaTeX mid-run, or a run that died half-way)
       no longer replaces the finished version you were looking at: the view
       keeps it behind an "incomplete" banner until the file is complete. On

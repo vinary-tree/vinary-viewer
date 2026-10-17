@@ -234,10 +234,27 @@ ok(!run(['--plain', src]).includes(ESC), '--plain source contains ZERO escape by
 
 // ── 4c. PDF → headless pdf.js text extraction → reflowed prose (not raw bytes / a delimited table) ────────
 const pdf = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
+// run the CLI capturing exit code + BOTH streams (stdin ignored, as in `run`)
+function runFull(args, env) {
+  const r = require('child_process').spawnSync('node', [CLI, ...args], {
+    encoding: 'utf8', env: { ...process.env, ...(env || {}) }, maxBuffer: 128 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return { code: r.status, out: r.stdout || '', err: r.stderr || '' };
+}
 if (fs.existsSync(pdf)) {
   const pout = run(['--no-color', '--width', '60', pdf]);
   ok(pout.includes('Vinary PDF Smoke'), 'PDF renders its extracted text (pdf.js reflow)');
   ok(!pout.startsWith('%PDF') && !pout.includes('┌'), 'PDF is NOT dumped as raw bytes or a box-drawing table');
+
+  // a damaged PDF: pdf.js warns while it fails ("Indexing all PDF objects") — with console.log, i.e. onto stdout,
+  // which carries the document; the failure itself belongs on stderr, with a non-zero exit
+  const smokeBytes = fs.readFileSync(pdf);
+  const cut = path.join(tmp, 'cut.pdf');                // the first half of the file: unrecoverable
+  fs.writeFileSync(cut, smokeBytes.subarray(0, Math.floor(smokeBytes.length / 2)));
+  const ct = runFull(['--no-color', '--width', '60', cut]);
+  ok(ct.code === 1 && /vv-cli: .*cut\.pdf: /.test(ct.err), 'a damaged PDF is reported cleanly on stderr with a non-zero exit');
+  ok(!/Warning:/.test(ct.out), 'pdf.js warnings ("Indexing all PDF objects") never reach stdout');
 }
 
 // ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────

@@ -30,8 +30,12 @@
   [bytes]
   (-> (load-pdfjs)
       (.then (fn [^js lib]
-               ;; pdf.js v5 requires a Uint8Array (a Node Buffer is rejected even though it is one) — wrap it
-               (.-promise (.getDocument lib #js {:data (js/Uint8Array. bytes) :useSystemFonts true :isEvalSupported false}))))
+               ;; pdf.js v5 requires a Uint8Array (a Node Buffer is rejected even though it is one) — wrap it.
+               ;; :verbosity 0 (VerbosityLevel.ERRORS): pdf.js prints its warnings ("Indexing all PDF objects" for a
+               ;; damaged file, font fallbacks, …) with console.log — onto STDOUT, which carries the document in
+               ;; vv --cli and the screen in vv --tui. Errors still reject the promise and reach stderr.
+               (.-promise (.getDocument lib #js {:data (js/Uint8Array. bytes) :useSystemFonts true :isEvalSupported false
+                                                 :verbosity 0}))))
       (.then (fn [^js doc]
                (js/Promise.all (into-array (map #(page-items doc %) (range 1 (inc (or (.-numPages doc) 0))))))))
       (.then (fn [pages] (vec pages)))))

@@ -104,6 +104,18 @@ const pdf = path.join(ROOT, 'test', 'fixtures', 'smoke.pdf');
 if (fs.existsSync(pdf)) {
   ok(strip(drive('', pdf, ['--no-color', '--width', '50'])).includes('Vinary PDF Smoke'),
      'a PDF opens in the TUI (pdf.js text extraction + reflow)');
+
+  // a damaged PDF: pdf.js's warnings ("Indexing all PDF objects") are console.logs — they must not reach the screen
+  const kf = path.join(tmp, 'keys-none.bin');
+  fs.writeFileSync(kf, '');
+  const smokeBytes = fs.readFileSync(pdf);
+  const cut = path.join(tmp, 'cut.pdf');                // the first half of the file: unrecoverable
+  fs.writeFileSync(cut, smokeBytes.subarray(0, Math.floor(smokeBytes.length / 2)));
+  const ct = spawnSync('node', [TUI, '--drive', kf, '--no-color', '--width', '70', cut],
+                       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  ok(ct.status === 1 && /vv-tui: .*cut\.pdf: /.test(ct.stderr || ''),
+     'a damaged PDF is reported cleanly on stderr with a non-zero exit');
+  ok(!/Warning:/.test(ct.stdout || ''), 'pdf.js warnings ("Indexing all PDF objects") never reach the screen');
 }
 
 // ── 6. pseudo-tty teardown check (skippable: needs python3 + a Linux pty) ───────
