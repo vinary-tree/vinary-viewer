@@ -1,0 +1,12 @@
+ 21:57:59 up 4 days,  5:24,  1 user,  load average: 7.50, 6.92, 7.62
+# bench-remote-read 2026-10-17T01:58:00.095Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=1429008kHz max=4561833kHz  pid 2014093's current affinity list: 2-5
+# sizes=32M rtts=50 idents=ssh2 readers=pipelined:16:31952,pipelined:33:31952,pipelined:66:31952,pipelined:131:31952 runs≤7 budget=40s warmup=2 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+ssh2      50   32M  pipelined:16:31952    7      3536.6    3544.1  3531.6±10.0         9.05   283.9        42.9     42.6         1.8  76900
+ssh2      50   32M  pipelined:33:31952    7      1779.7    1790.7   1781.1±5.7        17.98   239.4        44.7     44.4         2.1  76900
+ssh2      50   32M  pipelined:66:31952    7       997.9    1005.1    999.5±3.4        32.07   225.3        48.6     46.6         3.1  76900
+ssh2      50   32M  pipelined:131:31952   7      1008.2    1022.8   1009.9±8.2        31.74   237.1        48.8     44.6         3.8  76900
+# wrote docs/scientific/data/11/e3-depth-ssh2.json
+ 21:59:11 up 4 days,  5:26,  1 user,  load average: 9.13, 7.52, 7.78

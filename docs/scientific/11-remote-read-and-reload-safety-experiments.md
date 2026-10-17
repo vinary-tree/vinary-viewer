@@ -4,10 +4,9 @@
 - **Recorded:**
   - the baseline and its hypotheses, plus one discovery made while validating the instrument (H0);
   - E0, E1 and E2 (§9.1–§9.3);
-  - why H2 failed at 32 MiB, and E4, the eager channel window that fixes it (§9.4).
-- **Pending:**
-  - E3: the re-measurement with E0–E4 in place, the pipeline depth, and H6's memory (§9.5);
-  - the D-phase measurements of H4 and H5.
+  - why H2 failed at 32 MiB, and E4, the eager channel window that fixes it (§9.4);
+  - E3, the re-measurement with E0–E4 in place: H2 holds, the depth is chosen, and H6 holds (§9.5).
+- **Pending:** the pipelined streaming reader (§9.6), and the D-phase measurements of H4 and H5.
 
 These experiments support [ADR-0046 — Reload-safe, pipelined remote reads] and the slide-deck work of
 [ADR-0045 — Slide-deck presentation], where a remote deck (`vv sftp://host/talk.pdf`) is read whole over SFTP
@@ -558,8 +557,113 @@ ident. H2's criterion still applies: E4 is refuted if a read is more than 25 % o
   - A reconnect pools its successor before the successor's handshake, so the late `close` evicted the successor.
   - The successor was leaked open, and the next request dialled a third connection.
 
-*E3, the re-measurement with E0–E4 in place (§9.5), and the D-phase measurements (H4, H5) are recorded
-below as they land.*
+### 9.5 · E3 — re-measured with E0–E4 in place (2026-10-17)
+
+**Pre-registration.** `data/11/e3-prediction.txt` was written and committed (`d765a9f`) before any E3 run. Its
+two addenda record three artefacts of the new memory instrument, found and fixed in instrument checks before
+the runs; H6's predictions did not change.
+
+**Runs.** Client on cores 2–5, server on 6–9, `--server-nodelay`, governor `performance`.
+- **Matrix.** Sizes {64 KiB, 1, 8, 32 MiB} × $`R`$ ∈ {0, 10, 50, 100} ms × both idents × {`stream`, `fastGet`},
+  under `--expose-gc`. The collection runs between reads, outside the timing. 2 warm-ups, then ≤ 9 timed reads
+  or 30 s.
+- **Depth sweeps.** 32 MiB at 50 ms, `pipelined:D:C` with $`DC`$ ≈ 0.5 / 1 / 2 / 4 MiB, per ident.
+- **Memory.** `--live-memory` at $`R`$ = 10 ms, 8 and 32 MiB, {`stream`, `stream-legacy`, `fastGet`}, both idents.
+- **Raw data:** `data/11/e3-{matrix,depth-openssh,depth-ssh2,memory}.{txt,json}`.
+- **Every verdict below:** `data/11/e3-analysis.txt`, produced by
+  [`scripts/analyze-e3-remote-reads.cjs`](../../scripts/analyze-e3-remote-reads.cjs).
+
+**1. H2 holds for the shipped reader in every cell.** The model:
+
+```math
+\hat t = 2R + R\cdot\max\!\left(\left\lceil \frac{S}{D\,C}\right\rceil,\ \frac{S}{W}\right) + t_{R=0}
+```
+
+There are 2 fixed round trips (OPEN and FSTAT, since the reader is given no size) and $`W = 2`$ MiB.
+
+| Ident | $`S`$ | $`R=10`$: measured / $`\hat t`$ (ms) | $`R=50`$ | $`R=100`$ |
+|---|---|---|---|---|
+| OpenSSH | 64 KiB | 32.8 / 32.0 (+2.4 %) | 152.6 / 152.0 (+0.4 %) | 303.1 / 302.0 (+0.3 %) |
+| OpenSSH | 1 MiB | 36.1 / 35.2 (+2.7 %) | 156.4 / 155.2 (+0.8 %) | 306.0 / 305.2 (+0.3 %) |
+| OpenSSH | 8 MiB | 85.7 / 76.8 (+11.5 %) | 363.5 / 316.8 (+14.7 %) | 714.8 / 616.8 (+15.9 %) |
+| OpenSSH | 32 MiB | 236.4 / 248.0 (−4.7 %) | **991.8** / 968.0 (+2.5 %) | 1 942.3 / 1 868.0 (+4.0 %) |
+| ssh2 | 64 KiB | 32.8 / 31.7 (+3.2 %) | 152.8 / 151.7 (+0.7 %) | 303.0 / 301.7 (+0.4 %) |
+| ssh2 | 1 MiB | 35.9 / 34.2 (+4.9 %) | 156.7 / 154.2 (+1.6 %) | 306.6 / 304.2 (+0.8 %) |
+| ssh2 | 8 MiB | 84.1 / 93.9 (−10.4 %) | 365.7 / 373.9 (−2.2 %) | 715.3 / 723.9 (−1.2 %) |
+| ssh2 | 32 MiB | 242.2 / 282.0 (−14.1 %) | **998.8** / 1 042.0 (−4.1 %) | 1 950.2 / 1 992.0 (−2.1 %) |
+
+- **No cell is more than 25 % off; the largest gap is 15.9 %.** H2 survives the test it failed in §9.2.
+- **The OpenSSH 8 MiB cells sit 11–16 % high, and the residual has a known cause.**
+  - E4 keeps $`W - \text{WINDOW\_STEP}`$ ≈ 1.906 MiB in flight, not the full $`W`$.
+  - 8 MiB therefore needs ⌈8 / 1.906⌉ = 5 rounds, not the model's 4.
+  - With that effective window the model predicts 86.8 / 366.8 / 716.8 ms against 85.7 / 363.5 / 714.8 measured,
+    within 1.3 %.
+- **The negative residuals at 10 ms (ssh2, 8–32 MiB) are CPU work overlapping the waits.** The additive
+  $`t_{R=0}`$ term counts the client's decryption as if it never overlapped them.
+
+**2. The reference reader `fastGet`: its prediction is refuted.** It was predicted to land within ±15 % of
+`stream` for files of at least 8 MiB. 10 of 12 such cells fall outside.
+- **ssh2 ident: 70–97 % slower.** `fastGet` requests ssh2's default 32 768-byte chunks, which exceed that ident's
+  read cap $`L`$ = 31 952. ssh2 then splits every request into two sequential sub-reads (§1), halving its
+  pipeline.
+- **OpenSSH ident: 7–29 % slower.** $`L`$ = 260 096, so nothing splits; the cost is its own design, writing the
+  file to `/dev/shm` and reading it back. It is within ±15 % only at 32 MiB and 50–100 ms, where the network
+  dominates.
+- **This was a prediction about the reference reader, not the shipped one.**
+
+**3. Depth: the knee is $`DC = W`$.** 32 MiB at 50 ms:
+
+| Ident | $`D`$ × $`C`$ | $`DC`$ (MiB) | measured (ms) | $`\hat t`$ (ms) | off by |
+|---|---|---|---|---|---|
+| OpenSSH | 2 × 260 096 | 0.50 | 3 516.5 | 3 418.0 | +2.9 % |
+| OpenSSH | 4 × 260 096 | 0.99 | 1 835.9 | 1 818.0 | +1.0 % |
+| OpenSSH | 8 × 260 096 | 1.98 | 1 039.5 | 1 018.0 | +2.1 % |
+| OpenSSH | 16 × 260 096 | 3.97 | 1 028.9 | 968.0 | +6.3 % |
+| ssh2 | 16 × 31 952 | 0.49 | 3 536.6 | 3 492.0 | +1.3 % |
+| ssh2 | 33 × 31 952 | 1.01 | 1 779.7 | 1 792.0 | −0.7 % |
+| ssh2 | 66 × 31 952 | 2.01 | 997.9 | 992.0 | +0.6 % |
+| ssh2 | 131 × 31 952 | 3.99 | 1 008.2 | 992.0 | +1.6 % |
+
+- **Below the window the read is depth-bound:** halving $`DC`$ doubles the time, within 3 % of the model.
+- **At and above it the read is window-bound:** going from 2 to 4 MiB in flight gains 1.0 % (OpenSSH) and −1.0 %
+  (ssh2), inside the pre-registered 10 %.
+- **The shipped shape stays.** $`D = \lceil 2\,\text{MiB}/C\rceil`$ puts $`DC`$ on the knee for both idents.
+- **The pre-registration erred on one point.** It modelled `pipelined:D:C` with one fixed round trip (it assumed
+  a size hint), but that reader also pays FSTAT. Under the model as written the cells are 2.2–12.1 % off, still
+  inside 25 %. The table uses the corrected model.
+
+**4. H6 holds: the preallocated reader's live footprint is 1 S.**
+
+| Ident | $`S`$ | `stream` | `stream-legacy` | `fastGet` |
+|---|---|---|---|---|
+| OpenSSH | 8 MiB | 8.53 MiB = 1.066 S | 16.00 MiB = 2.000 S | 8.00 MiB = 1.000 S |
+| OpenSSH | 32 MiB | 32.53 MiB = 1.016 S | 64.00 MiB = 2.000 S | 32.00 MiB = 1.000 S |
+| ssh2 | 8 MiB | 8.04 MiB = 1.005 S | 16.00 MiB = 2.000 S | 8.00 MiB = 1.000 S |
+| ssh2 | 32 MiB | 32.07 MiB = 1.002 S | 64.00 MiB = 2.000 S | 32.00 MiB = 1.000 S |
+
+- **`stream` is exactly what its allocation predicts:** $`S + C`$ (the end-of-file probe's chunk is part of the
+  one buffer), plus at most one response packet being reassembled, ≈ $`C`$ again.
+  - OpenSSH: 8 + 0.25 + 0.28 MiB.
+  - ssh2: $`C`$ = 31 952 B, so ≈ 0.03 MiB over $`S`$.
+- **`stream-legacy` peaks at exactly 2 S** inside `Buffer.concat`: every chunk plus the result.
+- **`fastGet` holds 1 S:** `readFileSync` of its local copy.
+- **Both criteria hold in all four cells:** ≤ 1.25 S, and at least 0.5 S below legacy.
+- **The garbage-inclusive peaks of the timed runs are an observation only.** No hypothesis was attached, and they
+  depend on when V8 happens to collect.
+
+**Summary of the interventions.** Baseline (§5) against E3:
+
+| Cell | Baseline (ms) | E3 (ms) | Speed-up | What removed the time |
+|---|---|---|---|---|
+| ssh2 ident, 1 MiB, $`R = 0`$ | 2 058.9 | 4.2 | 490× | E0 (Nagle / delayed ACK) |
+| OpenSSH, 1 MiB, 10 ms | 934.6 | 36.1 | 25.9× | E0 + E1 |
+| OpenSSH, 1 MiB, 50 ms | 917.8 | 156.4 | 5.9× | E1 |
+| OpenSSH, 32 MiB, 50 ms | 26 278.4 | 991.8 | 26.5× | E1 + E4 |
+| ssh2 ident, 32 MiB, 50 ms | 78 751.7 | 998.8 | 78.8× | E1 + E4 |
+| OpenSSH, 64 KiB, 50 ms | 152.6 | 152.6 | 1.0× | — (3 R either way: no small-file regression) |
+| remote PDF open, 64 KiB, 50 ms (§9.3) | 862.2 | 254.8 | 3.4× | E2 |
+
+*The D-phase measurements (H4, H5) and the streaming reader (§9.6) are recorded below as they land.*
 
 ## 10 · Regression guards
 

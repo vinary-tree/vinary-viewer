@@ -1,0 +1,12 @@
+ 21:56:47 up 4 days,  5:23,  1 user,  load average: 6.25, 6.80, 7.65
+# bench-remote-read 2026-10-17T01:56:47.493Z  node v26.11.1  ssh2 1.17.0  AMD Ryzen Threadripper PRO 5975WX 32-Cores (64 cpus)
+# governor=performance cur=1429008kHz max=4561833kHz  pid 2008928's current affinity list: 2-5
+# sizes=32M rtts=50 idents=openssh readers=pipelined:2:260096,pipelined:4:260096,pipelined:8:260096,pipelined:16:260096 runs≤7 budget=40s warmup=2 TCP_NODELAY overrides: server=true client=false (since E0 the transport itself sets client TCP_NODELAY on every connection)
+# memory: gc() before each timed read (--expose-gc); dAB = peak − at-rest, including garbage allocated during the read
+ident    rtt  size  reader                n   median_ms    p95_ms   mean±sd_ms        MiB/s  cpu_ms  peakAB_MiB  dAB_MiB  eld_p99_ms  h1_ms
+openssh   50   32M  pipelined:2:260096    7      3516.5    3524.5   3516.4±6.9         9.10   252.2        57.2     56.9         1.5  25700
+openssh   50   32M  pipelined:4:260096    7      1835.9    1842.0   1833.0±8.3        17.43   207.7        62.5     62.1         1.7  25700
+openssh   50   32M  pipelined:8:260096    7      1039.5    1046.7   1040.8±3.6        30.78   183.3        52.4     52.0         2.1  25700
+openssh   50   32M  pipelined:16:260096   7      1028.9    1051.1  1027.5±15.9        31.10   167.7        59.7     54.5         3.5  25700
+# wrote docs/scientific/data/11/e3-depth-openssh.json
+ 21:57:59 up 4 days,  5:24,  1 user,  load average: 7.50, 6.92, 7.62
