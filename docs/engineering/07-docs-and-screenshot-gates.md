@@ -136,20 +136,30 @@ catalog records the pin:
 > committed SVG byte-for-byte, so `git status` stays clean unless a `.puml`
 > actually changed.
 
-There are currently **81** `.puml` sources and 81 rendered `.svg` files in
+There are currently **87** `.puml` sources and 87 rendered `.svg` files in
 `docs/diagrams/` (the catalog in [`docs/diagrams/README.md`](../diagrams/README.md)
 lists every one; its two loops check that against the filesystem).
 
 Two practical cautions, both verifiable on this workstation:
 
-1. **Graphviz drift.** This workstation currently has **Graphviz `15.1.0`**
+1. **Graphviz drift.** This workstation currently has **Graphviz `16.1.0`**
    (`dot -V`), not the pinned `14.1.5`. Graphviz lays out the `dot`-based diagram
    kinds — component, class, and state — so **re-rendering those kinds here can
    reflow the layout** and produce a non-byte-identical SVG even when the `.puml`
    is unchanged. Sequence, activity, and deployment diagrams do not use Graphviz
    and are unaffected. If you must re-render a component/class/state diagram,
    render with the pinned Graphviz (or review the SVG diff as a layout reflow, not
-   a content change).
+   a content change). The pinned `dot` is easy to have beside the system one:
+   build the official release tarball (`graphviz-14.1.5.tar.xz`, sha256
+   `b0173788…c1b45b3`, verified against the release's own `.sha256`) with
+   `configure --prefix=<dir> && make && make install`, run `<dir>/bin/dot -c` once,
+   and pass it to PlantUML with `-graphvizdot <dir>/bin/dot`.
+
+   *Verified 2026-10-17:* re-rendering all 87 sources with PlantUML `1.2026.5` and
+   that Graphviz `14.1.5` reproduced 85 committed SVGs byte for byte. The other
+   two (`state-find`, `activity-find-collect`) differed only by the embedded
+   `<?plantuml-src …?>` metadata, which their committed renders lacked, so they
+   were replaced by the pinned renders. Every committed SVG now reproduces.
 2. **PlantUML self-reports no version here.** The installed `plantuml -version`
    prints an unsubstituted `$version$` placeholder (an Arch packaging quirk), so
    the binary cannot confirm it is `1.2026.5`. This is precisely why the
