@@ -134,7 +134,10 @@ without creating a tab. (The byte-only `loadPdfBytes` invoke channel that ADR-00
 | `vv:app-info-request` | `requestAppInfo()` | none | main app info | Push app metadata. |
 | `vv:quit` | `quit()` | none | main app lifecycle | Quit application. |
 | `vv:devtools` | `toggleDevtools()` | none | `vinary.main.shell` | Toggle DevTools. |
-| `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | dir / factor | `vinary.main.window` | Adjust / set the app-renderer (DOM) zoom. |
+| `vv:zoom` / `vv:zoom-set` | `zoom(dir)` / `zoomSet(f)` | dir / factor | `vinary.main.shell` | Adjust / set the app-renderer (DOM) zoom; main reports the new factor on `vv:zoom-changed`. |
+| `vv:zoom-request` | `requestZoom()` | none | `vinary.main.shell` | Boot pull: main answers on `vv:zoom-changed` with this window's real (Chromium-restored) zoom factor, so `[:ui :window-zoom]` is right before the first zoom action. |
+| `vv:set-fullscreen` | `setFullscreen(on)` | `{on}` | `vinary.main.fullscreen` | Slide show ([ADR-0045](../design-decisions/0045-slide-deck-presentation.md)): make the **sender's** window fullscreen, or leave it; main only ever leaves a fullscreen it entered. |
+| `vv:fullscreen-request` | `requestFullscreenState()` | none | `vinary.main.fullscreen` | Boot pull: main answers on `vv:fullscreen-changed` with this window's state. |
 
 > **Retired PDF shims.** `pdfShow` / `pdfHide` / `pdfBounds` (channels `vv:pdf-show`,
 > `vv:pdf-hide`, `vv:pdf-bounds`) remain exposed by the preload as **no-ops with no
@@ -150,8 +153,8 @@ Every `on*` API returns an unsubscribe function.
 
 | Channel | `window.vv` API | Payload | Renderer event |
 |---------|-----------------|---------|----------------|
-| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?, git?}` | `[:content/received payload]` — `git` is `{root, from, to, range}` on a git-produced commit diff (the derived open-commit highlight, [ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) and `{root}` on a Commit Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)) |
-| `vv:error` | `onError(cb)` | `{path, message, stamp?}` | `[:content/error payload]` |
+| `vv:content` | `onContent(cb)` | `{path, kind, text?, html?, entries?, sheets?, page?, meta?, stamp?, seq?, incomplete?, incompleteReason?, git?}` | `[:content/received payload]` — `seq` numbers main's reads ([ADR-0046](../design-decisions/0046-reload-safe-pipelined-remote-reads.md)): a read older than the one the window applied is dropped (`vinary.app.content-guard`); `incomplete` flags a PDF caught mid-write, kept behind the last complete version's note; `git` is `{root, from, to, range}` on a git-produced commit diff (the derived open-commit highlight, [ADR-0042](../design-decisions/0042-derived-open-commit-highlight.md)) and `{root}` on a Commit Graph document ([ADR-0040](../design-decisions/0040-commit-graph-blame-and-history.md)) |
+| `vv:error` | `onError(cb)` | `{path, message, seq?, refresh?}` | `[:content/error payload]` — a numbered failure of a fanned-out read (`refresh`) for a document the window already shows becomes a refresh note over the last good version, not an error page (ADR-0046) |
 | `vv:tree` | `onTree(cb)` | `{root, files, synthetic?, listing, scope?}` | `[:tree/received payload]` — full project merge or exact scoped-subtree replacement, in listing order (`listing` = `{epoch, n}`) |
 | `vv:keymap` | `onKeymap(cb)` | EDN string or parsed payload | `[:keymap/config-received payload]` |
 | `vv:grammars` | `onGrammars(cb)` | grammar registry | grammar registry event |
@@ -168,6 +171,8 @@ Every `on*` API returns an unsubscribe function.
 | `vv:connections` | `onConnections(cb)` | EDN string | `[:connections/received text]` |
 | `vv:recent` | `onRecent(cb)` | EDN string | `[:recent/received text]` |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata | `[:app-info/received info]` |
+| `vv:zoom-changed` | `onZoomChanged(cb)` | `{context, factor}` | `[:view/zoom-changed …]` — the resolved app-window (`"window"`) or web-view (`"web"`) zoom factor |
+| `vv:fullscreen-changed` | `onFullscreenChanged(cb)` | `{fullscreen, owned}` | `[:view/fullscreen-changed …]` — this window entered or left fullscreen; leaving one a slide show asked for ends the show (ADR-0045) |
 
 ---
 
