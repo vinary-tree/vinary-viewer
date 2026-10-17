@@ -823,7 +823,15 @@ const closeSoon = (file) => { file.close().catch(() => {}); };
 //   • End of file is a read that returns nothing: every earlier byte has been delivered by then (delivery is in
 //     order), so the stream ends there and the requests issued past it are discarded. With o.size (the caller's
 //     stat) no request starts past it — the one starting AT it is the end-of-file probe — so a small file costs its
-//     own requests, not D of them; a probe that returns data (the file grew) lifts the limit.
+//     own requests, not D of them; data reaching past it (the file grew) lifts the limit.
+//   • The end of the file costs no extra round trip (docs/scientific/11 §9.6 measured one: the last chunk STRADDLED
+//     the end, came back short, and the remainder was requested only to learn "end of file"):
+//       – with o.size, the request that would straddle it ends exactly there (as readAll splits at its size), so an
+//         exact file has no short read at all;
+//       – without it, a short read IS the end when an earlier read of that length came back full (so the server does
+//         not cap reads that long) and the request starting right after it — already in the same flight — found
+//         end-of-file. Otherwise (a first read that is short, a server that caps reads) the remainder is requested:
+//         inferring there could truncate a file.
 //   • destroy() — a page window filled, a session closed — issues nothing more; a dropped connection rejects the
 //     handle's pending requests (remoteOpenFile), which errors the stream. Either way, and at the end, the handle is
 //     closed in the background, exactly once.
@@ -835,6 +843,7 @@ function pipelinedReadStream(file, sftp, o) {
   let next = Math.max(0, Number(o.start) || 0);   // the next offset to request
   let limit = Number.isInteger(o.size) && o.size >= 0 ? o.size : Infinity;   // no request starts past it
   const slots = [];                               // issued requests not yet delivered, in FILE order
+  let fullSeen = 0;                               // the longest read that came back full (the server serves that much)
   let eof = false;                                // a read returned nothing: the file ends at the delivered offset
   let wanted = true;                              // the consumer is reading (no push() has said stop since)
   let over = false;                               // ended, errored or destroyed: deliver and issue nothing more
@@ -854,14 +863,29 @@ function pipelinedReadStream(file, sftp, o) {
   function flow() {
     if (over) return;
     while (slots.length && (slots[0].n >= 0 || slots[0].err)) {
-      const s = slots.shift();
+      const s = slots[0];
       if (s.err) { over = true; slots.length = 0; stream.destroy(s.err); return; }
-      if (s.n === 0) { eof = true; break; }                          // the file ends at s.off
+      if (s.n === 0) { slots.shift(); eof = true; break; }          // the file ends at s.off
+      if (s.n < s.len) {
+        // a SHORT read: the end of the file, or a server that capped it — see the header
+        const nx = slots[1];
+        const endProof = fullSeen >= s.len && nx && nx.off === s.off + s.len;
+        if (endProof && nx.n < 0 && !nx.err) break;                  // that reply decides: it is in the same flight
+        if (endProof && nx.n === 0) {                                // the next request found end-of-file: so did this
+          slots.shift();
+          if (!stream.push(s.buf.subarray(0, s.n))) wanted = false;
+          if (over) return;
+          eof = true;
+          break;
+        }
+      }
+      slots.shift();
       // data reaching past the stat'ed size: the file grew since the stat — the last request below the limit came back
       // full (or the probe at the limit returned data), so read on to the real end
       if (s.off + s.n > limit) limit = Infinity;
       if (s.after > 0) chunk = Math.max(1, Math.min(chunk, s.after)); // a short read's remainder returned data: capped
       if (s.n < s.len) slots.unshift(issue(s.off + s.n, s.len - s.n, s.n));   // its remainder, ahead of the rest
+      else fullSeen = Math.max(fullSeen, s.len);
       if (!stream.push(s.n === s.len ? s.buf : s.buf.subarray(0, s.n))) wanted = false;
       if (over) return;                                              // the consumer destroyed us from a 'data' handler
     }
@@ -873,8 +897,10 @@ function pipelinedReadStream(file, sftp, o) {
       return;
     }
     while (wanted && slots.length < depth && next <= limit) {
-      slots.push(issue(next, chunk, 0));
-      next += chunk;
+      // the request that would straddle a stat'ed size ends exactly at it; the next, starting AT it, is the probe
+      const len = next < limit && next + chunk > limit ? limit - next : chunk;
+      slots.push(issue(next, len, 0));
+      next += len;
     }
   }
   stream.on('end', closeOnce);

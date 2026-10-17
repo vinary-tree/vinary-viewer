@@ -85,8 +85,18 @@ async function testPipelinedStream() {
       const shape = transport._pipelineShape(sftp);
       for (const size of sizes) {
         srv.resetStats();
+        const readOffsets = [];
+        srv.onRequest((req) => { if (req.op === 'READ' && req.path === `/s-${size}.bin`) readOffsets.push(req.offset); });
         const got = await consume(await transport.remoteCreateReadStream(url(`s-${size}.bin`)));
+        srv.onRequest(null);
         ok(got.equals(files[`s-${size}.bin`]), `${label}: a ${size}-byte file streams byte-exact`);
+        // the end of the file costs no round trip of its own: once a full read has shown the server serves C bytes,
+        // the short read that straddles the end is recognized from the end-of-file reply right behind it — nothing
+        // is ever requested at exactly `size` (where the straddling chunk's remainder would start)
+        if (size > L && size % L !== 0) {
+          ok(!readOffsets.includes(size),
+            `${label}: streaming ${size} bytes requests nothing at its end offset (no remainder round trip)`);
+        }
         ok(srv.stats.maxInFlightReads <= shape.depth,
           `${label}: never more than D = ${shape.depth} READs in flight while streaming ${size} bytes (${srv.stats.maxInFlightReads})`);
         // every request is a chunk, a short read's remainder, or one of at most D issued past the end
@@ -104,6 +114,20 @@ async function testPipelinedStream() {
       const from = 3 * L + 5;
       ok((await consume(await transport.remoteCreateReadStream(url('s-8388608.bin'), { start: from }))).equals(big.subarray(from)),
         `${label}: { start } streams from that offset`);
+
+      // the size hint splits the request that would straddle the end, so an exact file reads with no short read: its
+      // body requests plus ONE probe at its size
+      for (const size of [3 * L + 17, 8 * 1024 * 1024]) {
+        srv.resetStats();
+        const hintedOffsets = [];
+        srv.onRequest((req) => { if (req.op === 'READ' && req.path === `/s-${size}.bin`) hintedOffsets.push(req.offset); });
+        ok((await consume(await transport.remoteCreateReadStream(url(`s-${size}.bin`), { size }))).equals(files[`s-${size}.bin`]),
+          `${label}: a size-hinted ${size}-byte stream is byte-exact`);
+        srv.onRequest(null);
+        eq(hintedOffsets.length, Math.ceil(size / L) + 1,
+          `${label}: …in ⌈S/C⌉ + 1 requests — the body, split at the size, and one probe (${hintedOffsets.length})`);
+        eq(hintedOffsets.filter((o) => o === size).length, 1, `${label}: …the probe being the one request at the size`);
+      }
 
       // the size hint: a small file costs its own requests (no D-wide burst past its end), and a file larger than the
       // hint — it grew after the stat — is still read to its real end
