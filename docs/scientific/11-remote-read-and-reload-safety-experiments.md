@@ -245,6 +245,7 @@ of payload. H6 will be tested against a preallocated reader.
 | E1 | Pipelined, preallocated whole-file reader (`remoteOpenFile().readAll`, depth $`D = \lceil 2\,\text{MiB}/C \rceil`$) | H2, H6 | OpenSSH 32 MiB at 50 ms: 26.3 s → ≈ 1–2 s; peak ≈ 1 S |
 | E2 | Sibling stats in parallel, overlapped with the read | H3 | −12 R on a remote open of a `.tex`/`.pdf` group |
 | E4 | Grant the SFTP channel window eagerly, as OpenSSH does (added after §9.4's trace) | H2′ | A large read keeps ≈ 2 MiB in flight per round trip, not ≈ 1 MiB; H2's model holds again |
+| S7 | The streaming / paging source (`remoteCreateReadStream`) pipelined like the whole-file reader, with backpressure | H7 | A streamed read costs the whole-file model instead of H1; its buffering stays bounded whatever the size |
 | D1–D7 | Single-flight read-once fan-out, sequence ordering, torn-read detection, keep-last-good | H4, H5 | ≤ 2 S per burst; 0 torn PDFs delivered |
 
 ## 9 · Results after the interventions

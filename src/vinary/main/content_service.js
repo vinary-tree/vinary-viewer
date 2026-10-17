@@ -740,9 +740,10 @@ async function openUri(uri, kind, opts) {
   return openLocal(uri, kind, opts);
 }
 
-// A gunzip-aware Readable over a remote file (mirrors localContentStream: `.gz` log names are decompressed).
-async function remoteContentStream(uri) {
-  return contentStreamForName(uri, await transport.remoteCreateReadStream(uri));
+// A gunzip-aware Readable over a remote file (mirrors localContentStream: `.gz` log names are decompressed). `size`,
+// when the caller already stat'ed the file, keeps the pipelined stream from requesting past its end (ADR-0046 S7).
+async function remoteContentStream(uri, size) {
+  return contentStreamForName(uri, await transport.remoteCreateReadStream(uri, Number.isInteger(size) ? { size } : undefined));
 }
 
 // ── verified PDF reads (ADR-0046 §Torn reads) ─────────────────────────────────────────────────────────────────
@@ -911,7 +912,7 @@ async function openRemoteUri(uri, kind, opts = {}) {
   if (k === 'table') {
     const delimited = delimitedExts.has(extname(uri)) || (explicit && !workbookExts.has(extname(uri)));
     if (delimited && st.size > SMALL_TABLE_BYTES) {
-      const page = await streamDelimitedPage(await remoteContentStream(uri), delimiterFor(uri, meta), 0);
+      const page = await streamDelimitedPage(await remoteContentStream(uri, st.size), delimiterFor(uri, meta), 0);
       return { path: uri, kind: 'table', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: TABLE_PAGE_ROWS }) };
     }
     if (delimited && !delimitedExts.has(extname(uri))) {
@@ -922,7 +923,7 @@ async function openRemoteUri(uri, kind, opts = {}) {
 
   if (k === 'log') {
     if (st.size > SMALL_LOG_BYTES || gzipLogName(uri)) {
-      const page = await streamLogPage(await remoteContentStream(uri), 0);   // first page only — large logs stream (E)
+      const page = await streamLogPage(await remoteContentStream(uri, st.size), 0);   // first page only — large logs stream (E)
       return { path: uri, kind: 'log', paged: true, page, stamp, sourceable: true, meta: Object.assign({}, meta, { pageSize: LOG_PAGE_LINES }) };
     }
     return logTextPayload(uri, uri, await transport.remoteReadText(uri, sized()), stamp, meta);
@@ -1540,7 +1541,8 @@ async function streamOpen(req) {
   // engine for markdown/org/latex re-parses the already-delivered text and never opens a stream.)
   if (transport.isRemoteUri(filePath)) {
     try { size = (await transport.remoteStat(filePath)).size; } catch (e) { size = 0; }
-    raw = await transport.remoteCreateReadStream(filePath);
+    // the stat bounds the pipelined stream's requests (a failed stat — size 0 — gives no hint)
+    raw = await transport.remoteCreateReadStream(filePath, size > 0 ? { size } : undefined);
   } else {
     try { size = fs.statSync(filePath).size; } catch (e) { size = 0; }
     raw = fs.createReadStream(filePath);

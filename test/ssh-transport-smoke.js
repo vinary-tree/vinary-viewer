@@ -44,6 +44,159 @@ async function testNoDelay() {
   await srv.close();
 }
 
+// ADR-0046 S7 — the pipelined Readable behind remote streaming and paging (remoteCreateReadStream), against BOTH
+// server identities: byte-exact at every chunk boundary, at most D requests in flight (and actually pipelined), a
+// capping server, a start offset, backpressure (a paused consumer stops new requests: what is requested stays within
+// one buffer and one pipeline of what was consumed), destroy mid-stream (handle closed, no error), and a dropped
+// connection erroring the stream promptly.
+async function testPipelinedStream() {
+  const rand = (len) => crypto.randomBytes(len);
+  // read a stream to its end — boundedly: a stream that stops issuing requests (or never ends) fails the arm with a
+  // message after 15 s instead of hanging the smoke
+  const consume = (stream) => new Promise((resolve, reject) => {
+    const parts = [];
+    const guard = setTimeout(() => reject(new Error('the stream neither ended nor errored within 15 s')), 15000);
+    stream.on('data', (c) => parts.push(c));
+    stream.on('end', () => { clearTimeout(guard); resolve(Buffer.concat(parts)); });
+    stream.on('error', (e) => { clearTimeout(guard); reject(e); });
+  });
+  const handlesClosed = async (srv) => {
+    const deadline = Date.now() + 2000;
+    while (srv.openHandles() !== 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    return srv.openHandles();
+  };
+  for (const ident of [undefined, 'OpenSSH_9.6']) {
+    const label = ident || 'ssh2-ident';
+    const L = ident ? 260096 : 31952;
+    const sizes = [0, 1, L - 1, L, L + 1, 3 * L + 17, 8 * 1024 * 1024];
+    const files = {};
+    for (const size of sizes) files[`s-${size}.bin`] = rand(size);
+    const srv = await startSftpServer({ password: 'ps-pw', ident, files });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-ps-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    transport.configure({
+      homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'ps-pw', onError: () => {},
+    });
+    const url = (name) => srv.url(`/${name}`);
+    try {
+      await transport.remoteStat(url('s-1.bin'));
+      const { sftp } = await transport._resolvePath(url('s-1.bin'));
+      const shape = transport._pipelineShape(sftp);
+      for (const size of sizes) {
+        srv.resetStats();
+        const got = await consume(await transport.remoteCreateReadStream(url(`s-${size}.bin`)));
+        ok(got.equals(files[`s-${size}.bin`]), `${label}: a ${size}-byte file streams byte-exact`);
+        ok(srv.stats.maxInFlightReads <= shape.depth,
+          `${label}: never more than D = ${shape.depth} READs in flight while streaming ${size} bytes (${srv.stats.maxInFlightReads})`);
+        // every request is a chunk, a short read's remainder, or one of at most D issued past the end
+        ok((srv.stats.byPath[`/s-${size}.bin`] || { reads: 0 }).reads <= Math.ceil(size / L) + shape.depth + 1,
+          `${label}: streaming ${size} bytes costs at most ⌈S/C⌉ + D + 1 requests`);
+        eq(await handlesClosed(srv), 0, `${label}: the handle is closed once a ${size}-byte stream ends`);
+      }
+      ok(srv.stats.maxInFlightReads >= 1, '(stats were collected)');
+      srv.resetStats();
+      await consume(await transport.remoteCreateReadStream(url('s-8388608.bin')));
+      ok(srv.stats.maxInFlightReads > 1, `${label}: an 8 MiB stream is actually pipelined (${srv.stats.maxInFlightReads} READs in flight at once)`);
+
+      // a start offset
+      const big = files['s-8388608.bin'];
+      const from = 3 * L + 5;
+      ok((await consume(await transport.remoteCreateReadStream(url('s-8388608.bin'), { start: from }))).equals(big.subarray(from)),
+        `${label}: { start } streams from that offset`);
+
+      // the size hint: a small file costs its own requests (no D-wide burst past its end), and a file larger than the
+      // hint — it grew after the stat — is still read to its real end
+      srv.resetStats();
+      ok((await consume(await transport.remoteCreateReadStream(url('s-1.bin'), { size: 1 }))).equals(files['s-1.bin']),
+        `${label}: a size-hinted 1-byte stream is byte-exact`);
+      ok(srv.stats.byPath['/s-1.bin'].reads <= 2,
+        `${label}: …in at most 2 requests (${srv.stats.byPath['/s-1.bin'].reads}), not D = ${shape.depth}`);
+      ok((await consume(await transport.remoteCreateReadStream(url('s-8388608.bin'), { size: 1024 * 1024 }))).equals(big),
+        `${label}: a stream whose file outgrew its size hint reads on to the real end`);
+
+      // backpressure: pause after the first chunk; what is requested must stay bounded by what was consumed
+      srv.resetStats();
+      const paused = await transport.remoteCreateReadStream(url('s-8388608.bin'));
+      let consumed = 0;
+      const parts = [];
+      await new Promise((resolve) => {
+        paused.once('data', (c) => { consumed += c.length; parts.push(c); paused.pause(); resolve(); });
+      });
+      await new Promise((r) => setTimeout(r, 300));               // replies to what was in flight land meanwhile
+      const requested = srv.stats.byPath['/s-8388608.bin'].readBytes;
+      const bound = consumed + paused.readableHighWaterMark + (shape.depth + 1) * shape.chunk;
+      ok(requested <= bound,
+        `${label}: a paused stream stops requesting — ${requested} bytes read for ${consumed} consumed (≤ ${bound}, of ${big.length})`);
+      paused.on('data', (c) => { consumed += c.length; parts.push(c); });
+      await new Promise((resolve, reject) => { paused.on('end', resolve); paused.on('error', reject); paused.resume(); });
+      ok(Buffer.concat(parts).equals(big), `${label}: …and resumed, it finishes byte-exact`);
+
+      // destroy mid-stream: no error, the handle closes
+      const early = await transport.remoteCreateReadStream(url('s-8388608.bin'));
+      let earlyError = null;
+      early.on('error', (e) => { earlyError = e; });
+      await new Promise((resolve) => early.once('data', () => { early.destroy(); resolve(); }));
+      await new Promise((r) => setTimeout(r, 50));
+      ok(earlyError === null && early.destroyed, `${label}: destroy() mid-stream ends it without an error`);
+      eq(await handlesClosed(srv), 0, `${label}: …and closes the handle`);
+    } finally {
+      transport.closeAll();
+      srv.destroyConnections();
+      await srv.close();
+    }
+  }
+
+  // a server that caps reads (answers at most 10 000 bytes per READ): still byte-exact, in order
+  {
+    const data = rand(300000);
+    const srv = await startSftpServer({ password: 'pc-pw', files: { 'c.bin': data }, maxReadLen: 10000 });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-pc-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    transport.configure({
+      homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'pc-pw', onError: () => {},
+    });
+    try {
+      ok((await consume(await transport.remoteCreateReadStream(srv.url('/c.bin')))).equals(data),
+        'a server that caps reads at 10 000 bytes: the stream is byte-exact and in order');
+    } finally {
+      transport.closeAll();
+      srv.destroyConnections();
+      await srv.close();
+    }
+  }
+
+  // a dropped connection errors the stream promptly (never hangs)
+  {
+    const data = rand(8 * 1024 * 1024);
+    const srv = await startSftpServer({ password: 'pd-pw', files: { 'd.bin': data } });
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-sshhome-pd-'));
+    fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+    transport.configure({
+      homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+      promptHostKey: async () => true, promptSecret: async () => 'pd-pw', onError: () => {},
+    });
+    try {
+      srv.setDelay((req) => (req.op === 'READ' && req.offset > 0 ? 200 : 0));   // keep later reads in flight
+      const s = await transport.remoteCreateReadStream(srv.url('/d.bin'));
+      const t0 = Date.now();
+      const outcome = await new Promise((resolve) => {
+        s.on('error', (e) => resolve(e));
+        s.on('end', () => resolve(null));
+        s.once('data', () => srv.destroyConnections());
+      });
+      ok(outcome instanceof Error && Date.now() - t0 < 1000,
+        `a dropped connection errors the stream within 1 s (${outcome && outcome.message}, ${Date.now() - t0} ms)`);
+    } finally {
+      srv.setDelay(null);
+      transport.closeAll();
+      srv.destroyConnections();
+      await srv.close();
+    }
+  }
+}
+
 // A closed connection's LATE 'close' event must not evict its successor from the pool. closeAll() unpools a
 // connection at once, but ssh2 delivers its 'close' only when the socket is gone; a reconnect pools its successor
 // BEFORE the successor's handshake, so the old 'close' landed mid-handshake and deleted the successor by key: the
@@ -408,6 +561,9 @@ async function main() {
 
   // 9i. the SFTP channel window granted eagerly, as OpenSSH does (docs/scientific/11 §9.4)
   await testEagerWindow();
+
+  // 9j. the pipelined Readable behind remote streaming and paging (ADR-0046 S7)
+  await testPipelinedStream();
 
   // 10. AddKeysToAgent (ssh_agent.js) — add ed25519 / rsa / ecdsa keys to a throwaway ssh-agent, list them back.
   await testAgentAdd(home);

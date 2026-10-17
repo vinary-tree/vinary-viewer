@@ -21,6 +21,7 @@ const os = require('os');
 const net = require('net');
 const path = require('path');
 const cp = require('child_process');
+const { Readable } = require('stream');
 const { Client, utils } = require('ssh2');
 const sshcfg = require('./ssh_config.js');
 const sshAgent = require('./ssh_agent.js');
@@ -746,6 +747,8 @@ async function remoteOpenFile(uri) {
   };
   // the whole file (see readAllFrom)
   file.readAll = (o) => readAllFrom(file, sftp, o);
+  // the file as a pipelined Readable (see pipelinedReadStream) — it closes the handle when it ends or is destroyed
+  file.readStream = (o) => pipelinedReadStream(file, sftp, o);
   file.close = async () => {
     if (closed) return;
     try {
@@ -806,6 +809,78 @@ async function readAllFrom(file, sftp, o) {
 // sooner — the legacy stream likewise resolved at end-of-stream, before its handle closed.
 const closeSoon = (file) => { file.close().catch(() => {}); };
 
+// A Node Readable over an open file HANDLE that keeps up to D requests of C bytes in flight — the whole-file reader's
+// pipeline shape — and delivers the bytes strictly IN FILE ORDER. It is the streaming and paging engines' source
+// (remoteCreateReadStream): ssh2's own createReadStream keeps ONE request of 64 KiB in flight (three sequential
+// sub-reads against a server whose ident caps reads at 31 952 bytes), so streaming or paging a large remote log cost a
+// round trip per 64 KiB — H1's cost, docs/scientific/11 §9.6.
+//   • Backpressure: while the consumer is not reading (push() returned false) no new request is issued. Requests
+//     already in flight still complete and are queued, so at most ≈ highWaterMark + D·C bytes are buffered, whatever
+//     the file's size.
+//   • A SHORT read re-requests its remainder AHEAD of every later request, so order holds; as in the whole-file
+//     reader, later requests shrink only when that remainder returns data (a server that caps reads) — a short read
+//     at the end of the file never shrinks anything.
+//   • End of file is a read that returns nothing: every earlier byte has been delivered by then (delivery is in
+//     order), so the stream ends there and the requests issued past it are discarded. With o.size (the caller's
+//     stat) no request starts past it — the one starting AT it is the end-of-file probe — so a small file costs its
+//     own requests, not D of them; a probe that returns data (the file grew) lifts the limit.
+//   • destroy() — a page window filled, a session closed — issues nothing more; a dropped connection rejects the
+//     handle's pending requests (remoteOpenFile), which errors the stream. Either way, and at the end, the handle is
+//     closed in the background, exactly once.
+function pipelinedReadStream(file, sftp, o) {
+  o = o || {};
+  const shape = pipelineShape(sftp, o);
+  const depth = shape.depth;
+  let chunk = shape.chunk;
+  let next = Math.max(0, Number(o.start) || 0);   // the next offset to request
+  let limit = Number.isInteger(o.size) && o.size >= 0 ? o.size : Infinity;   // no request starts past it
+  const slots = [];                               // issued requests not yet delivered, in FILE order
+  let eof = false;                                // a read returned nothing: the file ends at the delivered offset
+  let wanted = true;                              // the consumer is reading (no push() has said stop since)
+  let over = false;                               // ended, errored or destroyed: deliver and issue nothing more
+  let closed = false;
+  const closeOnce = () => { if (!closed) { closed = true; closeSoon(file); } };
+  const issue = (off, len, after) => {
+    const slot = { off, len, after, buf: Buffer.allocUnsafe(len), n: -1, err: null };
+    file.readAt(slot.buf, 0, len, off).then((n) => { slot.n = n; flow(); }, (err) => { slot.err = err || new Error('read failed'); flow(); });
+    return slot;
+  };
+  const stream = new Readable({
+    highWaterMark: Math.max(64 * 1024, chunk),
+    read() { wanted = true; flow(); },
+    destroy(err, cb) { over = true; slots.length = 0; closeOnce(); cb(err); },
+  });
+  // deliver every completed request at the head, in order; then keep the pipeline full while the consumer reads
+  function flow() {
+    if (over) return;
+    while (slots.length && (slots[0].n >= 0 || slots[0].err)) {
+      const s = slots.shift();
+      if (s.err) { over = true; slots.length = 0; stream.destroy(s.err); return; }
+      if (s.n === 0) { eof = true; break; }                          // the file ends at s.off
+      // data reaching past the stat'ed size: the file grew since the stat — the last request below the limit came back
+      // full (or the probe at the limit returned data), so read on to the real end
+      if (s.off + s.n > limit) limit = Infinity;
+      if (s.after > 0) chunk = Math.max(1, Math.min(chunk, s.after)); // a short read's remainder returned data: capped
+      if (s.n < s.len) slots.unshift(issue(s.off + s.n, s.len - s.n, s.n));   // its remainder, ahead of the rest
+      if (!stream.push(s.n === s.len ? s.buf : s.buf.subarray(0, s.n))) wanted = false;
+      if (over) return;                                              // the consumer destroyed us from a 'data' handler
+    }
+    if (eof) {
+      over = true;
+      slots.length = 0;                                              // requests past the end: their replies are dropped
+      stream.push(null);
+      closeOnce();
+      return;
+    }
+    while (wanted && slots.length < depth && next <= limit) {
+      slots.push(issue(next, chunk, 0));
+      next += chunk;
+    }
+  }
+  stream.on('end', closeOnce);
+  return stream;
+}
+
 async function remoteReadFile(uri, o) {
   o = o || {};
   const file = await remoteOpenFile(uri);
@@ -840,16 +915,14 @@ async function readAllPipelined(uri, o) {
   }
 }
 
-// A Node Readable over a remote file — a drop-in for fs.createReadStream so the streaming/paging engines are
-// unchanged. Registered against the connection so the idle reaper won't close it mid-stream.
+// A Node Readable over a remote file — a drop-in for fs.createReadStream, so the streaming/paging engines are
+// unchanged — PIPELINED (pipelinedReadStream): up to D requests of C bytes in flight instead of ssh2's one. It reads
+// through a file handle, which remoteOpenFile registers with its connection: the idle reaper spares the connection
+// mid-stream and a drop errors the stream. o: { start (offset), size (a stat the caller already holds: no request is
+// issued past it but the end-of-file probe), depth, chunk (benchmark knobs) }.
 async function remoteCreateReadStream(uri, o) {
-  o = o || {};
-  const { conn, sftp, path: p } = await resolvePath(uri);
-  const stream = sftp.createReadStream(p, o);
-  conn.openStreams.add(stream);
-  const done = () => conn.openStreams.delete(stream);
-  stream.on('close', done); stream.on('end', done); stream.on('error', done);
-  return stream;
+  const file = await remoteOpenFile(uri);
+  return file.readStream(o);
 }
 
 // Resolve the SFTP-visible path behind a remote URI.  The daemon-event bridge needs the same canonical

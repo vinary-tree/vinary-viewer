@@ -574,6 +574,12 @@ Fixed
       instead of 26-78 s; small files are no slower. A dropped connection now
       fails a read at once instead of leaving it hanging, and the idle-
       connection reaper no longer closes a connection under a read in progress.
+    - Large remote logs and tables (ssh:// and sftp://) stream and page many
+      times faster: the bounded-memory streaming reader and the page-by-page
+      table/log reader used to keep one 64 KiB request in flight at a time;
+      they now keep the whole-file reader's 2 MiB in flight, in order, and
+      stop asking for more while the view is not reading (so memory stays
+      bounded however large the file).
     - Large remote files (ssh:// and sftp://) download up to 1.8x faster on
       distant hosts: the client now tops up the SSH channel's flow-control
       window as soon as a little of it is used, as OpenSSH's own client does,
