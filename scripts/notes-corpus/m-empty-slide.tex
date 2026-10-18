@@ -1,0 +1,20 @@
+% m-empty-slide -- the last frame has no text at all, and a note (docs/scientific/13). The template is chosen on the
+% command line (default or compressed), as in i-templates.tex. Exercises ADR-0048 §2.2's empty-slide clause: a slide
+% without text has a thumbnail without text, so the default template's rotated date decides; the compressed template
+% draws no date.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\providecommand\vvnotetemplate{default}
+\setbeamertemplate{note page}[\vvnotetemplate]
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\begin{frame}
+  \note{NOTEMARK1X Notes for the empty last slide}
+\end{frame}
+\end{document}

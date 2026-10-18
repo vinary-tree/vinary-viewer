@@ -1,0 +1,20 @@
+% d-between -- a \note written BETWEEN two frames, right after a frame that has a note of its own, so two note pages
+% follow each other (docs/scientific/13). Exercises ADR-0048 §2.1's remark that a frame's last note page can be
+% followed at once by the page of a \note written after that frame; the pair sits after a frame with overlays, outside
+% the plain run.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha first point \pause Alpha second point
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+  \note{NOTEMARK1X Notes inside the bravo frame}
+\end{frame}
+\note{NOTEMARK2X A note written between bravo and charlie}
+\begin{frame}{Charlie}
+  Charlie slide words
+\end{frame}
+\end{document}

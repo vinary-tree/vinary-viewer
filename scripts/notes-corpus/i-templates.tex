@@ -1,0 +1,27 @@
+% i-templates -- one deck under each of Beamer's four note-page templates (docs/scientific/13). The template is chosen
+% on the command line, as test/fixtures/beamer-shownotes.tex does it:
+%   <engine> -jobname=i-templates-<t> '\def\vvnotetemplate{<t>}\input{i-templates}'   with <t> one of
+%   default (thumbnail at 1/4 and the rotated date), compressed (thumbnail at 1/8), plain (the notes only),
+%   lined (ruled lines only: the note text is NOT drawn -- the oracle reads the default twin, docs/scientific/13 §4).
+% Exercises ADR-0048 §2.2 (the signature), §2.4 (the scan) and §2.5 (the confirmation) on every template: in-frame
+% notes on both overlays of a frame, a \note between two frames, a note on a later overlay, and \againframe.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\providecommand\vvnotetemplate{default}
+\setbeamertemplate{note page}[\vvnotetemplate]
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Intro}
+  Intro first point \pause Intro second point
+  \note{NOTEMARK1X Notes for both overlays of the intro}
+\end{frame}
+\note{NOTEMARK2X A note written between the intro and the middle}
+\begin{frame}[label=middle]{Middle}
+  Middle slide words
+\end{frame}
+\begin{frame}{Outro}
+  Outro first point \pause Outro second point
+  \note<2>{NOTEMARK3X Notes for the second overlay of the outro}
+\end{frame}
+\againframe{middle}
+\end{document}

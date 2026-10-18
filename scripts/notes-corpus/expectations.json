@@ -1,0 +1,5256 @@
+{
+ "experiment": "H-NOTES-CORPUS",
+ "record": "docs/scientific/13-speaker-note-detection.md",
+ "registered": "2026-10-18T04:52:26.948Z",
+ "basis": "ADR-0048 §2 (docs/design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) and the plan/settle table, applied by scripts/notes-corpus/derive-expectations.cjs to the labels and oracle of a --no-detector run; SIG and ROTATED-DATE predicted by the content model M1-M4 (PREREGISTRATION.md §4)",
+ "fields": [
+  "notes",
+  "notePages",
+  "notesProof",
+  "notesReason",
+  "frames"
+ ],
+ "extra": {
+  "labels": "the page labels the pre-look read (an input fact, re-checked by the run)",
+  "hidden": "the note pages the detector is expected to hide (0-based)"
+ },
+ "contentModelM2Exceptions": [],
+ "artifacts": {
+  "a-last-note.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 4",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "a-last-note.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 4",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "a-last-note.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    4
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     }
+    ]
+   }
+  },
+  "a-last-note.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → candidate 4, confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "b-no-notes.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "b-no-notes.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "b-no-notes.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "b-no-notes.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "c-overlays.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "2",
+    "2",
+    "7",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 3,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    3,
+    6
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       6
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "c-overlays.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "2",
+    "2",
+    "7",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 3,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    3,
+    6
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       6
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "c-overlays.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 3,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 5,
+   "hidden": [
+    1,
+    3,
+    6
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       7
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "c-overlays.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "2",
+    "2",
+    "7",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 3,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    3,
+    6
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       6
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "d-between.pdflatex": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "4",
+    "5",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       3,
+       4
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "d-between.lualatex": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "4",
+    "5",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       3,
+       4
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "d-between.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "d-between.xelatex2": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "4",
+    "5",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       3,
+       4
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "e-againframe.pdflatex": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2",
+    "3",
+    "6",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "e-againframe.lualatex": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2",
+    "3",
+    "6",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "e-againframe.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 5,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "e-againframe.xelatex2": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2",
+    "3",
+    "6",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "f-noframenumbering.pdflatex": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 2,
+   "hidden": [
+    2
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "f-noframenumbering.lualatex": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 2,
+   "hidden": [
+    2
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "f-noframenumbering.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    2
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "f-noframenumbering.xelatex2": {
+   "labels": [
+    "1",
+    "1",
+    "3",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 2,
+   "hidden": [
+    2
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       2
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "f0-unnumbered-first.pdflatex": {
+   "labels": [
+    "0",
+    "2",
+    "1",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "f0-unnumbered-first.lualatex": {
+   "labels": [
+    "0",
+    "2",
+    "1",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "f0-unnumbered-first.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "f0-unnumbered-first.xelatex2": {
+   "labels": [
+    "0",
+    "2",
+    "1",
+    "2"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "g-appendix-no-notes.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "1",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 7,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; restartable → confirmation fails",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "g-appendix-no-notes.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "1",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 7,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; restartable → confirmation fails",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "g-appendix-no-notes.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 7,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "g-appendix-no-notes.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "1",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 7,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmation fails",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "h-appendix-notes.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "3",
+    "1",
+    "6",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "invalid",
+   "frames": 6,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: invalid",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "invalid",
+     "validParses": [],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "h-appendix-notes.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "3",
+    "1",
+    "6",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "invalid",
+   "frames": 6,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: invalid",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "invalid",
+     "validParses": [],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "h-appendix-notes.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 5,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "h-appendix-notes.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "3",
+    "1",
+    "6",
+    "2"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "invalid",
+   "frames": 6,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: invalid",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "invalid",
+     "validParses": [],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": []
+   }
+  },
+  "i-templates-default.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-default.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-default.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 6,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       6,
+       7
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       9
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "i-templates-default.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "i-templates-compressed.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-compressed.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-compressed.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 6,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "compressed",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       6,
+       7
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       9
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "i-templates-compressed.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmed",
+    "trusted": false,
+    "template": "compressed",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": false
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": false
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": false
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "i-templates-plain.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "plain",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-plain.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "plain",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-plain.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 10,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "plain",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       6,
+       7
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       8,
+       9
+      ],
+      "sig": false,
+      "model": "M3c"
+     }
+    ]
+   }
+  },
+  "i-templates-plain.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 9,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmation fails",
+    "trusted": false,
+    "template": "plain",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3e",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "i-templates-lined.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "lined",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-lined.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 4,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    4,
+    8
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "lined",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  },
+  "i-templates-lined.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 10,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "lined",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3t"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": null,
+      "model": "M3t"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3t"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       6,
+       7
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       7,
+       8
+      ],
+      "sig": false,
+      "model": "M3e"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       8,
+       9
+      ],
+      "sig": false,
+      "model": "M3t"
+     }
+    ]
+   }
+  },
+  "i-templates-lined.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "5",
+    "2",
+    "3",
+    "3",
+    "9",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 9,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmation fails",
+    "trusted": false,
+    "template": "lined",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       4,
+       8
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3e",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "j-only-notes.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "j-only-notes.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "j-only-notes.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3c"
+     }
+    ]
+   }
+  },
+  "j-only-notes.xelatex2": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3c"
+     }
+    ]
+   }
+  },
+  "k-counter-set.pdflatex": {
+   "labels": [
+    "2",
+    "2",
+    "3",
+    "3",
+    "4",
+    "6"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "undecidable",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: undecidable",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "undecidable",
+     "validParses": [
+      [
+       5
+      ],
+      [
+       2,
+       5
+      ],
+      [
+       1,
+       5
+      ],
+      [
+       1,
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": true,
+     "why": "several valid parses and L0 >= 2"
+    },
+    "reads": []
+   }
+  },
+  "k-counter-set.lualatex": {
+   "labels": [
+    "2",
+    "2",
+    "3",
+    "3",
+    "4",
+    "6"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "undecidable",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: undecidable",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "undecidable",
+     "validParses": [
+      [
+       5
+      ],
+      [
+       2,
+       5
+      ],
+      [
+       1,
+       5
+      ],
+      [
+       1,
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": true,
+     "why": "several valid parses and L0 >= 2"
+    },
+    "reads": []
+   }
+  },
+  "k-counter-set.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    2,
+    5
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": true,
+      "model": "M3a"
+     }
+    ]
+   }
+  },
+  "k-counter-set.xelatex2": {
+   "labels": [
+    "2",
+    "2",
+    "3",
+    "3",
+    "4",
+    "6"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "undecidable",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "the automaton: undecidable",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "undecidable",
+     "validParses": [
+      [
+       5
+      ],
+      [
+       2,
+       5
+      ],
+      [
+       1,
+       5
+      ],
+      [
+       1,
+       2,
+       5
+      ]
+     ],
+     "restartable": false,
+     "trusted": false,
+     "why": "several valid parses and L0 >= 2"
+    },
+    "reads": []
+   }
+  },
+  "l-second-screen.pdflatex": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "2"
+   ],
+   "notes": "split",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "two-screen deck: split notes, the automaton never runs",
+    "trusted": true,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "l-second-screen.lualatex": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "2"
+   ],
+   "notes": "split",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "two-screen deck: split notes, the automaton never runs",
+    "trusted": true,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "l-second-screen.xelatex": {
+   "labels": null,
+   "notes": "split",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "two-screen deck: split notes, the automaton never runs",
+    "trusted": false,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "l-second-screen.xelatex2": {
+   "labels": [
+    "1",
+    "1",
+    "2",
+    "2"
+   ],
+   "notes": "split",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "two-screen deck: split notes, the automaton never runs",
+    "trusted": false,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "m-empty-slide-default.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 3",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3t",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "m-empty-slide-default.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 3",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3t",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "m-empty-slide-default.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3t"
+     }
+    ]
+   }
+  },
+  "m-empty-slide-default.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "interleaved",
+   "notePages": 1,
+   "notesProof": [
+    "labels",
+    "probe",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3
+   ],
+   "derivation": {
+    "path": "ambiguous → candidate 3, confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3t",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3t",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "m-empty-slide-compressed.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3t",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "m-empty-slide-compressed.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3t",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "m-empty-slide-compressed.xelatex": {
+   "labels": null,
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "no labels → the scan finds none",
+    "trusted": false,
+    "template": "compressed",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3t"
+     }
+    ]
+   }
+  },
+  "m-empty-slide-compressed.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 4,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": false,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       3
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3
+     ],
+     "runEnd": 3,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3t",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-default.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 3",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-default.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 3",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-default.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-default.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "ambiguous → candidate 3, confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-compressed.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-compressed.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-compressed.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    3,
+    4
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "compressed",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     }
+    ]
+   }
+  },
+  "n-trailing-notes-compressed.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "no-note-pages",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe keeps the parse without note pages",
+    "trusted": false,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [],
+      [
+       4
+      ],
+      [
+       3,
+       4
+      ],
+      [
+       2,
+       3,
+       4
+      ],
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "runEnd": 4,
+     "base": [],
+     "fallback": true
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "o-run-between-default.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    2
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 1",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "o-run-between-default.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    2
+   ],
+   "derivation": {
+    "path": "ambiguous → the probe chooses candidate 1",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "o-run-between-default.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    2
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "o-run-between-default.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "labels",
+    "probe",
+    "confirm"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    2
+   ],
+   "derivation": {
+    "path": "ambiguous → candidate 1, confirmed",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": true
+     },
+     {
+      "step": "probe",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     }
+    ]
+   }
+  },
+  "o-run-between-compressed.pdflatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "probe-undecided",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe stops and the fallback is invalid",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "o-run-between-compressed.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "probe-undecided",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe stops and the fallback is invalid",
+    "trusted": true,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": true,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "o-run-between-compressed.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    2
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "compressed",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       4,
+       5
+      ],
+      "sig": false,
+      "model": "M3d"
+     }
+    ]
+   }
+  },
+  "o-run-between-compressed.xelatex2": {
+   "labels": [
+    "1",
+    "2",
+    "3",
+    "2",
+    "2",
+    "3"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "probe-undecided",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "ambiguous → the probe stops and the fallback is invalid",
+    "trusted": false,
+    "template": "compressed",
+    "automaton": {
+     "status": "ambiguous",
+     "validParses": [
+      [
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "restartable": true,
+     "trusted": false,
+     "candidates": [
+      1,
+      2
+     ],
+     "runEnd": 2,
+     "base": [],
+     "fallback": false
+    },
+    "reads": [
+     {
+      "step": "probe",
+      "pair": [
+       1,
+       2
+      ],
+      "sig": false,
+      "model": "M3c",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "p-roman-numbers.pdflatex": {
+   "labels": [
+    "I",
+    "2",
+    "II",
+    "III",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "labels-not-integers",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "the labels are not all integers: the automaton does not run",
+    "trusted": true,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "p-roman-numbers.lualatex": {
+   "labels": [
+    "I",
+    "2",
+    "II",
+    "III",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "labels-not-integers",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "the labels are not all integers: the automaton does not run",
+    "trusted": true,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "p-roman-numbers.xelatex": {
+   "labels": null,
+   "notes": "interleaved",
+   "notePages": 2,
+   "notesProof": [
+    "scan"
+   ],
+   "notesReason": null,
+   "frames": 3,
+   "hidden": [
+    1,
+    4
+   ],
+   "derivation": {
+    "path": "no labels → the scan finds note pages",
+    "trusted": false,
+    "template": "default",
+    "reads": [
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       0,
+       2
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": false,
+      "model": "M3d"
+     },
+     {
+      "step": "scan",
+      "pair": [
+       3,
+       4
+      ],
+      "sig": true,
+      "model": "M3a"
+     }
+    ]
+   }
+  },
+  "p-roman-numbers.xelatex2": {
+   "labels": [
+    "I",
+    "2",
+    "II",
+    "III",
+    "5"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "labels-not-integers",
+   "frames": 5,
+   "hidden": [],
+   "derivation": {
+    "path": "the labels are not all integers: the automaton does not run",
+    "trusted": false,
+    "template": "default",
+    "reads": []
+   }
+  },
+  "stale.xelatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "2",
+    "3",
+    "7",
+    "8"
+   ],
+   "notes": "none",
+   "notePages": 0,
+   "notesProof": null,
+   "notesReason": "confirm-failed",
+   "frames": 8,
+   "hidden": [],
+   "derivation": {
+    "path": "proven; untrusted producer → confirmation fails",
+    "trusted": false,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       6,
+       7
+      ]
+     ],
+     "restartable": false,
+     "trusted": false
+    },
+    "reads": [
+     {
+      "step": "confirm",
+      "pair": [
+       0,
+       1
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       2,
+       3
+      ],
+      "sig": true,
+      "model": "M3a",
+      "dated": true
+     },
+     {
+      "step": "confirm",
+      "pair": [
+       5,
+       6
+      ],
+      "sig": false,
+      "model": "M3d",
+      "dated": false
+     }
+    ]
+   }
+  },
+  "stale.lualatex": {
+   "labels": [
+    "1",
+    "2",
+    "1",
+    "4",
+    "2",
+    "3",
+    "4",
+    "8"
+   ],
+   "notes": "interleaved",
+   "notePages": 3,
+   "notesProof": [
+    "labels"
+   ],
+   "notesReason": null,
+   "frames": 4,
+   "hidden": [
+    1,
+    3,
+    7
+   ],
+   "derivation": {
+    "path": "proven by the labels; trusted producer, not restartable → hidden at once",
+    "trusted": true,
+    "template": "default",
+    "automaton": {
+     "status": "proven",
+     "validParses": [
+      [
+       1,
+       3,
+       7
+      ]
+     ],
+     "restartable": false,
+     "trusted": true
+    },
+    "reads": []
+   }
+  }
+ }
+}

@@ -5,7 +5,8 @@
 [`vinary.slides.evidence`](../../src/vinary/slides/evidence.cljs). Its finite claims are also checked by machine, in
 [`formal/speaker-notes/`](formal/speaker-notes/check.sh) (§7.1): exhaustively over every small deck, by evaluating
 the model's own source text, and over pdf.js's own decoder. This document changes no code. Where it finds the ADR or
-a docstring wrong, it says so (§7.3) and leaves the decision to the maintainer.**
+a docstring wrong, it says so (§7.3) and leaves the decision to the maintainer. The statements it found wrong have
+since been corrected; §7.3 gives each finding's status.**
 
 A Beamer deck compiled with `\setbeameroption{show notes}` puts **note pages** between its slides. A slide show must
 hide them from the audience. vinary-viewer decides where they are from the page labels when it can, and from the
@@ -481,8 +482,9 @@ valid parse:
 
 So the status is `:proven` with note pages $`\{1, 2, 3, 4\}`$. The unit test `a-restarted-frame-counter-is-not-proof`
 records exactly this. Proposition 9 says what a drop forces: page $`i - 1`$ is a note page, page $`i`$ is a slide, and
-a valid parse survives the drop only when $`L_{i-1} = i`$. The `interleaving` docstring still glosses `:invalid` as "a
-label drops, as a restarted frame counter makes it", which suggests that every drop invalidates (finding F4).
+a valid parse survives the drop only when $`L_{i-1} = i`$. The `interleaving` docstring glossed `:invalid` as "a
+label drops, as a restarted frame counter makes it", which suggested that every drop invalidates. It now gives this
+example instead (finding F4, corrected).
 
 These labels have two readings, and nothing in them tells the two apart:
 
@@ -565,8 +567,10 @@ So the labels are restartable.
 - every page after it is a slide.
 
 An $`n`$-page deck ($`n \ge 2`$) has $`2^{n-2} - 1`$ such forms. A trusted Producer's deck of one of these forms is
-confirmed instead of hidden at once. That costs reading pages, and nothing else: CONFIRM passes on a true parse
-(§5).
+confirmed instead of hidden at once. That costs reading pages, and nothing else, whenever CONFIRM passes on the true
+parse: under T1 and T4 (§4.1) it does with the `default` template, and with `compressed` when every slide that has
+notes has upright text. With `plain` or `lined`, CONFIRM fails at the first note page (T1′ and T4), and the deck is
+shown as it is (§5).
 
 *Proof.* ($`\Rightarrow`$) The deck's true parse $`N^\ast`$ is valid, and the status is `:proven`, so
 $`\mathcal{P}(L) = \{N^\ast\}`$ with $`N^\ast \neq \varnothing`$, and every choice set, $`\mathcal{C}_0`$ included, has
@@ -592,8 +596,9 @@ a new frame:
 \sum_{m=1}^{n-2} 2^{\,n-m-2} = 2^{\,n-2} - 1 . \qquad \blacksquare
 ```
 
-The `restartable?` docstring says that "a real notes deck almost never reads so". Corollary 17 makes that precise:
-these are the only restart-free forms the guard confirms (finding F16).
+The `restartable?` docstring said that "a real notes deck almost never reads so". Corollary 17 makes that precise:
+these are the only restart-free forms the guard confirms. The docstring and ADR-0048 §2.1 now say so (finding F16,
+corrected).
 
 #### 2.4.6 · The restart lemma
 
@@ -949,11 +954,12 @@ grid has a boundary inside it, so neither holds it in one cell.*
 So every copy found agrees within $`(w_\ell, w_t)`$. Every copy that agrees within $`(w_\ell / 2, w_t / 2)`$ is found.
 Between the two, a copy may or may not be found, depending on where the boundaries fall.
 
-ADR-0048 §2.2 states both guarantees: every copy found "agrees within 2 % in scale and 0.5 % of the diagonal in
+ADR-0048 §2.2 stated both guarantees: every copy found "agrees within 2 % in scale and 0.5 % of the diagonal in
 offset", and "every set of matches that agrees within half those tolerances falls into one cell of some grid". The
 offset bounds hold on each axis separately, a Chebyshev bound rather than a Euclidean one. For the scale, "half" holds
 in log scale only: a ratio of $`\sqrt{1.02} \approx 1.00995`$, slightly less than 1 %. A set whose scales agree within
-1 % but not within $`\sqrt{1.02}`$ can be split by all eight grids (Proposition 25; finding F9). The margin is ample in
+1 % but not within $`\sqrt{1.02}`$ can be split by all eight grids (Proposition 25). The ADR now states the half-cell
+bound as that ratio, and the offsets' as 0.25 % of the diagonal on each axis (finding F9, corrected). The margin is ample in
 practice: on a real LuaLaTeX deck the thumbnail offsets agree to 0.01 pt (ADR-0048 §2.2). For Beamer's default page of
 $`128\,\mathrm{mm} \times 96\,\mathrm{mm}`$, $`d \approx 453.5`$ page units (PostScript points), so
 $`w_t / 2 \approx 1.13`$ of them.
@@ -1134,8 +1140,9 @@ Take a deck whose labels read $`1, 2, \dots, n`$ (case (a)), with $`k \ge 0`$ no
 the default template it costs $`\max(2, k + 1)`$ pages: two without notes, one pair; $`k + 1`$ with $`k \ge 1`$, $`k`$
 pairs. With the compressed template it always costs 2 pages, one pair.
 
-ADR-0048 §2.3 says the walk costs "one more page for every note page after its last slide", that is, $`2 + k`$. That
-is one too many for every $`k \ge 1`$, and the "Alternatives considered" section repeats it (finding F5). The
+ADR-0048 §2.3 said the walk costs "one more page for every note page after its last slide", that is, $`2 + k`$. That
+is one too many for every $`k \ge 1`$, and the "Alternatives considered" section repeated it. Both now give
+$`k + 1`$ (finding F5, corrected). The
 enumeration checked $`\max(2, k + 1)`$ for every $`n \le 12`$. ADR-0048 is right that, under the compressed template,
 "Such a deck with several note pages after its last slide is shown as it is": by item 2, the walk returns the
 fallback, whose `:base` is empty in case (a).
@@ -1200,7 +1207,8 @@ probe and the CONFIRM after it share it.
 $`1.68 \times 10^7`$ pair visits (§3.7). Also, `plan`'s check for CONFIRM counts *distinct* pages
 (`confirm-page-count`). The cache keeps four pages, so CONFIRM reads a slide again when it has five or more note pages
 (§5). A CONFIRM that passed the check can therefore still run out of reads, and end `:too-many-pages`. That outcome is
-safe, but it is not, as the `max-content-pages` docstring says, "refused before any page is read" (finding F6).
+safe, but it is not, as the `max-content-pages` docstring said, "refused before any page is read". The docstring and
+ADR-0048 §2.5 and §8.9 now tell the up-front refusal from the read budget (finding F6, corrected).
 
 ### 4.6 · Outside the rules
 
@@ -1284,8 +1292,9 @@ measured on the reader's own logic (§7.1), with the two texts of every pair arr
 | 9 | 10 | 12 | 11 |
 | 12 | 13 | 15 | 15 |
 
-So ADR-0048 §2.5's "Each note page and each slide that has notes is read once" holds only up to four note pages per
-slide. Its bound of "at most two pages' text per note page" always holds (finding F6).
+So ADR-0048 §2.5's "Each note page and each slide that has notes is read once" held only up to four note pages per
+slide, and §2.5 now says so. Its bound of "at most two pages' text per note page" always holds (finding F6,
+corrected).
 
 ---
 
@@ -1366,11 +1375,11 @@ length and is injective letter by letter (Lemma 33), so $`\Delta`$ is injective 
 `stringToPDFString` computes the four examples, and §7.1's check confirms the case split of §6.1 on every non-empty
 string of up to six bytes over an alphabet that reaches every branch. ∎
 
-ADR-0048 §4 says that "no two bytes decode to the same character, so the inverse is defined exactly when every
+ADR-0048 §4 said that "no two bytes decode to the same character, so the inverse is defined exactly when every
 character of $`s`$ is one that some byte decodes to". That is true of $`\delta`$ on the bytes other than `1B`, and so
-of $`\Delta`$ on $`D_T^0`$. The `pdfdoc-bytes` docstring restricts the same claim to strings without a byte-order mark,
-which excludes the BOM branch but not the escapes. Both need the qualification "for a string of $`D_T^0`$": the bytes
-that pdf.js turned into a string are unique only there (finding F7).
+of $`\Delta`$ on $`D_T^0`$. The `pdfdoc-bytes` docstring restricted the same claim to strings without a byte-order
+mark, which excludes the BOM branch but not the escapes. Both needed the qualification "for a string of $`D_T^0`$":
+the bytes that pdf.js turned into a string are unique only there. Both now state it (finding F7, corrected).
 
 ### 6.3 · The inverse
 
@@ -1445,14 +1454,14 @@ condition of Theorem 36, and that happens in two situations only:
    valid UTF-8. Every byte of $`\mathrm{strip}(b)`$ at or above `0x80` must then belong to a well-formed sequence of
    2–4 bytes [8]. In characters, that applies to every character of $`u`$ that comes from such a byte, which is every
    character above U+007F except ˘ ˇ ˆ ˝ ˛ ˚ ˜, the images of bytes below `0x20`. Examples are `Ã©` (`C3 A9`),
-   `Ã©Ã©`, and `Ã©˘` (`C3 A9 18`). ADR-0048's trade-off states the condition on characters ("every character above
+   `Ã©Ã©`, and `Ã©˘` (`C3 A9 18`). ADR-0048's trade-off stated the condition on characters ("every character above
    0x7F in that text must also happen to pair into a UTF-8 sequence"), which those seven need not do. Its two-byte case
-   adds "with no other character above 0x7F anywhere in the note", which describes a note with one sequence only: a
-   note with several, such as `Ã©Ã©`, is mis-decoded too (finding F8).
+   added "with no other character above 0x7F anywhere in the note", which describes a note with one sequence only: a
+   note with several, such as `Ã©Ã©`, is mis-decoded too (finding F8, corrected).
 2. **A string that pdf.js decoded through the BOM branch** (UTF-16BE, UTF-16LE, or UTF-8 with a BOM), whose characters
    all lie in $`\operatorname{Im}\delta`$, and whose bytes under $`\textsf{PDFDOC}^{-1}`$ meet the condition. For
-   example, `FE FF 00 C3 00 A9` reads `Ã©`, and REPAIR turns it into `é`. ADR-0048's trade-off omits this case
-   (finding F8).
+   example, `FE FF 00 C3 00 A9` reads `Ã©`, and REPAIR turns it into `é`. ADR-0048's trade-off omitted this case. It
+   now gives both cases (finding F8, corrected).
 
 *Proof.* REPAIR changes $`u`$ exactly when the condition holds (Theorem 36). When $`u`$ is the intended text, every
 change is a mis-decoding. By §6.1, the bytes $`b`$ behind $`u`$ take one of three paths.
@@ -1526,27 +1535,34 @@ passed, in 7 minutes 18 seconds, most of it the $`n \le 6`$ enumeration (5 minut
 |---|---|
 | labels $`L`$, canonical integers | `notes.cljs` `label-int`, `integer-labels` (lines 25–37) |
 | gaps and $`\mathcal{C}_t`$ (Lemma 3) | `gap-choices` (57–69), `gap-notes` (71–76) |
-| the statuses (Theorems 10–12) | `interleaving` (78–129) |
-| candidate $`a`$, the fallback | `candidate-notes` (141–144), `fallback-notes` (146–150) |
-| `restartable?` (Theorem 14) | `restartable?` (131–139) |
-| the guard, the trusted Producer | `plan` (775–805), `trusted-producer-re` and `trusts-labels?` (348–357) |
-| matches, the grids, $`\textsf{SIG}`$ (§3) | `copy-covers?` (216–246), `note-page-signature?` (248–284), the constants (154–175) |
-| $`\textsf{ROTATED-DATE}`$ | `rotated-date?` (199–206) |
-| the probe (§4.3) | `probe-next` (288–308); `evidence.cljs` `probe` (149–158), `read-pair` (136–147) |
-| the scan (§4.4) | `scan-step` (310–317); `evidence.cljs` `scan` (174–192) |
-| CONFIRM (§5) | `confirm-pairs` (319–328), `confirmed?` (330–333); `evidence.cljs` `confirm` (160–172) |
-| the budget (§4.5) | `max-content-pages` (335–340), `confirm-page-count` (342–346); `evidence.cljs` `kept-pages`, `runs-reader` (107–131) |
+| the statuses (Theorems 10–12) | `interleaving` (78–132) |
+| candidate $`a`$, the fallback | `candidate-notes` (147–150), `fallback-notes` (152–156) |
+| `restartable?` (Theorem 14) | `restartable?` (134–145) |
+| the guard, the trusted Producer | `plan` (785–815), `trusted-producer-re` and `trusts-labels?` (356–365) |
+| matches, the grids, $`\textsf{SIG}`$ (§3) | `copy-covers?` (222–252), `note-page-signature?` (254–290), the constants (160–181) |
+| $`\textsf{ROTATED-DATE}`$ | `rotated-date?` (205–212) |
+| the probe (§4.3) | `probe-next` (294–314); `evidence.cljs` `probe` (149–158), `read-pair` (136–147) |
+| the scan (§4.4) | `scan-step` (316–323); `evidence.cljs` `scan` (174–192) |
+| CONFIRM (§5) | `confirm-pairs` (325–334), `confirmed?` (336–339); `evidence.cljs` `confirm` (160–172) |
+| the budget (§4.5) | `max-content-pages` (341–347), `confirm-page-count` (349–354); `evidence.cljs` `kept-pages`, `runs-reader` (107–131) |
 | the decision after the first paint | `evidence.cljs` `settle` (194–233) |
-| $`\delta`$, $`\textsf{PDFDOC}^{-1}`$ | `pdfdoc-low`, `pdfdoc-high`, `pdfdoc-inverse`, `never-decoded` (696–713), `pdfdoc-bytes` (715–730) |
-| REPAIR | `repair` (734–746) |
+| $`\delta`$, $`\textsf{PDFDOC}^{-1}`$ | `pdfdoc-low`, `pdfdoc-high`, `pdfdoc-inverse`, `never-decoded` (704–721), `pdfdoc-bytes` (723–740) |
+| REPAIR | `repair` (744–756) |
 
 ### 7.3 · Findings
 
-Nothing below has been changed in the code: each finding is reported to the maintainer. They are ordered by
-consequence: first the paths that can hide a slide, then statements that are false or imprecise, then remarks on the
-code. ADR-0048 was revised in commit `7d75f8e` while this document was being written. The revision already states, as
-proved here, the gap decomposition (§2.1), the exception to drops (§2.4.1), the fallback (§4.3) and the per-axis
-tolerances (§3.4). The findings are against the revised text.
+This document changed no code: each finding was reported to the maintainer. They are ordered by consequence: first
+the paths that can hide a slide, then statements that are false or imprecise, then remarks on the code. ADR-0048 was
+revised in commit `7d75f8e` while this document was being written. The revision already states, as proved here, the
+gap decomposition (§2.1), the exception to drops (§2.4.1), the fallback (§4.3) and the per-axis tolerances (§3.4). The
+findings are against the revised text.
+
+Each finding ends with its status:
+
+- **Corrected.** ADR-0048 and the docstrings were changed to state what is proved here, when
+  [experiment 13](../scientific/13-speaker-note-detection.md) was integrated. No code changed. The finding quotes
+  the text as it stood before.
+- **Open.** A proposal that the maintainer has not decided. The code is as the finding describes it.
 
 **Paths that can hide a slide.**
 
@@ -1555,67 +1571,84 @@ tolerances (§3.4). The findings are against the revised text.
   $`1, \dots, s`$. That is $`W(n) = (3^{\,n-1} - 2^{\,n+1} + 2n + 1)/4`$ true decks per $`n`$, for instance 42,245 at
   $`n = 12`$. ADR-0048 §2.1's rationale for the guard covers only the restart decks whose appendix has no note page:
   the others cannot be read as all slides, so their parse "counts as proven by the labels alone". No rule on the labels
-  alone separates them from their $`V(n)`$ restart-free twins (Proposition 22).
+  alone separates them from their $`V(n)`$ restart-free twins (Proposition 22). *Open.*
 - **F2. A counter set forward by hand, landing on $`L_i = i + 1`$, is hidden at once** (§4.6). All 9,330 proven
-  forward decks at $`n = 9`$ hide a slide, and so does every proven forward deck at each smaller $`n`$.
+  forward decks at $`n = 9`$ hide a slide, and so does every proven forward deck at each smaller $`n`$. *Open.*
 - **F3. Unconfirmed probes and unchecked assumptions** (§4.6, §5).
   - The probe's choice for a trusted Producer is not confirmed. Outside the rules it hides a slide in 4,340 of 7,537
     ambiguous forward decks at $`n = 9`$, or 3,867 with the compressed template.
   - `rotated-date?` lets a slide that draws a rotated date pass CONFIRM: T4′ is assumed, not checked.
   - A page that breaks T2 defeats the probe, the scan and CONFIRM alike.
 
+  *Open.*
+
 **Statements that are false or imprecise.**
 
 - **F4. The `interleaving` docstring says that a drop invalidates.** It glosses `:invalid` as "no parse is valid (a
   label drops, as a restarted frame counter makes it)". A drop leaves a valid parse exactly when Proposition 9's
   condition holds. For instance $`(1, 2, 3, 4, 5, 1, 2)`$ is `:proven` (§2.4.1), as ADR-0048 §2.1 now says itself.
+  *Corrected:* the docstring now gives that example.
 - **F5. The probe's cost is one page too many** in ADR-0048 §2.3 ("one more page for every note page after its last
   slide") and in "Alternatives considered" ("one more per trailing note page"). The cost is $`\max(2, k + 1)`$, not
-  $`2 + k`$ (Corollary 29).
+  $`2 + k`$ (Corollary 29). *Corrected:* both passages now give $`k + 1`$ for $`k \ge 1`$.
 - **F6. CONFIRM re-reads.** ADR-0048 §2.5 says "Each note page and each slide that has notes is read once
   (`confirm-page-count`)", which is false with five or more note pages per slide (§5). §2.5 and §8.9 both say that a
   confirmation that would read more than 2 000 pages is refused before it starts, and the `max-content-pages`
   docstring that it is "refused before any page is read". `plan`'s check counts distinct pages, so a CONFIRM that
   passed it can still end `:too-many-pages` part-way (§4.5). The bound of two pages per note page holds.
+  *Corrected:* §2.5 and §8.9, and the `max-content-pages` and `confirm-page-count` docstrings, now tell the up-front
+  refusal of distinct pages from the budget of reads, and say when CONFIRM reads a slide again.
 - **F7. The bytes behind a string are unique only on $`D_T^0`$.** ADR-0048 §4 says "No two bytes decode to the same
   character, so the inverse is defined exactly when every character of $`s`$ is one that some byte decodes to". The
   `pdfdoc-bytes` docstring says the same of "a literal string without a byte-order mark". Both are true of the byte
   map, but the bytes that pdf.js turned into a string are unique only for the escape-free strings that reach its table
   branch whole. pdf.js's decoding is not injective on escapes, across its branches, within the BOM branch, or on the
   UTF-16 strings of odd length that the decoder rejects, which reach the table branch without their last byte
-  (Theorem 34). The docstring's restriction excludes all but the escapes.
+  (Theorem 34). The docstring's restriction excludes all but the escapes. *Corrected:* ADR-0048 §4 and the
+  docstring now restrict the uniqueness of the bytes to $`D_T^0`$.
 - **F8. REPAIR's trade-off is imprecise.** ADR-0048 states the condition on characters: "Every character above 0x7F
   in that text must also happen to pair into a UTF-8 sequence". The seven accents ˘ ˇ ˆ ˝ ˛ ˚ ˜ lie above 0x7F but
   come from bytes below `0x20`, so they need not pair: `Ã©˘` is mis-decoded too. Its two-byte case adds "with no
   other character above 0x7F anywhere in the note", which describes a note with a single sequence, while a note with
   several, such as `Ã©Ã©`, is mis-decoded as well. The trade-off also omits the mis-decoding of strings that pdf.js
-  decoded through its BOM branch (Theorem 38).
+  decoded through its BOM branch (Theorem 38). *Corrected:* the trade-off now gives both cases of Theorem 38.
 - **F9. Half the scale tolerance is $`\sqrt{1.02}`$, not 1 %.** ADR-0048 §2.2 says that "every set of matches that
   agrees within half those tolerances falls into one cell of some grid". That holds on each offset axis, and for the
   scale in log scale only: a ratio of $`\sqrt{1.02} \approx 1.00995`$. Some sets whose scales agree within 1 % are
   split by all eight grids (§3.4, Proposition 25). The difference is negligible in practice. The `copy-covers?`
   docstring's version of the claim is exact, because it states the scale tolerance as a cell width in $`\ln \sigma`$.
+  *Corrected:* §2.2 now gives the half-cell bounds, $`\sqrt{1.02}`$ in scale and 0.25 % of the diagonal per offset.
 - **F10. The bounds are credited to the wrong thread.** The `max-content-pages` docstring says the page budget "keeps
   a hostile PDF from occupying pdf.js's worker for minutes", and ADR-0048 §8.9 says that, with the run and match caps,
   "a hostile PDF cannot occupy pdf.js's worker for long". The page budget does bound the worker's text extraction. The
   signature, however, runs on the thread that calls it, the renderer's in the GUI, so the caps protect that thread
-  rather than the worker, and only partly (F11).
+  rather than the worker, and only partly (F11). *Open.*
 
 **Remarks on the code** (none changes what is shown).
 
 - **F11.** The match cap does not bound the pair work: up to $`4096^2`$ visits per comparison, unmeasured (§3.7).
   ADR-0048 §2.2 describes the cap as "a pair whose equal strings pair up more than 65 536 times", but only the pairs
-  with $`\sigma \le 0.4`$ count toward it.
+  with $`\sigma \le 0.4`$ count toward it. *Open.*
 - **F12.** The first `:undecidable` condition, `(> (count multi) 1)`, is dead code (Proposition 8). ADR-0048 §2.1's
-  table lists "more than one gap with a choice" among the undecidable cases, which never occurs.
+  table lists "more than one gap with a choice" among the undecidable cases, which never occurs. *The statement is
+  corrected:* §2.1 now says that the condition never occurs, and that `:undecidable` needs $`L_0 \ge 2`$. *The test is
+  open:* it is still in the code.
 - **F13.** The filter `:when (ok? (inc y))` in `gap-choices` is implied by `ys` and never removes a block (§2.1).
+  *Open.*
 - **F14.** The candidates are sorted in $`O(n \log n)`$ in case (a), where they are $`1, \dots, n - 1`$ already
-  (Proposition 13).
-- **F15.** Coverage counts slide runs, and one note run can witness two overprinted slide runs (§3.5).
+  (Proposition 13). *Open.*
+- **F15.** Coverage counts slide runs, and one note run can witness two overprinted slide runs (§3.5). *Open.*
 - **F16.** The "almost never" of the `restartable?` docstring, and of ADR-0048 §2.1's "A real notes deck almost never
-  reads so", is precisely the $`2^{\,n-2} - 1`$ forms of Corollary 17.
+  reads so", is precisely the $`2^{\,n-2} - 1`$ forms of Corollary 17. *Corrected:* the docstring and §2.1 now say so.
 - **F17.** With $`L_0 \ge 2`$, the code shows as they are even decks where only c3 holds, whose parses differ only by
-  distinct first note pages: 59 label sequences at $`n \le 6`$ (§2.3). This is conservative, not wrong.
+  distinct first note pages: 59 label sequences at $`n \le 6`$ (§2.3). This is conservative, not wrong. *Open:*
+  ADR-0048 §2.1 and the `interleaving` docstring now say it, and the code is unchanged.
+
+**Revisions of this document.**
+
+- Corollary 17 first said that the confirmation of its forms costs reading pages and nothing else, because "CONFIRM
+  passes on a true parse". That holds under T1 and T4 only with the `default` template, or `compressed` when every
+  slide with notes has upright text. The proviso was added when ADR-0048 §2.1 came to quote the corollary.
 
 ---
 

@@ -1,0 +1,19 @@
+% e-againframe -- \againframe of a frame whose second overlay has a note (docs/scientific/13).
+% Exercises ADR-0048 §2.1 rule 2: \againframe steps the frame counter like any frame, and the frame's note comes back
+% with it, after the repeated overlay.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}[label=alpha]{Alpha}
+  Alpha first point \pause Alpha second point
+  \note<2>{NOTEMARK1X Notes for the second overlay of alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\againframe<2>{alpha}
+\begin{frame}{Charlie}
+  Charlie slide words
+\end{frame}
+\end{document}

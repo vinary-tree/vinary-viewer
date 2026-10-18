@@ -248,7 +248,7 @@ frames. `--deck-info` waits for that background work, so it prints the GUI's fin
 | `notes` | Where the deck keeps its notes: `interleaved` (note pages between the slides), `split` (each page holds a slide and its notes, side by side or one above the other) or `none`. |
 | `notePages` | How many note pages leave the audience's sequence. |
 | `notesProof` | How they were found: `labels` (the page labels alone), `probe` (page text chose between the parses the labels allow), `confirm` (page text confirmed a parse whose labels an untrusted producer wrote, or that a restarted frame counter would also explain) and `scan` (no labels: page text compared page by page). |
-| `notesReason` | Why no page is hidden, when one applies: `no-note-pages`, `not-beamer`, `one-page`, `labels-not-integers`, `invalid` and `undecidable` (the labels cannot be a `show notes` deck's), `probe-undecided`, `confirm-failed`, `too-many-pages` (the text comparison would read more than 2 000 pages), `unreadable` or `error`. In every one of these cases the deck is shown as it is. |
+| `notesReason` | Why no page is hidden, when one applies: `no-note-pages`, `not-beamer`, `one-page`, `labels-not-integers`, `invalid` (no reading of the labels fits a `show notes` deck), `undecidable` (several readings fit, and the first label is 2 or more), `probe-undecided`, `confirm-failed`, `too-many-pages` (the text comparison would need more than 2 000 page reads), `unreadable` or `error`. In every one of these cases the deck is shown as it is. A reason names what the evidence found, not what the PDF holds: `no-note-pages` says that the reading without note pages stood, or that the scan found none, so a deck whose note pages the evidence cannot see reports it too — a notes handout, a `compressed` note page of an empty slide, a `compressed` deck whose probe stopped, or a `plain` or `lined` deck without labels ([experiment 13](../scientific/13-speaker-note-detection.md) §9.2). |
 | `notesSide` | A `split` deck's notes half: `right`, `left`, `bottom` or `top` — Beamer's default unless pdfpc's notes position says otherwise. |
 | `pdfpc` | pdfpc's settings, from pdfpc.sty's metadata first and the sidecar second: `notesPosition`, `durationMin`, `startTime`, `endTime`, `lastMinutes`, `endFrame` (0-based) and `markdown` (whether text notes are Markdown). `null` without either. |
 | `sidecar` | The `.pdfpc` file beside the PDF: `{"status": "read", "format": 0, 1, 2 or "legacy"}`, or `{"status": "ignored", "why": …}` — `too-large` (over 4 MiB), `unreadable`, `format` (newer than pdfpc format 2), `not-an-object` or `unrecognized`. `null` when there is none. |
@@ -404,8 +404,9 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
 - **A deck's note pages show as slides.** The viewer hides note pages only when it can prove which they are
   (*Decks with speaker notes*, §2). `vv --cli --deck-info` names the reason it could not (`notesReason`): a producer
   other than pdfLaTeX or LuaLaTeX whose labels page text did not confirm (`confirm-failed`), labels that allow no
-  `show notes` reading (`invalid`), a deck over 2 000 pages (`too-many-pages`). Compile with pdfLaTeX or LuaLaTeX,
-  or let XeLaTeX run twice, and the labels prove them.
+  `show notes` reading (`invalid`), a decision that would read more than 2 000 pages (`too-many-pages`), or note pages
+  that the page text cannot tell from slides (`no-note-pages`, for instance a `plain` or `lined` deck without labels).
+  Compiling with pdfLaTeX or LuaLaTeX, or letting XeLaTeX run twice, gives the viewer labels it can use.
 - **A page pdfpc hides is still reachable.** The hidden pages of a pdfpc sidecar are skipped by → and ← and the
   frame steps, as in pdfpc, but Home, End, a typed number and the overview still show them.
 - **Not available yet:** the presenter view (the current slide's notes with the next slide, in this window or a second

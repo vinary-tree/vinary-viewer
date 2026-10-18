@@ -1,0 +1,22 @@
+% o-run-between -- a \note between the FIRST two frames, after a first frame with a note of its own: two note pages in a
+% row INSIDE the plain run (docs/scientific/13). The template is chosen on the command line (default or compressed),
+% as in i-templates.tex. Exercises the probe when the parse without note pages is not valid (ADR-0048 §2.3): the walk
+% reaches the true first note page only over the default template's rotated date; without it the probe is undecided.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\providecommand\vvnotetemplate{default}
+\setbeamertemplate{note page}[\vvnotetemplate]
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+  \note{NOTEMARK1X Notes for alpha}
+\end{frame}
+\note{NOTEMARK2X A note written between alpha and bravo}
+\begin{frame}{Bravo}
+  Bravo first point \pause Bravo second point
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+\end{frame}
+\end{document}

@@ -27,7 +27,7 @@ Concretely, the project validates five classes of property, each with its own in
 | 2 | **Bounded memory** | Does a stream's working set stay `$`O(1)`$` in document length? | [02 — Bounded-memory streaming validation](02-bounded-memory-streaming-validation.md) |
 | 3 | **Algebraic law** | Do the parser's weights actually form a semiring? | [03 — Semiring algebraic laws](03-semiring-algebraic-laws.md) |
 | 4 | **Security invariance** | Is per-block sanitization identical to whole-document sanitization? | [04 — Sanitizer context-freedom](04-sanitizer-context-freedom.md) |
-| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md), [12 — Slide-deck detection & flip latency](12-slide-deck-detection-and-flip-latency.md) |
+| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md), [12 — Slide-deck detection & flip latency](12-slide-deck-detection-and-flip-latency.md), [13 — Speaker-note detection](13-speaker-note-detection.md) |
 
 Runtime performance benchmarking is a **documented, deliberate gap** — the project ships no `perf`/`hyperfine`
 harness today. [07 — Measurement methodology](07-measurement-methodology.md) writes down the methodology that
@@ -153,6 +153,13 @@ that applied it (08–12).
   and end to end, each check first shown to fail without the fix. And the text layer of a split page (H-SPLIT-TEXT):
   pdf.js sized it with a CSS variable the app never defines, so on a slide-left (or slide-top) two-screen deck every
   run sat at half its x (or y); fixed, and measured on a real slide-left LuaLaTeX deck without and with the fix.
+
+- **[13 — Speaker-note detection.](13-speaker-note-detection.md)** The speaker-notes detector of ADR-0048 on what
+  pdfLaTeX, LuaLaTeX and XeLaTeX really write: a controlled corpus of 94 small Beamer decks, each compiled by one
+  engine run, with every decision derived from the ADR's rules and hashed before the detector first ran. No slide
+  was hidden, every deck that hid pages hid all its note pages, and all 470 decision fields matched; the 28 decks
+  shown as they are were all predicted. Two refinements (fall back to the scan; let the probe walk past a
+  thumbnail) are left to a later registered experiment.
 
 ---
 

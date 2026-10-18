@@ -1,0 +1,19 @@
+% l-second-screen -- the CONTROL: \setbeameroption{show notes on second screen=right} (docs/scientific/13).
+% Every page is a slide half beside a notes half (pgfpages doubles the paper), so there is no note page to hide:
+% ADR-0048 §1 calls these split notes, and the label automaton never runs on such a deck (§2.1).
+\documentclass{beamer}
+\setbeameroption{show notes on second screen=right}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+  \note{NOTEMARK1X Notes for alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo first point \pause Bravo second point
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+  \note{NOTEMARK2X Notes for charlie}
+\end{frame}
+\end{document}

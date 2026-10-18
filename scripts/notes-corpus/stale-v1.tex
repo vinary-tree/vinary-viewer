@@ -1,0 +1,20 @@
+% stale-v1 -- the FIRST version of the stale-labels case (docs/scientific/13, after experiment 12's H-XSTALE).
+% The experiment compiles this file twice as stale.tex, replaces stale.tex with stale-v2.tex (one frame inserted after
+% the first), and compiles ONCE more. XeLaTeX's hyperref driver (hxetex.def) then writes the page labels that the
+% previous run left in the .aux file -- this version's -- into the new deck (ADR-0048 §2.5). LuaLaTeX is the control.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{One}
+  One first point \pause One second point
+  \note{NOTEMARK1X Notes for both overlays of one}
+\end{frame}
+\begin{frame}{Two}
+  Two slide words
+\end{frame}
+\begin{frame}{Three}
+  Three slide words
+  \note{NOTEMARK2X Notes for three}
+\end{frame}
+\end{document}

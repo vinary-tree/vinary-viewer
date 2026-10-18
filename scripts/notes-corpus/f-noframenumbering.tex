@@ -1,0 +1,17 @@
+% f-noframenumbering -- a frame marked noframenumbering, with a note, in the middle of the deck (docs/scientific/13).
+% Exercises ADR-0048 §2.1 rule 2: a slide that keeps the current frame number (no new number) is still a slide.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+\end{frame}
+\begin{frame}[noframenumbering]{Aside}
+  Aside slide words
+  \note{NOTEMARK1X Notes for the unnumbered aside}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\end{document}

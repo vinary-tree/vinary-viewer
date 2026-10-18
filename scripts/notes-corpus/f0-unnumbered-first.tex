@@ -1,0 +1,17 @@
+% f0-unnumbered-first -- the FIRST frame is marked noframenumbering, so its label is 0, and it has a note
+% (docs/scientific/13). Exercises ADR-0048 §2.1's statement that a deck whose first label is 0 is never ambiguous.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}[noframenumbering]{Opening}
+  Opening words before the count starts
+  \note{NOTEMARK1X Notes for the unnumbered opening}
+\end{frame}
+\begin{frame}{Alpha}
+  Alpha slide words
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\end{document}

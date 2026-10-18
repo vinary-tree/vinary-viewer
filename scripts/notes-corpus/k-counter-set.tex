@@ -1,0 +1,20 @@
+% k-counter-set -- the frame counter set by hand before the first frame, so the first label is 2
+% (docs/scientific/13). Exercises ADR-0048 §2.1: with a first label of 2 or more, several parses that the probe cannot
+% tell apart may be valid, and such a deck is shown as it is.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\setcounter{framenumber}{1}
+\begin{frame}{Alpha}
+  Alpha first point \pause Alpha second point
+  \note<2>{NOTEMARK1X Notes for the second overlay of alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+  \note{NOTEMARK2X Notes for charlie}
+\end{frame}
+\end{document}

@@ -1,0 +1,22 @@
+% n-trailing-notes -- one page per frame, a note on the last frame AND a \note after it: two note pages after the last
+% slide, inside the plain run (docs/scientific/13). The template is chosen on the command line (default or
+% compressed), as in i-templates.tex. Exercises the probe's walk (ADR-0048 §2.3): the last candidate's pair is two
+% note pages of one slide, and only the default template's rotated date lets the walk go on to the previous candidate.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\providecommand\vvnotetemplate{default}
+\setbeamertemplate{note page}[\vvnotetemplate]
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+  \note{NOTEMARK1X Notes for charlie}
+\end{frame}
+\note{NOTEMARK2X A closing note written after the last frame}
+\end{document}

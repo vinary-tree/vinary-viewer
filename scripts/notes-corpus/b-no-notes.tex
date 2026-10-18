@@ -1,0 +1,20 @@
+% b-no-notes -- one page per frame, `show notes` switched on, and NO \note at all (docs/scientific/13).
+% Exercises the probe on a deck without notes (ADR-0048 §2.3): the labels 1 2 ... n admit a note page at every page
+% after page 0, and the probe should read two pages, find two slides, and keep the parse without note pages.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Intro}
+  Intro words for the opening slide
+\end{frame}
+\begin{frame}{Alpha}
+  Alpha words on the second slide
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo words on the third slide
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie words on the last slide
+\end{frame}
+\end{document}

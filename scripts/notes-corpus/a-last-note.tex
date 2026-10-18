@@ -1,0 +1,22 @@
+% a-last-note -- one page per frame, and a \note on the LAST frame only (docs/scientific/13, H-NOTES-CORPUS).
+% Exercises the PLAIN RUN of ADR-0048 §2.1: every page begins a new frame, so the labels read 1 2 ... n+1 and every
+% page after page 0 could be the first note page; the probe (§2.3) walks the candidates from the last one.
+% Every \note carries a marker token NOTEMARK<k>X that the experiment's oracle finds in the page text.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Intro}
+  Intro words for the opening slide
+\end{frame}
+\begin{frame}{Alpha}
+  Alpha words on the second slide
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo words on the third slide
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie words on the last slide
+  \note{NOTEMARK1X Speaker notes for the last slide only}
+\end{frame}
+\end{document}

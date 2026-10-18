@@ -1,0 +1,23 @@
+% c-overlays -- frames with overlays (\pause, <2->) and a note per overlay (docs/scientific/13).
+% Exercises the label automaton's proof (ADR-0048 §2.1): a note page after an overlay that is not the frame's last
+% carries a label that the frame's next overlay drops below, so exactly one parse is valid.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha first point \pause Alpha second point
+  \note<1>{NOTEMARK1X Notes for the first overlay of alpha}
+  \note<2>{NOTEMARK2X Notes for the second overlay of alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  \begin{itemize}
+    \item Bravo opening point
+    \item<2-> Bravo later point
+  \end{itemize}
+  \note<2>{NOTEMARK3X Notes for the second overlay of bravo}
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie closing words
+\end{frame}
+\end{document}

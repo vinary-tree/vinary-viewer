@@ -1,0 +1,24 @@
+% j-only-notes -- \setbeameroption{show only notes}: the notes handout, note pages only (docs/scientific/13).
+% ADR-0048 §1: such a PDF IS the notes, a document, and is shown as it is. `show only notes` also sets \nofiles, so
+% no .aux file is written and a second XeLaTeX pass finds no labels to write either.
+\documentclass{beamer}
+\setbeameroption{show only notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+  \note{NOTEMARK1X Notes for alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\note{NOTEMARK2X A note written between bravo and charlie}
+\begin{frame}{Charlie}
+  Charlie first point \pause Charlie second point
+  \note<2>{NOTEMARK3X Notes for the second overlay of charlie}
+\end{frame}
+\begin{frame}{Delta}
+  Delta slide words
+  \note{NOTEMARK4X Notes for delta}
+\end{frame}
+\end{document}

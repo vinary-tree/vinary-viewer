@@ -167,7 +167,17 @@ is marked `noframenumbering`. Then a valid parse is determined by where its firs
 | exactly one, without note pages | not interleaved (`:none`) |
 | exactly one, with note pages | **proven** (`:proven`): that parse's note pages, subject to §2.5's confirmation |
 | several, differing only in the plain run of a deck with $`L_0 \le 1`$, with distinct first note pages | **ambiguous** (`:ambiguous`): each parse with note pages is a *candidate*, named by its first note page, and the probe (§2.3) chooses; whether the parse with no note page in the run is valid is recorded too |
-| several, otherwise — $`L_0 \ge 2`$, more than one gap with a choice, or two parses with the same first note page | **undecidable** (`:undecidable`): the probe cannot tell them apart, so the deck is shown as it is |
+| several, otherwise, which needs $`L_0 \ge 2`$: a frame counter set by hand before the first frame | **undecidable** (`:undecidable`): shown as it is |
+
+**Why only a deck with $`L_0 \ge 2`$ is undecidable.** With $`L_0 \le 1`$, a deck with several valid parses is always
+ambiguous: its parses differ only in its plain run, and their first note pages are distinct
+([theory/12](../theory/12-speaker-notes-detection.md), Theorem 12). `interleaving` returns `:undecidable` when any of
+five conditions holds: more than one gap with a choice, which never occurs, whatever $`L_0`$ is (theory/12,
+Proposition 8); a gap with a choice other than the first; $`L_0 \ge 2`$; a choice whose block does not start right
+after its gap's required slide; or two parses with the same first note page. Every deck that meets one of them has
+$`L_0 \ge 2`$. Some such decks meet only that condition: their parses still differ only in the first gap, by distinct
+first note pages, and the probe could tell them apart. Showing them as they are is conservative, not wrong (theory/12
+§2.3).
 
 **A restarted frame counter.** A label that drops — the frame counter restarted, as `appendixnumberbeamer` does at
 `\appendix`, or set back by hand — is outside the rules. A rule that admitted a restart to 1 was considered and
@@ -178,8 +188,15 @@ rules admit exactly one parse of those labels: page 0 a slide, pages 1–4 note 
 6 a new frame. Nothing in the labels refutes it, and it would hide four slides. So a parse counts as proven **by the
 labels alone** only when they cannot also be read as all slides with the counter restarted at every drop, that is, when
 some label is at least two more than the one before it (`restartable?` is false). Labels that are `restartable?` send
-the parse to confirmation by page content (§2.5), whatever the producer. A real notes deck almost never reads so: a
-note page after a slide outside the plain run makes its label jump by two or more.
+the parse to confirmation by page content (§2.5), whatever the producer. A proven parse's labels are `restartable?`
+exactly when its note pages are one run directly after the plain run, all annotating the run's last slide: any note
+page after a later slide makes its label jump by two or more ([theory/12](../theory/12-speaker-notes-detection.md),
+Proposition 16). Among the decks whose counter never restarts, the $`n`$-page ones proven with such labels have
+exactly $`2^{\,n-2} - 1`$ forms (theory/12, Corollary 17): $`L_0 = 1`$, note pages $`1, \dots, m`$, page $`m + 1`$ an
+overlay of frame 1, and only slides after it. A trusted producer's deck of one of those forms is confirmed instead of
+hidden at once. That costs reading its pages, and nothing more when the confirmation passes on the true parse: with the
+`default` template, or `compressed` when every slide that has notes has text (theory/12 §4.1, T1 and T4). Otherwise
+the confirmation fails and the deck is shown as it is (§2.5).
 
 The automaton runs only for Beamer sources (the same gate as `frames-from-labels`), never on a second-screen deck
 (those labels are corrupt — ADR-0045 §9), and only when every label is a non-negative integer.
@@ -221,9 +238,12 @@ height, at positions $`\sigma \cdot (x, y) + (t_x, t_y)`$, for one scale $`\sigm
   $`(t_x, t_y) = (x_j, y_j) - \sigma \cdot (x_s, y_s)`$; only $`\sigma \le 0.4`$ counts. A **copy** is the set of matches in
   one cell of a grid over $`(\ln \sigma, t_x, t_y)`$ whose cells are $`\ln 1.02`$ wide in $`\ln \sigma`$ and
   $`0.005\,d`$ wide in each offset, $`d`$ being the note page's diagonal — or in one cell of the seven grids shifted
-  from it by half a cell along any of the three axes. Every copy found this way agrees within 2 % in scale and 0.5 % of
-  the diagonal in offset, and every set of matches that agrees within half those tolerances falls into one cell of
-  some grid ([theory/12](../theory/12-speaker-notes-detection.md) §3). A slide run counts once per copy, however many
+  from it by half a cell along any of the three axes. Every copy found this way agrees within 2 % in scale (its
+  largest scale is less than 1.02 times its smallest) and within 0.5 % of the diagonal in each offset. Every set of
+  matches that agrees within half a cell on each axis falls into one cell of some grid: scales within a ratio of
+  $`\sqrt{1.02} \approx 1.00995`$, half a cell in $`\ln \sigma`$, and offsets within 0.25 % of the diagonal
+  ([theory/12](../theory/12-speaker-notes-detection.md) §3.3–§3.4). Half a cell is the limit: a set that spreads more
+  on some axis can be split by all eight grids. A slide run counts once per copy, however many
   runs of the note page repeat its string. The signature is true when some copy covers at least half of the
   characters of $`s`$'s upright text. Eight passes over hash maps make it linear in the number of matches.
 - **Bounds.** A page with more than 4 096 runs, or a pair whose equal strings pair up more than 65 536 times, is not
@@ -268,7 +288,9 @@ Pages are read with page-level pdf.js calls, which work in the Node build too.
 
 The walk starts at the end because a deck whose labels read $`1, 2, \dots, n`$ has every page as a candidate.
 Every frame being one page is common, and when such a deck has notes, they are its last pages. A deck without notes
-therefore costs two pages' text. A deck with notes costs one more page for every note page after its last slide.
+therefore costs two pages' text, one pair. With the `default` template, a deck with $`k \ge 1`$ note pages after its
+last slide costs $`k + 1`$ pages: the walk tests $`k`$ pairs, and consecutive pairs share a page
+([theory/12](../theory/12-speaker-notes-detection.md), Corollary 29).
 A `compressed` deck has no date, so its walk stops at the first failing pair. Such a deck with several note pages
 after its last slide is shown as it is.
 
@@ -319,9 +341,15 @@ procedure CONFIRM(parse)
 Here `SIG` is the signature of §2.2, and `ROTATED-DATE(j)` holds when page $`j`$ has a run rotated by $`\pm 90°`$ that
 reads as a date `YYYY-MM-DD` (also §2.2). The confirmation runs in the background after the first paint, like the
 probe, and stops at the first page that fails. A confirmed parse is used, and a deck that fails is shown as it is.
-Each note page and each slide that has notes is read once (`confirm-page-count`), so the cost is at most two pages'
-text per note page, and a parse without note pages costs nothing. A confirmation that would read more than 2 000 pages
-is refused before it starts (`:too-many-pages`), and one that fails decides `:confirm-failed`.
+The cost is at most two pages' text per note page, and a parse without note pages costs nothing. The page reader keeps
+the last four pages it read, so each note page and each slide that has notes is read once when no slide has more than
+four note pages; with five or more, a slide can be read again
+([theory/12](../theory/12-speaker-notes-detection.md) §5). A proven parse whose distinct pages
+(`confirm-page-count`: its note pages and the slides they annotate) number more than 2 000 is not confirmed: it is
+refused before any page is read (`:too-many-pages`). Every other read counts against the budget of 2 000 page reads
+for the whole decision (§8.9), so a confirmation that passed that check, or that follows the probe, can still end
+`:too-many-pages` part-way (theory/12 §4.5). Either way the deck is shown as it is. A confirmation that fails decides
+`:confirm-failed`.
 
 *What is given up.* A deck from one of these drivers whose note template draws neither a thumbnail nor the date
 (`plain`, `lined`) is never confirmed, so it is shown as it is, as it would be without labels (§2.4). Its labels may
@@ -348,6 +376,12 @@ is until then, and whenever a reason is given:
 | `:proven` otherwise | — | the confirmation (§2.5) | `:confirm-failed`, or `:too-many-pages` |
 | `:ambiguous` | — | the probe (§2.3), then the confirmation when the producer is not trusted | `:no-note-pages`, `:probe-undecided`, `:confirm-failed` |
 | `:none` · `:invalid` · `:undecidable` | — | — | `:no-note-pages` · `:invalid` · `:undecidable` |
+
+A reason names what the evidence found, not what the PDF holds. `:no-note-pages` says that the parse without note
+pages stood, or that the scan found none, so a deck whose note pages the evidence cannot see reports it too: a notes
+handout whose every page is a note page (page 0 is always a slide, rule 1), a `compressed` note page of an empty slide,
+a `compressed` deck whose probe stopped (§2.3), or a `plain` or `lined` deck without labels (§2.4)
+([experiment 13](../scientific/13-speaker-note-detection.md) §9.2).
 
 In the background, a page whose text cannot be read decides `:unreadable`, and anything unexpected `:error`; both show
 the deck as it is. A document closed or replaced while its work runs gets nothing applied. The decision's proof is the
@@ -433,9 +467,14 @@ procedure REPAIR(s, producer)                        ⟨s: an annotation's /Cont
 - 0x1B starts a language escape, which is removed;
 - every other byte is the Latin-1 character of the same number.
 
-No two bytes decode to the same character, so the inverse is defined exactly when every character of $`s`$ is one that
-some byte decodes to. pdf.js gives the viewer only the decoded string, never the bytes, so this inverse is the only way
-back to them. The case it cannot tell apart is given under the trade-offs.
+No two bytes other than 0x1B decode to the same character, so the inverse is defined exactly when every character of
+$`s`$ is one that some byte decodes to, and it is then unique. It gives back the bytes pdf.js read only when pdf.js
+decoded them a byte at a time, with no escape to remove: a string without the byte 0x1B that either has no byte-order
+mark, or has one but fails pdf.js's `TextDecoder` and is not UTF-16 of odd length (which loses its last byte)
+([theory/12](../theory/12-speaker-notes-detection.md) §6.1–§6.3, Theorems 34 and 35). For an escape, or for a string
+pdf.js decoded by its byte-order mark, the inverse, when it exists, is not the bytes the string came from. pdf.js
+gives the viewer only the decoded string, never the bytes, so this inverse is the only way back to them. The cases it
+cannot tell apart are given under the trade-offs.
 
 LuaTeX's `\\` is left as it is: pdfpc receives the same two characters, and both GFM and Discount render them as one
 backslash.
@@ -836,9 +875,10 @@ Annotation and sidecar text is rendered as text, or as Markdown through the docu
 new commands are not reachable from a PDF's named actions or links (ADR-0045's allow-list is unchanged). The sidecar is
 read only as the PDF's same-stem sibling (the last dot is looked for in the basename only), capped at 4 MiB and refused
 unread above it, through a non-blocking open of a regular file only (so a FIFO at that name cannot stall the read) and
-`fstat` on the handle it then reads. The background notes work reads the text of at most 2 000 pages of one deck
-(`notes/max-content-pages`): a scan or a confirmation that would read more is refused before it starts, and a probe
-stops when it would. Each signature compares at most 4 096 runs per page and 65 536 matches (§2.2), so a hostile PDF
+`fstat` on the handle it then reads. The background notes work makes at most 2 000 page-text reads per deck
+(`notes/max-content-pages`): the scan of a deck of more pages, and the confirmation of a proven parse with more
+distinct pages, are refused before any page is read, and any other work that would read more stops part-way with
+`:too-many-pages` (§2.5). Each signature compares at most 4 096 runs per page and 65 536 matches (§2.2), so a hostile PDF
 cannot occupy pdf.js's worker for long. [The threat model](../security/threat-model.md) records the new boundary.
 
 ---
@@ -876,19 +916,27 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 - A swap briefly shows both windows windowed while they change displays.
 - A `plain` or `lined` notes deck from XeLaTeX, dvipdfmx or dvips is shown as it is: its labels cannot be confirmed
   (§2.5).
-- REPAIR (§4) decodes one kind of annotation wrongly. This needs a pdfTeX deck holding an annotation whose text really
-  is PDFDocEncoding. `\pdfpcnote` writes the UTF-8 of the source, so such an annotation was added by another tool.
-  Every character above 0x7F in that text must also happen to pair into a UTF-8 sequence. For two bytes, that means one
-  of 0xC2–0xDF (Â–ß: most accented capitals, ×, ß) directly before one of 0x80–0xBF (symbols such as ’ ” » © °),
-  with no other character above 0x7F anywhere in the note. A note like that is shown mis-decoded. A lone accented
-  letter, such as the `é` of `café` mapped back to `E9`, is not valid UTF-8, so ordinary text is left alone.
+- REPAIR (§4) decodes two kinds of annotation wrongly in a pdfTeX deck
+  ([theory/12](../theory/12-speaker-notes-detection.md) §6.4, Theorem 38). Both need text whose characters, mapped back
+  to bytes, form valid UTF-8 with a byte of 0x80 or more:
+  - *Text that really is PDFDocEncoding.* `\pdfpcnote` writes the UTF-8 of the source, so such an annotation was
+    added by another tool. Every byte of 0x80 or more must belong to a UTF-8 sequence. For two bytes, that is one of
+    0xC2–0xDF (Â–ß: most accented capitals, ×, ß) directly before one of 0x80–0xBF (symbols such as ’ ” » © °). A note
+    may hold several sequences, and ˘ ˇ ˆ ˝ ˛ ˚ ˜, which come from bytes below 0x20, need not belong to one: `Ã©`,
+    `Ã©Ã©` and `Ã©˘` are all shown mis-decoded.
+  - *Text that pdf.js decoded by its byte-order mark* (UTF-16, or UTF-8 that starts with U+FEFF), when its characters
+    map back to bytes that form such sequences: `FE FF 00 C3 00 A9` reads `Ã©`, and is shown as `é`.
+
+  A lone accented letter, such as the `é` of `café` mapped back to `E9`, is not valid UTF-8, so ordinary text is left
+  alone.
 - `S` is a bare letter in the `:all` layer, so it acts wherever F5 does, with the focus on the sidebar too.
 
 ## Alternatives considered
 
 **Notes.**
 - *A per-page notes heuristic on every deck at open* (rotated date or thumbnail): $`O(n)`$ text extractions before the
-  first paint. Labels are free; the probe reads two pages of a deck without notes (one more per trailing note page);
+  first paint. Labels are free; the probe reads two pages of a deck without notes ($`k + 1`$ for $`k \ge 1`$ trailing
+  note pages);
   only label-less Beamer decks are scanned; the probe and the scan run after the first paint.
 - *A label rule that admits a restarted frame counter* (`appendixnumberbeamer`): makes `1 2 1 …`, the most common
   opening, ambiguous, and the probe would then choose the wrong parse (§2.1).
@@ -953,7 +1001,7 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 | Rule | Evidence |
 |---|---|
 | The generated decks the tests use | `test/pdf-gen-smoke.mjs`: `pdf-gen.js`'s note pages, labels, annotations and pdfpc XMP against real Beamer and pdfpc output (`test/fixtures/beamer-*.pdf`), with four negative controls |
-| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
+| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; the proofs of [theory/12](../theory/12-speaker-notes-detection.md) and their machine checks against `notes.cljs` itself (§7.1); and [experiment 13](../scientific/13-speaker-note-detection.md), a corpus of 94 small Beamer decks of real TeX output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) whose expected decisions were written and hashed before the detector first ran on it: no slide was hidden in any of the 94, every deck that hid pages hid all of its note pages (54 of 54), and all 470 decision fields were the registered ones |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures, the pdfpc deck and its sidecar, a sidecar over the cap and a legacy sidecar |
 | N7, the sidecar read: its name, the 4 MiB cap, a FIFO, an unreadable file, a directory, over SFTP | `test/content-service-smoke.js` `testPdfpcSidecar`; five mutants, each killed — a blocking open, the cap off by one, the dot looked for in the whole path, no remote sidecar, a remote read past the cap |
@@ -973,6 +1021,9 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 - [theory/12 — Speaker-notes detection](../theory/12-speaker-notes-detection.md): the proofs behind §1–§5 (the label
   automaton, the restart guard, the copy test, the probe, the scan, CONFIRM, `PDFDOC⁻¹` and REPAIR), and their checks
   against `notes.cljs` itself, [`formal/speaker-notes/check.sh`](../theory/formal/speaker-notes/check.sh)
+- [Experiment 13 — Speaker-note detection on real TeX output](../scientific/13-speaker-note-detection.md): §2's
+  detector on 94 small Beamer decks from pdfLaTeX, LuaLaTeX and XeLaTeX, against expectations registered before it
+  ran
 - [ADR-0045](0045-slide-deck-presentation.md), [ADR-0046](0046-reload-safe-pipelined-remote-reads.md),
   [ADR-0047](0047-persisted-state-stores.md), [ADR-0009](0009-mediator-ipc-over-point-to-point.md),
   [ADR-0010](0010-bounded-content-retention-and-render-metadata.md)

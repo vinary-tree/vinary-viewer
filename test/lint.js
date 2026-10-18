@@ -49,6 +49,8 @@ const jsFiles = [
   // the slide-flip latency benchmark of docs/scientific/12 and its analysis
   'scripts/bench-slide-flip.cjs', 'scripts/analyze-flip-runs.cjs', 'scripts/probe-wheel-notch.cjs',
   'scripts/bench-tree-scopes.cjs',
+  // the speaker-notes corpus experiment of docs/scientific/13 (ADR-0048) and its registered expectations' derivation
+  'scripts/exp-notes-corpus.cjs', 'scripts/notes-corpus/derive-expectations.cjs',
   // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools
   'scripts/profile-cold-start.mjs', 'scripts/sync-assets.mjs', 'scripts/check-assets.mjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the

@@ -1,0 +1,80 @@
+@startuml activity-notes-corpus-experiment
+'' PlantUML over Mermaid because the experiment is a control flow whose ORDER is part of its validity: the corpus and
+'' the expectations are fixed and hashed before the detector first runs, and only then are the artifacts compiled, read
+'' by the oracle and decided by the detector. Activity swimlanes show who owns each step (the registration, the
+'' experiment script, the oracle, the detector under test), the `elseif` chain shows the order in which outcomes are
+'' reported (a hidden slide first), the formulas render as LaTeX, and the SVG renders byte-reproducibly (README §4).
+'' Lanes and fills, from the shared palette: tan = files on disk that are fixed before the run (the corpus,
+'' expectations.json, PREREGISTRATION.md); slate = the Node experiment script (compiling under taskset, collecting,
+'' comparing); teal = the pdf.js oracle; orange = the detector under test, the "model orange" of the pure
+'' vinary.slides.* libraries; red = a refutation; green = as registered.
+'' Escapes: `~--` keeps a command-line flag's double dash literal (a bare `--x --` is creole strike-through).
+!include _vv-theme.iuml
+!pragma useVerticalIf on
+
+title H-NOTES-CORPUS: speaker-note detection on real TeX output, pre-registered (scientific/13)
+
+|#EEEBE8|corpus and registration (scripts/notes-corpus/)|
+start
+:**the corpus**: 19 Beamer sources (a–p, stale-v1, stale-v2),
+every note command carrying a marker of its own (NOTEMARK1X, …),
+the templated sources taking their note template from the
+command line (default, compressed, plain, lined);  <<FS_TINT>>
+|#E4E8F1|the experiment (scripts/exp-notes-corpus.cjs)|
+:**the pre-look** (~--no-detector): compile the corpus and read
+the oracle, then stop. The bundle is neither loaded nor run;  <<MAIN_TINT>>
+|#EEEBE8|corpus and registration (scripts/notes-corpus/)|
+:**derive-expectations.cjs**: ADR-0048 §2 by brute force (every
+slide/note assignment checked against rules 1–3), the plan and
+settle table, and SIG and ROTATED-DATE predicted by the content
+model M1–M4, giving expectations.json for 94 artifacts;  <<FS_TINT>>
+:**the registration**: the sha256 of expectations.json is written
+into PREREGISTRATION.md. Neither file changes after this point;  <<FS_TINT>>
+|#E4E8F1|the experiment (scripts/exp-notes-corpus.cjs)|
+:**the run**, into a fresh directory (a non-empty one is refused):
+each artifact compiled in a directory of its own under taskset -c 16-23,
+pdflatex ×1 · lualatex ×1 · xelatex ×1 · xelatex ×2, and the stale case,
+v1 ×2 then v2 ×1 over v1's .aux (xelatex, and lualatex as the control);  <<MAIN_TINT>>
+|#E3F2ED|oracle (pdf.js legacy build: page text)|
+:<latex>N</latex>, the note pages: the pages whose text holds a marker.
+A lined artifact takes its default twin's <latex>N</latex> (M4, checked on
+the templates that draw the note text). A two-screen deck has
+<latex>N = \emptyset</latex> (every page doubles the paper, checked);  <<RENDERER_TINT>>
+|#F5EAE0|detector under test (dist/cli/vv-cli.js: vinary.slides.*)|
+:**vv ~--cli ~--deck-info**, one line per PDF: notes · notePages ·
+notesProof · notesReason · frames;  <<IR_TINT>>
+:<latex>H</latex>, the hidden set: the same bundle loaded without its main,
+evidence/detect called as cli.core/deck-info calls it, and its
+note pages read. Their count, style, proof and reason are checked
+against the CLI's line (P-instrument);  <<IR_TINT>>
+|#E4E8F1|the experiment (scripts/exp-notes-corpus.cjs)|
+:**the comparison**, artifact by artifact. H1: the five fields against
+expectations.json. H2: S1 <latex>H \subseteq N</latex> and S2 <latex>H \neq \emptyset \Rightarrow H = N</latex>.
+Beside them P-labels, P-hidden, P-instrument and P-twin;  <<MAIN_TINT>>
+if (S1 fails: a slide is hidden?) then (yes)
+  :**UNSAFE**, reported first: the artifact, its labels,
+  the pages and the rule that fired;  <<ERROR_TINT>>
+elseif (a field differs from its expectation,\nor S2 fails?) then (yes)
+  :**a deviation**, analysed without changing any code and
+  attributed to the detector, the expectation (M1–M3 or the
+  derivation) or the oracle. expectations.json is never edited;  <<ERROR_TINT>>
+else (no)
+  :**as registered**: the decision, and the safety class
+  (exact, no notes, or shown as it is);  <<MARKDOWN_TINT>>
+endif
+:**the record**: the table and the summary on the console (tee'd),
+and the results JSON, every path relative to the output directory,
+copied to docs/scientific/data/13/;  <<MAIN_TINT>>
+stop
+
+legend right
+  |= Colour |= Swimlane / concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| the corpus and the registration, fixed before the detector first runs |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| the experiment script: compiling (pinned), collecting, comparing |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the oracle: pdf.js page text and the markers, independent of the detector |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the detector under test: the vinary.slides.* models as vv runs them |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a refutation: a hidden slide, or a decision other than the registered one |
+  |<#67B11D>&#160;&#160;&#160;&#160;| as registered |
+  The run of 2026-10-18: 94 of 94 decisions as registered, S1 held in 94 of 94, S2 in 54 of 54.
+endlegend
+@enduml

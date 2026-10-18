@@ -1,0 +1,26 @@
+% h-appendix-notes -- the same appendixnumberbeamer restart, WITH notes before and after it (docs/scientific/13).
+% Exercises ADR-0048 §2.1: a label that drops below the frame number is outside the rules and invalidates every parse.
+\documentclass{beamer}
+\usepackage{appendixnumberbeamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Intro}
+  Intro slide words
+\end{frame}
+\begin{frame}{Alpha}
+  Alpha slide words
+  \note{NOTEMARK1X Notes for alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\appendix
+\begin{frame}{Backup one}
+  Backup one words
+  \note{NOTEMARK2X Notes for the first backup slide}
+\end{frame}
+\begin{frame}{Backup two}
+  Backup two words
+\end{frame}
+\end{document}

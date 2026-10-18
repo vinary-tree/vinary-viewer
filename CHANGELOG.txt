@@ -33,7 +33,9 @@ Added
       them, and its notes and settings are kept with the deck (pdfpc.sty's
       metadata wins, as in pdfpc). vv --cli --deck-info adds the notes decision:
       notes, notePages, notesProof, notesReason, notesSide, pdfpc, sidecar and
-      textNotes.
+      textNotes. The detector was tested on a pre-registered corpus of 94 small
+      Beamer decks of real pdfLaTeX, LuaLaTeX and XeLaTeX output: no slide was
+      hidden, and every decision was the registered one (docs/scientific/13).
     - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
       viewer does or does not treat it as a slide deck: the evidence it reads
       (Creator / Producer, page mode, page sizes, how many page labels) and the

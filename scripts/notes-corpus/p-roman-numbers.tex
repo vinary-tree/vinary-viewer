@@ -1,0 +1,20 @@
+% p-roman-numbers -- frame numbers printed as Roman numerals, so the slides' page labels are not integers while the
+% note pages keep their arabic page numbers (docs/scientific/13). Exercises ADR-0048 §2.1's gate: the automaton runs
+% only when every label is a non-negative integer.
+\documentclass{beamer}
+\setbeameroption{show notes}
+\renewcommand{\insertframenumber}{\Roman{framenumber}}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Alpha}
+  Alpha slide words
+  \note{NOTEMARK1X Notes for alpha}
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+  \note{NOTEMARK2X Notes for charlie}
+\end{frame}
+\end{document}

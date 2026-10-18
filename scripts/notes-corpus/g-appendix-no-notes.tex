@@ -1,0 +1,32 @@
+% g-appendix-no-notes -- appendixnumberbeamer restarts the frame counter at \appendix; no notes at all
+% (docs/scientific/13). Exercises vinary.slides.notes/restartable?: the labels 1 2 3 4 5 1 2 admit exactly one parse
+% under ADR-0048 §2.1 -- pages 1 to 4 as note pages of frame 1 -- which no rule refutes, so that parse must be
+% confirmed by content (§2.5) and must fail, leaving the deck as it is.
+\documentclass{beamer}
+\usepackage{appendixnumberbeamer}
+\setbeameroption{show notes}
+\title{Corpus deck}
+\begin{document}
+\begin{frame}{Intro}
+  Intro slide words
+\end{frame}
+\begin{frame}{Alpha}
+  Alpha slide words
+\end{frame}
+\begin{frame}{Bravo}
+  Bravo slide words
+\end{frame}
+\begin{frame}{Charlie}
+  Charlie slide words
+\end{frame}
+\begin{frame}{Delta}
+  Delta slide words
+\end{frame}
+\appendix
+\begin{frame}{Backup one}
+  Backup one words
+\end{frame}
+\begin{frame}{Backup two}
+  Backup two words
+\end{frame}
+\end{document}
