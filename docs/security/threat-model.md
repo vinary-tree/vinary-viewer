@@ -274,6 +274,26 @@ order and its timing. The reader bounds what a hostile or broken host can make t
   one-second resolution, so a same-size rewrite within the same second is not seen until the next live refresh.
   This is a freshness limit, not an integrity one: the bytes shown are a version the host really served.
 
+**A PDF's pdfpc sidecar (ADR-0048 N7).** Reading a PDF from a path — local, or over SFTP — reads one more
+file: the deck's pdfpc sidecar, whose name main derives from the PDF's own (`talk.pdf` → `talk.pdfpc`; the last
+dot is looked for in the basename only, so a dotted directory such as `/a.b/talk` gives `/a.b/talk.pdfpc`, never a
+file outside the PDF's directory). The renderer never names it, so it opens no new path for a script to ask for.
+The read is bounded the same way the documents are:
+
+- **Size.** At most 4 MiB (`PDFPC_SIDECAR_MAX_BYTES`), checked before any byte is read. The check uses `fstat` on
+  the handle that is then read, so a file swapped between check and read is not read past the cap. Over SFTP the
+  check is a stat, and the read is bounded by that stat. A larger sidecar is refused unread and named as such
+  (`tooLarge`).
+- **No stall.** The local open is non-blocking and only a regular file is read. A FIFO, a device or a directory at
+  that name counts as no sidecar, so nothing planted there can hold main's read of the PDF open.
+- **No effect on the PDF.** A sidecar that cannot be read (`EACCES`, …) is reported by name beside the PDF. It never
+  fails the PDF's read. A piped-in PDF and an archive member have no sidecar.
+- **Data only.** The renderer parses the text with `JSON.parse` (no reviver), or as pdfpc's line-oriented legacy
+  format, into plain data: page indices, flags, settings and note strings. A format above the one this version
+  reads is ignored. In this version nothing renders the notes as HTML; the deck model only counts and places them.
+- **Watching.** A local sidecar is watched with its PDF: creating, editing or deleting it re-reads the PDF and the
+  sidecar together.
+
 **Where this would be a problem:** if the renderer were ever to load **remote or untrusted web content**
 that could script `window.vv.open("/etc/passwd")` (or any readable path) and exfiltrate the returned
 `vv:content` text. Today the renderer loads only the local, first-party bundle from `index.html`, so

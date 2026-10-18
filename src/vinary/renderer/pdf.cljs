@@ -10,6 +10,7 @@
             [vinary.renderer.scroll :as scroll]
             [vinary.slides.deck :as deck]
             [vinary.slides.evidence :as evidence]
+            [vinary.slides.notes :as notes]
             [vinary.renderer.toc :as toc]
             [vinary.ir.node :as node]
             [vinary.ir.frontend.pdf :as pdf-fe]
@@ -29,7 +30,8 @@
 (def ^:const click-slop-px 4)     ; presenting: a press that moved further than this is a drag, not a click
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
-         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command! current-anchor)
+         resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command! current-anchor
+         keep-set)
 
 ;; ---- pdf.js module + worker bootstrap -----------------------------------------------------------
 ;; pdfjs-dist uses dynamic import() internally, which Closure :simple cannot bundle — so we do NOT
@@ -121,10 +123,18 @@
 (defn- split-side
   "The half of every page the view shows: a second-screen deck's SLIDE half — :left :right :top :bottom — or nil for
    whole pages. Only in the slides layout: the document layout keeps whole pages, so the notes stay readable and
-   searchable there (vinary.slides.deck/slide-side under the :slides-notes preference)."
+   searchable there (vinary.slides.deck/slide-side where vinary.slides.notes/notes-position puts the notes: the
+   :slides-notes preference when it names a side, else pdfpc's notes position, else the geometric default)."
   [state]
   (when (slides? state)
-    (deck/slide-side (:second-screen (:deck @state)) (:notes @state))))
+    (deck/slide-side (:second-screen (:deck @state))
+                     (notes/notes-position (:notes @state) (get-in @state [:notes-model :pdfpc :notes-position])))))
+
+(defn- unseen?
+  "Is page `idx` one the audience never sees in this view — a note page (ADR-0048 §3), in the slides layout? Its
+   slot is never shown there, so it is never rasterized there."
+  [state idx]
+  (and (slides? state) (contains? (:hidden (:deck @state)) idx)))
 
 (defn- apply-document-layout!
   "Continuous layout: placeholders sized to the pages at the document :scale, stacked with `gap` (preallocates
@@ -225,7 +235,7 @@
 
 (defn- render-page! [state idx]
   (let [{:keys [doc page-divs rendered destroyed? gen]} @state]
-    (when (and (not destroyed?) doc (< idx (count page-divs)) (not (contains? rendered idx)))
+    (when (and (not destroyed?) doc (< idx (count page-divs)) (not (contains? rendered idx)) (not (unseen? state idx)))
       (swap! state update :rendered conj idx)
       (-> (.getPage ^js doc (inc idx))
           (.then (fn [^js pg]
@@ -311,9 +321,10 @@
 
 (defn- release-canvas!
   "Drop a page's canvas when it scrolls out of the overscan band (bounds memory on large PDFs). The text
-   + link layers stay so find/selection still cover the page; the canvas re-renders on re-intersect."
+   + link layers stay so find/selection still cover the page; the canvas re-renders on re-intersect. In the slides
+   layout the keep-set stays (the slides a flip shows next, wherever their slots are)."
   [state idx]
-  (when (contains? (:rendered @state) idx)
+  (when (and (contains? (:rendered @state) idx) (not (contains? (keep-set state) idx)))
     (when-let [task (get-in @state [:tasks idx])]
       (try (.cancel task) (catch :default _ nil))
       (swap! state update :tasks dissoc idx))
@@ -618,7 +629,8 @@
             vh      (.-clientHeight scroller)
             [lo hi] (layout/visible-range rects doc-top vh (* (overscan-of state) vh))]
         (when (<= 0 lo)
-          (doseq [idx (range lo (inc hi))] (render-page! state idx)))))))
+          (doseq [idx (range lo (inc hi))] (render-page! state idx)))
+        (doseq [idx (keep-set state)] (render-page! state idx))))))
 
 (defn- strip-layers!
   "Remove a sheet's scale-dependent layers (text, links, status) — the next render rebuilds them. The canvas
@@ -638,9 +650,11 @@
       (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
             vh      (.-clientHeight scroller)
             [lo hi] (layout/visible-range rects doc-top vh (* (overscan-of state) vh))]
-        (dotimes [i (count sheet-divs)]
-          (when (or (neg? lo) (< i lo) (> i hi))
-            (when-let [^js c (.querySelector (nth sheet-divs i) "canvas.vv-pdf-canvas")] (.remove c))))))))
+        (let [keep (keep-set state)]
+          (dotimes [i (count sheet-divs)]
+            (when (or (unseen? state i)
+                      (and (or (neg? lo) (< i lo) (> i hi)) (not (contains? keep i))))
+              (when-let [^js c (.querySelector (nth sheet-divs i) "canvas.vv-pdf-canvas")] (.remove c)))))))))
 
 (defn- current-anchor
   "Where the reader is: in the slides layout the current slide's top, else the page at the viewport top plus how
@@ -716,16 +730,54 @@
 
 (defn- slot-height [state] (second (:slot @state [1 1])))
 
+(defn- keep-set
+  "Slides layout: the pages whose canvases stay rendered wherever the scroller is — the current slide and the slides
+   :next and :prev would show (vinary.slides.deck/step). Between two slides of a `show notes` deck lie note pages, so
+   the next slide's slot is not the adjacent one the overscan keeps; keeping it makes a flip over note pages (or over
+   pdfpc's skipped pages) as instant as one to the adjacent slot (ADR-0048 §3). Without hidden or skipped pages it is
+   exactly the band slides-overscan keeps. Empty in the document layout."
+  [state]
+  (if (slides? state)
+    (let [{d :deck cur :current} @state
+          nav {:page (or cur 0) :back [] :fwd []}]
+      (hash-set (deck/snap d (or cur 0)) (:page (deck/step d nav :next)) (:page (deck/step d nav :prev))))
+    #{}))
+
+(defn- release-far!
+  "Slides layout, after a flip: release every rendered page that is neither in the keep-set nor in the overscanned
+   band around the shown slot. A keep-set page rendered away from the viewport gets no IntersectionObserver callback
+   when the show moves on, so nothing else would release it: the live canvases stay bounded (three, plus the band)."
+  [state]
+  (let [{:keys [container rects rendered]} @state
+        ^js scroller (scroller-of container)
+        keep (keep-set state)]
+    (when (and scroller (seq rects))
+      (let [doc-top (- (.-scrollTop scroller) (.-offsetTop container))
+            vh      (.-clientHeight scroller)
+            [lo hi] (layout/visible-range rects doc-top vh (* (overscan-of state) vh))]
+        (doseq [idx rendered]
+          (when (and (not (contains? keep idx)) (or (neg? lo) (< idx lo) (> idx hi)))
+            (release-canvas! state idx)))))))
+
+(defn- render-around!
+  "Slides layout: render the keep-set and release what fell out of reach (release-far!)."
+  [state]
+  (when (slides? state)
+    (doseq [idx (keep-set state)] (render-page! state idx))
+    (release-far! state)))
+
 (defn- go-to-page!
-  "Show slide `idx` (clamped) at once: its slot's top at the scroller top. Instant by design — a slide show
-   flips, it does not glide — and the neighbouring slots are already rendered (slides-overscan)."
+  "Show slide `idx` (clamped, and snapped to the audience's page: a note page shows as its slide, ADR-0048 §3) at
+   once: its slot's top at the scroller top. Instant by design — a slide show flips, it does not glide — and the
+   slides a flip shows next are already rendered (keep-set)."
   [state idx]
   (let [{:keys [container deck]} @state
         ^js scroller (scroller-of container)
-        idx (deck/clamp-page deck idx)]
+        idx (deck/snap deck idx)]
     (when scroller
       (set! (.-scrollTop scroller) (+ (.-offsetTop container) (* idx (slot-height state)))))
     (swap! state assoc :current idx)
+    (render-around! state)
     (report! state)))
 
 ;; ---- slide transitions (S8) -----------------------------------------------------------------------------
@@ -831,17 +883,20 @@
 
 (defn- snap!
   "At the END of a scroll (a smooth Contents jump, find's centring, a stray pixel scroll) settle exactly on the
-   slot nearest the top. Never mid-scroll: snapping during a smooth scroll would fight it and land on the wrong
-   slide."
+   slot nearest the top — or, when that is a note page, on its slide's (vinary.slides.deck/snap: only ever down to
+   the slide before it, ADR-0048 §3). Never mid-scroll: snapping during a smooth scroll would fight it and land on
+   the wrong slide."
   [state]
   (when (and (slides? state) (not (:destroyed? @state)))
-    (let [{:keys [container sizes]} @state
+    (let [{:keys [container sizes deck]} @state
           ^js scroller (scroller-of container)
-          idx    (layout/slot-at (- (.-scrollTop scroller) (.-offsetTop container)) (slot-height state) (count sizes))
+          idx    (deck/snap deck (layout/slot-at (- (.-scrollTop scroller) (.-offsetTop container))
+                                                 (slot-height state) (count sizes)))
           target (+ (.-offsetTop container) (* idx (slot-height state)))]
       (when (> (js/Math.abs (- (.-scrollTop scroller) target)) 0.5)
         (set! (.-scrollTop scroller) target))
       (swap! state assoc :current idx)
+      (render-around! state)
       (report! state))))
 
 (defn- normalize-wheel
@@ -1005,7 +1060,9 @@
   [state layout]
   (when (not= layout (:layout @state))
     (finish-transition! state)
-    (let [page (or (:idx (current-anchor state)) 0)]
+    ;; entering the slides layout on a note page shows its slide (the document layout shows every page)
+    (let [page (cond-> (or (:idx (current-anchor state)) 0)
+                 (= layout :slides) (->> (deck/snap (:deck @state))))]
       (swap! state assoc :layout layout :current page)
       ;; the class goes on FIRST: CSS hides the scroller's scrollbar in the slides layout, and the slot geometry
       ;; must be measured without it
@@ -1108,21 +1165,50 @@
 
 ;; ---- public API (driven by the Reagent pdf-view component) --------------------------------------
 (defn prepare!
-  "Load a PDF once, measure its intrinsic page sizes, and classify it as a slide deck (ADR-0045) — the evidence
-   (Info/XMP creator, page mode, page labels) is read IN PARALLEL with the page measurement, so detection adds
-   no round trip and the FIRST mount already knows whether to use the slides layout. Returns the DOM-free
-   artifact {:doc :sizes :deck}, which may be leased across view mounts; `dispose-prepared!` owns the eventual
-   pdf.js destruction. Detection runs here, in the renderer, on the loaded document — so it behaves identically
-   for a local file, an ssh:// / sftp:// URI, an archive member or a web-linked PDF."
-  [bytes]
-  (-> (get-document bytes)
-      (.then (fn [^js doc]
-               (-> (js/Promise.all #js [(page-sizes doc) (evidence/gather doc)])
-                   (.then (fn [^js results]
-                            (let [sizes (aget results 0)]
-                              {:doc   doc
-                               :sizes sizes
-                               :deck  (deck/deck (assoc (aget results 1) :sizes sizes))}))))))))
+  "Load a PDF once, measure its intrinsic page sizes, and gather what classifies it as a slide deck (ADR-0045) and
+   locates its speaker notes (ADR-0048) — the evidence (Info/XMP creator, page mode, page labels, pdfpc's XMP keys)
+   is read IN PARALLEL with the page measurement, so detection adds no round trip and the FIRST mount already knows
+   whether to use the slides layout. `opts` {:sidecar} is the pdfpc sidecar main read beside the PDF (ADR-0048 N7).
+   Returns the DOM-free artifact, which may be leased across view mounts; `dispose-prepared!` owns the eventual pdf.js
+   destruction:
+     {:doc :sizes
+      :evidence  the deck evidence, :sizes included
+      :notes     an atom of the notes model (vinary.slides.notes/initial; settled once, in place)
+      :settle    an atom of the Promise of the settled model (settled: started by the first mount, at most once)}
+   Each view derives its deck from these under its own :slides-notes preference (deck-for). Detection runs here, in
+   the renderer, on the loaded document — so it behaves identically for a local file, an ssh:// / sftp:// URI, an
+   archive member or a web-linked PDF."
+  ([bytes] (prepare! bytes nil))
+  ([bytes {:keys [sidecar]}]
+   (-> (get-document bytes)
+       (.then (fn [^js doc]
+                (-> (js/Promise.all #js [(page-sizes doc) (evidence/gather doc)])
+                    (.then (fn [^js results]
+                             (let [sizes (aget results 0)
+                                   ev    (assoc (aget results 1) :sizes sizes)]
+                               {:doc      doc
+                                :sizes    sizes
+                                :evidence ev
+                                :notes    (atom (notes/initial ev (notes/sidecar-of sidecar)))
+                                :settle   (atom nil)})))))))))
+
+(defn- deck-for
+  "The deck a view navigates: the document's `evidence`, plus what its notes `model` hides, skips, forces and splits
+   under the :slides-notes preference `pref` (vinary.slides.notes/deck-evidence — :off shows every page as it is)."
+  [evidence model pref]
+  (deck/deck (merge evidence (notes/deck-evidence model pref))))
+
+(defn- settled
+  "The Promise of `prepared`'s settled notes model (vinary.slides.evidence/settle: the probe, the scan or the
+   confirmation the first paint left pending, ADR-0048 N2), started at most once per artifact however many views
+   mount it, and stored in its :notes atom when it lands. Resolves at once when nothing is pending, and to nil when
+   the document went first (dispose-prepared! destroyed it: pdf.js marks its loading task destroyed)."
+  [{:keys [doc sizes] notes* :notes settle* :settle}]
+  (or @settle*
+      (reset! settle*
+              (-> (evidence/settle doc @notes* sizes #(not (.. ^js doc -loadingTask -destroyed)))
+                  (.then (fn [model] (when model (reset! notes* model)) model))
+                  (.catch (fn [_] nil))))))
 
 (defn- mark-deck!
   "Expose the classification on the view element (data-deck = source, or empty): CSS and DOM-level tests
@@ -1132,6 +1218,70 @@
 
 (defn dispose-prepared! [{:keys [doc]}]
   (when doc (try (.destroy ^js doc) (catch :default _ nil))))
+
+(defn- mark-note-pages!
+  "Mark the placeholders of the pages this view's deck hides from the audience (.vv-pdf-note-page): in the slides
+   layout CSS hides their text and link layers, so find and Tab never take the audience to a note page (ADR-0048 §3).
+   The document layout shows them, marks and all."
+  [state]
+  (let [{:keys [page-divs] d :deck} @state
+        hidden (:hidden d)]
+    (dotimes [i (count page-divs)]
+      (toggle-class! (nth page-divs i) "vv-pdf-note-page" (contains? hidden i)))))
+
+(defn deck-summary
+  "The :doc/deck summary of a mounted view's deck: vinary.slides.deck/summary, and the notes model's under :notes
+   (vinary.slides.notes/summary)."
+  [state]
+  (assoc (deck/summary (:deck @state)) :notes (notes/summary (:notes-model @state))))
+
+(defn- report-deck!
+  "Tell app-db what this view's deck is now ([:pdf/deck-detected path stamp summary] → :doc/deck): on mount, on a
+   refresh, when the notes settle and when the :slides-notes preference changes the deck."
+  [state]
+  (let [{:keys [path stamp]} @state]
+    (rf/dispatch [:pdf/deck-detected path stamp (deck-summary state)])))
+
+(defn- adopt-deck!
+  "Make `d` this view's deck and show what it changes at once: the deck classification and note-page marks; in the
+   slides layout the current page snapped to the audience's (a note page shows as its slide), then either a re-layout
+   (the split half changed) or a re-show of the current slide (go-to-page!: the slides around it rendered); the
+   counter; and :doc/deck."
+  [state d]
+  (let [side-before (:side @state)]
+    (swap! state assoc :deck d)
+    (mark-deck! (:container @state) d)
+    (mark-note-pages! state)
+    (when (slides? state)
+      (swap! state update :current #(deck/snap d (or % 0)))
+      (if (not= (split-side state) side-before)
+        (relayout! state (current-anchor state))
+        (go-to-page! state (:current @state))))
+    (report! state)
+    (report-deck! state)))
+
+(defn- rebuild-deck!
+  "Re-derive this view's deck from its evidence, notes model and :slides-notes preference, and adopt it."
+  [state]
+  (let [{:keys [evidence notes-model notes]} @state]
+    (adopt-deck! state (deck-for evidence notes-model notes))))
+
+(defn- settle-notes!
+  "Once the first frame is out, let `prepared`'s background notes work run (settled) and take its result into this
+   view — unless the view is gone, or shows another version of the document by then (replace-doc! swapped one in)."
+  [state prepared]
+  (let [current? #(and (not (:destroyed? @state)) (identical? (:doc prepared) (:doc @state)))]
+    (js/requestAnimationFrame
+     (fn [_]
+       (js/setTimeout
+        (fn []
+          (when (current?)
+            (-> (settled prepared)
+                (.then (fn [model]
+                         (when (and model (current?) (not= model (:notes-model @state)))
+                           (swap! state assoc :notes-model model)
+                           (rebuild-deck! state)))))))
+        0)))))
 
 (defn- wanted-layout
   "The layout `view-state` asks for, given this document's deck classification (vinary.slides.deck/
@@ -1153,20 +1303,24 @@
    :snapshot  (fn [] (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout :side]))})
 
 (defn mount-prepared!
-  "Mount a leased `{doc sizes deck}` artifact into a fresh DOM surface, in the layout `view-state` asks for
-   ({:scale :fit :invert? :explicit :open-as :presenting? :page}). Per-mount canvases, observers, tasks, and
-   text/link layers are still recreated and torn down normally. A slides-layout mount opens on `:page` (a
-   restored slide, ADR-0045 §Remembering the slide) or the first page; a document-layout mount given a `:page`
-   scrolls that page to the top."
-  [container {:keys [doc sizes] :as prepared} path view-state]
-  (let [d      (:deck prepared)
+  "Mount a leased artifact (prepare!) into a fresh DOM surface, in the layout `view-state` asks for
+   ({:scale :fit :invert? :explicit :open-as :presenting? :page :notes :stamp}). Per-mount canvases, observers, tasks,
+   and text/link layers are still recreated and torn down normally. The view's deck is derived from the artifact
+   under its :notes preference (deck-for), reported as :doc/deck, and re-derived when the background notes work
+   settles (settle-notes!). A slides-layout mount opens on `:page` (a restored slide, ADR-0045 §Remembering the
+   slide; a note page shows as its slide) or the first page; a document-layout mount given a `:page` scrolls that
+   page to the top."
+  [container {:keys [doc sizes evidence] :as prepared} path view-state]
+  (let [model  @(:notes prepared)
+        d      (deck-for evidence model (:notes view-state))
         layout (wanted-layout d view-state)
-        state  (atom {:container container :path path :doc doc :owns-doc? false
-                      :deck d :doc-gen 0 :layout layout
+        page   (or (:page view-state) 0)
+        state  (atom {:container container :path path :stamp (:stamp view-state) :doc doc :owns-doc? false
+                      :deck d :evidence evidence :notes-model model :doc-gen 0 :layout layout
                       :presenting? (boolean (:presenting? view-state))
                       :transition (:transition view-state)
                       :notes (:notes view-state)
-                      :current (deck/clamp-page d (or (:page view-state) 0))
+                      :current (if (= layout :slides) (deck/snap d page) (deck/clamp-page d page))
                       :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                       :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                       :fit (:fit view-state) :invert? (boolean (:invert? view-state))
@@ -1182,6 +1336,7 @@
     (reset! current-doc {:doc doc :path path})
     (when (and (:fit view-state) (not= layout :slides)) (apply-fit! state (:fit view-state)))
     (build-placeholders! state)
+    (mark-note-pages! state)
     (if (= layout :slides)
       (do (go-to-page! state (:current @state))
           (attach-slides-listeners! state))
@@ -1195,6 +1350,8 @@
     (watch-dpr! state)
     (extract-outline! state doc path)
     (report! state)
+    (report-deck! state)
+    (settle-notes! state prepared)
     state))
 
 (defn mount!
@@ -1238,58 +1395,68 @@
       :else nil)))
 
 (defn replace-doc!
-  "Swap a freshly prepared {:doc :sizes} into a MOUNTED controller in place — a live refresh (ADR-0045
-   §Live refresh): no unmount, no DOM teardown, no scroll reset. Keeps the reading anchor (page + in-page
-   fraction, clamped if the document shrank), keeps the visible canvases (CSS-stretched) until their
-   double-buffered re-render swaps in, grows/shrinks the placeholders when the page count changed, and
-   re-extracts the outline. The CALLER releases the previous artifact's lease afterwards — that is what
-   destroys the old PDFDocumentProxy, never this function."
-  [state {:keys [doc sizes] :as prepared}]
+  "Swap a freshly prepared artifact (prepare!; version `stamp`) into a MOUNTED controller in place — a live refresh
+   (ADR-0045 §Live refresh): no unmount, no DOM teardown, no scroll reset. Keeps the reading anchor (page + in-page
+   fraction, clamped if the document shrank; in the slides layout the slide, snapped if it became a note page), keeps
+   the visible canvases (CSS-stretched) until their double-buffered re-render swaps in, grows/shrinks the
+   placeholders when the page count changed, re-derives the deck (deck-for) and re-extracts the outline. The new
+   artifact's notes settle in the background like a mount's. The CALLER releases the previous artifact's lease
+   afterwards — that is what destroys the old PDFDocumentProxy, never this function."
+  [state {:keys [doc sizes evidence] :as prepared} stamp]
   (when-not (:destroyed? @state)
     (let [{:keys [container path]} @state
           scroller (scroller-of container)
-          anchor   (current-anchor state)]
+          anchor   (current-anchor state)
+          model    @(:notes prepared)
+          d        (deck-for evidence model (:notes @state))
+          slides?  (slides? state)]
       (doseq [[_ task] (:tasks @state)] (try (.cancel task) (catch :default _ nil)))
       ;; :gen fences in-flight work against the OLD document; :doc-gen counts document swaps (observers that
       ;; borrow the proxy — the overview grid — rebuild when it moves)
       (swap! state #(-> %
-                        (assoc :doc doc :sizes sizes :deck (:deck prepared)
+                        (assoc :doc doc :sizes sizes :deck d :evidence evidence :notes-model model :stamp stamp
                                :tasks {} :rendered #{} :text-built {} :toc-ids [])
                         (update :gen inc)
                         (update :doc-gen (fnil inc 0))))
-      (mark-deck! container (:deck prepared))
+      (mark-deck! container d)
       (reconcile-pages! state (count sizes))
-      (swap! state update :current #(deck/clamp-page (:deck prepared) (or % 0)))
+      (mark-note-pages! state)
+      (swap! state update :current #(if slides? (deck/snap d (or % 0)) (deck/clamp-page d (or % 0))))
       (doseq [^js sheet (:sheet-divs @state)] (strip-layers! sheet))
-      (when-let [mode (when-not (slides? state) (:fit @state))] (apply-fit! state mode))
+      (when-let [mode (when-not slides? (:fit @state))] (apply-fit! state mode))
       (apply-layout! state)
-      (when (and scroller anchor)
-        (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor))))
+      (let [anchor (if slides? {:idx (:current @state) :frac 0} anchor)]
+        (when (and scroller anchor)
+          (set! (.-scrollTop scroller) (+ (.-offsetTop container) (layout/anchor-top (:rects @state) anchor)))))
       (drop-offscreen-canvases! state)
       (reobserve! state)
       (render-visible! state)
       (report! state)
+      (report-deck! state)
       (reset! current-doc {:doc doc :path path})
       (cache/set-ensurer! (:ensure-fn @state))
       (extract-outline! state doc path)
+      (settle-notes! state prepared)
       state)))
 
 (defn update!
-  "Apply a new view-state to a mounted controller: dark-invert always; then a LAYOUT change (document ↔ slides,
-   ADR-0045) if the effective layout moved; in the slides layout a presenting change (its margin: none when
-   presenting) or a different second-screen half (the :notes preference — split-side); in the document layout
-   zoom/fit as before. Slides fit themselves, so zoom/fit never apply there."
+  "Apply a new view-state to a mounted controller: dark-invert always; a changed :slides-notes preference re-derives
+   the deck first (rebuild-deck!: :off shows every page, a side moves the split); then a LAYOUT change (document ↔
+   slides, ADR-0045) if the effective layout moved; in the slides layout a presenting change (its margin: none when
+   presenting) or a different second-screen half (split-side); in the document layout zoom/fit as before. Slides fit
+   themselves, so zoom/fit never apply there."
   [state view-state]
   (when-not (:destroyed? @state)
-    (let [container   (:container @state)
-          old-scale   (:scale @state)
+    (toggle-class! (:container @state) "vv-pdf-invert" (:invert? view-state))
+    (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state))
+    (when (not= (:notes view-state) (:notes @state))
+      (swap! state assoc :notes (:notes view-state))
+      (rebuild-deck! state))
+    (let [old-scale   (:scale @state)
           layout      (wanted-layout (:deck @state) view-state)
           was-presenting? (boolean (:presenting? @state))
           presenting? (boolean (:presenting? view-state))
           shown-side  (:side @state)]
-      (toggle-class! container "vv-pdf-invert" (:invert? view-state))
-      (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state)
-             :notes (:notes view-state))
       (cond
         (not= layout (:layout @state))
         (do (swap! state assoc :presenting? presenting? :fit (:fit view-state)

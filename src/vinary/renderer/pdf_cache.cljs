@@ -6,23 +6,26 @@
    bytes + trigger the ensurer. Bytes live here (keyed by :doc/path), never in DataScript (ADR-0010).
 
    KEEP-LAST-GOOD (ADR-0045 §Live refresh). Arriving bytes are a CANDIDATE, not a replacement: each path holds
-   {:good {:bytes :stamp} :candidate {:bytes :stamp}}. The pdf-view prepares the candidate and PROMOTES it on a
+   {:good {:bytes :stamp :sidecar} :candidate {:bytes :stamp :sidecar}} — :sidecar is the pdfpc sidecar main read
+   beside the PDF (ADR-0048 N7), nil when there is none. The pdf-view prepares the candidate and PROMOTES it on a
    successful parse, or REJECTS it (dropping it, keeping :good) when pdf.js cannot open it — a refresh read
    while pdflatex was still writing, a corrupt file. So a torn reload never displaces the last version that
    rendered, and a later remount (a tab switch back) still finds bytes that open.")
 
-(defonce ^:private bytes-cache (atom {}))   ; :doc/path → {:good {:bytes :stamp}|nil :candidate {:bytes :stamp}|nil}
+(defonce ^:private bytes-cache (atom {}))   ; :doc/path → {:good version|nil :candidate version|nil}, version = {:bytes :stamp :sidecar}
 (defonce ^:private ensurer (atom nil))      ; 0-arg fn → Promise materializing the active PDF's text
 
 (defn put-bytes!
-  "Cache newly arrived `bytes` for `path` (stamped `stamp`) as the CANDIDATE version."
-  ([path bytes] (put-bytes! path bytes nil))
-  ([path bytes stamp]
-   (swap! bytes-cache update path assoc :candidate {:bytes bytes :stamp stamp})))
+  "Cache newly arrived `bytes` for `path` (stamped `stamp`, with the pdfpc `sidecar` read beside it) as the CANDIDATE
+   version."
+  ([path bytes] (put-bytes! path bytes nil nil))
+  ([path bytes stamp] (put-bytes! path bytes stamp nil))
+  ([path bytes stamp sidecar]
+   (swap! bytes-cache update path assoc :candidate {:bytes bytes :stamp stamp :sidecar sidecar})))
 
 (defn bytes-for
   "The newest version to try for `path`: the candidate when one is pending, else the last good one — as
-   {:bytes :stamp}, or nil when nothing is cached."
+   {:bytes :stamp :sidecar}, or nil when nothing is cached."
   [path]
   (let [{:keys [good candidate]} (get @bytes-cache path)]
     (or candidate good)))
@@ -33,7 +36,7 @@
   (:bytes (bytes-for path)))
 
 (defn good-version
-  "The last version of `path` that rendered successfully, {:bytes :stamp}, or nil."
+  "The last version of `path` that rendered successfully, {:bytes :stamp :sidecar}, or nil."
   [path]
   (:good (get @bytes-cache path)))
 

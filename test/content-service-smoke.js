@@ -650,10 +650,115 @@ async function testPdfSettle() {
   }
 }
 
+// ADR-0048 N7 — the pdfpc sidecar is read WITH its PDF: named as pdfpc names it (but only ever beside the PDF), read
+// whole when present, refused unread past the 4 MiB cap, never blocking on a FIFO, and carried on a remote PDF's payload.
+async function testPdfpcSidecar() {
+  const { execFileSync } = require('child_process');
+  const { makeDeckPdf } = require('./fixtures/pdf-gen.js');
+  const cap = content.PDFPC_SIDECAR_MAX_BYTES;
+  assert.strictEqual(cap, 4 * 1024 * 1024, 'the cap is 4 MiB (ADR-0048 §8.9)');
+
+  // the name: the file's own name up to its last dot, then .pdfpc — never a dot in a directory name (pdfpc's quirk)
+  const name = content.pdfpcSidecarPath;
+  assert.strictEqual(name('/talks/talk.pdf'), '/talks/talk.pdfpc', 'talk.pdf → talk.pdfpc');
+  assert.strictEqual(name('/talks/slides.v2.PDF'), '/talks/slides.v2.pdfpc', 'the last dot, in any case: slides.v2.PDF → slides.v2.pdfpc');
+  assert.strictEqual(name('/a.b/talk'), '/a.b/talk.pdfpc', 'a name without a dot gets .pdfpc appended — not /a.pdfpc, outside its directory');
+  assert.strictEqual(name('/dir/.pdf'), '/dir/.pdfpc', 'a dot-file named .pdf: the dot is its own (pdfpc agrees)');
+  assert.strictEqual(name('ssh://u@host.example/srv/talk.pdf'), 'ssh://u@host.example/srv/talk.pdfpc', 'a remote URI keeps its authority');
+  assert.strictEqual(name('ssh://host.example/talk'), 'ssh://host.example/talk.pdfpc', 'a dot in the host is not the extension');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-pdfpc-'));
+  try {
+    const pdf = path.join(dir, 'talk.pdf');
+    fs.writeFileSync(pdf, makeDeckPdf({ pages: 2 }));
+    assert.strictEqual(content.readPdfpcSidecarLocal(pdf), null, 'no sidecar → null');
+
+    const text = '{"pdfpcFormat": 2, "pages": [{"idx": 0, "label": "1", "overlay": 0, "note": "Grüße — ✓"}]}';
+    fs.writeFileSync(path.join(dir, 'talk.pdfpc'), text);
+    assert.deepStrictEqual(content.readPdfpcSidecarLocal(pdf), { path: path.join(dir, 'talk.pdfpc'), text },
+      'a sidecar is read whole, as UTF-8');
+
+    fs.writeFileSync(path.join(dir, 'talk.pdfpc'), Buffer.alloc(cap, 0x61));
+    const atCap = content.readPdfpcSidecarLocal(pdf);
+    assert.ok(atCap.text && atCap.text.length === cap, 'a sidecar of exactly the cap is read');
+
+    fs.truncateSync(path.join(dir, 'talk.pdfpc'), cap + 1);   // sparse: one byte over, nothing written
+    assert.deepStrictEqual(content.readPdfpcSidecarLocal(pdf), { path: path.join(dir, 'talk.pdfpc'), size: cap + 1, tooLarge: true },
+      'one byte over the cap is refused unread, with its size');
+
+    fs.rmSync(path.join(dir, 'talk.pdfpc'));
+    fs.mkdirSync(path.join(dir, 'talk.pdfpc'));
+    assert.strictEqual(content.readPdfpcSidecarLocal(pdf), null, 'a directory where the sidecar would be is no sidecar');
+    fs.rmdirSync(path.join(dir, 'talk.pdfpc'));
+
+    if (process.platform !== 'win32') {
+      // a blocking open of a FIFO waits for a writer and stalls the whole thread — no timer here could fire — so the
+      // read runs in a child given a deadline: a reader that blocks fails this check instead of hanging the smoke
+      execFileSync('mkfifo', [path.join(dir, 'talk.pdfpc')]);
+      const probe = `const c = require(${JSON.stringify(require.resolve('../src/vinary/main/content_service.js'))});`
+        + `process.stdout.write(JSON.stringify(c.readPdfpcSidecarLocal(${JSON.stringify(pdf)})));`;
+      let out;
+      try {
+        out = execFileSync(process.execPath, ['-e', probe], { timeout: 5000, encoding: 'utf8' });
+      } catch (e) {
+        assert.fail(`opening a FIFO where the sidecar would be must not wait for a writer (${e.code || e.signal || e.message})`);
+      }
+      assert.strictEqual(out, 'null', 'a FIFO where the sidecar would be is no sidecar, and opening it does not block');
+      fs.rmSync(path.join(dir, 'talk.pdfpc'));
+    }
+    if (process.platform !== 'win32' && process.getuid && process.getuid() !== 0) {
+      fs.writeFileSync(path.join(dir, 'talk.pdfpc'), text);
+      fs.chmodSync(path.join(dir, 'talk.pdfpc'), 0o000);
+      assert.deepStrictEqual(content.readPdfpcSidecarLocal(pdf), { path: path.join(dir, 'talk.pdfpc'), error: 'EACCES' },
+        'a sidecar that cannot be read is reported, not thrown');
+      fs.chmodSync(path.join(dir, 'talk.pdfpc'), 0o600);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // REMOTE: the PDF's payload carries its sidecar (read while the PDF is read); past the cap it is never downloaded
+  const { startSftpServer } = require('./fixtures/ssh-server.js');
+  const transport = require('../src/vinary/main/ssh_transport.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vv-pdfpc-home-'));
+  fs.mkdirSync(path.join(home, '.ssh'), { recursive: true });
+  const sidecarText = '[duration]\n30\n[notes]\n### 1\nA legacy note\n';
+  const srv = await startSftpServer({
+    password: 'pc-pw',
+    files: {
+      'talk.pdf': makeDeckPdf({ pages: 2 }),
+      'talk.pdfpc': sidecarText,
+      'lone.pdf': makeDeckPdf({ pages: 2 }),
+      'big.pdf': makeDeckPdf({ pages: 2 }),
+      'big.pdfpc': Buffer.alloc(cap + 1, 0x61),
+    },
+  });
+  transport.configure({ homeDir: home, agentSock: '', systemConfigPath: '', systemKnownHostsPath: '',
+    promptHostKey: async () => true, promptSecret: async () => 'pc-pw', onError: () => {} });
+  try {
+    const talk = await content.openRemoteUri(srv.url('/talk.pdf'), 'pdf');
+    assert.deepStrictEqual(talk.sidecar, { path: srv.url('/talk.pdfpc'), text: sidecarText },
+      'a remote PDF\'s payload carries the sidecar beside it');
+    const lone = await content.openRemoteUri(srv.url('/lone.pdf'), 'pdf');
+    assert.strictEqual(lone.sidecar, null, '…and null when there is none');
+    srv.resetStats();
+    const big = await content.readPdfpcSidecarRemote(srv.url('/big.pdf'));
+    assert.deepStrictEqual(big, { path: srv.url('/big.pdfpc'), size: cap + 1, tooLarge: true }, 'a remote sidecar past the cap is refused…');
+    const moved = (srv.stats.byPath['/big.pdfpc'] || { readBytes: 0 }).readBytes;
+    assert.strictEqual(moved, 0, `…without a byte of it read (${moved})`);
+  } finally {
+    transport.closeAll();
+    await srv.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  console.log('[ok] pdfpc sidecar: named beside its PDF, read whole, capped unread, FIFO-safe, unreadable reported, remote payload carries it');
+}
+
 main()
   .then(async () => {
     testPdfIntegrity();
     await testPdfSettle();
+    await testPdfpcSidecar();
     console.log('content-service smoke OK');
   })
   .catch(err => {

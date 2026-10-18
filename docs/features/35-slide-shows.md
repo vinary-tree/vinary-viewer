@@ -163,6 +163,37 @@ back–find–forward symbol's *GoBack*, *Find* (opens the find bar) and *GoForw
 *PrevPage*, *FirstPage* and *LastPage* links. Every other PDF named action — *Print*, *SaveAs*, *Quit*,
 *FullScreen*, … — stays inert, so a document cannot print, save, quit or make the window fullscreen.
 
+### Decks with speaker notes
+
+Beamer writes speaker notes into the PDF in one of two ways, and the Slides layout shows only the audience's slides
+in both ([ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1–§5):
+
+- **`\setbeameroption{show notes}`** puts a **note page** after the slide it annotates: a small copy of the slide at
+  the top, then the notes. In the Slides layout the note pages leave the sequence. → and ← step over them, a typed
+  number counts only the audience's frames, the overview has no tile for them, find does not stop on them and Tab
+  does not reach their links. A note page is never even drawn there. A show started from a note page (right-click ▸
+  **Start From This Slide** in the Document layout) starts on its slide. **View as Document** shows every page, notes
+  included and searchable.
+- **`\setbeameroption{show notes on second screen=<side>}`** doubles every page: the slide on one half, its notes on
+  the other. The Slides layout shows the slide half (*Notes on a second screen* under Preferences, below).
+
+**How note pages are recognized.** pdfLaTeX and LuaLaTeX write page labels in which a note page carries its own page
+number, so the labels alone usually prove which pages are note pages, before the first slide is drawn. When the
+labels leave a choice, or the deck has none (a single XeLaTeX pass, §4 *Limitations*), the viewer compares page text
+in the background: the top of a note page holds a scaled-down copy of its slide's text. As soon as that is decided
+the deck changes and the slide you are on stays on screen. A deck whose note pages cannot be told apart from its slides
+is shown as it is, every page a slide. `vv --cli --deck-info` (below) shows what was decided, and how.
+
+**pdfpc files.** A `talk.pdfpc` file beside `talk.pdf` — the sidecar [pdfpc](https://pdfpc.github.io/) writes, in
+its JSON format or its older text format — is read with the PDF. The pages it marks hidden are skipped, as pdfpc skips
+them, and its notes and settings (duration, end slide, notes position) are kept with the deck. pdfpc.sty's settings in
+the PDF's own metadata win over the sidecar's, as they do in pdfpc. Saving the sidecar refreshes the open deck. Over
+`sftp://` the sidecar is read with every read of the PDF, so an edit to it alone shows at the PDF's next change.
+
+**Where the notes are shown.** This version shows note pages in the Document layout. A presenter view that shows the
+current slide's notes beside it and the next slide, in this window or a second one, is described in ADR-0048 §6–§8
+and is not available yet.
+
 ### Preferences
 
 **Settings ▸ Preferences… ▸ Slides**, stored in `settings.edn` ([configuration](../usage/05-configuration.md)):
@@ -175,6 +206,9 @@ back–find–forward symbol's *GoBack*, *Find* (opens the find bar) and *GoForw
 | Notes on a second screen | N | Auto (notes on the right, or below) · Notes on the right · on the left · below · above · Show whole pages | `:slides-notes` `:auto` / `:right` / `:left` / `:bottom` / `:top` / `:off` |
 | Present full screen | U | on · off | `:slides-fullscreen?` |
 | Click advances the slide show | K | on · off | `:slides-click-advance?` |
+
+*Show whole pages* also shows a `show notes` deck's note pages, as slides of their own (*Decks with speaker notes*,
+above); any other choice takes them out of the slides again.
 
 *Fade* (220 ms) dissolves the outgoing slide and *Push* (260 ms) slides it off while the next one slides in from the
 side the deck moves toward. Only the flips you ask for animate — keys, the wheel, clicks, swipes, the slide bar, links
@@ -189,12 +223,36 @@ own code, run headless ([terminal preview](30-terminal-preview.md)). For the two
 
 ```console
 $ cd docs/screenshots/samples && vv --cli --deck-info slides.pdf fuzzy-rho.pdf
-{"path":"slides.pdf","pages":8,"sizes":[[453.54,255.12]],"distinctSizes":1,"creator":"LaTeX with Beamer class","producer":"LuaTeX-1.24.0","creatorTool":null,"pageMode":"UseOutlines","labels":{"count":8,"distinct":5},"deck":true,"tier":"definite","source":"beamer","frames":5,"secondScreen":null}
-{"path":"fuzzy-rho.pdf","pages":6,"sizes":[[612,792]],"distinctSizes":1,"creator":"LaTeX with hyperref","producer":"pdfTeX-1.40.27","creatorTool":null,"pageMode":"UseOutlines","labels":null,"deck":false,"tier":null,"source":null,"frames":6,"secondScreen":null}
+{"path":"slides.pdf","pages":8,"sizes":[[453.54,255.12]],"distinctSizes":1,"creator":"LaTeX with Beamer class","producer":"LuaTeX-1.24.0","creatorTool":null,"pageMode":"UseOutlines","labels":{"count":8,"distinct":5},"deck":true,"tier":"definite","source":"beamer","frames":5,"secondScreen":null,"notes":"none","notePages":0,"notesProof":null,"notesReason":"no-note-pages","notesSide":null,"pdfpc":null,"sidecar":null,"textNotes":0}
+{"path":"fuzzy-rho.pdf","pages":6,"sizes":[[612,792]],"distinctSizes":1,"creator":"LaTeX with hyperref","producer":"pdfTeX-1.40.27","creatorTool":null,"pageMode":"UseOutlines","labels":null,"deck":false,"tier":null,"source":null,"frames":6,"secondScreen":null,"notes":"none","notePages":0,"notesProof":null,"notesReason":"not-beamer","notesSide":null,"pdfpc":null,"sidecar":null,"textNotes":0}
 ```
 
 `sizes` lists up to five distinct page sizes in bp; `labels` counts the page labels without listing them (they are
 document content). Eight pages with five distinct labels are five frames; the paper is one frame per page.
+
+A deck compiled with `show notes` — the test fixture [`beamer-shownotes.tex`](../../test/fixtures/beamer-shownotes.tex),
+once with LuaLaTeX and once with a single XeLaTeX pass:
+
+```console
+$ cd test/fixtures && vv --cli --deck-info beamer-shownotes.pdf beamer-shownotes-xelatex.pdf
+{"path":"beamer-shownotes.pdf","pages":10,"sizes":[[362.84,272.13]],"distinctSizes":1,"creator":"LaTeX with Beamer class","producer":"LuaTeX-1.24.0","creatorTool":null,"pageMode":"UseOutlines","labels":{"count":10,"distinct":6},"deck":true,"tier":"definite","source":"beamer","frames":4,"secondScreen":null,"notes":"interleaved","notePages":4,"notesProof":["labels"],"notesReason":null,"notesSide":null,"pdfpc":null,"sidecar":null,"textNotes":0}
+{"path":"beamer-shownotes-xelatex.pdf","pages":10,"sizes":[[362.83,272.13]],"distinctSizes":1,"creator":"LaTeX with Beamer class","producer":"xdvipdfmx (20260113)","creatorTool":null,"pageMode":"UseOutlines","labels":null,"deck":true,"tier":"definite","source":"beamer","frames":6,"secondScreen":null,"notes":"interleaved","notePages":4,"notesProof":["scan"],"notesReason":null,"notesSide":null,"pdfpc":null,"sidecar":null,"textNotes":0}
+```
+
+Both have the same four note pages: LuaLaTeX's labels prove them, and the XeLaTeX pass, which has no labels, is
+decided by comparing page text. Without labels the XeLaTeX deck cannot group overlays, so its six shown pages are six
+frames. `--deck-info` waits for that background work, so it prints the GUI's final decision. The speaker-notes fields:
+
+| Field | Meaning |
+|---|---|
+| `notes` | Where the deck keeps its notes: `interleaved` (note pages between the slides), `split` (each page holds a slide and its notes, side by side or one above the other) or `none`. |
+| `notePages` | How many note pages leave the audience's sequence. |
+| `notesProof` | How they were found: `labels` (the page labels alone), `probe` (page text chose between the parses the labels allow), `confirm` (page text confirmed a parse whose labels an untrusted producer wrote, or that a restarted frame counter would also explain) and `scan` (no labels: page text compared page by page). |
+| `notesReason` | Why no page is hidden, when one applies: `no-note-pages`, `not-beamer`, `one-page`, `labels-not-integers`, `invalid` and `undecidable` (the labels cannot be a `show notes` deck's), `probe-undecided`, `confirm-failed`, `too-many-pages` (the text comparison would read more than 2 000 pages), `unreadable` or `error`. In every one of these cases the deck is shown as it is. |
+| `notesSide` | A `split` deck's notes half: `right`, `left`, `bottom` or `top` — Beamer's default unless pdfpc's notes position says otherwise. |
+| `pdfpc` | pdfpc's settings, from pdfpc.sty's metadata first and the sidecar second: `notesPosition`, `durationMin`, `startTime`, `endTime`, `lastMinutes`, `endFrame` (0-based) and `markdown` (whether text notes are Markdown). `null` without either. |
+| `sidecar` | The `.pdfpc` file beside the PDF: `{"status": "read", "format": 0, 1, 2 or "legacy"}`, or `{"status": "ignored", "why": …}` — `too-large` (over 4 MiB), `unreadable`, `format` (newer than pdfpc format 2), `not-an-object` or `unrecognized`. `null` when there is none. |
+| `textNotes` | How many pages carry a text note: a note annotation (pdfpc.sty's `\pdfpcnote`, a PDF Text annotation, …) or a sidecar note. `null` for a deck over 2 000 pages. |
 
 ### Example
 
@@ -210,11 +268,14 @@ looking at.
 ## 3 · How it works internally
 
 ```text
-bytes (vv:content → byte cache, as a CANDIDATE)
+bytes + pdfpc sidecar read (vv:content → byte cache, as a CANDIDATE version)
   └─ renderer.pdf/prepare!        pdf.js getDocument; page-sizes ∥ slides.evidence/gather
-       └─ slides.deck/deck         classify (rules in order) → frames → {:deck? :tier :source :pages :frames …}
-            └─ {:doc :sizes :deck} leased through the warm cache; :pdf/deck-detected → :doc/deck
-                 └─ mount-prepared!   layout = deck/effective-layout(presenting?, the view's choice, deck?, preference)
+       └─ slides.notes/initial     the first paint's notes model: labels → note pages, or work left :pending
+            └─ {:doc :sizes :evidence :notes :settle}   leased through the warm cache
+                 └─ mount-prepared!   deck = slides.deck/deck(evidence + the view's notes under :slides-notes)
+                      │               layout = deck/effective-layout(presenting?, the view's choice, deck?, preference)
+                      ├─ report-deck! :pdf/deck-detected → :doc/deck (again when the notes settle or the preference moves)
+                      ├─ settle-notes!  after the first frame: slides.evidence/settle (probe | confirm | scan) → adopt
                       ├─ Document layout  (feature 11: continuous pages, zoom, Fit)
                       └─ Slides layout    slots W × H, one sheet per page at its own fit, ±1 render band
                            ├─ keys      key-scroll! / keymap → scroll delegate or :slides layer → step! → command!
@@ -223,6 +284,16 @@ bytes (vv:content → byte cache, as a CANDIDATE)
                            ├─ Tab       :slides/overview → ui/slides-overview + renderer.pdf-thumbs (borrowed doc)
                            └─ refresh   new stamp → refresh! → replace-doc! (same view, same slide) | refresh note
 ```
+
+**Speaker notes.** The deck a view navigates is its own: the document's evidence plus a notes model, derived under
+the view's *Notes on a second screen* preference (`deck-for`). The model starts from what the first paint already
+knows — the page labels, the pdfpc metadata and the sidecar read that came with the bytes — and leaves whatever page
+text must decide as pending work, which runs in the background once per document version (`settle-notes!`) and is
+adopted by every view still showing that version. In the Slides layout the note pages' placeholders stay in the DOM,
+marked `.vv-pdf-note-page`: CSS hides their text and link layers, and the engine never rasterizes them. A note page
+shows as its slide (the nearest shown page before it), and the pages a flip shows next — two slots away when a note page
+lies between — are kept rendered (the *keep-set*), so that flip is as instant as any other
+([ADR-0048 §2–§3](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)).
 
 **Detection on prepare.** `renderer.pdf/prepare!` reads the evidence — the `/Info` Creator and Producer, the XMP
 CreatorTool, the `/PageMode`, the page labels — in parallel with the page measure the layout needs anyway, so a deck
@@ -262,8 +333,9 @@ verified read per change to every window ([ADR-0046](../design-decisions/0046-re
 
 | Namespace | Role |
 |---|---|
-| `vinary.slides.deck` · `vinary.slides.evidence` | the pure deck model: detection, frames, navigation, input mappings; the evidence reader |
-| `vinary.renderer.pdf` · `.pdf-layout` · `.pdf-cache` · `.pdf-thumbs` | the engine's two layouts, slide steps, presenting listeners, transitions, swipes, named actions; pure geometry; the byte cache and the slides hook; the overview's thumbnails |
+| `vinary.slides.deck` · `vinary.slides.evidence` · `vinary.slides.notes` | the pure deck model: detection, frames, navigation, input mappings; the evidence reader and the background notes work; the speaker-notes model (note pages, pdfpc metadata and sidecar, text notes) |
+| `vinary.renderer.pdf` · `.pdf-layout` · `.pdf-cache` · `.pdf-thumbs` | the engine's two layouts, slide steps, presenting listeners, transitions, swipes, named actions, the view's deck and its note pages; pure geometry; the byte cache (each version with its sidecar read) and the slides hook; the overview's thumbnails |
+| `vinary.main.content_service.js` · `vinary.main.service` | the PDF's pdfpc sidecar: read beside the PDF (local and SFTP, bounded) and watched with it |
 | `vinary.renderer.scroll` | the scroll delegate |
 | `vinary.app.slides` · the `:slides/*` and `:pdf/*` events in `vinary.app.events` | the app-db side: preferences, the effective layout, the position mirror, presenting, the overview, typed numbers, blanking |
 | `vinary.app.commands` · `vinary.input.resolver` · `resources/keymaps/*.edn` | the Slides commands, the immediate view moves, the `:slides` layer |
@@ -313,8 +385,8 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
   Beamer's default (notes on the right, or below). If you wrote another side, pick it under *Notes on a second screen*
   — or *Show whole pages*. Such a deck steps one page at a time and is numbered by page, because pgfpages corrupts its
   page labels undetectably ([measurements](../scientific/data/12/second-screen-2026-10-16.txt)). View as Document
-  always shows whole pages, notes included and searchable. Plain `show notes` (note pages between the slides) is shown
-  as is.
+  always shows whole pages, notes included and searchable. Plain `show notes` puts note pages between the slides
+  instead; see *Decks with speaker notes* (§2).
 - **Zoom does nothing in the Slides layout**, and *Fit* is hidden: slides fit themselves. Use View as Document to zoom.
 - **Tab opens the overview** in the Slides layout instead of moving the focus, and **Space is a slide key** — both
   rebindable under `:keymaps {:slides …}`. In Vim's normal mode Space stays the leader.
@@ -329,8 +401,15 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
   *Retry* re-reads the file, *×* dismisses the note, and the next good version clears it.
 - **Remote decks** behave the same: `vv sftp://host/talk.pdf` opens as slides, each change is read once and swapped in
   on the same slide, and a connection dropped while presenting keeps the slide until *Retry* reconnects.
-- **Not available yet:** a presenter console on a second display (current and next slide, timer, notes) and slide
-  navigation in `vv --tui`; both are filed feature requests.
+- **A deck's note pages show as slides.** The viewer hides note pages only when it can prove which they are
+  (*Decks with speaker notes*, §2). `vv --cli --deck-info` names the reason it could not (`notesReason`): a producer
+  other than pdfLaTeX or LuaLaTeX whose labels page text did not confirm (`confirm-failed`), labels that allow no
+  `show notes` reading (`invalid`), a deck over 2 000 pages (`too-many-pages`). Compile with pdfLaTeX or LuaLaTeX,
+  or let XeLaTeX run twice, and the labels prove them.
+- **A page pdfpc hides is still reachable.** The hidden pages of a pdfpc sidecar are skipped by → and ← and the
+  frame steps, as in pdfpc, but Home, End, a typed number and the overview still show them.
+- **Not available yet:** the presenter view (the current slide's notes with the next slide, in this window or a second
+  one, ADR-0048 §6–§8) and slide navigation in `vv --tui`; both are filed feature requests.
 
 ---
 
@@ -343,12 +422,21 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
 
 *Diagram source: [`../diagrams/state-slides-modes.puml`](../diagrams/state-slides-modes.puml).*
 
-- **Activity — detection:** evidence and page sizes in parallel, the rules in order, frames, and the layout a PDF
-  opens in.
+- **Activity — detection:** evidence and page sizes in parallel, the speaker-notes model's first decision, the rules
+  in order, the audience's pages and their frames, the layout a PDF opens in, and the background settle the view
+  adopts.
 
-![Deck detection and the layout a PDF opens in](../diagrams/activity-pdf-deck-detection.svg)
+![Deck detection, speaker notes and the layout a PDF opens in](../diagrams/activity-pdf-deck-detection.svg)
 
 *Diagram source: [`../diagrams/activity-pdf-deck-detection.puml`](../diagrams/activity-pdf-deck-detection.puml).*
+
+- **Activity — note pages:** which pages of a Beamer deck are note pages: the first paint's decision table in its
+  order, the work it leaves for the background (the scan, the probe, the confirmation), and every reason a deck is shown
+  as it is (ADR-0048 §2).
+
+![Which pages of a Beamer deck are note pages](../diagrams/activity-note-page-decision.svg)
+
+*Diagram source: [`../diagrams/activity-note-page-decision.puml`](../diagrams/activity-note-page-decision.puml).*
 
 - **Sequence — presenting:** F5, the fullscreen request to main, the chrome hidden; Escape, and main leaving only a
   fullscreen it entered.

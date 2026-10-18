@@ -58,6 +58,7 @@ Settings persist as EDN (the keys below are exactly those the Preferences UI wri
  :slides-overview-page :last   ; an overview tile shows (and opens) its frame :last (fully built) or :first
  :slides-transition :none      ; how a slide flip animates: :none (instant), :fade or :push
  :slides-notes :auto           ; a second-screen deck's NOTES side: :auto :right :left :bottom :top, or :off
+                               ; (:off also shows a `show notes` deck's note pages)
  :slides-fullscreen? true      ; a slide show (F5) makes its window fullscreen
  :slides-click-advance? true}  ; a click on the slide advances a running show (Shift+click goes back)
 ```
@@ -81,7 +82,9 @@ page is the slide and its speaker notes side by side — twice the paper wide (`
 a running show display the other half — the slide — with the notes' text kept out of find. `:auto` (the default)
 assumes Beamer's own default, notes on the right (and notes below on a page doubled in height, where Beamer has
 none); if your deck shows its notes instead of its slides, pick the side you wrote in the option. `:off` shows whole
-pages. The document layout (View ▸ View as Document) always shows whole pages, so the notes stay readable and
+pages. It is also the escape hatch for decks built with plain `\setbeameroption{show notes}`: every other value takes
+their note pages out of the slides, and `:off` shows every page as it is, note pages included (`--deck-info`
+and [feature 35](../features/35-slide-shows.md#decks-with-speaker-notes) explain how note pages are recognized). The document layout (View ▸ View as Document) always shows whole pages, so the notes stay readable and
 searchable there. Such a deck steps one page at a time: pgfpages corrupts Beamer's page labels on these pages in a
 way no check can detect, so overlays are not grouped into frames and slides are numbered by page
 ([measurements](../scientific/data/12/second-screen-2026-10-16.txt)). Whether

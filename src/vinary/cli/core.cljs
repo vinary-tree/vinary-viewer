@@ -13,6 +13,7 @@
             [vinary.cli.render :as render]
             [vinary.slides.deck :as deck]
             [vinary.slides.evidence :as evidence]
+            [vinary.slides.notes :as notes]
             [vinary.terminal.pdf :as tpdf]
             ;; eager (non-lazy) population of the shared renderer.heavy-registry — Node has no shadow.lazy, so
             ;; unified-latex/uniorg are bundled + wired at startup (see main) instead of code-split like the renderer.
@@ -176,44 +177,101 @@
 ;; ── --deck-info: one PDF's slide-deck evidence and classification (ADR-0045), as a JSON line ──────────────────
 ;; The diagnostic behind deck detection and the instrument of docs/scientific/12: the SAME evidence (slides.evidence
 ;; on the headless pdf.js) and the SAME page measure (terminal.pdf/page-sizes ≡ renderer.pdf/page-sizes) feed the
-;; SAME classifier (slides.deck) the GUI uses on prepare. Page labels are summarised — how many, how many distinct —
-;; never listed: they are document content.
+;; SAME classifier (slides.deck) the GUI uses on prepare — and the SAME notes decision (evidence/detect: the GUI's
+;; first-paint model and its background settle in one step, ADR-0048 N6), so the frames counted are the audience's.
+;; Page labels are summarised — how many, how many distinct — never listed, and text notes are counted, never
+;; printed: they are document content.
 
 (defn- round2 [x] (/ (js/Math.round (* 100 x)) 100))
 
 (def ^:private deck-info-keys
   "The order --deck-info prints its fields in (a map this large is unordered; a diagnostic line should not be)."
   [:path :pages :sizes :distinctSizes :creator :producer :creatorTool :pageMode :labels
-   :deck :tier :source :frames :secondScreen])
+   :deck :tier :source :frames :secondScreen
+   :notes :notePages :notesProof :notesReason :notesSide :pdfpc :sidecar :textNotes])
+
+(def ^:private opposite-side {:left :right :right :left :top :bottom :bottom :top})
+
+(defn- pdfpc-info
+  "pdfpc's settings in effect (vinary.slides.notes/pdfpc-settings) as --deck-info prints them, when the deck carries
+   pdfpc metadata (XMP keys or a sidecar read); nil otherwise."
+  [model]
+  (when (:pdfpc? model)
+    (let [{:keys [notes-position duration-min start-time end-time last-minutes end-frame markdown?]} (:pdfpc model)]
+      {:notesPosition (some-> notes-position name)
+       :durationMin   duration-min
+       :startTime     start-time
+       :endTime       end-time
+       :lastMinutes   last-minutes
+       :endFrame      end-frame
+       :markdown      (boolean markdown?)})))
+
+(defn- count-text-notes
+  "Promise<the number of pages with a text note — an annotation note (evidence/text-notes) or a sidecar note
+   (vinary.slides.notes/page-notes)>, or nil for a deck longer than notes/max-content-pages (the background's own
+   bound). Pages are read one after another, so the run holds one page's annotations at a time."
+  [^js doc n producer model]
+  (if (> n notes/max-content-pages)
+    (js/Promise.resolve nil)
+    (let [sidecar (get-in model [:sidecar :notes])]
+      (reduce (fn [acc p]
+                (.then acc (fn [k]
+                             (-> (evidence/text-notes doc p producer)
+                                 (.then (fn [a] (if (seq (notes/page-notes a (get sidecar p))) (inc k) k)))))))
+              (js/Promise.resolve 0)
+              (range n)))))
 
 (defn deck-info
-  "PDF bytes → Promise<a map of the deck evidence, the measured sizes and the classification> for `uri`."
-  [uri ^js bytes]
-  (-> (tpdf/open-document bytes)
-      (.then (fn [^js doc]
-               (-> (js/Promise.all #js [(evidence/gather doc) (tpdf/page-sizes doc)])
-                   (.then (fn [^js both]
-                            (let [ev     (aget both 0)
-                                  sizes  (aget both 1)
-                                  d      (deck/deck (assoc ev :sizes sizes))
-                                  sum    (deck/summary d)
-                                  shapes (vec (distinct (map (fn [[w h]] [(round2 w) (round2 h)]) sizes)))
-                                  labels (:labels ev)]
-                              (-> (.destroy doc) (.catch (fn [_] nil)))
-                              {:path          uri
-                               :pages         (count sizes)
-                               :sizes         (vec (take 5 shapes))
-                               :distinctSizes (count shapes)
-                               :creator       (:creator ev)
-                               :producer      (:producer ev)
-                               :creatorTool   (:creator-tool ev)
-                               :pageMode      (:page-mode ev)
-                               :labels        (when labels {:count (count labels) :distinct (count (distinct labels))})
-                               :deck          (:deck? sum)
-                               :tier          (some-> (:tier sum) name)
-                               :source        (some-> (:source sum) name)
-                               :frames        (:frame-count sum)
-                               :secondScreen  (some-> (:second-screen sum) name)}))))))))
+  "PDF bytes → Promise<a map of the deck evidence, the measured sizes, the notes decision and the classification>
+   for `uri`. `sidecar` is the pdfpc sidecar read beside the PDF (content_service readPdfpcSidecarLocal / Remote, a JS
+   object), or nil."
+  ([uri bytes] (deck-info uri bytes nil))
+  ([uri ^js bytes sidecar]
+   (-> (tpdf/open-document bytes)
+       (.then (fn [^js doc]
+                (-> (js/Promise.all #js [(evidence/gather doc) (tpdf/page-sizes doc)])
+                    (.then (fn [^js both]
+                             (let [sizes (aget both 1)
+                                   ev    (assoc (aget both 0) :sizes sizes)]
+                               (-> (evidence/detect doc ev (notes/sidecar-of (js->clj sidecar :keywordize-keys true)))
+                                   (.then (fn [model]
+                                            (-> (count-text-notes doc (count sizes) (:producer ev) model)
+                                                (.then (fn [text-notes] [ev sizes model text-notes])))))))))
+                    (.then (fn [[ev sizes model text-notes]]
+                             (let [d      (deck/deck (merge ev (notes/deck-evidence model nil)))
+                                   sum    (deck/summary d)
+                                   nsum   (notes/summary model)
+                                   side   (deck/slide-side (:second-screen d)
+                                                           (notes/notes-position nil (get-in model [:pdfpc :notes-position])))
+                                   shapes (vec (distinct (map (fn [[w h]] [(round2 w) (round2 h)]) sizes)))
+                                   labels (:labels ev)]
+                               {:path          uri
+                                :pages         (count sizes)
+                                :sizes         (vec (take 5 shapes))
+                                :distinctSizes (count shapes)
+                                :creator       (:creator ev)
+                                :producer      (:producer ev)
+                                :creatorTool   (:creator-tool ev)
+                                :pageMode      (:page-mode ev)
+                                :labels        (when labels {:count (count labels) :distinct (count (distinct labels))})
+                                :deck          (:deck? sum)
+                                :tier          (some-> (:tier sum) name)
+                                :source        (some-> (:source sum) name)
+                                :frames        (:frame-count sum)
+                                :secondScreen  (some-> (:second-screen sum) name)
+                                :notes         (some-> (:style nsum) name)
+                                :notePages     (:note-pages nsum)
+                                :notesProof    (some->> (:proof nsum) (mapv name))
+                                :notesReason   (some-> (:reason nsum) name)
+                                :notesSide     (some-> (opposite-side side) name)
+                                :pdfpc         (pdfpc-info model)
+                                ;; :format is a JSON sidecar's pdfpcFormat (an integer, 0 when absent) or :legacy
+                                :sidecar       (when-let [{:keys [status format why]} (:sidecar model)]
+                                                 {:status (some-> status name)
+                                                  :format (if (keyword? format) (name format) format)
+                                                  :why    (some-> why name)})
+                                :textNotes     text-notes})))
+                    (.finally (fn [] (-> (.destroy doc) (.catch (fn [_] nil)))))))))))
 
 (defn- deck-info-spec!
   "Print one spec's --deck-info line. Its bytes come from the same readers as rendering (stdin buffer, the verified
@@ -227,16 +285,18 @@
                (let [kind (effective-kind spec)]
                  (cond
                    (not= "pdf" kind)            (js/Promise.reject (js/Error. (str "--deck-info reads PDFs; this is " kind)))
-                   stdin?                       buf
+                   ;; [bytes sidecar]: the pdfpc sidecar is read beside the PDF, as the GUI's main reads it (ADR-0048
+                   ;; N7) — over SFTP it rides on the payload; a PDF piped on stdin has no directory, so none
+                   stdin?                       [buf nil]
                    (.isRemoteUri ssh-transport uri) (-> (.openRemoteUri cs uri "pdf" #js {:notifies false})
-                                                        (.then (fn [^js payload] (.-bytes payload))))
+                                                        (.then (fn [^js payload] [(.-bytes payload) (.-sidecar payload)])))
                    :else (-> (js/Promise.resolve (.readPdfLocal cs uri #js {:notifies false}))
                              (.then (fn [^js r]
                                       (when (.-incomplete r)
                                         (ewrite (str "vv-cli: " uri ": the PDF looks incomplete (" (.-incomplete r)
                                                      ") — is it still being written?")))
-                                      (.-bytes r))))))))
-      (.then (fn [bytes] (deck-info uri bytes)))
+                                      [(.-bytes r) (.readPdfpcSidecarLocal cs uri)])))))))
+      (.then (fn [[bytes sidecar]] (deck-info uri bytes sidecar)))
       (.then (fn [info]
                (let [o (js-obj)]
                  (doseq [k deck-info-keys] (aset o (name k) (clj->js (get info k))))

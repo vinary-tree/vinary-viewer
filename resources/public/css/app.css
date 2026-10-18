@@ -113,6 +113,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    runs of the other half — the notes — are hidden outright, so find and selection see only what is shown */
 .vv-pdf-sheet.vv-pdf-split { overflow: hidden; }
 .vv-pdf-text .vv-pdf-offslide { display: none; }
+/* a NOTE page of a `show notes` deck (ADR-0048 §3): it stays in the slides layout's sequence of slots, but the audience
+   never sees it — navigation steps over it and the engine never rasterizes it there. Its text and link layers are
+   hidden outright, so find (which skips display:none) never centres a match on it and Tab never focuses its links.
+   The document layout shows note pages like any other page. */
+.vv-pdf-slides .vv-pdf-page.vv-pdf-note-page .vv-pdf-text,
+.vv-pdf-slides .vv-pdf-page.vv-pdf-note-page .vv-pdf-anno { display: none; }
 /* optional dark-invert: invert the CANVAS only, so text/selection/find highlights stay normal */
 .vv-pdf-doc.vv-pdf-invert .vv-pdf-canvas { filter: invert(1) hue-rotate(180deg); }
 /* per-page status chip: a "rendering…" hint while a slow (heavy) page rasterizes on the main thread, or a

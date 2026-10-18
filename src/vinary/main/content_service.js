@@ -877,6 +877,64 @@ async function readPdfRemote(uri, st0, o) {
   return s.incomplete ? { incomplete: s.incomplete, bytes: await transport.remoteReadFile(uri) } : s;
 }
 
+// ── the pdfpc sidecar (ADR-0048 N7) ──
+// pdfpc keeps a talk's notes and settings in a `.pdfpc` file beside the PDF. Main reads it WITH the PDF and the payload
+// carries it as `sidecar`; the renderer parses it (vinary.slides.notes/parse-sidecar). It is read only as the PDF's
+// same-stem sibling and only up to PDFPC_SIDECAR_MAX_BYTES: a larger one is reported, not read (ADR-0048 §8.9).
+// → null                         no sidecar: nothing there, or not a regular file
+//   { path, text }               its text (UTF-8)
+//   { path, size, tooLarge }     past the cap: not read
+//   { path, error }              there, but it could not be read
+const PDFPC_SIDECAR_MAX_BYTES = 4 * 1024 * 1024;
+
+// The sidecar pdfpc names for the PDF at `p` (a path or an ssh:// / sftp:// URI): the name up to its last dot, then
+// `.pdfpc` (`talk.pdf` → `talk.pdfpc`, `slides.v2.PDF` → `slides.v2.pdfpc`), or `.pdfpc` appended to a name without
+// one. pdfpc looks for that dot in the WHOLE path, so for an extension-less `/a.b/talk` it names `/a.pdfpc`, outside the
+// PDF's directory; here only the file's own name is searched, so the sidecar is always its sibling.
+function pdfpcSidecarPath(p) {
+  const s = String(p);
+  const dot = s.lastIndexOf('.');
+  return (dot > Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')) ? s.slice(0, dot) : s) + '.pdfpc';
+}
+
+// The sidecar of the LOCAL PDF at `p`. It is opened non-blocking and checked on the open handle, so a FIFO put in its
+// place (before or after a stat) cannot stall main; its buffer is preallocated to the size fstat reports.
+function readPdfpcSidecarLocal(p) {
+  const sc = pdfpcSidecarPath(p);
+  let fd;
+  try {
+    fd = fs.openSync(sc, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+  } catch (e) {
+    return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? null : { path: sc, error: String((e && e.code) || e) };
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return null;
+    if (st.size > PDFPC_SIDECAR_MAX_BYTES) return { path: sc, size: st.size, tooLarge: true };
+    const buf = Buffer.allocUnsafe(st.size);
+    const got = readFullySync(fd, buf, 0);
+    return { path: sc, text: buf.toString('utf8', 0, got) };
+  } catch (e) {
+    return { path: sc, error: String((e && e.code) || e) };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// The sidecar of the REMOTE PDF at `uri`: one stat, then (under the cap) one sized read. Never rejects. A stat that
+// fails means no sidecar — over SFTP that is how a missing file answers.
+async function readPdfpcSidecarRemote(uri) {
+  const sc = pdfpcSidecarPath(uri);
+  const st = await transport.remoteStat(sc).catch(() => null);
+  if (!st || !st.isFile) return null;
+  if (st.size > PDFPC_SIDECAR_MAX_BYTES) return { path: sc, size: st.size, tooLarge: true };
+  try {
+    return { path: sc, text: await transport.remoteReadText(sc, { size: st.size, maxBytes: PDFPC_SIDECAR_MAX_BYTES }) };
+  } catch (e) {
+    return { path: sc, error: String((e && e.message) || e) };
+  }
+}
+
 // The remote reader — an ssh://sftp:// analog of openLocal, paralleling openArchiveUri (a virtual backend).
 // It stats once (to decide list-vs-read and to fill meta.size, which the streaming gate needs), then produces
 // the SAME payload contract, reusing every existing parser (office/table/log/image/pdf/text sniff) and the
@@ -938,8 +996,10 @@ async function openRemoteUri(uri, kind, opts = {}) {
   }
   if (k === 'image') return { path: uri, kind: 'image', dataUrl: dataUrlFor(uri, await transport.remoteReadFile(uri, sized())), stamp, meta };
   if (k === 'pdf') {
-    // the PDF's collocated group (its authored sources + itself) is discovered WHILE the PDF is read — H3
+    // the PDF's collocated group (its authored sources + itself) and its pdfpc sidecar (ADR-0048 N7) are read WHILE
+    // the PDF is read — H3
     const siblings = remoteSiblingsGroup(uri, st);
+    const sidecar = readPdfpcSidecarRemote(uri);
     // VERIFIED and settled (ADR-0046 §Torn reads): the tail first, then the body, then fstat on the same handle;
     // `pending` (a notification is coming) delivers nothing; `incomplete` is delivered flagged
     const r = await readPdfRemote(uri, st, opts);
@@ -947,6 +1007,7 @@ async function openRemoteUri(uri, kind, opts = {}) {
     const payload = { path: uri, kind: 'pdf', bytes: r.bytes, stamp, meta };
     if (r.incomplete) { payload.incomplete = true; payload.incompleteReason = r.incomplete; }
     payload.siblings = await siblings;
+    payload.sidecar = await sidecar;
     return payload;
   }
   // Remote HTML is live-rendered in the web view via the vv-remote:// protocol (see main/service.cljs); the
@@ -1623,6 +1684,10 @@ function streamCount() { return streams.size; }   // for the electron smoke's fd
 module.exports = {
   readPdfLocal,
   readPdfRemote,
+  PDFPC_SIDECAR_MAX_BYTES,
+  pdfpcSidecarPath,
+  readPdfpcSidecarLocal,
+  readPdfpcSidecarRemote,
   _readPdfAttemptLocal: readPdfAttemptLocal,
   _readPdfAttemptRemote: readPdfAttemptRemote,
   _settlePdf: settlePdf,

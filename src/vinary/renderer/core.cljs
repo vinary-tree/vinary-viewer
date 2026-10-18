@@ -439,6 +439,8 @@
   (ds/install-bridge!)
   (set! (.-__vvdb js/window) (fn [] (clj->js @rfdb/app-db)))            ; DEV inspect hooks
   (set! (.-__vvds js/window) (fn [] (clj->js (ds/open-docs (ds/snapshot)))))
+  ;; DEV/test: what a PDF view reported about its deck — the :doc/deck summary, its notes model included (ADR-0048)
+  (set! (.-__vvdeck js/window) (fn [p] (clj->js (ds/doc-attr (ds/snapshot) p :doc/deck))))
   (set! (.-__vvkeymap js/window) (fn [nm] (rf/dispatch [:keymap/select nm])))   ; DEV: switch keymap set
   (set! (.-__vvopen js/window) (fn [p] (rf/dispatch [:doc/open p])))   ; DEV/test: open a path in the active tab
   (set! (.-__vvsource js/window) (fn [] (rf/dispatch [:tab/toggle-source])))   ; DEV/test: flip the active tab's facet to source

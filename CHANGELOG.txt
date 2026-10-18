@@ -14,6 +14,26 @@ sanitizer and drives cross-cutting capabilities. See docs/theory/08-common-docum
 and docs/design-decisions/0017-common-document-ir.md.
 
 Added
+    - Beamer decks built with \setbeameroption{show notes} present only the
+      audience's slides (ADR-0048): the note page Beamer writes after each slide
+      leaves the Slides layout's sequence. Arrows, Space and the frame steps pass
+      over note pages, a typed number counts the audience's frames, the overview
+      has no tile for them, find skips their text and a show started from one
+      starts on its slide; View as Document still shows every page, and
+      Preferences > Slides > Notes on a second screen > Show whole pages shows
+      them as slides again. pdfLaTeX's and LuaLaTeX's page labels prove the note
+      pages before the first slide is drawn; a deck without labels (one XeLaTeX
+      pass) or with labels that leave a choice is decided in the background by
+      comparing page text -- a note page carries a scaled-down copy of its
+      slide -- and a deck that cannot be decided is shown as it is. The slide a
+      flip shows next is kept rendered even when a note page lies between, so
+      flips stay instant. A pdfpc sidecar (talk.pdfpc beside talk.pdf, JSON or
+      the older text format) is read with the PDF, locally and over SFTP, and
+      watched with a local one: the pages it hides are skipped as pdfpc skips
+      them, and its notes and settings are kept with the deck (pdfpc.sty's
+      metadata wins, as in pdfpc). vv --cli --deck-info adds the notes decision:
+      notes, notePages, notesProof, notesReason, notesSide, pdfpc, sidecar and
+      textNotes.
     - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
       viewer does or does not treat it as a slide deck: the evidence it reads
       (Creator / Producer, page mode, page sizes, how many page labels) and the

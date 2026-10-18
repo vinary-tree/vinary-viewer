@@ -2803,6 +2803,205 @@ async function main() {
     console.log('[ok] PDF second-screen notes: the slides show the slide half (auto / notes=left / off), find skips the notes (a real LuaLaTeX deck too), the document layout keeps whole pages, tiles are halves, corrupt labels ignored');
   }
 
+  // ── NOTE PAGES (ADR-0048 §3, N2, N7): Beamer's `show notes` writes a note page after the slides it annotates. They
+  // leave the audience's sequence but stay in the DOM — marked .vv-pdf-note-page, never rasterized in the slides layout,
+  // their text hidden from find there — and next/prev step over them, the slide a flip shows next already rendered.
+  // LuaTeX's labels prove them at first paint; a deck without labels (one XeLaTeX pass) is settled by the background
+  // scan; :slides-notes :off shows every page; the document layout shows them all. The pdfpc sidecar a payload carries
+  // reaches the deck: its hidden page is skipped. Real TeX output throughout (test/fixtures/beamer-shownotes*.pdf,
+  // beamer-pdfpc.pdf + .pdfpc). ──
+  {
+    const fx = (f) => path.join(ROOT, 'test', 'fixtures', f);
+    // test/pdf-gen-smoke.mjs NOTE_PAGES — the note pages, written down before the fixtures were compiled
+    const NOTE_PAGES = [1, 3, 4, 8];
+    const engineHasSettings = () => evalIn(win, `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`);
+    const setNotes = async (v) => {
+      win.webContents.send('vv:settings', `{:slides-notes :${v}}`);
+      await waitCalm(win, `window.__vvdb().ui.settings['slides-notes'] === '${v}'`, `notes = ${v}`, 4000);
+      await engineHasSettings();
+    };
+    const marksAre = (want, label) => waitCalm(win, `JSON.stringify([...document.querySelectorAll(
+      '.vv-pdf-doc .vv-pdf-page.vv-pdf-note-page')].map((p) => +p.dataset.pdfIdx)) === ${JSON.stringify(JSON.stringify(want))}`,
+      label, 15000);
+    const slidesAt = async (page, label) => {
+      await waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {}; const c = document.querySelector('.vv-content');
+        const slot = document.querySelector('.vv-pdf-doc .vv-pdf-page').offsetHeight;
+        return s.page === ${page} && Math.abs(c.scrollTop - s.page * slot) <= 1; })()`, label, 8000);
+      return evalIn(win, `window.__vvdb().ui.slides`);
+    };
+    const step = async (op, page, label) => { await evalIn(win, `window.__vvslides(${JSON.stringify(op)})`); return slidesAt(page, label); };
+    const deckOf = (p) => evalIn(win, `window.__vvdeck(${JSON.stringify(p)})`);
+    const findFor = async (q) => {
+      const setQuery = (v) => evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+      const ranFor = (v) => waitCalm(win, `(() => { const f = window.__vvfind();
+        return String(f.query || '').trim().toLowerCase() === ${JSON.stringify(v.toLowerCase())}
+          && !window.__vvpending('find/search'); })()`, `find ran for ${v}`, 8000);
+      await setQuery('qzxjv sentinel');
+      await ranFor('qzxjv sentinel');
+      await setQuery(q);
+      await ranFor(q);
+      return evalIn(win, `window.__vvfind().count`);
+    };
+    const closeFind = () => evalIn(win, `(() => { const i = document.querySelector('.vv-find-input');
+      i && i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return true; })()`);
+
+    // 1 — LuaLaTeX: the labels prove the note pages before the first paint
+    const luaPath = path.join(ROOT, 'test', 'fixtures', 'notes-lua-deck.pdf');   // virtual path; the real bytes
+    state.contentByPath.set(luaPath, { path: luaPath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(fs.readFileSync(fx('beamer-shownotes.pdf'))) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(luaPath)})`);
+    await waitCalm(win, `(() => { const d = document.querySelector('.vv-pdf-doc.vv-pdf-slides'); const s = window.__vvdb().ui.slides || {};
+      return Boolean(d && d.dataset.deck === 'beamer') && s.path === ${JSON.stringify(luaPath)} && s.page === 0; })()`,
+      'the LuaLaTeX `show notes` deck opens in the slides layout', 15000);
+    await marksAre(NOTE_PAGES, 'its four note pages are marked');
+    let s = await evalIn(win, `window.__vvdb().ui.slides`);
+    assert.deepStrictEqual([s.pages, s.frames], [10, 4], '10 pages, and 4 frames over the 6 pages the audience sees');
+    let dk = await deckOf(luaPath);
+    assert.ok(dk && dk.notes && dk.notes.style === 'interleaved' && dk.notes['note-pages'] === 4
+      && JSON.stringify(dk.notes.proof) === '["labels"]' && dk.notes['has-notes?'] === true,
+      `:doc/deck carries the notes model: ${JSON.stringify(dk && dk.notes)}`);
+    // the slide a flip shows next is already rendered — two slots away, past the note page — and no note page is
+    await waitCalm(win, `Boolean(document.querySelector('#vv-pdf-page-3 canvas.vv-pdf-canvas'))`,
+      'the next slide (page 2, beyond note page 1) is rendered before the flip', 8000);
+    assert.strictEqual(await evalIn(win, `document.querySelectorAll('.vv-pdf-note-page canvas.vv-pdf-canvas').length`), 0,
+      'no note page is rasterized in the slides layout');
+    // next and prev step over the note pages: 0 → 2 → 5 → 6 → 7 → 9, and back
+    s = await step('next', 2, 'next skips note page 1');
+    assert.deepStrictEqual([s.frame, s.overlay, s.overlays], [0, 1, 2], 'page 2 is the Intro\'s second overlay (of 2)');
+    await step('next', 5, 'next skips note pages 3 and 4 — Middle');
+    await step('next', 6, 'Outro, overlay 1');
+    await step('next', 7, 'Outro, overlay 2');
+    s = await step('next', 9, 'next skips note page 8 — the \\againframe of Middle');
+    assert.strictEqual(s.frame, 3, 'the last frame');
+    await step('prev', 7, 'prev skips note page 8');
+    // a typed frame number counts the audience's frames: 2 is Middle
+    await evalIn(win, `window.__vvslides('goto-label', '2')`);
+    await slidesAt(5, 'goto 2 is frame 2 (Middle, page 5) — not physical page 2');
+    await evalIn(win, `window.__vvslides('first')`);
+    await slidesAt(0, 'back on the first slide');
+    // the overview is the audience's frames: four tiles, none of them a note page
+    await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    await sendChord(win, 'o');
+    await waitCalm(win, `document.querySelectorAll('.vv-slides-overview .vv-slides-tile').length === 4`,
+      'the overview shows the 4 frames the audience sees', 8000);
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!document.querySelector('.vv-slides-overview')`, 'the overview closes', 4000);
+
+    // find never takes the audience to a note page; the document layout finds the notes like any text
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'the find bar opens', 8000);
+    assert.strictEqual(await findFor('Notes for the introduction'), 0, 'the slides layout finds no note-page text');
+    assert.ok(await findFor('Intro') >= 2, 'it still finds the slides\' own text');
+    await closeFind();
+    await evalIn(win, `window.__vvslides('layout', 'document')`);
+    await waitCalm(win, `!document.querySelector('.vv-pdf-slides')`, 'the document layout', 8000);
+    await evalIn(win, `window.__vvfindtoggle()`);
+    await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'the find bar opens again', 8000);
+    assert.strictEqual(await findFor('Notes for the introduction'), 2, 'the document layout finds both note pages of the Intro');
+    await closeFind();
+    // a show started from a note page — the document layout's Start From This Slide — starts on that note's slide:
+    // the audience never sees a note page, however the show is asked to start. The slot on screen is recorded at the
+    // END of every frame, from before the show starts, and slot 3 — note page 3, never drawn, so a blank slot — must
+    // not appear in any (checked before the end state, so a view stuck on it fails here, by this name). The end of a
+    // frame is a ResizeObserver callback: a frame runs it after every animation-frame callback and after layout, just
+    // before it paints, and a 1-px probe whose width each frame toggles makes it run every frame. A record taken IN an
+    // animation-frame callback would miss the frame that matters: the show starts inside Reagent's own
+    // animation-frame callback (its flushSync commit runs pdf/update!), which runs after the record's, so that frame
+    // is painted before such a record looks again. go-to-page! snaps every target it is given; without that snap the
+    // show's first frame is painted on the blank slot, and snap!, at the end of the scroll, repairs it one frame later
+    // (ADR-0048 Verification).
+    win.webContents.send('vv:settings', '{:slides-fullscreen? false}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-fullscreen?'] === false`, 'the fullscreen preference is off', 4000);
+    await evalIn(win, `(() => { const c = document.querySelector('.vv-content'); const seen = window.__vvSlotsSeen = [];
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+      document.body.appendChild(probe);
+      const ro = new ResizeObserver(() => { if (window.__vvSlotsSeen !== seen) return;
+        const p = document.querySelector('.vv-pdf-doc.vv-pdf-slides .vv-pdf-page');
+        if (p) seen.push(Math.round(c.scrollTop / p.offsetHeight)); });
+      ro.observe(probe);
+      window.__vvSlotsStop = () => { ro.disconnect(); probe.remove(); };
+      const tick = () => { if (window.__vvSlotsSeen !== seen) return;
+        probe.style.width = probe.style.width === '1px' ? '2px' : '1px';
+        requestAnimationFrame(tick); };
+      requestAnimationFrame(tick); return true; })()`);
+    await evalIn(win, `(() => { const p = document.getElementById('vv-pdf-page-4'); p.scrollIntoView(); const r = p.getBoundingClientRect();
+      p.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2,
+        clientX: r.left + r.width / 2, clientY: r.top + Math.min(40, r.height / 2) })); return true; })()`);
+    await waitCalm(win, `Array.from(document.querySelectorAll('.vv-ctx-menu .vv-menu-item')).some((n) => n.textContent.includes('Start From This Slide'))`,
+      'the context menu over note page 3 offers Start From This Slide', 4000);
+    await evalIn(win, `Array.from(document.querySelectorAll('.vv-ctx-menu .vv-menu-item')).find((n) => n.textContent.includes('Start From This Slide')).click(); true`);
+    await waitCalm(win, `Boolean((window.__vvdb().ui.presentation || {})['active?'])`, 'the show starts', 8000);
+    await waitCalm(win, `(window.__vvSlotsSeen || []).length >= 20`, 'twenty frames of the show recorded', 8000);
+    const slotsSeen = await evalIn(win, `(() => { const s = window.__vvSlotsSeen; window.__vvSlotsSeen = null; window.__vvSlotsStop(); return s; })()`);
+    assert.ok(!slotsSeen.includes(3),
+      `no frame showed note page 3's slot (slots seen, in order: ${JSON.stringify(slotsSeen.filter((v, i) => i === 0 || v !== slotsSeen[i - 1]))})`);
+    await slidesAt(2, 'a show from note page 3 starts on its slide, page 2');
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!window.__vvdb().ui.presentation`, 'Escape ends the show', 4000);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).layout === 'document'`, 'back in the document layout', 8000);
+    win.webContents.send('vv:settings', '{:slides-fullscreen? true}');
+    await waitCalm(win, `window.__vvdb().ui.settings['slides-fullscreen?'] === true`, 'the fullscreen preference is back on', 4000);
+    await evalIn(win, `window.__vvslides('layout', null)`);
+    await waitCalm(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`, 'back in the slides layout', 8000);
+    await evalIn(win, `window.__vvslides('first')`);
+    await slidesAt(0, 'on the first slide again');
+
+    // :slides-notes :off shows every page as it is — the escape hatch; any other value pairs them again
+    await setNotes('off');
+    await marksAre([], ':off: no page is marked');
+    s = await step('next', 1, ':off: next goes to physical page 1 (the note page is shown)');
+    // its labels, 1 2 1 4 5 2 3 3 9 4, group into 9 frames when every page is shown: a note page is labelled with its
+    // physical page number, so each one is a frame of its own
+    assert.strictEqual(s.frames, 9, ':off: 9 frames — each note page, labelled with its page number, is a frame of its own');
+    await setNotes('auto');
+    await marksAre(NOTE_PAGES, 'auto: the note pages are marked again');
+    s = await slidesAt(0, 'auto: the note page the view was on shows as its slide (page 0)');
+
+    // 2 — one XeLaTeX pass: no labels, so the note pages are found by the background scan after the first paint
+    const xePath = path.join(ROOT, 'test', 'fixtures', 'notes-xe-deck.pdf');
+    state.contentByPath.set(xePath, { path: xePath, kind: 'pdf', stamp: Date.now(),
+      bytes: new Uint8Array(fs.readFileSync(fx('beamer-shownotes-xelatex.pdf'))) });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(xePath)})`);
+    await waitCalm(win, `(window.__vvdb().ui.slides || {}).path === ${JSON.stringify(xePath)}`, 'the XeLaTeX deck mounts', 15000);
+    await marksAre(NOTE_PAGES, 'the scan finds the same four note pages');
+    dk = await deckOf(xePath);
+    assert.ok(dk.notes.style === 'interleaved' && JSON.stringify(dk.notes.proof) === '["scan"]' && !dk.notes.pending,
+      `…proven by the scan, nothing left pending: ${JSON.stringify(dk.notes)}`);
+    await step('next', 2, 'the XeLaTeX deck: next skips note page 1');
+    s = await evalIn(win, `window.__vvdb().ui.slides`);
+    assert.strictEqual(s.frames, 6, 'without labels, one frame per shown page');
+
+    // 3 — pdfpc: the sidecar on the payload (main reads it beside the PDF — content-service smoke) reaches the deck
+    const pcText = fs.readFileSync(fx('beamer-pdfpc.pdfpc'), 'utf8');
+    const pcPath = path.join(ROOT, 'test', 'fixtures', 'notes-pdfpc-deck.pdf');
+    const pcBytes = fs.readFileSync(fx('beamer-pdfpc.pdf'));
+    state.contentByPath.set(pcPath, { path: pcPath, kind: 'pdf', stamp: Date.now(), bytes: new Uint8Array(pcBytes),
+      sidecar: { path: pcPath.replace(/\.pdf$/, '.pdfpc'), text: pcText } });
+    await evalIn(win, `window.__vvopen(${JSON.stringify(pcPath)})`);
+    await waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {}; const d = window.__vvdeck(${JSON.stringify(pcPath)});
+      return s.path === ${JSON.stringify(pcPath)} && Boolean(d && d.notes); })()`, 'the pdfpc deck mounts', 15000);
+    dk = await deckOf(pcPath);
+    assert.ok(dk.notes.sidecar === 'read' && dk.notes['pdfpc?'] === true && dk.notes['markdown?'] === true,
+      `the sidecar was read and the deck carries pdfpc metadata (Markdown notes): ${JSON.stringify(dk.notes)}`);
+    await evalIn(win, `window.__vvslides('goto', 3)`);
+    await slidesAt(3, 'goto page 3 (frame Three)');
+    await evalIn(win, `window.__vvslides('next')`);
+    await engineHasSettings();
+    s = await slidesAt(3, 'next stays: the only page ahead, 4, is hidden in the sidecar (pdfpc skips it)');
+    await step('last', 4, 'End still reaches the skipped page');
+    // the control: the same PDF without its sidecar steps onto page 4
+    win.webContents.send('vv:content', { path: pcPath, kind: 'pdf', bytes: new Uint8Array(pcBytes), stamp: Date.now() + 1, sidecar: null });
+    await waitCalm(win, `(window.__vvdeck(${JSON.stringify(pcPath)}) || { notes: {} }).notes.sidecar == null`,
+      'the refresh without a sidecar is swapped in', 15000);
+    await evalIn(win, `window.__vvslides('goto', 3)`);
+    await slidesAt(3, 'goto page 3 again');
+    await step('next', 4, 'without the sidecar, next steps onto page 4');
+    console.log('[ok] PDF note pages: marked and never rasterized in the slides layout; next/prev/goto over the audience\'s pages; the next slide pre-rendered; find skips them (the document layout finds them); :off shows every page; one XeLaTeX pass settled by the scan; the pdfpc sidecar\'s hidden page is skipped');
+  }
+
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.
   // Bug A: a persisted Vim set must be LIVE immediately (active set AND its modal :normal mode set in :db), not
   // only after a manual Standard→Vim→… switch. Push a Vim config the way main does and assert both at once.

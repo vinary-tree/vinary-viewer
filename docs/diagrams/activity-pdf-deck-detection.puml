@@ -5,17 +5,21 @@
 '' fork/end fork shows the parallel evidence and page measure, and `elseif` chains render the rules in their
 '' exact order; the fills come from the shared theme and the SVG renders byte-reproducibly (README §4). Lanes and
 '' fills, from the shared palette: teal = the renderer's pdf.js engine (renderer.pdf);
-'' orange = the pure, process-agnostic deck model (vinary.slides.*), the "model orange" of the pure libraries;
-'' blue = re-frame + DataScript (:pdf/deck-detected → :doc/deck); blue-violet = the app-db inputs of the layout.
+'' orange = the pure, process-agnostic deck and notes models (vinary.slides.*), the "model orange" of the pure
+'' libraries; blue = re-frame + DataScript (:pdf/deck-detected → :doc/deck); blue-violet = the app-db inputs of the
+'' layout. ADR-0048 added the speaker-notes model: its first-paint decision (notes/initial), the view's deck built
+'' from it (deck-for), and the background settle that the view adopts (the note-page decision has its own diagram,
+'' activity-note-page-decision.puml).
 !include _vv-theme.iuml
 !pragma useVerticalIf on
 
-title Deck detection and the layout a PDF opens in (ADR-0045)
+title Deck detection, speaker notes and the layout a PDF opens in (ADR-0045, ADR-0048)
 
 |#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
 start
-:the PDF's bytes: the byte cache's newest version
-(a CANDIDATE from vv:content, else the last good one);  <<RENDERER_TINT>>
+:the PDF's bytes and main's read of its pdfpc sidecar
+(one byte-cache version: a CANDIDATE from vv:content,
+else the last good one);  <<RENDERER_TINT>>
 :**prepare!** — pdf.js getDocument (a copy of the bytes),
 leased through the warm cache;  <<RENDERER_TINT>>
 fork
@@ -24,11 +28,25 @@ fork
   the measure the layout needs anyway;  <<RENDERER_TINT>>
 fork again
   :**vinary.slides.evidence/gather** — getMetadata
-  (Info Creator and Producer, XMP CreatorTool) ·
-  getPageMode · getPageLabels. Each call is caught
-  on its own: a failure is nil, never a failed open;  <<IR_TINT>>
+  (Info Creator and Producer, XMP CreatorTool, pdfpc's
+  XMP keys from the raw packet) · getPageMode ·
+  getPageLabels. Each call is caught on its own:
+  a failure is nil, never a failed open;  <<IR_TINT>>
 end fork
-|#F5EAE0|pure deck model (vinary.slides.*)|
+|#F5EAE0|pure deck and notes models (vinary.slides.*)|
+:**notes/initial** — the speaker-notes model at the first paint
+(ADR-0048 §2.6): split notes on a second-screen deck; note pages
+the labels alone prove; else the work left //pending// (a probe,
+a confirmation or a scan) or the reason none is hidden —
+with pdfpc's settings and the sidecar's hidden pages and notes;  <<IR_TINT>>
+|#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
+:the artifact **{:doc :sizes :evidence :notes :settle}** —
+no extra I/O: the same calls serve a local, sftp://,
+archive or web PDF;  <<RENDERER_TINT>>
+:at mount, **deck-for** — the view's own deck: the evidence plus
+what the notes model hides, skips and splits under its
+:slides-notes preference (:off shows every page as it is);  <<RENDERER_TINT>>
+|#F5EAE0|pure deck and notes models (vinary.slides.*)|
 :**deck/classify** the evidence and the sizes —
 <latex>n</latex> is the page count, <latex>s</latex> the common size when
 every page agrees within <latex>0.5\,\mathrm{bp}</latex> (uniform);  <<IR_TINT>>
@@ -46,20 +64,20 @@ else (no rule matched)
 endif
 :second-screen axis: does <latex>s</latex> double a Beamer paper
 in width (:horizontal) or height (:vertical)?;  <<IR_TINT>>
+:the audience's pages — every page but the //hidden// note pages:
+a note page shows as its slide, the nearest shown page before it;  <<IR_TINT>>
 if (a Beamer source (:beamer, :beamer-geometry),\nno second-screen axis, one label per page?) then (yes)
-  :**frames-from-labels** — a frame is a maximal run
-  of ADJACENT pages sharing one non-blank label;  <<IR_TINT>>
+  :**frames-from-labels** over the shown pages — a frame is
+  a maximal run of ADJACENT shown pages sharing one label;  <<IR_TINT>>
 else (no)
-  :one frame per page (one XeLaTeX pass writes no labels,
+  :one frame per shown page (one XeLaTeX pass writes no labels,
   a two-screen deck's labels are corrupt);  <<IR_TINT>>
 endif
-|#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
-:the artifact **{:doc :sizes :deck}** — no extra I/O:
-the same calls serve a local, sftp://, archive or web PDF;  <<RENDERER_TINT>>
 |#E2EBF3|re-frame + DataScript|
-:pdf-view dispatches [:pdf/deck-detected path stamp summary]
+:the ENGINE (report-deck!) dispatches
+[:pdf/deck-detected path stamp summary]
 → :doc/deck {:deck? :tier :source :pages :frame-count
-:second-screen}, written only when it changed;  <<REFRAME_TINT>>
+:second-screen :notes}, written only when it changed;  <<REFRAME_TINT>>
 |#E3E7F2|app-db: the layout request|
 :deck/effective-layout over [:ui :presentation],
 the view's :pdf-layout and :slides-open-as;  <<APPDB_TINT>>
@@ -74,13 +92,20 @@ else (no)
 endif
 |#E3F2ED|renderer · pdf.js engine (renderer.pdf)|
 :**mount-prepared!** in that layout — the FIRST mount
-already has it, so a deck never flashes as a document;  <<RENDERER_TINT>>
+already has it, so a deck never flashes as a document —
+and in the Slides layout the note pages are marked
+.vv-pdf-note-page and never rasterized;  <<RENDERER_TINT>>
+:**settle-notes!** — after the first frame, once per version:
+evidence/settle runs the pending work over page text
+(at most 2 000 pages); a view still showing that version
+adopts the decided model — its deck again, the marks,
+its slide snapped, :doc/deck reported again;  <<RENDERER_TINT>>
 stop
 
 legend right
   |= Colour |= Swimlane / concept |
   |<#2D9574>&#160;&#160;&#160;&#160;| renderer: the pdf.js engine (renderer.pdf) |
-  |<#E67E22>&#160;&#160;&#160;&#160;| the pure deck model (vinary.slides.deck / .evidence) — the model orange |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure deck and notes models (vinary.slides.deck / .notes / .evidence) — the model orange |
   |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame event → DataScript :doc/deck |
   |<#7590DB>&#160;&#160;&#160;&#160;| app-db inputs of the layout choice |
   Rules are tried in order; the first that matches decides. The tier is

@@ -1,0 +1,111 @@
+@startuml activity-note-page-decision
+'' PlantUML over Mermaid because the note-page decision is a decision table evaluated in order (first match wins),
+'' split between what the first paint decides synchronously and the work it leaves for a background task that walks
+'' page text — two owners, one pure and one effectful. Activity swimlanes show the owner of each step, `elseif`
+'' chains render the table in its exact order, and <latex> labels set the label rules as mathematics; the fills come
+'' from the shared theme and the SVG renders byte-reproducibly (README §4). Lanes and fills, from the shared
+'' palette: orange = the pure notes model (vinary.slides.notes), the "model orange" of the pure libraries;
+'' teal = the renderer side that reads page text with pdf.js and adopts the result (vinary.slides.evidence/settle,
+'' renderer.pdf); red = a decision that shows the deck as it is (no page hidden), the error/refusal hue.
+!include _vv-theme.iuml
+!pragma useVerticalIf on
+
+title Which pages of a Beamer deck are note pages (ADR-0048 §2)
+
+|#F5EAE0|first paint · the pure notes model (notes/initial, plan)|
+start
+:the evidence — page labels <latex>L_0, \dots, L_{n-1}</latex>, the Producer,
+the page sizes — and the parsed pdfpc sidecar;  <<IR_TINT>>
+if (a second-screen axis (doubled pages,\nor pdfpc's notes position)?) then (yes)
+  :split notes: the other half is the slide;  <<IR_TINT>>
+  stop
+elseif (not a Beamer source?) then (yes)
+  ::not-beamer;  <<ERROR_TINT>>
+  stop
+elseif (one page?) then (yes)
+  ::one-page;  <<ERROR_TINT>>
+  stop
+elseif (no page labels (one XeLaTeX pass)?) then (yes)
+  if (<latex>n > 2000</latex>?) then (yes)
+    ::too-many-pages;  <<ERROR_TINT>>
+    stop
+  else (no)
+    :pending **:scan**;  <<IR_TINT>>
+  endif
+elseif (a label that is not a\nnon-negative integer?) then (yes)
+  ::labels-not-integers;  <<ERROR_TINT>>
+  stop
+else (integer labels)
+  :**interleaving** — the label automaton, gap by gap: a page <latex>j \ge 1</latex>
+  with <latex>L_j = j + 1</latex> may be a note page; every other page is a
+  required slide; the valid parses are one choice per gap (§2.1);  <<IR_TINT>>
+  if (:proven — one valid parse, with note pages?) then (yes)
+    if (the Producer is pdfTeX / LuaTeX / LuaHBTeX\nand the labels are not restartable?) then (yes)
+      :**the note pages are hidden at once**
+      (proof [:labels]);  <<IR_TINT>>
+      stop
+    elseif (the confirmation would read\nmore than 2 000 pages?) then (yes)
+      ::too-many-pages;  <<ERROR_TINT>>
+      stop
+    else (no)
+      :pending **:confirm**;  <<IR_TINT>>
+    endif
+  elseif (:ambiguous — several parses, only in the plain run,\n<latex>L_0 \le 1</latex>, distinct first note pages?) then (yes)
+    :pending **:probe** (and :confirm after it
+    unless the Producer is trusted);  <<IR_TINT>>
+  else (:none · :invalid · :undecidable)
+    ::no-note-pages · :invalid · :undecidable;  <<ERROR_TINT>>
+    stop
+  endif
+endif
+|#E3F2ED|background · page text over pdf.js (evidence/settle), adopted by renderer.pdf|
+:after the first frame, once per document version —
+the deck is shown as it is until this decides;  <<RENDERER_TINT>>
+if (pending :scan?) then (yes)
+  :every page in order: a note page when its signature
+  (SIG — a scaled copy of the last slide's text, <latex>\sigma \le 0.4</latex>,
+  half its characters) matches the last slide before it;  <<RENDERER_TINT>>
+  if (note pages found?) then (yes)
+    :hidden (proof [:scan]);  <<RENDERER_TINT>>
+  else (no)
+    ::no-note-pages;  <<ERROR_TINT>>
+  endif
+elseif (pending :probe?) then (yes)
+  :walk the candidates from the LAST: the pair <latex>(a - 1, a)</latex>
+  passes SIG → candidate <latex>a</latex>; fails but page <latex>a</latex> carries the
+  rotated date → the previous candidate; else the parse with no
+  note page in the plain run, when it is valid;  <<RENDERER_TINT>>
+  if (a parse with note pages?) then (yes)
+    if (trusted Producer?) then (yes)
+      :hidden (proof [:labels :probe]);  <<RENDERER_TINT>>
+    else (no)
+      :CONFIRM, as below → [:labels :probe :confirm]
+      or :confirm-failed;  <<RENDERER_TINT>>
+    endif
+  else (none valid · none with note pages)
+    ::probe-undecided · :no-note-pages;  <<ERROR_TINT>>
+  endif
+else (pending :confirm)
+  :CONFIRM — every note page <latex>j</latex> passes SIG against the
+  slide it annotates, or carries the rotated date;  <<RENDERER_TINT>>
+  if (all confirmed?) then (yes)
+    :hidden (proof [:labels :confirm]);  <<RENDERER_TINT>>
+  else (no)
+    ::confirm-failed;  <<ERROR_TINT>>
+  endif
+endif
+:an unreadable page → :unreadable · anything unexpected → :error ·
+more than 2 000 pages read → :too-many-pages — each shows the deck
+as it is; a document closed meanwhile gets nothing applied.
+Every view still showing that version adopts the result;  <<RENDERER_TINT>>
+stop
+
+legend right
+  |= Colour |= Swimlane / concept |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure notes model, at the first paint (vinary.slides.notes) |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the background work over page text, and the views that adopt it |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a reason: no page is hidden, the deck is shown as it is |
+  SIG compares two pages' text runs (§2.2); the bounds of 4 096 runs
+  and 65 536 matches make it "no evidence" beyond them.
+endlegend
+@enduml

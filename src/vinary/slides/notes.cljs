@@ -515,9 +515,12 @@
 
 ;; ---- the sidecar (ADR-0048 §4, §5; pdfpc pdf.vala) -----------------------------------------------------------------
 
-(def max-sidecar-bytes
-  "Main reads a sidecar only up to this size (ADR-0048 §8.9); a larger one is not read."
-  (* 4 1024 1024))
+;; Disabled: the cap is enforced where the file is read, before a byte of it is — main's
+;; content_service.js PDFPC_SIDECAR_MAX_BYTES (4 MiB, ADR-0048 §8.9) — and a sidecar past it reaches this namespace
+;; only as {:tooLarge true} (sidecar-of). A second copy here would be a constant nothing reads, free to drift.
+;; (def max-sidecar-bytes
+;;   "Main reads a sidecar only up to this size (ADR-0048 §8.9); a larger one is not read."
+;;   (* 4 1024 1024))
 
 (defn- json-object? [x] (and (some? x) (= "object" (goog/typeOf x))))
 (defn- json-int [v] (when (and (number? v) (js/Number.isInteger v)) v))
@@ -610,6 +613,18 @@
         (= parsed ::not-json)                            (parse-legacy-sidecar text)
         (or (not (json-object? parsed)) (array? parsed)) {:status :ignored :why :not-an-object}
         :else                                            (parse-json-sidecar parsed)))))
+
+(defn sidecar-of
+  "The parsed sidecar of what main read beside a PDF (ADR-0048 N7: content_service readPdfpcSidecarLocal / Remote, as
+   the payload's :sidecar): parse-sidecar of its :text; a sidecar too large to read, or one that could not be read,
+   is {:status :ignored :why :too-large|:unreadable}, so `--deck-info` names it; nil when there is none."
+  [{:keys [text tooLarge error] :as read}]
+  (cond
+    (string? text) (parse-sidecar text)
+    tooLarge       {:status :ignored :why :too-large}
+    (some? error)  {:status :ignored :why :unreadable}
+    (some? read)   {:status :ignored :why :unreadable}
+    :else          nil))
 
 (defn- poppler-labels
   "Page labels as Poppler gives them to pdfpc: the PDF's labels, or 1-based page numbers when it has none."

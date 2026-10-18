@@ -69,7 +69,7 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | N4 | Text notes come from the annotations pdfpc reads and from the pdfpc sidecar file, per page; both are shown when both exist. They are rendered as sanitized Markdown when the deck carries pdfpc metadata (as pdfpc does), as plain text otherwise, and never as raw HTML. |
 | N5 | pdfpc's settings are read from the raw XMP and from the sidecar (XMP first): notes position, duration, start and end time, last minutes, end slide, Markdown, hidden pages and forced overlays. |
 | N6 | The GUI and `vv --cli --deck-info` run one detection pipeline, `evidence/detect`, so the CLI prints the GUI's decision. |
-| N7 | Main reads the sidecar beside the PDF — locally and over SFTP — attaches it to the PDF's payload, and watches it locally as one of the PDF's assets. |
+| N7 | Main reads the sidecar beside the PDF — locally and over SFTP — and attaches it to the PDF's payload. A local sidecar is watched by the PDF's own content watcher, so creating, editing or deleting it re-delivers the PDF; over SFTP a change to the sidecar alone shows at the PDF's next read. A piped-in PDF and an archive member have no sidecar. |
 | P1 | `s` toggles the **presenter view** in any slides view, windowed or presenting. A single-window show starts in the audience view. |
 | P2 | The engine is never remounted: the pane is an absolutely positioned sibling of the slides, and the slides shrink beside it. |
 | P3 | The pane renders the notes regions and the next slide from the engine's document into canvases of its own (`vinary.renderer.pdf-region`). While the pane is shown, a flip is instant (transitions clipped to the slides are deferred, §6.3). |
@@ -124,8 +124,29 @@ page a role, *slide* or *note*. It is valid when it obeys the rules Beamer's out
 3. a note page is any page after page 0 that carries its own physical page number, $`L_i = i + 1`$. It leaves $`f`$
    unchanged.
 
-The automaton's state is the frame number $`f`$. It is a nondeterministic finite automaton over the labels, simulated
-forward with its set of live states. It keeps back-pointers, so that every accepting parse can be read back.
+**The valid parses, gap by gap.** Call page $`j`$ **eligible** when $`j \ge 1`$ and $`L_j = j + 1`$: by rule 3 only an
+eligible page can be a note page. Every other page, and page 0, is a **required slide**, and sets $`f`$ to its own
+label, whatever came before it. Between two consecutive required slides $`r < r'`$ lies a **gap**, the eligible pages
+$`r + 1, \dots, r' - 1`$; after the last required slide lies the **tail**, the gap that runs to the end of the deck. Two
+facts make the gaps independent of each other:
+
+- The labels of a gap's pages are consecutive ($`L_j = j + 1`$), and a slide's label is the previous slide's or one more
+  (rule 2). So two slides chosen in one gap, with no slide between them, are adjacent pages: the slides a parse chooses
+  in a gap form one **block** $`[x, y]`$ of consecutive pages, or there are none.
+- A required slide fixes $`f`$ to its own label, so what a parse does in one gap cannot constrain another gap.
+
+A parse is therefore one choice per gap, and the valid parses are all the combinations of the gaps' valid choices.
+Each gap has few valid choices:
+
+| Choice in the gap after $`r`$ (up to $`r'`$) | Valid when |
+|---|---|
+| no block: every page of the gap is a note page | $`L_{r'} \in \{L_r, L_r + 1\}`$ — always, in the tail |
+| a block $`[x, y]`$, the pages outside it note pages | $`x \in \{L_r - 1, L_r\}`$ (page $`x`$'s label $`x + 1`$ follows $`L_r`$) and $`y \in \{L_{r'} - 2, L_{r'} - 1\}`$ ($`L_{r'}`$ follows page $`y`$'s label $`y + 1`$); in the tail, any $`y \ge x`$ |
+
+**When $`L_0 \le 1`$, only the first gap can offer a choice.** Along any valid parse a slide's label is at most its page
+index plus one, so a later required slide $`r`$ has $`L_r \le r`$, and $`x \in \{L_r - 1, L_r\}`$ leaves no block that
+starts in its gap ($`x \ge r + 1`$): every later gap's only valid choice is "no block". The first gap is the deck's
+**plain run**, described next.
 
 **The first note page decides a parse.** Suppose $`L_0 \le 1`$: Beamer numbers the first frame 1, or 0 when that frame
 is marked `noframenumbering`. Then a valid parse is determined by where its first note page is, or by having none.
@@ -140,33 +161,44 @@ is marked `noframenumbering`. Then a valid parse is determined by where its firs
   Its frame number stays $`a`$, which no later label $`j + 1 > a + 1`$ in the run can carry.
 - A deck whose first label is 0 is never ambiguous.
 
-| Valid parses | Result |
+| Valid parses | Result (`interleaving`'s `:status`) |
 |---|---|
-| none has a note page | not interleaved (`nil`) |
-| exactly one, and it has note pages | **proven**: that parse's note pages |
-| more than one | **ambiguous**: each parse with note pages is a *candidate*, named by its first note page, and the probe (§2.3) chooses |
+| none | **invalid** (`:invalid`): shown as it is |
+| exactly one, without note pages | not interleaved (`:none`) |
+| exactly one, with note pages | **proven** (`:proven`): that parse's note pages, subject to §2.5's confirmation |
+| several, differing only in the plain run of a deck with $`L_0 \le 1`$, with distinct first note pages | **ambiguous** (`:ambiguous`): each parse with note pages is a *candidate*, named by its first note page, and the probe (§2.3) chooses; whether the parse with no note page in the run is valid is recorded too |
+| several, otherwise — $`L_0 \ge 2`$, more than one gap with a choice, or two parses with the same first note page | **undecidable** (`:undecidable`): the probe cannot tell them apart, so the deck is shown as it is |
 
-A label that drops is outside the rules and invalidates every parse. This happens when the frame counter is restarted,
-as `appendixnumberbeamer` does at `\appendix`, or set back by hand, and the deck is then shown as it is. A rule that
-admitted a restart to 1 was considered and rejected. It would make the most common pattern ambiguous: a first frame
-with two overlays and notes, `1 2 1 …`, would also parse as slide, new frame, restart. With $`L_0 \ge 2`$ (a frame counter
-set by hand), two candidates can share their first note page. The probe cannot tell those apart, so such a deck is shown
-as it is too.
+**A restarted frame counter.** A label that drops — the frame counter restarted, as `appendixnumberbeamer` does at
+`\appendix`, or set back by hand — is outside the rules. A rule that admitted a restart to 1 was considered and
+rejected. It would make the most common pattern ambiguous: a first frame with two overlays and notes, `1 2 1 …`, would
+also parse as slide, new frame, restart. A drop usually leaves no valid parse, and the deck is shown as it is. But not
+always. The plain run of a deck **without** notes, followed by an appendix that restarts at 1, reads `1 2 3 4 5 1 2`. The
+rules admit exactly one parse of those labels: page 0 a slide, pages 1–4 note pages, page 5 an overlay of frame 1, page
+6 a new frame. Nothing in the labels refutes it, and it would hide four slides. So a parse counts as proven **by the
+labels alone** only when they cannot also be read as all slides with the counter restarted at every drop, that is, when
+some label is at least two more than the one before it (`restartable?` is false). Labels that are `restartable?` send
+the parse to confirmation by page content (§2.5), whatever the producer. A real notes deck almost never reads so: a
+note page after a slide outside the plain run makes its label jump by two or more.
 
 The automaton runs only for Beamer sources (the same gate as `frames-from-labels`), never on a second-screen deck
 (those labels are corrupt — ADR-0045 §9), and only when every label is a non-negative integer.
 
+The computation is one pass over the pages and one over the gaps (`notes/interleaving`, `gap-choices`):
+
 ```
 procedure INTERLEAVING(L[0..n-1])
-  live ← { L[0] ↦ start }                                                         ⟨rule 1⟩
-  for i ← 1 to n-1 do
-    next ← {}
-    for each f in live do
-      if L[i] = f or L[i] = f + 1 then add L[i] to next, pointing at (i-1, f) as a slide      ⟨rule 2⟩
-      if L[i] = i + 1             then add f    to next, pointing at (i-1, f) as a note       ⟨rule 3⟩
-    live ← next
-  read the accepting parses back from live through the pointers, grouped by their first note page,
-  stopping as soon as two parses share one; decide by the table above
+  eligible(j) ⇔ j ≥ 1 and L[j] = j + 1                                   ⟨rule 3: only these can be note pages⟩
+  R ← [0] followed by every j in 1..n-1 that is not eligible             ⟨the required slides, ascending⟩
+  gaps ← the consecutive pairs (r, r') of R, then (the last of R, nil)   ⟨nil: the tail⟩
+  for each gap (r, r') do
+    C(r, r') ← the blocks [x, y] the table allows, plus "no block" when it is valid
+  if some C(r, r') is empty               then return INVALID            ⟨no parse is valid⟩
+  if every C(r, r') has one choice        then return PROVEN(the pages outside the chosen blocks), or NONE if none
+  if only the first gap has several choices, L[0] ≤ 1, and their first note pages are distinct
+                                          then return AMBIGUOUS(candidates ← those first note pages,
+                                                                base ← the note pages every parse shares after the run)
+  return UNDECIDABLE
 ```
 
 #### 2.2 The note-page signature
@@ -184,11 +216,19 @@ A thumbnail is a **scaled copy** of the slide. Its text runs carry the slide's o
 height, at positions $`\sigma \cdot (x, y) + (t_x, t_y)`$, for one scale $`\sigma`$ and one offset $`(t_x, t_y)`$.
 `note-page-signature?` compares a slide page $`s`$ with a candidate page $`j`$:
 
-- **The thumbnail.** Every text run of $`s`$ is matched with the runs of $`j`$ that carry the same string. Each match
-  gives a scale $`\sigma = h_j / h_s`$ (the ratio of the two runs' heights) and an offset. A **copy** is a set of
-  matches whose scales agree within 2 % and whose offsets agree within 0.5 % of the page's diagonal, with
-  $`\sigma \le 0.4`$. The signature is true when the largest copy covers at least half of the characters of $`s`$'s
-  text.
+- **The thumbnail.** Every upright text run of $`s`$ is matched with the upright runs of $`j`$ that carry the same
+  string. Each match gives a scale $`\sigma = h_j / h_s`$ (the ratio of the two runs' heights) and an offset
+  $`(t_x, t_y) = (x_j, y_j) - \sigma \cdot (x_s, y_s)`$; only $`\sigma \le 0.4`$ counts. A **copy** is the set of matches in
+  one cell of a grid over $`(\ln \sigma, t_x, t_y)`$ whose cells are $`\ln 1.02`$ wide in $`\ln \sigma`$ and
+  $`0.005\,d`$ wide in each offset, $`d`$ being the note page's diagonal — or in one cell of the seven grids shifted
+  from it by half a cell along any of the three axes. Every copy found this way agrees within 2 % in scale and 0.5 % of
+  the diagonal in offset, and every set of matches that agrees within half those tolerances falls into one cell of
+  some grid. A slide run counts once per copy, however many
+  runs of the note page repeat its string. The signature is true when some copy covers at least half of the
+  characters of $`s`$'s upright text. Eight passes over hash maps make it linear in the number of matches.
+- **Bounds.** A page with more than 4 096 runs, or a pair whose equal strings pair up more than 65 536 times, is not
+  compared: the signature is `nil`, no evidence. No slide comes near either bound. They keep a hostile PDF from making
+  the background comparison slow (§8.9).
 - **An empty slide.** When $`s`$ has no text, its thumbnail has none either, and the default template's date decides.
   The signature is true when $`j`$ has a run rotated by $`\pm 90°`$ that reads as a date `YYYY-MM-DD`, false when it
   has none, and `nil` (no evidence) when $`j`$ has no text at all.
@@ -207,8 +247,8 @@ template's own frame title repeats the slide's title at $`\sigma = 0.69`$, and t
 #### 2.3 The probe
 
 An ambiguous deck's candidates are named by their first note pages $`a`$, all inside the plain run. Under candidate
-$`a`$, page $`a`$ is a note page of page $`a - 1`$, so the probe (`evidence/probe-note-pages`) tests the signature of
-the pair $`(a - 1, a)`$. When the pages are what the rules and the templates describe, **at most one candidate passes**:
+$`a`$, page $`a`$ is a note page of page $`a - 1`$, so the probe (`notes/probe-next`, which `evidence/settle` drives) tests
+the signature of the pair $`(a - 1, a)`$. When the pages are what the rules and the templates describe, **at most one candidate passes**:
 
 - for the true first note page $`a^\ast`$, page $`a^\ast`$ is a thumbnail of page $`a^\ast - 1`$;
 - for $`a < a^\ast`$, pages $`a - 1`$ and $`a`$ are two different slides;
@@ -219,8 +259,10 @@ The probe walks the candidates from the last to the first:
 - **The pair passes.** That candidate is the parse.
 - **It fails, but page $`a`$ carries the default template's rotated date.** Page $`a`$ is then a note page of an
   earlier slide, and the walk goes on to the previous candidate.
-- **Otherwise, the walk stops.** Page $`a`$ is a slide, and no earlier candidate allows that. The all-slides parse stands
-  when it is valid, and the deck is shown as it is when it is not.
+- **Otherwise, the walk stops.** Page $`a`$ is a slide, and no earlier candidate allows that. The parse with no note page
+  in the plain run stands when it is valid (`fallback-notes`: its note pages are the ones every parse shares after the
+  run, so usually none, `:no-note-pages`), and the deck is shown as it is when it is not (`:probe-undecided`). A walk
+  that passes every candidate's pair without a decision ends the same way.
 
 Pages are read with page-level pdf.js calls, which work in the Node build too.
 
@@ -237,8 +279,9 @@ labels that the *previous* run left in the `.aux` file, and asks for a rerun whe
 write them in the same run. So a deck compiled once by XeLaTeX, or by any tool that writes no labels, has neither the
 labels the automaton reads nor the frames of ADR-0045.
 
-Such a deck is **scanned**: every page's text is read once, in order, and page $`j`$ is a note page when its signature
-matches the last slide page before it. Consecutive note pages all match that one slide.
+Such a deck is **scanned** (`notes/scan-step`): every page's text is read once, in order, and page $`j`$ is a note page
+when its signature matches the last slide page before it. Consecutive note pages all match that one slide. A scan that
+finds none decides `:no-note-pages`; a deck of more than 2 000 pages is not scanned (`:too-many-pages`, §8.9).
 
 The probe and the scan run **in the background after the first paint**, so the first paint never waits for page text.
 A proven deck from pdfTeX or LuaTeX is decided from its labels before the first paint (§2.5 covers the other
@@ -262,8 +305,8 @@ pass per save, feeding a live-refreshing viewer, is always in that state.
 
 Labels from another version can still obey the rules of §2.1. The automaton would then prove a parse whose note pages
 are, in this version, slides, and the audience would not see them. So, unless the Producer names pdfTeX, LuaTeX or
-LuaHBTeX, a parse from labels (proven, or chosen by the probe) is **confirmed** before its note pages leave the
-audience's sequence:
+LuaHBTeX (`trusts-labels?`), a parse from labels (proven, or chosen by the probe) is **confirmed** before its note pages
+leave the audience's sequence — and so is a trusted producer's proven parse whose labels are `restartable?` (§2.1):
 
 ```
 procedure CONFIRM(parse)
@@ -276,8 +319,9 @@ procedure CONFIRM(parse)
 Here `SIG` is the signature of §2.2, and `ROTATED-DATE(j)` holds when page $`j`$ has a run rotated by $`\pm 90°`$ that
 reads as a date `YYYY-MM-DD` (also §2.2). The confirmation runs in the background after the first paint, like the
 probe, and stops at the first page that fails. A confirmed parse is used, and a deck that fails is shown as it is.
-Each note page and each slide that has notes is read once, so the cost is at most two pages' text per note page, and a
-parse without note pages costs nothing.
+Each note page and each slide that has notes is read once (`confirm-page-count`), so the cost is at most two pages'
+text per note page, and a parse without note pages costs nothing. A confirmation that would read more than 2 000 pages
+is refused before it starts (`:too-many-pages`), and one that fails decides `:confirm-failed`.
 
 *What is given up.* A deck from one of these drivers whose note template draws neither a thumbnail nor the date
 (`plain`, `lined`) is never confirmed, so it is shown as it is, as it would be without labels (§2.4). Its labels may
@@ -286,6 +330,36 @@ costs less than hiding a slide from it.
 
 *Why the probe's choice is confirmed too.* The probe tests one pair, $`(a - 1, a)`$. A stale parse can agree there and
 still mark a later slide as a note page.
+
+#### 2.6 What the first paint decides, and the reasons
+
+`notes/initial` (through `plan`) decides at the first paint what the labels alone prove, and leaves the rest
+`:pending` for the background (`evidence/settle`), which settles it once per document version. The deck is shown as it
+is until then, and whenever a reason is given:
+
+| The deck | At the first paint | In the background | Reason when no page is hidden |
+|---|---|---|---|
+| a second-screen deck (doubled pages, or pdfpc's notes position) | split notes (`:split`) | — | — |
+| not a Beamer source | — | — | `:not-beamer` |
+| a single page | — | — | `:one-page` |
+| no labels | — | the scan (§2.4) | `:no-note-pages`, or `:too-many-pages` beyond 2 000 pages |
+| a label that is not a non-negative integer | — | — | `:labels-not-integers` |
+| `:proven`, a trusted producer, labels not `restartable?` | **the note pages, hidden at once** (proof `[:labels]`) | — | — |
+| `:proven` otherwise | — | the confirmation (§2.5) | `:confirm-failed`, or `:too-many-pages` |
+| `:ambiguous` | — | the probe (§2.3), then the confirmation when the producer is not trusted | `:no-note-pages`, `:probe-undecided`, `:confirm-failed` |
+| `:none` · `:invalid` · `:undecidable` | — | — | `:no-note-pages` · `:invalid` · `:undecidable` |
+
+In the background, a page whose text cannot be read decides `:unreadable`, and anything unexpected `:error`; both show
+the deck as it is. A document closed or replaced while its work runs gets nothing applied. The decision's proof is the
+vector of the steps that found the note pages — `[:labels]`, `[:scan]`, `[:labels :confirm]`, `[:labels :probe]` or
+`[:labels :probe :confirm]` — and `:doc/deck` and `--deck-info` carry it with the reason.
+
+The whole decision in one picture: the first paint's table in its order, the work it leaves for the background, and
+every reason a deck is shown as it is:
+
+![Which pages of a Beamer deck are note pages: the first paint's decision, the background work it leaves, and the reasons](../diagrams/activity-note-page-decision.svg)
+
+*Diagram source: [`../diagrams/activity-note-page-decision.puml`](../diagrams/activity-note-page-decision.puml).*
 
 ### 3. Navigating over the audience's pages (N3)
 
@@ -308,9 +382,18 @@ shown pages — `:next`/`:prev` move one ordinal, `:first`/`:last` go to the fir
 - **`resolve-goto`** matches the labels of shown pages only and falls back to the 1-based ordinal, so in a `show notes`
   deck typed `2` goes to frame 2.
 
-The engine marks hidden sheets `.vv-pdf-note-page`; CSS hides their text layers in the Slides layout, so find — which
-skips `display: none` — never takes the audience to a note page. The Document layout shows every page, notes included.
-`:slides-notes :off` also disables the pairing: every page is shown as it is (the escape hatch if detection is wrong).
+Each view navigates its own deck (`renderer.pdf` `deck-for`: the document's evidence plus its notes model under the
+view's `:slides-notes` preference), and the engine reports it as `:doc/deck`. In the Slides layout the engine marks the
+hidden pages' placeholders `.vv-pdf-note-page`. CSS hides their text and link layers, so find — which skips
+`display: none` — never takes the audience to a note page and Tab never reaches its links, and the engine never
+rasterizes them (`unseen?`). Every page the engine is asked to show — by a flip, a jump, a refresh or the start of a
+show — is snapped first, and a scroll that ends on a note page's slot is snapped at its end, so no frame shows a
+note page's slot. The slide a flip shows next is not always in the adjacent slot, since a note page may lie between,
+so the engine keeps a **keep-set** rendered: the current slide and the slides `:next` and `:prev` would show
+(`deck/step`). `release-far!` releases every rendered page outside the keep-set and the overscanned band, so the live
+canvases stay bounded. Without hidden or skipped pages the keep-set is exactly the band ADR-0045 §3 keeps. The
+Document layout shows every page, notes included. `:slides-notes :off` also disables the pairing: every page is shown
+as it is (the escape hatch if detection is wrong), and pdfpc's notes position no longer splits a page (§5).
 
 ### 4. Text notes (N4)
 
@@ -395,7 +478,9 @@ does. Values are parsed as pdfpc parses them (`atoi` for numbers, exactly `"true
 so it joins the last frame as an overlay. The second pass removes it. Both facts were measured
 (`test/fixtures/beamer-pdfpc.tex`). vinary-viewer shows the deck as it was compiled.
 
-**Precedence.** XMP, then the sidecar, then the defaults — pdfpc's order without its command line. **Not used:**
+**Precedence.** XMP, then the sidecar, then the defaults — pdfpc's order without its command line. The
+`:slides-notes` preference overrides the notes position: a side splits there, and `:off` splits nothing — whole pages
+(ADR-0045 §9's geometric second screen included). **Not used:**
 `DefaultTransition` (transitions are the viewer's preference, ADR-0045 §10), `noteFontSize` (pdfpc writes it on every
 save, so it is not an author's choice; window zoom scales the pane), `savedSlide` (pdfpc's bookmark).
 
@@ -749,8 +834,12 @@ session between displays. Each capability is constrained:
 
 Annotation and sidecar text is rendered as text, or as Markdown through the document sanitizer — never as raw HTML. The
 new commands are not reachable from a PDF's named actions or links (ADR-0045's allow-list is unchanged). The sidecar is
-read only as the PDF's same-stem sibling, capped at 4 MiB. [The threat model](../security/threat-model.md) records the
-new boundary.
+read only as the PDF's same-stem sibling (the last dot is looked for in the basename only), capped at 4 MiB and refused
+unread above it, through a non-blocking open of a regular file only (so a FIFO at that name cannot stall the read) and
+`fstat` on the handle it then reads. The background notes work reads the text of at most 2 000 pages of one deck
+(`notes/max-content-pages`): a scan or a confirmation that would read more is refused before it starts, and a probe
+stops when it would. Each signature compares at most 4 096 runs per page and 65 536 matches (§2.2), so a hostile PDF
+cannot occupy pdf.js's worker for long. [The threat model](../security/threat-model.md) records the new boundary.
 
 ---
 
@@ -866,10 +955,14 @@ new boundary.
 | The generated decks the tests use | `test/pdf-gen-smoke.mjs`: `pdf-gen.js`'s note pages, labels, annotations and pdfpc XMP against real Beamer and pdfpc output (`test/fixtures/beamer-*.pdf`), with four negative controls |
 | The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
-| The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures |
+| The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures, the pdfpc deck and its sidecar, a sidecar over the cap and a legacy sidecar |
+| N7, the sidecar read: its name, the 4 MiB cap, a FIFO, an unreadable file, a directory, over SFTP | `test/content-service-smoke.js` `testPdfpcSidecar`; five mutants, each killed — a blocking open, the cap off by one, the dot looked for in the whole path, no remote sidecar, a remote read past the cap |
+| N7, the sidecar watched with the PDF (the real main) | `test/watch-e2e.js`: creating, rewriting and deleting `talk.pdfpc` beside an open deck each re-deliver the PDF and the deck follows; two mutants killed — the sidecar not watched, the sidecar not sent |
+| A byte-cache version carries its sidecar read | unit: `vinary.renderer.pdf-cache-test` `the-sidecar-is-part-of-its-version` |
+| §3 in the engine: note pages marked and never drawn in the Slides layout, flips over them, the next slide kept rendered, typed numbers, the overview, find, a show started from a note page, `:off`, one XeLaTeX pass settled by the scan, the sidecar's hidden page | the `npm run test:electron` NOTE PAGES block, on the real LuaLaTeX, XeLaTeX and pdfpc fixtures. Seven mutants, each killed at the check named before its run: the note pages not hidden, note pages rasterized, no keep-set, no background settle, the sidecar dropped by the view, the note-page CSS removed, and no snap in `go-to-page!`. The last one paints the first frame of a show started from a note page on that page's blank slot, and `snap!`, at the end of the scroll, repairs it one frame later. Only a record taken at the end of each frame (a `ResizeObserver` callback, after layout, before paint) sees that frame: the show starts inside Reagent's own animation-frame callback (its `flushSync` commit), so an end-state check and a record taken in an animation-frame callback both missed it — both were tried first ([test strategy §3.5](../engineering/03-test-strategy.md#35-the-harnesses-that-run-the-real-main-process)). A double mutant, with no snap anywhere, is killed too |
 | The presenter view, the pane, instant flips while it is shown, find | `npm run test:electron` blocks |
-| The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages; seven negative controls); unit and randomized simulation tests of both pure models (to be written) |
-| Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (to be written) |
+| The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages; seven negative controls); unit tests of both pure models (`vinary.main.slides-link-test`, 20 tests; `vinary.app.slides-link-test`, 27); and `vinary.app.slides-link-sim-test`, a seeded randomized simulation that drives the real pure code of both windows and main: 2 200 runs over seven configurations (FIFO and reordering channels, windows snapping pages, deeper runs, random ones), each step checking P2, P4 and P6 and each quiescent state P1 and P3, with seven negative controls that each break the property their rule protects |
+| Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (8 tests: the display holding most of a window, the audience display, centred placement in the work area, the sessions that let main place windows, what the presenter is told, swapping screens, nothing to swap) |
 | The real main: link, both directions, crossing moves, blanking, lifecycle, swap, window.edn | `test/presenter-e2e.js`, with two displays faked over one wide virtual screen (to be written) |
 | The hint: when it shows, once per installation | unit (the pure trigger) and an `npm run test:electron` block (to be written) |
 

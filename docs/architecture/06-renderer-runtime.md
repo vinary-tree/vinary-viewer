@@ -44,6 +44,7 @@ harnesses (the Electron smoke, the real-main e2e suites and the benchmarks drive
 |------|---------|
 | `window.__vvdb()` | Current app-db as JS data. |
 | `window.__vvds()` | Current DataScript cached document rows. |
+| `window.__vvdeck(path)` | The `:doc/deck` summary a PDF view reported for `path` — the classification, and the notes model under `notes` (ADR-0048), as JS data (keywords become strings). |
 | `window.__vvkeymap(id)` | Select a keymap set. |
 | `window.__vvopen(path)` | Open a path in the active tab (`[:doc/open path]`). |
 | `window.__vvsource()` | Flip the active tab's facet to its source (`[:tab/toggle-source]`). |

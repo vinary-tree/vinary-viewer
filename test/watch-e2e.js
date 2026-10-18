@@ -305,6 +305,30 @@ async function run() {
   await until(() => pages(first), (n) => n === 7, 'the finished file replaces v2');
   await until(() => note(first), (k) => k === null, 'and clears the note');
   console.log('[ok] a PDF left half-written keeps the last complete version behind the incomplete note; the finished file replaces it');
+
+  // A PDF's pdfpc sidecar is watched WITH the PDF (ADR-0048 N7): creating it beside an open deck, rewriting it and
+  // deleting it each re-deliver the PDF — the bytes unchanged — and that read carries the sidecar's new state, which
+  // the deck the engine reports (:doc/deck, window.__vvdeck) follows. The sidecar does not exist when the watch
+  // begins: chokidar reports a path that appears later.
+  const TALK = path.join(SCRATCH, 'talk.pdf');
+  const TALK_SIDECAR = path.join(SCRATCH, 'talk.pdfpc');
+  fs.copyFileSync(path.join(ROOT, 'test', 'fixtures', 'beamer-pdfpc.pdf'), TALK);
+  const sidecarOf = (win) => evalIn(win, `(() => { const d = window.__vvdeck(${JSON.stringify(TALK)});
+    return d && d.notes ? { sidecar: d.notes.sidecar ?? null } : null; })()`);
+  await openIn(first, TALK);
+  await until(() => sidecarOf(first), (s) => s !== null && s.sidecar === null, 'the deck opens with no sidecar');
+  await sleep(300);   // the content watcher for TALK is installed
+  fs.copyFileSync(path.join(ROOT, 'test', 'fixtures', 'beamer-pdfpc.pdfpc'), TALK_SIDECAR);
+  await until(() => sidecarOf(first), (s) => s !== null && s.sidecar === 'read',
+    'creating the sidecar re-delivers the PDF with it');
+  fs.writeFileSync(TALK_SIDECAR, '{"pdfpcFormat": 99}');   // a format this version does not read: ignored, by name
+  await until(() => sidecarOf(first), (s) => s !== null && s.sidecar === 'ignored',
+    'rewriting the sidecar re-delivers the PDF with the new text');
+  fs.rmSync(TALK_SIDECAR);
+  await until(() => sidecarOf(first), (s) => s !== null && s.sidecar === null,
+    'deleting the sidecar re-delivers the PDF without it');
+  assert.strictEqual(await note(first), null, 'no refresh note: every one of those reads succeeded');
+  console.log('[ok] a PDF\'s pdfpc sidecar is watched with it: creating, rewriting and deleting it re-deliver the PDF, and the deck follows');
 }
 
 app.whenReady().then(() =>

@@ -233,6 +233,19 @@ npm run test:tree-e2e     # compile main+renderer, then run the real app through
 > immediately after an app-db assertion races the re-render — which is exactly how the
 > Remove-from-Files check first failed against a correct implementation.
 
+> **Record what a frame shows at the frame's end.** A check that *no frame* shows something — the Electron smoke's
+> NOTE PAGES block asserts that no frame of a show started from a note page shows that page's blank slot — must
+> sample where the frame is finished: in a `ResizeObserver` callback, which a frame runs after every
+> animation-frame callback and after layout, just before it paints (a 1-px probe whose width each frame toggles
+> makes it run every frame). A sample taken *in* an animation-frame callback misses the frame that matters. Reagent 2
+> commits ratom-driven renders with `flushSync` inside its own animation-frame callback (`reagent.dom.client/render`
+> sets `batch/react-flush`), so a view's `componentDidUpdate`, and any scroll it makes, runs after a callback
+> registered before it, and the frame is painted before that callback looks again. A message posted from the
+> callback runs as a task after the frame, so it can read a state that no frame showed. Measured on 2026-10-18
+> against `go-to-page!` without its snap: the animation-frame record saw `[2]`, and the end-of-frame record saw
+> `[3, 2]`, one painted frame on the blank slot
+> ([ADR-0048 Verification](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md#verification)).
+
 > **Note on `test/test-sidebar.js`.** This is the legacy v0.1.0 vmd-patch sidebar
 > harness. It is parse-checked by [`test/lint.js`](../../test/lint.js) but is not
 > part of `npm test`; the shipped 0.2/0.3 app does not load `src/sidebar.js`.

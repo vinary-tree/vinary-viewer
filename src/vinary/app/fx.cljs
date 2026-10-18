@@ -251,7 +251,7 @@
      (set! (.-href link) (str "css/themes/" theme ".css")))))
 
 ;; PDF byte cache (keyed by :doc/path; never DataScript — ADR-0010) + retention eviction
-(rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes stamp]}] (pdf-cache/put-bytes! path bytes stamp)))
+(rf/reg-fx :pdf/cache-bytes (fn [{:keys [path bytes stamp sidecar]}] (pdf-cache/put-bytes! path bytes stamp sidecar)))
 (rf/reg-fx :pdf/evict       (fn [keep-paths] (pdf-cache/evict-keep! keep-paths)))
 ;; drive the mounted slide show (ADR-0045) through pdf-cache's pdf.js-free hook; a no-op without one
 (rf/reg-fx :slides/command  (fn [op] (pdf-cache/slides-command! op)))

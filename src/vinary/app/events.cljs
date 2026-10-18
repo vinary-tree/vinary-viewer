@@ -630,7 +630,8 @@
 ;; `seq`: this body calls cljs.core/seq).
 (defn- content-received-fx
   [db {:keys [path kind text html entries bytes stamp sheets page meta dataUrl
-              sourceable paged siblings language stdin baseDir git incomplete incompleteReason] read-n :seq :as payload}]
+              sourceable paged siblings language stdin baseDir git incomplete incompleteReason sidecar] read-n :seq
+       :as payload}]
   (let [snap    (ds/snapshot)
         eid     (ds/eid-for-path snap path)
         cur-err (and eid (ds/doc-attr snap path :doc/error))
@@ -758,8 +759,9 @@
              (and (= kind "diff") (ds/doc-attr snap path :doc/diff-split-html))
              (conj [:diff/build-split {:path path :text text :stamp stamp}])
              ;; pdf bytes go to the renderer byte cache (keyed by :doc/path), never DataScript (ADR-0010)
-             ;; …as the CANDIDATE version: the pdf-view promotes it once pdf.js opens it (keep-last-good)
-             (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes :stamp stamp}])
+             ;; …as the CANDIDATE version: the pdf-view promotes it once pdf.js opens it (keep-last-good). The pdfpc
+             ;; sidecar main read beside it (ADR-0048 N7) is part of the version: a sidecar edit is a new version
+             (= kind "pdf")      (conj [:pdf/cache-bytes {:path path :bytes bytes :stamp stamp :sidecar sidecar}])
              ;; the default facet points at a DIFFERENT collocated file (the PDF-first default) → load it in place
              ;; (no tab). Loading gives a pdf facet BOTH its doc entity and its cached bytes (via :content/received).
              (and fresh-facet (not= (:path fresh-facet) path) (nil? (ds/eid-for-path snap (:path fresh-facet))))

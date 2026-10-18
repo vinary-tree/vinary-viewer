@@ -438,6 +438,19 @@
       (:remote m))
     (catch :default _ nil)))
 
+(defn- sidecar-beside?
+  "Does the local PDF at `path` have a directory of its own for a pdfpc sidecar to sit in (ADR-0048 N7)? A PDF piped
+   on stdin is a spilled temp file: the sidecar is read beside the PDF a user named, so it has none."
+  [path]
+  (not (doc-overrides/stdin-doc? path)))
+
+(defn- pdfpc-sidecar
+  "The pdfpc sidecar beside the local PDF at `path` (content_service readPdfpcSidecarLocal: nil, {path text},
+   {path size tooLarge} or {path error}), read with every read of the PDF."
+  [path]
+  (when (sidecar-beside? path)
+    (.readPdfpcSidecarLocal content-service path)))
+
 (defn- pdf-result
   "A verified PDF read's outcome (content_service readPdfLocal / settlePdf: {bytes} | {pending} | {incomplete bytes})
    → a producer result. :pending delivers nothing — the change notification that follows will read again (the
@@ -446,7 +459,8 @@
   [path ^js r ov]
   (if (.-pending r)
     {:pending true}
-    {:payload (clj->js (decorate-payload (cond-> {:path path :kind "pdf" :bytes (.-bytes r) :siblings (siblings-group path)}
+    {:payload (clj->js (decorate-payload (cond-> {:path path :kind "pdf" :bytes (.-bytes r) :siblings (siblings-group path)
+                                                  :sidecar (pdfpc-sidecar path)}
                                            (.-incomplete r) (assoc :incomplete true :incompleteReason (.-incomplete r)))
                                          ov))}))
 
@@ -1061,8 +1075,13 @@
       (if dir?
         (doseq [ev ["add" "unlink" "addDir" "unlinkDir" "change"]]
           (.on w ev (fn [_] (send-open-content! path))))
-        (doseq [ev ["change" "add" "unlink"]]
-          (.on w ev (fn [_] (send-open-content! path)))))
+        (do (doseq [ev ["change" "add" "unlink"]]
+              (.on w ev (fn [_] (send-open-content! path))))
+            ;; a PDF's pdfpc sidecar is watched with it (ADR-0048 N7): writing, creating or deleting the sidecar
+            ;; refreshes the PDF, and that read carries the sidecar again. chokidar reports a path that does not
+            ;; exist yet once it appears (measured, chokidar 5)
+            (when (and (= "pdf" (doc-overrides/effective-kind kind-of path)) (sidecar-beside? path))
+              (.add w (.pdfpcSidecarPath content-service path)))))
       (swap! watchers assoc path w))))
 
 (defn- release-content-watcher-if-unowned! [path]

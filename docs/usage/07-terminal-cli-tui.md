@@ -114,12 +114,17 @@ prints:
 ```json
 {"path":"talk.pdf","pages":3,"sizes":[[725.67,272.13]],"distinctSizes":1,"creator":"LaTeX with Beamer class",
  "producer":"LuaTeX-1.24.0","creatorTool":null,"pageMode":"UseOutlines","labels":{"count":3,"distinct":1},
- "deck":true,"tier":"definite","source":"beamer","frames":3,"secondScreen":"horizontal"}
+ "deck":true,"tier":"definite","source":"beamer","frames":3,"secondScreen":"horizontal",
+ "notes":"split","notePages":0,"notesProof":null,"notesReason":null,"notesSide":"right","pdfpc":null,"sidecar":null,
+ "textNotes":0}
 ```
 
 (Wrapped here for width; the CLI prints one line per file, fields in this order. `labels` counts the PDF's page labels.
 Here pgfpages' two-screen output labels every page "1". That is why a second-screen deck is split into one frame
-per page, not grouped by label.) Like every `vv --cli` invocation, it reads a piped stdin as a document, so a
+per page, not grouped by label. The last eight fields are the speaker-notes decision — `notes` `split` with the notes
+on the right half here; a `show notes` deck reports its note pages instead — and they are described in
+[feature 35](../features/35-slide-shows.md#why-a-pdf-is-or-is-not-a-deck---deck-info). `--deck-info` waits for the
+page-text comparison the GUI runs in the background, so it prints the GUI's final decision.) Like every `vv --cli` invocation, it reads a piped stdin as a document, so a
 script that runs it should redirect stdin: `vv --cli --deck-info talk.pdf < /dev/null`.
 
 ![CLI render sequence](../diagrams/seq-cli-render.svg)

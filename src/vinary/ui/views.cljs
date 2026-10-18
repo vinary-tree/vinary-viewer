@@ -884,11 +884,12 @@
                                                    :layout      (or (some-> @ctrl deref :layout) :document)
                                                    :presenting? (boolean (:presenting? vs))}}}])))
         release! (fn [lease] (when-let [r (:release! lease)] (r)))
-        prepare  (fn [path stamp bytes]
+        ;; a version's pdfpc sidecar (ADR-0048 N7) is prepared with its bytes: a sidecar edit arrives as a new stamp
+        prepare  (fn [path stamp bytes sidecar]
                    (warm-cache/acquire! {:key [:pdf path stamp]
                                          :path path :stamp stamp
                                          :weight (or (.-byteLength ^js bytes) 0)
-                                         :build #(pdf/prepare! bytes)
+                                         :build #(pdf/prepare! bytes {:sidecar sidecar})
                                          :dispose pdf/dispose-prepared!}))
         unmount-doc! (fn []
                        (when @ctrl (pdf/unmount! @ctrl) (reset! ctrl nil))
@@ -897,22 +898,26 @@
                        (reset! shown nil))
         refresh! (fn [path stamp]
                    ;; a newer version of the MOUNTED document: prepare it beside the live one, then swap in place
-                   (when-let [{:keys [bytes] s :stamp} (pdf-cache/bytes-for path)]
+                   (when-let [{:keys [bytes sidecar] s :stamp} (pdf-cache/bytes-for path)]
                      (when (and (= s stamp) (not= s (:stamp @pending)))
                        (when-let [p @pending] (release! (:lease p)))      ; superseded by this newer stamp
                        (let [gen   (swap! gen* inc)
-                             lease (prepare path s bytes)]
+                             lease (prepare path s bytes sidecar)]
                          (reset! pending {:stamp s :lease lease})
                          (-> (:promise lease)
                              (.then (fn [prepared]
                                       (when (and (= gen @gen*) @ctrl)
-                                        (pdf/replace-doc! @ctrl prepared)
+                                        ;; the engine reports the view's deck itself (:pdf/deck-detected), now and
+                                        ;; again when its notes settle (ADR-0048 N2)
+                                        (pdf/replace-doc! @ctrl prepared s)
                                         (release! @lease*)               ; destroys the previous proxy
                                         (reset! lease* lease)
                                         (reset! pending nil)
                                         (reset! shown [path s])
                                         (pdf-cache/promote! path s)
-                                        (rf/dispatch [:pdf/deck-detected path s (deck/summary (:deck prepared))])
+                                        ;; Disabled: replace-doc! dispatches it — from the VIEW's deck, which depends on
+                                        ;; the :slides-notes preference and the settled notes, not the artifact's.
+                                        ;; (rf/dispatch [:pdf/deck-detected path s (deck/summary (:deck prepared))])
                                         (rf/dispatch [:pdf/refreshed path s]))))
                              (.catch (fn [e]
                                        (when (= gen @gen*)
@@ -925,9 +930,9 @@
         mount!   (fn mount! [path]
                    ;; a FRESH mount: the newest cached version (a pending candidate, else the last good one). A
                    ;; candidate that fails to open falls back to the good version when there is one.
-                   (when-let [{:keys [bytes stamp]} (pdf-cache/bytes-for path)]
+                   (when-let [{:keys [bytes stamp sidecar]} (pdf-cache/bytes-for path)]
                      (let [gen   (swap! gen* inc)
-                           lease (prepare path stamp bytes)
+                           lease (prepare path stamp bytes sidecar)
                            ;; a restored history entry's SLIDE (Back/Forward, a tab switch — ADR-0045): the engine
                            ;; opens on it, and the pixel restore is dropped (it would land anywhere in a layout whose
                            ;; slot height follows the window)
@@ -936,11 +941,16 @@
                        (-> (:promise lease)
                            (.then (fn [prepared]
                                     (when (and (= gen @gen*) @node)
+                                      ;; the engine reports the view's deck itself (:pdf/deck-detected), now and
+                                      ;; again when its notes settle (ADR-0048 N2)
                                       (reset! ctrl (pdf/mount-prepared! @node prepared path
-                                                                        (cond-> @vstate (some? want) (assoc :page want))))
+                                                                        (cond-> (assoc @vstate :stamp stamp)
+                                                                          (some? want) (assoc :page want))))
                                       (reset! shown [path stamp])
                                       (pdf-cache/promote! path stamp)
-                                      (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
+                                      ;; Disabled: mount-prepared! dispatches it — from the VIEW's deck, which depends
+                                      ;; on the :slides-notes preference and the settled notes, not the artifact's.
+                                      ;; (rf/dispatch [:pdf/deck-detected path stamp (deck/summary (:deck prepared))])
                                       (rf/dispatch [:pdf/refreshed path stamp])
                                       (if (some? want) (scroll/discard!) (scroll/apply! @node))
                                       ;; a NEWER version that arrived while this one was being prepared (a re-open

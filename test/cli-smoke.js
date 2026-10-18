@@ -307,6 +307,46 @@ if (fs.existsSync(pdf)) {
      '--deck-info: a missing file does not stop the files after it');
   ok(mixed.err.includes(`vv-cli: ${gone}: ENOENT`) && !/\n\s+at /.test(mixed.err),
      '…and is reported in one line, not a stack trace');
+
+  // ── 4e′. the notes decision (ADR-0048 N6): the GUI's own pipeline, evidence/detect, settled — on REAL Beamer output
+  const fx = (f) => path.join(ROOT, 'test', 'fixtures', f);
+  ok(beamer.json.notes === 'split' && beamer.json.notesSide === 'right' && beamer.json.notePages === 0,
+     '--deck-info notes: `show notes on second screen=right` is a split deck, notes on the right');
+  const shown = info(fx('beamer-shownotes.pdf'));         // LuaLaTeX, one pass: labels written in the run
+  ok(shown.json.notes === 'interleaved' && shown.json.notePages === 4 && JSON.stringify(shown.json.notesProof) === '["labels"]'
+     && shown.json.frames === 4 && shown.json.pages === 10,
+     '--deck-info notes: a `show notes` deck from LuaLaTeX — 4 note pages proven by its labels; 4 frames over the 6 shown pages');
+  const xe = info(fx('beamer-shownotes-xelatex.pdf'));     // one XeLaTeX pass: no labels → the content scan
+  ok(xe.json.notes === 'interleaved' && xe.json.notePages === 4 && JSON.stringify(xe.json.notesProof) === '["scan"]'
+     && xe.json.labels === null && xe.json.frames === 6,
+     '--deck-info notes: the same deck from one XeLaTeX pass (no labels) — the scan finds the same 4 note pages');
+  const plain = info(fx('beamer-plain.pdf'));
+  ok(plain.json.notes === 'none' && plain.json.notesReason === 'no-note-pages' && plain.json.pdfpc === null
+     && plain.json.sidecar === null && plain.json.textNotes === 0,
+     '--deck-info notes: a Beamer deck without notes says why nothing is hidden (no-note-pages)');
+  ok(paper.json.notes === 'none' && paper.json.notesReason === 'not-beamer', '--deck-info notes: an ordinary PDF is not a Beamer deck');
+  // pdfpc: its XMP keys, its sidecar beside the PDF (XMP first: Duration 20 beats the sidecar's 30), its text notes
+  const pc = info(fx('beamer-pdfpc.pdf'));
+  ok(pc.json.sidecar && pc.json.sidecar.status === 'read' && pc.json.sidecar.format === 2,
+     '--deck-info notes: the pdfpc sidecar beside the PDF is read (pdfpcFormat 2)');
+  ok(pc.json.pdfpc && pc.json.pdfpc.durationMin === 20 && pc.json.pdfpc.lastMinutes === 3 && pc.json.pdfpc.endFrame === 2
+     && pc.json.pdfpc.markdown === true,
+     '…pdfpc\'s settings, XMP before the sidecar (duration 20, last minutes 3, end frame 2), Markdown on');
+  ok(pc.json.textNotes === 4, `…and the pages with text notes — annotations and sidecar notes (${pc.json.textNotes})`);
+  // a sidecar main will not read: past the 4 MiB cap (sparse), or pdfpc's legacy text format
+  const capDir = fs.mkdtempSync(path.join(tmp, 'pdfpc-'));
+  fs.copyFileSync(fx('beamer-plain.pdf'), path.join(capDir, 'talk.pdf'));
+  fs.writeFileSync(path.join(capDir, 'talk.pdfpc'), '');
+  fs.truncateSync(path.join(capDir, 'talk.pdfpc'), 4 * 1024 * 1024 + 1);
+  const big = info(path.join(capDir, 'talk.pdf'));
+  ok(big.code === 0 && big.json.sidecar && big.json.sidecar.status === 'ignored' && big.json.sidecar.why === 'too-large'
+     && big.json.pdfpc === null,
+     '--deck-info notes: a sidecar past the 4 MiB cap is named, ignored, and gives no pdfpc settings');
+  fs.writeFileSync(path.join(capDir, 'talk.pdfpc'), '[duration]\n25\n[notes]\n### 1\nA legacy note\n');
+  const legacy = info(path.join(capDir, 'talk.pdf'));
+  ok(legacy.json.sidecar && legacy.json.sidecar.status === 'read' && legacy.json.sidecar.format === 'legacy'
+     && legacy.json.pdfpc && legacy.json.pdfpc.durationMin === 25 && legacy.json.textNotes === 1,
+     '--deck-info notes: a legacy-format sidecar is read: its duration and its note');
 }
 
 // ── 4d. ADR-0036: piped stdin documents + positional -t/--type ────────────────────────────────────

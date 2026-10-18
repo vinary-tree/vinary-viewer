@@ -1,6 +1,7 @@
 # 0045 — Slide-deck presentation: a Slides layout inside the PDF engine, keys that flip slides, and a window-level slide show
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR-0048](0048-speaker-notes-and-linked-presenter-windows.md) (§9 below: a plain
+  `show notes` deck's note pages now leave the audience's sequence)
 - **Date:** 2026-10-17
 - **Deciders:** vinary-viewer maintainers
 
@@ -174,9 +175,10 @@ experiment 12 §5–§7.
 legacy build of pdf.js) and the same classifier, and prints one JSON line per PDF — the instrument of experiment
 12, so the experiments test the product's code rather than a copy of it.
 
-![Deck detection and the layout a PDF opens in](../diagrams/activity-pdf-deck-detection.svg)
+![Deck detection, speaker notes and the layout a PDF opens in](../diagrams/activity-pdf-deck-detection.svg)
 
-*Diagram source: [`../diagrams/activity-pdf-deck-detection.puml`](../diagrams/activity-pdf-deck-detection.puml).*
+*Diagram source: [`../diagrams/activity-pdf-deck-detection.puml`](../diagrams/activity-pdf-deck-detection.puml). It now
+also shows ADR-0048's speaker-notes model — its first-paint decision, the view's own deck, and the background settle.*
 
 ### 2. The DOM-free deck model
 
@@ -654,6 +656,8 @@ without reading layout, so find, selection and copy see what the eye sees. Such 
 no labels, because a corrupt label would make the counter, the typed number and the frame steps lie; the page number
 is always right. The Document layout always shows whole pages, so the notes stay readable and searchable there.
 Plain `show notes`, which interleaves note pages at the slide's own size, gives no geometric signal and is shown as is.
+*Amended by ADR-0048 §2–§3:* such a deck's note pages are now found from its page labels, or by comparing page text,
+and leave the audience's sequence; a deck whose note pages cannot be proven is still shown as is.
 
 ### 10. Transitions (S8)
 
