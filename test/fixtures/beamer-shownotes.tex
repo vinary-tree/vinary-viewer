@@ -1,0 +1,54 @@
+% A REAL Beamer deck with speaker notes interleaved as note pages (`show notes`) -- the regression fixture for
+% ADR-0048 §2 (vinary.slides.notes: the label automaton, the note-page signature, the probe, the scan and the
+% confirmation) and for test/fixtures/pdf-gen.js's `notes` option, whose output test/cli-smoke.js compares with it.
+%
+% Four PDFs were compiled from this file ONCE, on 2026-10-17, each in its own empty directory, with
+%   This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux); XeTeX 3.141592653-2.6-0.999998 (TeX Live 2026);
+%   beamer.cls 2026/01/22 v3.77; hyperref 2026-01-29 v7.01p
+%     beamer-shownotes.pdf             lualatex -interaction=nonstopmode -halt-on-error beamer-shownotes.tex
+%     beamer-shownotes-compressed.pdf  lualatex -interaction=nonstopmode -halt-on-error
+%                                        -jobname=beamer-shownotes-compressed
+%                                        '\def\vvnotetemplate{compressed}\input{beamer-shownotes}'
+%     beamer-shownotes-xelatex.pdf     xelatex -interaction=nonstopmode -halt-on-error
+%                                        -jobname=beamer-shownotes-xelatex beamer-shownotes.tex     (ONE pass)
+%     beamer-onlynotes.pdf             lualatex -interaction=nonstopmode -halt-on-error -jobname=beamer-onlynotes
+%                                        '\def\vvnotesmode{show only notes}\input{beamer-shownotes}'
+% and they are committed as-is: frozen samples of real TeX output (embedded fonts, the note templates' thumbnails,
+% the rotated date, the labels hyperref writes). Do not regenerate them to "fix" a test.
+%
+% Expected, written down before the first compile (pages are 0-based):
+%   pages 10: Intro o1, note, Intro o2, note, the between-frames note, Middle, Outro o1, Outro o2, note, Middle again
+%   labels (lualatex, both templates): 1 2 1 4 5 2 3 3 9 4  -- a slide carries its frame number, a note page its
+%                                                              physical page number, \againframe steps the counter
+%   labels (one xelatex pass): none                          -- hxetex.def writes them from the previous run's .aux
+%   note pages: {1, 3, 4, 8}; the label automaton proves that parse (page 1 cannot stay a slide: page 2's label 1
+%   would then drop below frame 2).
+%   beamer-onlynotes.pdf (`show only notes`: the four note pages alone), from the rule measured on two other decks
+%   (an in-frame note page carries its frame number, a between-frames one its physical page number): labels
+%   1 1 3 3, and no valid parse (page 3's label 3 is neither frame 1 or 2 nor its page number 4), so it is shown as
+%   it is.
+%
+% Measured (2026-10-17): as expected, for all four PDFs. Not predicted: xdvipdfmx writes the page box rounded to
+% 0.01 pt (362.83 x 272.13, where LuaTeX writes 362.835 x 272.126), and places every text run within 0.002 pt of
+% LuaTeX's (36 runs on 10 pages compared).
+\documentclass{beamer}
+\providecommand\vvnotesmode{show notes}
+\setbeameroption{\vvnotesmode}
+\providecommand\vvnotetemplate{default}
+\setbeamertemplate{note page}[\vvnotetemplate]
+\title{Speaker notes fixture}
+\begin{document}
+\begin{frame}{Intro}
+  Intro first point \pause Intro second point
+  \note{Notes for the introduction}
+\end{frame}
+\note{A note written between two frames}
+\begin{frame}[label=middle]{Middle}
+  Middle slide words
+\end{frame}
+\begin{frame}{Outro}
+  Outro first point \pause Outro second point
+  \note<2>{Notes for the second overlay of the outro}
+\end{frame}
+\againframe{middle}
+\end{document}

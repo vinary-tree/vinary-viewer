@@ -1,0 +1,20 @@
+% A REAL Beamer deck with five one-page frames and no notes -- the fixture for the probe's cheapest case
+% (ADR-0048 §2.3): its labels read 1 2 3 4 5, so every page is a candidate first note page, and the probe must
+% reject the last one by reading two pages' text, leaving the all-slides parse.
+%
+% beamer-plain.pdf was compiled from this file ONCE, on 2026-10-17, with
+%   This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux); beamer.cls 2026/01/22 v3.77
+%   lualatex -interaction=nonstopmode -halt-on-error beamer-plain.tex
+% and is committed as-is: a frozen sample of real TeX output. Do not regenerate it to "fix" a test.
+%
+% Expected, written down before the first compile: 5 pages, labels 1 2 3 4 5, no note pages.
+% Measured (2026-10-17): as expected.
+\documentclass{beamer}
+\title{Plain deck fixture}
+\begin{document}
+\begin{frame}{First}The first slide's words\end{frame}
+\begin{frame}{Second}The second slide's words\end{frame}
+\begin{frame}{Third}The third slide's words\end{frame}
+\begin{frame}{Fourth}The fourth slide's words\end{frame}
+\begin{frame}{Fifth}The fifth slide's words\end{frame}
+\end{document}

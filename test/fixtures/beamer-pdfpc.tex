@@ -1,0 +1,55 @@
+% A REAL Beamer deck written for pdfpc -- the fixture for ADR-0048 §4 and §5: \pdfpcnote's hidden /Text
+% annotations (one copy per overlay page; their string encoding depends on the engine, below) and the pdfpc keys
+% pdfpc.sty writes into the XMP packet (a NESTED rdf:Description inside hyperxmp's, which is not valid RDF/XML).
+% beamer-pdfpc.pdfpc beside it is its sidecar, written by hand in pdfpc 4.7.0's writer format (pdfpc itself was not
+% installed). It disagrees with the XMP on purpose, so precedence can be tested: duration 30, lastMinutes 2 and
+% endSlide 1 all lose to the XMP. It holds a note on page 0 that differs from that page's annotation (both are shown,
+% ADR-0048 §4), a note on page 3, and page 4 hidden. pdfpc's writer never saves a page whose note came from an
+% annotation, so a note beside an annotation is what a sidecar holds after the author added the \pdfpcnote later.
+%
+% Two PDFs were compiled from this file on 2026-10-17, each in its own empty directory and each TWICE (see
+% "Measured" below for why), with beamer.cls 2026/01/22 v3.77, pdfpc.sty 2023/10/21 v0.7.1 and hyperxmp.sty v5.13:
+%   beamer-pdfpc.pdf         This is LuaHBTeX, Version 1.24.0 (TeX Live 2026/Arch Linux)
+%                              lualatex -interaction=nonstopmode -halt-on-error beamer-pdfpc.tex   (twice)
+%   beamer-pdfpc-pdftex.pdf  pdfTeX 3.141592653-2.6-1.40.29 (TeX Live 2026/Arch Linux)
+%                              pdflatex -interaction=nonstopmode -halt-on-error beamer-pdfpc.tex   (twice; renamed)
+% and they are committed as-is: frozen samples of real TeX output. Do not regenerate them to "fix" a test.
+%
+% Expected, written down before the first compile (pages are 0-based):
+%   pages 5: One o1, One o2, Two, Three, Four; labels 1 1 2 3 4
+%   annotations: /Text with /F 6 on pages 0 and 1 (the same note), and on page 2
+%   XMP: pdfpc:Duration 20, pdfpc:EndTime 10:30, pdfpc:EndUserSlide 3, pdfpc:LastMinutes 3,
+%        pdfpc:NotesPosition none (guessed: no pgfpages layout), pdfpc:DisableMarkdown false
+%
+% Measured (2026-10-17), where it differed from the expectation above:
+%   * ONE pass gave 6 pages, the last LaTeX's "Temporary page!": hyperxmp learns the page count from the .aux, so a
+%     pdfpc deck needs a second pass. The second pass has the 5 pages and the labels expected, under both engines.
+%     A separate one-pass LuaLaTeX compile (its expectation registered first) showed that the XMP already carries the
+%     six keys, and that the extra page is labelled 4 (labels 1 1 2 3 4 4): it joins the last frame as an overlay.
+%   * `\\` is a newline only under pdfTeX. Under LuaTeX, pdfpc.sty turns the note into hex BEFORE it redefines `\\`,
+%     so the annotation carries the two characters `\\`, which is also the text pdfpc receives.
+%   * Under pdfTeX, pdfpc.sty writes the note's UTF-8 bytes into a literal string, which every reader decodes as
+%     PDFDocEncoding: `café` arrives as `cafÃ©` (the bytes are C3 A9). Under LuaTeX it is UTF-16BE hex, and correct.
+%   Everything else was as expected: /Text with /F 6 on pages 0, 1 and 2, and the six XMP keys.
+%   * XeLaTeX (XeTeX 3.141592653-2.6-0.999998, twice; that PDF is not committed): `\\` is a newline, and
+%     xdvipdfmx re-encodes the non-ASCII note as UTF-16BE hex itself, so café and naïve arrive correct: only a
+%     pdfTeX deck needs the repair (ADR-0048 §4). Registered before the compile; all three expectations held.
+\documentclass{beamer}
+\usepackage[duration=20,endtime=10:30,enduserslide=3,lastminutes=3]{pdfpc}
+\title{pdfpc fixture}
+\begin{document}
+\begin{frame}{One}
+  One first point \pause One second point
+  \pdfpcnote{A pdfpc note on both overlays of frame one\\with a second line, café and naïve}
+\end{frame}
+\begin{frame}{Two}
+  Two words
+  \pdfpcnote{Markdown with *emphasis* and a [link](https://example.org/)}
+\end{frame}
+\begin{frame}{Three}
+  Three words
+\end{frame}
+\begin{frame}{Four}
+  Four words
+\end{frame}
+\end{document}

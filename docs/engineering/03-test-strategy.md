@@ -82,9 +82,9 @@ shadow-cljs compile test && node dist/test/test.js
 
 ## 3. The JavaScript smoke harnesses
 
-Ten JavaScript harnesses (`test/*-smoke.js`) drive the wiring. Each is a plain
-Node or Electron script using the built-in `assert` module; there is no test
-framework. They fall into three groups by host.
+JavaScript harnesses (`test/*-smoke.js`, `test/*-smoke.mjs` and `test/*-e2e.js`) drive the wiring. Each is a
+plain Node or Electron script using the built-in `assert` module; there is no test framework. They fall into three
+groups by host.
 
 ### 3.1 Electron smokes (isolated display protocol)
 
@@ -112,6 +112,7 @@ framework. They fall into three groups by host.
 | [`git-tree-smoke.js`](../../test/git-tree-smoke.js) | The sidebar file-tree git seam: `repo-files` (`vinary.main.tree-listing`) lists with `git ls-files --cached --others --exclude-standard` and subtracts `git ls-files --deleted`, so new non-ignored files appear while ignored clutter and deleted/unstaged-renamed tracked paths do not linger. It exercises both exact commands against a throwaway repo, asserts `path-tree` still falls back to the synthetic root when there is no repo ([ADR-0030](../design-decisions/0030-fallback-project-roots.md)), and gates every ClojureScript file of main against a synchronous child process (`execFileSync`/`spawnSync`/`execSync` — docs/scientific/10 §11). |
 | [`ssh-config-smoke.js`](../../test/ssh-config-smoke.js) | Hermetic unit tests for `ssh_config.js` (pure, no fs/net): `parseSshUri` for `ssh://` / `sftp://` authority, port, user, and home-relative path handling ([ADR-0027](../design-decisions/0027-remote-files-over-ssh.md)). |
 | [`ssh-transport-smoke.js`](../../test/ssh-transport-smoke.js) | `ssh_transport.js` end-to-end against the **hermetic in-process ssh2 SFTP fixture** (no network, no external host); also asserts ssh2 runs **pure-JS** (no native crypto addon) and that `AddKeysToAgent` adds a key to a throwaway ssh-agent. |
+| [`pdf-gen-smoke.mjs`](../../test/pdf-gen-smoke.mjs) | The generated speaker-notes decks against **real TeX output**, through pdf.js: `show notes` note pages (the default and compressed templates, a label-less XeLaTeX pass, `show only notes`) match the committed Beamer decks in page size, labels, thumbnail scale and offset, rotated date, and title, frame-title and notes runs; pdfpc decks match in their `\pdfpcnote` annotations (pdfTeX's mojibake included), labels and raw XMP keys; the sidecar writer reproduces the committed sidecar byte for byte. Four negative controls (a 0.011 pt baseline shift, a 0.26 thumbnail scale, frame-numbered note pages, a correctly encoded pdfTeX note) each make it fail. |
 | [`daemon-events-smoke.js`](../../test/daemon-events-smoke.js) | The authenticated target-daemon protocol: private descriptor lifecycle, both negative sides of mutual HMAC + SFTP-namespace proof, framed requests, SSH direct forwarding, invalidations, remote tree conversion, reconnect restoration, in-flight cancellation/owner release, and no-target SFTP fallback. Tree handlers return Promises (the target lists asynchronously): a delayed resolution replies `ok:true` with its value, a rejection `ok:false` with its message, and every entry's `listing` stamp crosses the wire. |
 
 ### 3.4 What `npm test` actually runs
@@ -121,11 +122,12 @@ Node smokes, and it deliberately excludes Electron smokes, which need a display:
 
 ```bash
 # npm test (terminal test compilers validate vendored assets; they do not sync/fetch)
-shadow-cljs compile test && node dist/test/test.js \
+npm run lint && shadow-cljs compile test && node dist/test/test.js \
   && node test/ssh-config-smoke.js && node test/ssh-transport-smoke.js \
   && node test/daemon-events-smoke.js \
   && node test/content-service-smoke.js && node test/git-tree-smoke.js \
-  && node test/headless-runner-smoke.mjs \
+  && node test/git-log-smoke.js && node test/git-blame-smoke.js \
+  && node test/headless-runner-smoke.mjs && node test/pdf-gen-smoke.mjs \
   && npm run test:cli && npm run test:tui
 # test:cli  → compile:cli:test (grammars:check + graphics:check) + cli-smoke + graphics-smoke
 # test:tui  → compile:tui:test (grammars:check + graphics:check) + tui-smoke
@@ -275,8 +277,11 @@ The smokes stand on a small set of committed fixtures under
 | `smoke.pdf` | PDF paths in the smokes / screenshots | A tiny real PDF for the pdf.js pipeline. |
 | `ssh-server.js` (`startSftpServer`) | `ssh-transport-smoke.js`, `content-service-smoke.js`, `daemon-events-smoke.js`, `cli-smoke.js`, `electron-smoke.js`, `remote-daemon-events-e2e.js`, `remote-pdf-e2e.js`, `scripts/bench-remote-read.cjs`, `scripts/exp-torn-pdf-reads.cjs` | A hermetic **in-process** `ssh2.Server` SFTP server, so the SSH transport and every remote path run with no network and no external host. Instrumented for the remote-read experiments ([scientific/11](../scientific/11-remote-read-and-reload-safety-experiments.md)): a server identity, a read-length cap, per-request delays and faults, request hooks, statistics and open-handle counts. |
 | `latency-proxy.js` | `scripts/bench-remote-read.cjs`, `scripts/diag-sftp-window.cjs` | A TCP proxy that adds a round-trip time (one FIFO per direction, RTT/2 each way) and an optional bandwidth limit between the SSH client and the fixture. |
-| `pdf-gen.js` | the PDF smokes and e2e harnesses, the benchmarks, `cli-smoke.js` | Deterministic PDF builders: `makeTextPdf`, `makeOutlinePdf`, `makeDeckPdf` (Beamer-like decks with overlays, page labels, page modes, links, second-screen notes, padding, incremental updates), `truncatePdf`, `pageColour`. |
+| `pdf-gen.js` | the PDF smokes and e2e harnesses, the benchmarks, `cli-smoke.js`, `pdf-gen-smoke.mjs` | Deterministic PDF builders: `makeTextPdf`, `makeOutlinePdf`, `makeDeckPdf` (Beamer-like decks with overlays, page labels, frame numbers and titles, page modes, links, second-screen notes, `show notes` note pages laid out by Beamer's four note-page templates, `show only notes`, `\pdfpcnote`-style annotations in each engine's string encoding, pdfpc XMP keys, padding, incremental updates), `makePdfpcSidecar` (pdfpc's sidecar JSON, in its writer's key order), `truncatePdf`, `pageColour`. |
 | `beamer-notes-right.pdf` + `.tex` | `electron-smoke.js`, `cli-smoke.js`, `content-service-smoke.js` | A real lualatex Beamer deck with `show notes on second screen=right`, and its source. |
+| [`beamer-shownotes.tex`](../../test/fixtures/beamer-shownotes.tex) → `beamer-shownotes.pdf`, `beamer-shownotes-compressed.pdf`, `beamer-shownotes-xelatex.pdf`, `beamer-onlynotes.pdf` | `pdf-gen-smoke.mjs` | Real Beamer `show notes` output ([ADR-0048 §2](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)): four frames with in-frame, overlay-specific and between-frames notes and an `\againframe`. LuaLaTeX with the default and the compressed note template, one XeLaTeX pass (no labels), and `show only notes`. The source's header gives each compile command and the expectations written down before the compile. |
+| [`beamer-plain.tex`](../../test/fixtures/beamer-plain.tex) → `beamer-plain.pdf` | `pdf-gen-smoke.mjs` | A real five-frame LuaLaTeX deck, one page per frame and no notes: labels `1 2 3 4 5`, the case where every page could be a note page by its label alone. |
+| [`beamer-pdfpc.tex`](../../test/fixtures/beamer-pdfpc.tex) → `beamer-pdfpc.pdf`, `beamer-pdfpc-pdftex.pdf`; [`beamer-pdfpc.pdfpc`](../../test/fixtures/beamer-pdfpc.pdfpc) | `pdf-gen-smoke.mjs` | A real pdfpc deck ([ADR-0048 §4–§5](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)) from LuaLaTeX (notes in UTF-16BE) and pdfLaTeX (notes in PDFDocEncoding mojibake), with pdfpc's XMP keys; and a hand-written sidecar that disagrees with the XMP on purpose, for precedence. |
 | `hermetic-env.js` | every harness that boots the real main | The private runtime dir and the disabled password bridge (see §3.4, Hermetic real-app harnesses). |
 
 Most other fixtures are *generated* by the harness at run time (e.g.
