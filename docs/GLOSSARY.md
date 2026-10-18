@@ -536,7 +536,8 @@ main accepted is the show's state. *First introduced in [ADR-0048](design-decisi
 and labelled with its *physical* page number. That label is how the label automaton of `vinary.slides.notes` finds
 it; a deck without page labels is scanned in the background instead. In the
 Slides layout a note page leaves the audience's sequence and appears in the **presenter view**. *First introduced in
-[ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1–§3.*
+[ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §1–§3; proved in
+[`theory/12`](theory/12-speaker-notes-detection.md).*
 
 **overlay (Beamer)** — One page of a Beamer **frame**: one build step, produced by `\pause` or by an overlay
 specification such as `<2->`. In the **Slides layout**, → steps one overlay and Shift+→ skips the frame's remaining

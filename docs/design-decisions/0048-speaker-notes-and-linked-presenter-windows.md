@@ -135,8 +135,8 @@ facts make the gaps independent of each other:
   in a gap form one **block** $`[x, y]`$ of consecutive pages, or there are none.
 - A required slide fixes $`f`$ to its own label, so what a parse does in one gap cannot constrain another gap.
 
-A parse is therefore one choice per gap, and the valid parses are all the combinations of the gaps' valid choices.
-Each gap has few valid choices:
+A parse is therefore one choice per gap, and the valid parses are all the combinations of the gaps' valid choices
+(the proof is [theory/12](../theory/12-speaker-notes-detection.md) §2). Each gap has few valid choices:
 
 | Choice in the gap after $`r`$ (up to $`r'`$) | Valid when |
 |---|---|
@@ -223,7 +223,7 @@ height, at positions $`\sigma \cdot (x, y) + (t_x, t_y)`$, for one scale $`\sigm
   $`0.005\,d`$ wide in each offset, $`d`$ being the note page's diagonal — or in one cell of the seven grids shifted
   from it by half a cell along any of the three axes. Every copy found this way agrees within 2 % in scale and 0.5 % of
   the diagonal in offset, and every set of matches that agrees within half those tolerances falls into one cell of
-  some grid. A slide run counts once per copy, however many
+  some grid ([theory/12](../theory/12-speaker-notes-detection.md) §3). A slide run counts once per copy, however many
   runs of the note page repeat its string. The signature is true when some copy covers at least half of the
   characters of $`s`$'s upright text. Eight passes over hash maps make it linear in the number of matches.
 - **Bounds.** A page with more than 4 096 runs, or a pair whose equal strings pair up more than 65 536 times, is not
@@ -970,6 +970,9 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 
 - [theory/11 — The linked slide show protocol](../theory/11-linked-slide-show-protocol.md) and its TLA+ model,
   [`formal/linked-show/LinkedShow.tla`](../theory/formal/linked-show/LinkedShow.tla)
+- [theory/12 — Speaker-notes detection](../theory/12-speaker-notes-detection.md): the proofs behind §1–§5 (the label
+  automaton, the restart guard, the copy test, the probe, the scan, CONFIRM, `PDFDOC⁻¹` and REPAIR), and their checks
+  against `notes.cljs` itself, [`formal/speaker-notes/check.sh`](../theory/formal/speaker-notes/check.sh)
 - [ADR-0045](0045-slide-deck-presentation.md), [ADR-0046](0046-reload-safe-pipelined-remote-reads.md),
   [ADR-0047](0047-persisted-state-stores.md), [ADR-0009](0009-mediator-ipc-over-point-to-point.md),
   [ADR-0010](0010-bounded-content-retention-and-render-metadata.md)

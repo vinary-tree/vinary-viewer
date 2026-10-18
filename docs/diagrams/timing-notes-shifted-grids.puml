@@ -1,0 +1,65 @@
+@startuml timing-notes-shifted-grids
+'' PlantUML over Mermaid because the shifted-grid argument is about intervals on ONE axis: a timing diagram's concise
+'' lanes draw each grid as a row of consecutive cells over a shared horizontal axis, so a set of matches (a highlighted
+'' span) can be read against the cell boundaries of both grids at once. Mermaid has no timing diagram with shared
+'' highlights, no LaTeX in labels, and does not render byte-reproducibly.
+'' Fills: orange = the pure notes model's objects (the cells, at the container tier; the copy that one grid finds, at the
+'' component tier); red = the set that every grid splits. The axis is ln sigma, t_x or t_y (theory/12 §3.2); one unit
+'' of the drawing is an eighth of a cell, so a cell is w = 8 units wide and the two grids are shifted by w/2 = 4.
+!include _vv-theme.iuml
+hide time-axis
+<style>
+timingDiagram {
+  LineColor #4A4A4A
+  LineThickness 1.2
+}
+</style>
+
+title Two grids half a cell apart, along one axis: cells <latex>w</latex> wide, shifted by <latex>w/2</latex> — theory/12 §3.4
+
+concise "a set of matches" as M
+concise "grid, shift 0" as G0
+concise "grid, shifted half a cell" as G1
+
+@0
+M is {-}
+G0 is "cell 0" IR_FILL
+G1 is "cell −1" IR_FILL
+@4
+G1 is "cell 0" IR_FILL
+@6
+M is "A" IR_TINT
+@8
+G0 is "cell 1" IR_FILL
+@9
+M is {-}
+@12
+G1 is "cell 1" IR_FILL
+@16
+G0 is "cell 2" IR_FILL
+@19
+M is "B" ERROR_TINT
+@20
+G1 is "cell 2" IR_FILL
+@24
+G0 is "cell 3" IR_FILL
+@25
+M is {-}
+@28
+G1 is "cell 3" IR_FILL
+@32
+G0 is {-}
+G1 is {-}
+
+highlight 6 to 9 IR_FILL : A
+highlight 19 to 25 ERROR_FILL : B
+
+legend bottom
+  |= Colour |= Meaning |
+  |<#E67E22>&#160;&#160;&#160;&#160;| a grid's cells, and the set <latex>A</latex>: its spread, <latex>3w/8 < w/2</latex>, holds at most one boundary of the two grids, so the other grid (here the shifted one) holds it in one cell |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the set <latex>B</latex>: its spread, <latex>w/2 < 3w/4 < w</latex>, holds a boundary of each grid, so every grid splits it |
+  Soundness: two matches in one cell differ by less than <latex>w</latex>. Completeness: a spread below <latex>w/2</latex> on every axis
+  lies in one cell of some grid. In three axes, <latex>(\ln\sigma, t_x, t_y)</latex>, the eight grids shift each axis by <latex>0</latex> or <latex>w/2</latex> on its own,
+  and the grid that takes the right shift on every axis holds the set in one cell.
+endlegend
+@enduml

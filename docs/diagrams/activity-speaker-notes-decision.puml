@@ -1,0 +1,112 @@
+@startuml activity-speaker-notes-decision
+'' PlantUML over Mermaid because the notes decision is an ordered rule chain (first match wins) whose steps belong to
+'' two owners and two moments — the pure model at the first paint, and the background reader after it — and whose
+'' outcomes must be read off where each theorem of docs/theory/12 applies. Activity swimlanes show the owner of each
+'' step, the vertical `elseif` chain renders the rules in their exact order (notes.cljs `plan`), `switch` renders the
+'' three kinds of background work (evidence.cljs `settle`), and the SVG renders byte-reproducibly (README §4).
+'' Lanes and fills, from the shared palette: orange = the pure, process-agnostic model (vinary.slides.notes), the
+'' "model orange" of the pure libraries; teal = the renderer reading page text through pdf.js
+'' (vinary.slides.evidence). The red notes mark the two paths that can hide a slide with no CONFIRM to catch it.
+!include _vv-theme.iuml
+!pragma useVerticalIf on
+
+title Where a Beamer deck's note pages are decided — ADR-0048 §2, proved in theory/12
+
+|#F5EAE0|pure notes model, at the first paint (vinary.slides.notes · plan)|
+start
+:the evidence: the page labels, the Producer,
+the page sizes (<latex>n</latex> pages), the second-screen axis;  <<IR_TINT>>
+if (a second-screen axis\n(geometry, or pdfpc's notes position)?) then (yes)
+  :split notes: every page is a slide half
+  and a notes half (:style :split);  <<IR_TINT>>
+  stop
+elseif (not a Beamer source, or one page?) then (yes)
+  :shown as it is (:not-beamer · :one-page);  <<IR_TINT>>
+  stop
+elseif (no page labels (one XeLaTeX pass)?) then (yes)
+  if (<latex>n > 2000</latex> (max-content-pages)?) then (yes)
+    :shown as it is (:too-many-pages),
+    before any page is read;  <<IR_TINT>>
+    stop
+  else (no)
+    :pending: the SCAN;  <<IR_TINT>>
+  endif
+elseif (a label that is not a canonical\nnon-negative integer?) then (yes)
+  :shown as it is (:labels-not-integers);  <<IR_TINT>>
+  stop
+else (integer labels <latex>L_0, \dots, L_{n-1}</latex>)
+  :**interleaving**(<latex>L</latex>): the gap decomposition,
+  one pass (§2.1–§2.3);  <<IR_TINT>>
+  if (status?) then (:proven — one valid parse)
+    if (the Producer names pdfTeX, LuaTeX or LuaHBTeX,\nand <latex>L</latex> is not restartable (the guard, §2.4)?) then (yes)
+      :hidden at once, proof [:labels]:
+      no page is read;  <<IR_TINT>>
+      note right ERROR_TINT
+        §2.4: a restart deck whose appendix has
+        a note page lands here with slides hidden:
+        <latex>W(n)</latex> of the <latex>n</latex>-page decks that restart
+        at 1. So does a counter set forward by
+        hand (§4.6). Nothing reads a page to
+        catch it.
+      end note
+      stop
+    elseif (CONFIRM would read more than\n2000 distinct pages?) then (yes)
+      :shown as it is (:too-many-pages);  <<IR_TINT>>
+      stop
+    else (no)
+      :pending: CONFIRM;  <<IR_TINT>>
+    endif
+  elseif (status?) then (:ambiguous — the plain run branches)
+    :pending: the PROBE (and CONFIRM after it
+    unless the Producer writes its labels in the run);  <<IR_TINT>>
+  else (:none · :invalid · :undecidable)
+    :shown as it is (:no-note-pages ·
+    :invalid · :undecidable);  <<IR_TINT>>
+    stop
+  endif
+endif
+|#E3F2ED|background, after the first paint (vinary.slides.evidence · settle, page text through pdf.js)|
+:one page reader for the whole decision: it keeps 4 pages
+and refuses the 2001st read (:too-many-pages, §4.5);  <<RENDERER_TINT>>
+switch (pending?)
+case (the SCAN)
+  :read every page once, in order: page <latex>j</latex> is a note page
+  when <latex>\mathrm{SIG}(s, j)</latex> holds for the last slide <latex>s</latex> (§4.4);  <<RENDERER_TINT>>
+case (the PROBE)
+  :walk the candidates from the last, reading <latex>(a-1, a)</latex>:
+  it passes → candidate <latex>a</latex> · page <latex>a</latex> is dated → the previous
+  candidate · otherwise → the parse without notes in the run (§4.1–§4.3);  <<RENDERER_TINT>>
+  if (the Producer writes its labels in the run?) then (no)
+    :CONFIRM the probe's choice (§5),
+    proof [:labels :probe :confirm];  <<RENDERER_TINT>>
+  else (yes)
+    :the probe's choice stands,
+    proof [:labels :probe];  <<RENDERER_TINT>>
+    note right ERROR_TINT
+      §4.6: with a frame counter set
+      forward by hand, outside the rules,
+      the probe can choose a parse that
+      hides a slide, and no CONFIRM
+      follows to catch it.
+    end note
+  endif
+case (CONFIRM)
+  :for each note page <latex>j</latex>, in order: <latex>\mathrm{SIG}(s, j)</latex> or
+  ROTATED-DATE(<latex>j</latex>), <latex>s</latex> the slide before it · stop at
+  the first page that fails (§5);  <<RENDERER_TINT>>
+endswitch
+:decided: the note pages leave the audience's sequence
+(:style :interleaved), or the deck is shown as it is with its
+reason (:no-note-pages · :probe-undecided · :confirm-failed ·
+:too-many-pages · :unreadable · :error);  <<RENDERER_TINT>>
+stop
+
+legend right
+  |= Colour |= Owner / meaning |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure notes model, at the first paint (vinary.slides.notes) — the model orange |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the background reader: page text through pdf.js (vinary.slides.evidence) |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a path that can hide a slide with no CONFIRM to catch it (§2.4, §4.6) |
+  Rules are tried in order; the first that matches decides.
+  "Shown as it is" hides no page: the audience sees every page.
+endlegend
+@enduml

@@ -379,6 +379,10 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `seq-linked-slide-show.puml` | sequence | `design-decisions/0048-speaker-notes-and-linked-presenter-windows.md` · `theory/11-linked-slide-show-protocol.md` |
 | `state-linked-slide-show.puml` | state | `design-decisions/0048-speaker-notes-and-linked-presenter-windows.md` · `theory/11-linked-slide-show-protocol.md` |
 | `seq-linked-show-last-move.puml` | sequence | `theory/11-linked-slide-show-protocol.md` |
+| `activity-speaker-notes-decision.puml` | activity | `theory/12-speaker-notes-detection.md` |
+| `seq-notes-gap-decomposition.puml` | sequence | `theory/12-speaker-notes-detection.md` |
+| `seq-notes-restart-lemma.puml` | sequence | `theory/12-speaker-notes-detection.md` |
+| `timing-notes-shifted-grids.puml` | timing | `theory/12-speaker-notes-detection.md` |
 
 ### Keeping this table honest
 

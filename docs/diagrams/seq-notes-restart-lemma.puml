@@ -1,0 +1,53 @@
+@startuml seq-notes-restart-lemma
+'' PlantUML over Mermaid because the restart lemma compares two readings of ONE row of pages: a sequence diagram lays
+'' the pages out left to right in declaration order (page i is the i-th column, deterministically, with no Graphviz
+'' involved), an arrow between two columns is "these are consecutive slides", and `==` dividers separate the true
+'' deck from the parse the labels prove. Mermaid has no LaTeX in labels and does not render byte-reproducibly.
+'' Fills: orange = the pure notes model's pages; red tint = slides the proven parse hides. Arrows: dark orange = a
+'' step of the frame number that rule 2 allows; red = one it forbids (dashed: the true deck's restart, which only
+'' R+ admits).
+!include _vv-theme.iuml
+hide footbox
+skinparam sequenceMessageAlign center
+
+title The restart lemma on <latex>L = (1, 2, 3, 1, 5)</latex> — theory/12 §2.4
+
+participant "page 0\n<latex>L_0 = 1</latex>\nrequired" as P0 IR_TINT
+participant "page 1\n<latex>L_1 = 2</latex>\neligible" as P1 IR_TINT
+participant "page 2\n<latex>L_2 = 3</latex>\neligible" as P2 IR_TINT
+participant "page 3\n<latex>L_3 = 1</latex>\nrequired" as P3 IR_TINT
+participant "page 4\n<latex>L_4 = 5</latex>\neligible" as P4 IR_TINT
+
+== the true deck: three frames, then \appendix restarts the frame counter (appendixnumberbeamer) ==
+P0 -[IR_BORDER]> P1 : a new frame, <latex>L_1 = L_0 + 1</latex>
+P1 -[IR_BORDER]> P2 : a new frame, <latex>L_2 = L_1 + 1</latex>
+P2 -[ERROR_BORDER]-> P3 : the restart, <latex>L_3 = 1 < L_2</latex>: only <latex>R^{+}</latex> admits it
+rnote over P4 : note page of page 3, <latex>L_4 = 4 + 1</latex>
+
+== the only parse that the rules R admit: :proven ==
+P0 -[IR_BORDER]> P3 : an overlay, <latex>L_3 = L_0</latex>
+rnote over P1, P2 ERROR_TINT : read as note pages of page 0 — they are slides
+rnote over P4 : note page of page 3
+
+== why every parse under R reads page 2, the last slide before the restart, as a note page ==
+note over P0, P4
+  Page 3 is a slide in every parse: it is not eligible (<latex>L_3 = 1 \neq 3 + 1</latex>). The slide <latex>p</latex> before it
+  must carry <latex>L_p \in \{L_3 - 1, L_3\} = \{0, 1\}</latex>, and only page 0 does. So pages 1 and 2 are note pages
+  in every valid parse: the last slide before a restart is always read as a note page (Lemma 18, §2.4.6).
+end note
+
+== what each producer then shows ==
+note over P0, P4
+  The labels are not restartable: <latex>L_4 - L_3 = 4 \geq 2</latex>. So pdfTeX or LuaTeX hides pages 1, 2 and 4 at
+  once (the guard lets a proven parse through): the audience never sees slides 1 and 2. Any other producer
+  CONFIRMs first; <latex>\mathrm{SIG}(0, 1)</latex> fails, because page 1 is a slide and carries no thumbnail of page 0,
+  and the deck is shown as it is.
+end note
+
+legend right
+  |= Colour |= Meaning |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure notes model's pages; an arrow: consecutive slides whose labels obey rule 2 |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a step rule 2 forbids (dashed: the true deck's restart); a red note: slides hidden wrongly |
+  This deck is one of the <latex>W(5) = 7</latex> five-page restart decks hidden wrongly at once (§2.4.8).
+endlegend
+@enduml
