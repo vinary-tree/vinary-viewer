@@ -316,6 +316,43 @@ overlay page by `pdfpc.sty` itself, so per-page reading is per-overlay reading. 
 annotations; vinary-viewer draws a page as the PDF says, because it is a general viewer and a visible highlight on a
 reviewed deck is content. `\pdfpcnote`'s annotations are hidden by their own flags, so a pdfpc deck looks the same.
 
+**How each engine writes a note.** The string a reader gets depends on the engine that compiled the deck. All three
+engines compiled the same `\pdfpcnote` (in `test/fixtures/beamer-pdfpc.tex`; its header has the commands and results):
+
+| Engine (its Producer) | `/Contents` as written | `café` reads as | `\\` in the note becomes |
+|---|---|---|---|
+| LuaTeX (`LuaTeX-…`) | UTF-16BE hex with a byte-order mark | `café` | the two characters `\\` (`pdfpc.sty` converts the note to hex before it redefines `\\`) |
+| XeTeX (`xdvipdfmx (…)`) | UTF-16BE hex: xdvipdfmx re-encodes a non-ASCII string itself | `café` | a newline |
+| pdfTeX (`pdfTeX-…`) | the note's UTF-8 bytes, in a literal string | `cafÃ©` | a newline |
+
+A text string without a byte-order mark is PDFDocEncoding (PDF 32000-1 §7.9.2.2), one byte per character. So every
+reader, pdf.js and Poppler (and so pdfpc) alike, decodes pdfTeX's UTF-8 a byte at a time: `é`, the bytes `C3 A9`,
+becomes `Ã©`. vinary-viewer repairs that case, and only that case:
+
+```
+procedure REPAIR(s, producer)                        ⟨s: an annotation's /Contents as pdf.js decoded it⟩
+  if producer does not name pdfTeX then return s     ⟨no other engine writes UTF-8 into a literal string⟩
+  b ← PDFDOC⁻¹(s)                                    ⟨the bytes that pdf.js's PDFDocEncoding decoded to s⟩
+  if b is undefined then return s                    ⟨s holds a character that no byte decodes to⟩
+  if no byte of b is ≥ 0x80 then return s            ⟨plain ASCII: nothing to repair⟩
+  if b is not valid UTF-8 then return s              ⟨Latin-1 text, decoded right the first time⟩
+  return UTF-8-DECODE(b)
+```
+
+`PDFDOC⁻¹` inverts pdf.js's decoding of a literal string, `stringToPDFString` in pdf.js 5.4.149:
+
+- 0x18–0x1A, 0x1C–0x1F and 0x80–0x9E map through its table to the PDFDocEncoding characters (`˘`, `•`, `–`, `ł`,
+  …), and 0xA0 maps to `€`;
+- 0x1B starts a language escape, which is removed;
+- every other byte is the Latin-1 character of the same number.
+
+No two bytes decode to the same character, so the inverse is defined exactly when every character of $`s`$ is one that
+some byte decodes to. pdf.js gives the viewer only the decoded string, never the bytes, so this inverse is the only way
+back to them. The case it cannot tell apart is given under the trade-offs.
+
+LuaTeX's `\\` is left as it is: pdfpc receives the same two characters, and both GFM and Discount render them as one
+backslash.
+
 **The sidecar.** pdfpc keys its sidecar notes by 0-based page index, with the page's label and its overlay number
 (its position in the run of equal labels) to relocate a note when pages were inserted; vinary-viewer applies the same
 relocation rule. Legacy files key notes by 1-based user slide and copy them to every page of it.
@@ -348,6 +385,11 @@ does. Values are parsed as pdfpc parses them (`atoi` for numbers, exactly `"true
 | Markdown off | `DisableMarkdown` (`"true"`) | `disableMarkdown` | plain-text notes |
 | hidden pages | — | `pages[].hidden` | `:skipped`: next and previous step over them; Home, End, typed numbers and the overview still reach them (pdfpc's rule) |
 | forced overlays | — | `pages[].forcedOverlay`; legacy `[skip]` | the page joins the previous frame (frames for decks without labels) |
+
+**One pass.** A deck compiled once with `pdfpc.sty` already carries its XMP keys, but LaTeX adds a last page,
+"Temporary page!", because hyperxmp learns the page count from the `.aux`. That page carries the last frame's label,
+so it joins the last frame as an overlay. The second pass removes it. Both facts were measured
+(`test/fixtures/beamer-pdfpc.tex`). vinary-viewer shows the deck as it was compiled.
 
 **Precedence.** XMP, then the sidecar, then the defaults — pdfpc's order without its command line. **Not used:**
 `DefaultTransition` (transitions are the viewer's preference, ADR-0045 §10), `noteFontSize` (pdfpc writes it on every
@@ -730,6 +772,12 @@ new boundary.
 - A swap briefly shows both windows windowed while they change displays.
 - A `plain` or `lined` notes deck from XeLaTeX, dvipdfmx or dvips is shown as it is: its labels cannot be confirmed
   (§2.5).
+- REPAIR (§4) decodes one kind of annotation wrongly. This needs a pdfTeX deck holding an annotation whose text really
+  is PDFDocEncoding. `\pdfpcnote` writes the UTF-8 of the source, so such an annotation was added by another tool.
+  Every character above 0x7F in that text must also happen to pair into a UTF-8 sequence. For two bytes, that means one
+  of 0xC2–0xDF (Â–ß: most accented capitals, ×, ß) directly before one of 0x80–0xBF (symbols such as ’ ” » © °),
+  with no other character above 0x7F anywhere in the note. A note like that is shown mis-decoded. A lone accented
+  letter, such as the `é` of `café` mapped back to `E9`, is not valid UTF-8, so ordinary text is left alone.
 - `S` is a bare letter in the `:all` layer, so it acts wherever F5 does, with the focus on the sidebar too.
 
 ## Alternatives considered
@@ -800,7 +848,8 @@ new boundary.
 
 | Rule | Evidence |
 |---|---|
-| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
+| The generated decks the tests use | `test/pdf-gen-smoke.mjs`: `pdf-gen.js`'s note pages, labels, annotations and pdfpc XMP against real Beamer and pdfpc output (`test/fixtures/beamer-*.pdf`), with four negative controls |
+| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures |
 | The presenter view, the pane, transitions, find | `npm run test:electron` blocks |
