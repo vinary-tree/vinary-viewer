@@ -598,6 +598,10 @@ Fixed
       still typed and the show ran on. Keys arrive together like this when the
       app is busy, for example while a heavy slide renders. Each Escape now
       takes its step itself, so every Escape sees what the one before it did.
+    - Expanding a commit in the Commits tab now shows its message. The body
+      had been blank since the tab was added: it was handed to Reagent in a
+      form that Reagent (1.3.0 and later) silently discards. A lint check now
+      rejects that form anywhere in the app.
     - Moving or resizing one window no longer cancels another window's
       pending save of its position. One save timer served every window, so
       when the second window was fullscreen -- a slide show -- the first

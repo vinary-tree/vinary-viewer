@@ -81,6 +81,20 @@
     (into [:span.vv-commits-refs]
           (for [r refs] ^{:key r} [:span.vv-commits-ref {:title r} r]))))
 
+(defn commit-body
+  "An expanded commit's message body: its sanitized HTML (`html`, from the one Markdown pipeline —
+   :commits/render-body), the raw message `body` when rendering failed (`html` false), or a placeholder while it
+   renders (anything else). The HTML goes in as r/unsafe-html: Reagent (1.3.0 and later) silently drops any other
+   :dangerouslySetInnerHTML value — the plain {:__html html} map this once passed rendered an empty body
+   (H-REAGENT-HTML, docs/engineering/04 §1.5; lint check 6)."
+  [html body]
+  (cond
+    ;; sanitized upstream by the single markdown pipeline (:commits/render-body)
+    (string? html) [:div.vv-commits-body.markdown-body
+                    {:dangerouslySetInnerHTML (r/unsafe-html html)}]
+    (false? html)  [:pre.vv-commits-body-plain body]
+    :else          [:div.vv-commits-body-loading "…"]))
+
 (defn- commit-row [root rail-w prev-row row commit selection open-set expanded bodies]
   ;; NB: `hash` here shadows cljs.core/hash — value-only by contract; never call it
   (let [{:keys [hash subject refs body]} commit
@@ -128,13 +142,7 @@
       [:div.vv-commits-meta
        [:span author] " · " [:span (rel-date date)] " · " [:span.vv-commits-hash (subs hash 0 7)]]
       (when expanded?
-        (let [html (get bodies hash ::pending)]
-          (cond
-            ;; sanitized upstream by the single markdown pipeline (:commits/render-body)
-            (string? html) [:div.vv-commits-body.markdown-body
-                            {:dangerouslySetInnerHTML {:__html html}}]
-            (false? html)  [:pre.vv-commits-body-plain body]
-            :else          [:div.vv-commits-body-loading "…"])))]]))
+        (commit-body (get bodies hash ::pending) body))]]))
 
 ;; ── header: repo switcher · branch combo · range input · Diff-selected pill ─────────────────────
 (defn- basename-of [root]

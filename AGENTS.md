@@ -15,8 +15,9 @@
   `--vv-*` theme-variable checks, the reference-catalog gate — every re-frame registration must have a row in
   `docs/reference/events-effects-subs.md`, every `vv:*` IPC channel a row in `docs/reference/ipc-channels.md`, every
   namespace one in `docs/reference/namespaces.md` and every `--vv-*` token one in `docs/reference/css-variables.md`
-  (both directions), so document new events/effects/subs/channels/namespaces/tokens in the same commit — and a check that every
-  relative link or image in the Markdown docs names a file that exists.
+  (both directions), so document new events/effects/subs/channels/namespaces/tokens in the same commit — a check that every
+  relative link or image in the Markdown docs names a file that exists, and one that every `:dangerouslySetInnerHTML`
+  passes its HTML through `reagent.core/unsafe-html` (Reagent silently drops any other value).
 - `npm run test:find-e2e`: the in-page-find + **typist-latency** gate — types real keys at 150 ms/char over
   a 1.1 MB document and the repository's own file tree, and asserts every character survives, that no
   re-render takes one back out of the field, that the renderer stays responsive, and that find's flattened

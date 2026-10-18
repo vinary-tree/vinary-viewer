@@ -6,14 +6,15 @@ rule, the ClojureScript and JavaScript style rules, and the renderer-never-touch
 the-filesystem discipline that is half compiler-enforced and half review-enforced.
 
 > **Audience.** Read this before your first commit, and again when adding a
-> `--vv-*` theme token, a new theme, or a new JavaScript file to the repository.
+> `--vv-*` theme token, a new theme, a new JavaScript file, or a component that
+> renders an HTML string.
 
 ---
 
-## 1. `test/lint.js` — the five checks
+## 1. `test/lint.js` — the six checks
 
 `test/lint.js` is a small CommonJS script (`'use strict'`) with **no
-dependencies** beyond Node built-ins. It performs five checks and exits non-zero
+dependencies** beyond Node built-ins. It performs six checks and exits non-zero
 on any failure. Run it with:
 
 ```bash
@@ -137,6 +138,89 @@ checked.
 A negative control: the check run on the tree before those three fixes reports
 exactly those three links.
 
+### 1.5 Check 6 — every `:dangerouslySetInnerHTML` is tagged with `unsafe-html`
+
+**What Reagent does.** In hiccup, `:dangerouslySetInnerHTML` asks React to put an HTML
+string into an element as-is. Since 1.3.0 (2025-02-14), Reagent passes that prop to
+React **only** when its value is a tagged `reagent.core/unsafe-html` value. It deletes
+any other value without a warning, so the element renders **empty** [REAGENT-CL]. The
+app has Reagent 2.0.1 (`deps.edn`); this is its `convert-props`
+(`reagent/impl/template.cljs`) [REAGENT-SRC]:
+
+```clojure
+;; Ensure only tagged values are used for dangerouslySetInnerHTML
+(when-let [d (and js-props (.-dangerouslySetInnerHTML js-props))]
+  (if (instance? UnsafeHTML d)
+    (set! (.-dangerouslySetInnerHTML js-props) #js {:__html (.-s d)})
+    (js-delete js-props "dangerouslySetInnerHTML")))
+```
+
+`UnsafeHTML` is a type that EDN and Transit cannot produce. The tag means that hiccup
+decoded from outside data — an API response, `localStorage` — cannot carry HTML into
+the page [REAGENT-SEC]. A plain `{:__html s}` map, the shape React's own
+documentation uses, is exactly what decoded EDN or Transit could contain, so Reagent
+drops it too.
+
+**What it cost (H-REAGENT-HTML).** The Commits tab rendered an expanded commit message
+with `{:dangerouslySetInnerHTML {:__html html}}`. The app has been on Reagent 2.0.1
+since v0.2, so that body has been **empty since the tab landed** (a26c9ef,
+2026-08-11). Nothing tested it. It was found on 2026-10-18, while building the
+presenter view's Markdown notes
+([ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)),
+which used the same map and also rendered empty:
+
+- the renderer computed the right HTML for each note;
+- a `MutationObserver` saw each note's element inserted already empty, and never
+  filled;
+- the props React held for the element (`__reactProps…` on the DOM node) had no
+  `dangerouslySetInnerHTML` key at all.
+
+The Commits body now passes `(r/unsafe-html html)`, and the presenter view's notes
+were written that way before they landed. The Commits body is a public function,
+`vinary.ui.commits/commit-body`, so a DOM-free unit test can see what React receives.
+
+**The check.** Every `:dangerouslySetInnerHTML` in **code** under `src/vinary` must be
+followed by a call of `unsafe-html`, as `(r/unsafe-html …)` or
+`(reagent.core/unsafe-html …)`. Docstrings, other strings and comments may name the
+prop freely. The scan blanks them first, keeping every newline so that a match's
+offset still gives its line:
+
+```text
+for each .cljs / .cljc file under src/vinary:
+    code ← the file, with every string, regex literal (#"…") and ; comment replaced by spaces,
+           newlines kept; a character literal (\" \; \a …) is copied as it is, so it opens nothing
+    for each match of  :dangerouslySetInnerHTML  followed by its next token t:
+        count the site
+        unless t starts with "(r/unsafe-html" or "(reagent.core/unsafe-html":
+            report  <file>:<line>
+pass ⇔ nothing was reported
+```
+
+The rule is syntactic, and deliberately strict:
+
+- A value computed elsewhere, as in `{:dangerouslySetInnerHTML tagged}`, is reported
+  even when `tagged` holds an `unsafe-html` value. Tag the HTML where the prop is
+  written, so a reader can check it there.
+- A JavaScript props object for `r/create-element` (`#js {:dangerouslySetInnerHTML
+  #js {:__html s}}`) bypasses Reagent's conversion and would be correct, but it is
+  reported too. There is no such site; the app builds its elements as hiccup.
+- Every namespace under `src/vinary` aliases `reagent.core` as `r`, so another alias
+  is reported rather than guessed at.
+
+**Negative controls.**
+
+| Gate | On the tree before the fix | After |
+|---|---|---|
+| G-A1: `test/vinary/ui/commits_body_test.cljs`, the body's props through `r/as-element` | **fails**: `(not (= "<p>Fixes <em>it</em></p>" nil))` — React receives no inner HTML | passes |
+| G-A2: this check | **fails**: `✗ 1 :dangerouslySetInnerHTML site(s) under src/vinary pass their HTML through reagent.core/unsafe-html — Reagent DROPS these silently: src/vinary/ui/commits.cljs:135` | `✓ 1 :dangerouslySetInnerHTML site(s) under src/vinary pass their HTML through reagent.core/unsafe-html` |
+| G-A3: `test/electron-smoke.js`, the Commits tab's arm D — expand a mocked commit whose body is `a body` | **fails**: `Timed out waiting for an expanded commit shows its message`; every earlier check passes | passes: a `<p>` in the body holds `a body` |
+
+The pipeline wraps each text node of the body in a source-position `<span>` (the
+`data-vv-source-*` attributes behind the source ↔ preview jump), so G-A3 asks for a
+paragraph that holds the text, not for the text directly inside a `<p>`: a first
+form of the check that matched `<p …>a body</p>` failed on the fixed tree for that
+reason alone.
+
 ---
 
 ## 2. The namespace ↔ file mapping rule
@@ -226,6 +310,17 @@ uphold the ports-and-adapters boundary the theory pillar describes
 ## 6. References and see also
 
 - [`test/lint.js`](../../test/lint.js) — the gate this page documents.
+- **[REAGENT-CL]** Reagent, `CHANGELOG.md`, 1.3.0 (2025-02-14): "Breaking IF you use
+  `:dangerouslySetInnerHTML` … you now need to use `reagent.core/unsafe-html` to tag
+  these html strings which will be placed as-is into DOM, or Reagent will ignore the
+  value." <https://github.com/reagent-project/reagent/blob/v2.0.1/CHANGELOG.md>
+- **[REAGENT-SRC]** Reagent 2.0.1, `src/reagent/impl/template.cljs`, `convert-props`
+  (byte-identical to the jar the app builds with).
+  <https://github.com/reagent-project/reagent/blob/v2.0.1/src/reagent/impl/template.cljs>
+- **[REAGENT-SEC]** Reagent, `doc/Security.md`, *Workarounds*: "Reagent 1.3.0+:
+  `:dangerouslySetInnerHTML` values must be created using `reagent.core/unsafe-html`
+  function which tags them using a type, that can't be used accidentally from Transit
+  and EDN". <https://github.com/reagent-project/reagent/blob/v2.0.1/doc/Security.md>
 - `AGENTS.md` (repository root) — the coding-style and naming source.
 - [`reference/css-variables.md`](../reference/css-variables.md) — the `--vv-*`
   token catalogue Check 3 depends on.

@@ -1,5 +1,5 @@
 'use strict';
-// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Five checks:
+// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Six checks:
 //   1. every JS source parses (node --check)
 //   2. app.css / style.css braces balance
 //   3. every --vv-* variable referenced by a stylesheet is defined by EVERY theme of that surface
@@ -9,6 +9,8 @@
 //        c. docs/reference/namespaces.md ↔ every namespace and JS module under src/vinary
 //        d. docs/reference/css-variables.md ↔ every --vv-* token the app's stylesheets define or read
 //   5. every relative link and image in the Markdown docs names a file that exists
+//   6. every :dangerouslySetInnerHTML under src/vinary passes its HTML through reagent.core/unsafe-html (Reagent 1.3.0
+//      and later silently drop any other value)
 // Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
 const path = require('path');
@@ -254,6 +256,47 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
   }
   log(broken.length === 0,
     `${checked} relative links in ${mdFiles.length} Markdown docs name existing files` + (broken.length ? ` — BROKEN: ${show(broken)}` : ''));
+}
+
+// 6. Reagent (1.3.0 and later; the app has 2.0.1) keeps `:dangerouslySetInnerHTML` only as a tagged `(r/unsafe-html s)`
+//    value and SILENTLY deletes any other — a plain `{:__html s}` map included (reagent/impl/template.cljs
+//    `convert-props`; Reagent's doc/Security.md). The plain map rendered EMPTY wherever it was used: an expanded
+//    commit message in the Commits tab, from the day it landed (docs/engineering/04 §1.5). Every
+//    `:dangerouslySetInnerHTML` in CODE under src/vinary — strings, regex literals and line comments are skipped, so
+//    a docstring may name it — must be followed by an `unsafe-html` call.
+{
+  const cljFiles = walkFiles(path.join(root, 'src', 'vinary'), ['.cljs', '.cljc']);
+  const dropped = [];
+  let sites = 0;
+  for (const f of cljFiles) {
+    const src = fs.readFileSync(f, 'utf8');
+    // blank strings, regex literals (#"…" — the same lexing) and line comments, keeping every newline so a match's
+    // offset still gives its line
+    let code = '';
+    for (let i = 0, inStr = false, inCom = false; i < src.length; i++) {
+      const c = src[i];
+      if (inCom) { inCom = c !== '\n'; code += inCom ? ' ' : '\n'; continue; }
+      if (inStr) {
+        if (c === '\\') { code += src[i + 1] === '\n' ? ' \n' : '  '; i++; continue; }
+        if (c === '"') inStr = false;
+        code += c === '\n' ? '\n' : ' ';
+        continue;
+      }
+      if (c === '\\') { code += src.slice(i, i + 2); i++; continue; }   // a character literal: \" \; \a …
+      if (c === '"') { inStr = true; code += ' '; continue; }
+      if (c === ';') { inCom = true; code += ' '; continue; }
+      code += c;
+    }
+    for (const m of code.matchAll(/:dangerouslySetInnerHTML(?![\w-])\s*(\S*)/g)) {
+      sites += 1;
+      if (!/^\((?:r|reagent\.core)\/unsafe-html(?![\w-])/.test(m[1])) {
+        dropped.push(`${path.relative(root, f)}:${code.slice(0, m.index).split('\n').length}`);
+      }
+    }
+  }
+  log(dropped.length === 0,
+    `${sites} :dangerouslySetInnerHTML site(s) under src/vinary pass their HTML through reagent.core/unsafe-html`
+    + (dropped.length ? ` — Reagent DROPS these silently: ${show(dropped)}` : ''));
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');

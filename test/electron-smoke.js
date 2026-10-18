@@ -4334,6 +4334,23 @@ async function main() {
     await appAlive('arm A′');
     console.log('[ok] Commits tab: primed-store remount renders (false-variant regression)');
 
+    // Arm D — expanding a commit shows its message (H-REAGENT-HTML, docs/engineering/04 §1.5). The body is Markdown
+    // rendered to sanitized HTML, which Reagent hands to React only as r/unsafe-html: the plain {:__html} map the
+    // row once passed was dropped without a word, and every expanded message was empty.
+    const midRow = `document.querySelector('.vv-commits-row[data-hash=${JSON.stringify(state.ggHashes[1])}]')`;
+    await evalIn(win, `${midRow}.querySelector('.vv-commits-expander').click(); true`);
+    await waitFor(() => evalIn(win,
+      `((${midRow}.querySelector('.vv-commits-body') || {}).textContent || '').trim() === 'a body'`),
+      'an expanded commit shows its message', 8000);
+    const bodyShape = await evalIn(win, `(() => { const b = ${midRow}.querySelector('.vv-commits-body');
+      const p = b.querySelector('p'); return { html: b.innerHTML, para: p ? p.textContent.trim() : null }; })()`);
+    assert.strictEqual(bodyShape.para, 'a body', `…rendered from Markdown: a paragraph holds it (${bodyShape.html})`);
+    await evalIn(win, `${midRow}.querySelector('.vv-commits-expander').click(); true`);
+    await waitFor(() => evalIn(win, `!${midRow}.querySelector('.vv-commits-body')`),
+      'collapsing the commit hides its message', 8000);
+    await appAlive('arm D');
+    console.log('[ok] Commits tab: an expanded commit shows its rendered message (H-REAGENT-HTML)');
+
     // Arm B (dev-only, like every dispatch_sync block) — a store primed BEFORE the panel ever
     // mounts: page-0 injected directly, then the repo pinned, then the first mount happens primed
     if (!releaseBuild) {
