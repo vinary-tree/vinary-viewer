@@ -659,9 +659,16 @@ The half alone is fitted and rasterized, through a viewport shifted so its corne
 cost no pixels and a fullscreen slide keeps the whole pixel budget. The text and link layers keep the full-page
 viewport, offset by the half's corner, and the sheet clips the rest (`.vv-pdf-split`). The text runs of the hidden
 half are hidden too (`.vv-pdf-offslide`), judged from each run's own inline position (`pdf-layout/run-percent`)
-without reading layout, so find, selection and copy see what the eye sees. Such a deck gets one frame per page and
-no labels, because a corrupt label would make the counter, the typed number and the frame steps lie; the page number
-is always right. The Document layout always shows whole pages, so the notes stay readable and searchable there.
+without reading layout, so find, selection and copy see what the eye sees. On the slide-left or the slide-top half,
+which ends before the page's right or bottom edge, the text layer was not the whole page until 2026-10-18. pdf.js's
+`TextLayer` constructor overwrote the size the engine wrote with an expression whose CSS variable the app does not
+define, so the layer fell back to its sheet's size: every run sat at half its x on a slide-left half (measured) and,
+by the same mechanism, at half its y on a slide-top half. The engine now writes the size again after the constructor
+(H-SPLIT-TEXT,
+[scientific/12 §4.1](../scientific/12-slide-deck-detection-and-flip-latency.md#41--the-text-layer-of-a-split-page--h-split-text-2026-10-18)).
+Such a deck gets one frame per page and no labels, because a corrupt label would make the counter, the typed number
+and the frame steps lie; the page number is always right. The Document layout always shows whole pages, so the notes
+stay readable and searchable there.
 Plain `show notes`, which interleaves note pages at the slide's own size, gives no geometric signal and is shown as is.
 *Amended by ADR-0048 §2–§3:* such a deck's note pages are now found from its page labels, or by comparing page text,
 and leave the audience's sequence; a deck whose note pages cannot be proven is still shown as is.

@@ -1,0 +1,77 @@
+# H-SPLIT-TEXT — the text layer of a split page (docs/scientific/12 §4.1). Assembled 2026-10-18 by a shell
+# block from the instruments' own outputs: every line not starting with '#' is copied verbatim from the log or
+# ledger named above it. Lines starting with '#' are written by hand. Absolute scratch paths are shortened to
+# <scratch>.
+
+# ---- the registration, before any measurement (the experiment ledger, verbatim) ----
+H-SPLIT-TEXT (registered 2026-10-18, before any measurement)
+Observation (code reading): pdf.js 5.4.149's TextLayer constructor calls setLayerDimensions(container, viewport), which
+writes the container's width/height as `round(down, var(--total-scale-factor) * <W>px, var(--scale-round-x))` (CSS
+round() is supported in Electron's Chromium). This app's CSS never defines --scale-round-x/-y (pdf_viewer.css does, on
+.pdfViewer .page; the app does not load it), so the declarations are invalid at computed-value time and the layer's
+width/height compute to auto. .vv-pdf-text is `position:absolute; inset:0`, so the layer then takes its SHEET's size.
+On a whole page the sheet is the page: harmless. On a split page (second screen) the sheet is the slide HALF, and
+offset-layer! moves only left/top: with the slide on the LEFT (x = 0, e.g. beamer-notes-right.pdf) the layer is the
+half's width; with the slide on the RIGHT it is sheet + x·scale = the full page.
+Hypothesis: in the slides layout of a slide-LEFT split deck, the engine's text layer is HALF the page wide, so every
+root-level run (`left: L%`) sits at L % of the half instead of L % of the page — find highlights and selection boxes sit
+at half their x.
+Predictions (slides layout, the current page's .vv-pdf-text and one root-level run with a percent left):
+  P1 split, slide left  : layer.width / sheet.width = 1 (± 0.01), and (run.left - layer.left) / (2·sheet.width) =
+                          0.5 · L/100 (± 0.005) — the run sits at half its x.
+  P2 control, whole page: layer.width / sheet.width = 1, and (run.left - layer.left) / sheet.width = L/100.
+  P3 after the fix (the layer's size written in px after the TextLayer constructor, as pdf-region/place-text! does):
+                          split, slide left: layer.width / sheet.width = 2 (± 0.01) and
+                          (run.left - layer.left) / (2·sheet.width) = L/100 (± 0.005).
+Refuted if P1 fails (the layer is the full page already): then nothing is to be fixed in the engine.
+
+# ---- the first observation: run C5-3, the presenter view's step 5, on the C5 tree (run-c5-3.log) ----
+[measure] H-SPLIT-TEXT engine layer / sheet width on a slide-left split page = 1.0000
+AssertionError [ERR_ASSERTION]: the slides layout's text layer on a split page is the whole page wide (1.000)
+    at main (<scratch>/wt-c4-final/test/electron-smoke.js:3300:12)
+# C5-3 measured the width ratio only. The ledger's first account of it said "P1 and P2 HOLD"; it was
+# corrected, before the commit's runs, by this entry (the ledger, verbatim):
+==== CORRECTION to "RUN C5-3 — RESULT" (2026-10-18) ====
+That entry says "P1 and P2 HOLD". C5-3's step 5 measured ONE number: the engine layer / sheet width on the slide-left
+split page = 1.0000 (run-c5-3.log:264). It measured neither a run's position (P1's second half) nor the whole-page
+control (P2). Corrected: P1's width ratio held; P1's run position and P2 were NOT measured in C5-3. The fix(pdf)
+commit's gate measures the ratio AND a run's position, on the base without and with the fix (the controlled pair);
+P2 is not part of that gate and stays unmeasured.
+
+# ---- the commit's gate, pre-registered before its runs (the ledger, verbatim) ----
+==== H-SPLIT-TEXT — the fix(pdf) commit's gate, pre-registered 2026-10-18 before its runs ====
+Base = the Fix A commit (H-ESC, then Fix A, on 7b141ad). The gate moves out of C5's presenter block into the smoke's
+SECOND-SCREEN NOTES block, right after the real LuaLaTeX deck (beamer-notes-right.pdf: notes right, slide LEFT) opens
+in the slides layout on its slide half. Layout px (offsetWidth / offsetLeft — no transforms) of page 1:
+  ratio  = .vv-pdf-text offsetWidth / .vv-pdf-sheet offsetWidth
+  runAt  = run.offsetLeft / (2 · sheet offsetWidth), for the first non-empty run whose style.left is a percent L
+  neg = base + the gate only:  predicted ratio = 1.00 (± 0.02) and runAt = L/200 (± 0.005) — P1 — the assertion
+        "the text layer of a split page is the whole page wide" FAILS; every earlier block passes.
+  fix = base + the engine fix (build-text-layer! writes the layer's px size after the TextLayer constructor) + the
+        gate: predicted ratio = 2.00 (± 0.02) and runAt = L/100 (± 0.005) — P3 — and the whole smoke passes.
+
+# ---- its addendum, registered before the runs (the ledger, verbatim) ----
+==== H-SPLIT-TEXT gate — ADDENDUM before its runs (2026-10-18) ====
+The gate now first waits (waitCalm, ≤ 8 s) for page 1's text layer to hold a non-empty run with a percent left: the
+canvas is inserted before pdf.js's runs stream in, so without the wait the measurement could throw on a missing run —
+a failure for the wrong reason. Predictions unchanged (neg: ratio 1.00 ± 0.02, runAt = L/200 ± 0.005, the assertion
+"the text layer of a split page is the whole page wide" fails; fix: ratio 2.00 ± 0.02, runAt = L/100 ± 0.005, the whole
+smoke passes). If the neg run times out at "the real deck's text layer is laid out" instead, the gate is NOT a valid
+negative control and must be revised before it is trusted.
+
+# ---- neg: 2b78f18 + the gate only (smoke-neg.log) ----
+[measure] H-SPLIT-TEXT text layer / sheet width on a slide-left split page = 1.0000; a run at 0.0058 of the page, its own left 0.0117
+AssertionError [ERR_ASSERTION]: the text layer of a split page is the whole page wide (1.000 sheets)
+    at main (<scratch>/wt-split-neg/test/electron-smoke.js:2818:12)
+# ---- fix: 2b78f18 + the engine fix + the gate (smoke-fix.log) ----
+[measure] H-SPLIT-TEXT text layer / sheet width on a slide-left split page = 2.0000; a run at 0.0116 of the page, its own left 0.0117
+[ok] PDF second-screen notes: the slides show the slide half (auto / notes=left / off), find skips the notes (a real LuaLaTeX deck too), the document layout keeps whole pages, tiles are halves, corrupt labels ignored; the text layer spans the whole page
+[ok] Electron smoke test passed
+
+# ---- the pair's run summary (summary.txt; neg on cores 22-31, fix on 12-21) ----
+neg compile main renderer EXIT=0 (38 s)
+fix compile main renderer test EXIT=0 (44 s)
+fix unit EXIT=0 (9 s)
+neg smoke EXIT=1 (86 s)
+fix smoke EXIT=0 (184 s)
+DONE

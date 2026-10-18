@@ -14,6 +14,11 @@
 - **Two Escapes at once.** Two Escapes that reached the renderer together took one step of Escape's chain twice, so a
   show could not be ended that way (H-ESC). Each Escape now applies its step in its own event; a unit experiment on
   re-frame's real queue and an end-to-end check, both shown to fail first, confirm the fix (§8.8).
+- **The text layer of a split page.** On a two-screen deck shown on its slide half with the slide on the left or on
+  top (Beamer's default sides), the transparent text that find, selection and copy use sat at half its x (or y):
+  pdf.js sized the layer with a CSS variable the app does not define (H-SPLIT-TEXT). The engine now writes the
+  layer's size after pdf.js; a measurement on a real slide-left LuaLaTeX deck, shown to fail first, confirms the fix
+  (§4.1).
 
 These experiments support [ADR-0045 — Slide-deck presentation](../design-decisions/0045-slide-deck-presentation.md).
 Under ADR-0045, a PDF the detector recognizes as a slide deck opens in a one-slide-per-screen *Slides layout*, and keys
@@ -33,8 +38,8 @@ flip slides. The methodology is that of [07 — Measurement methodology](07-meas
    - what the TeX engines actually produce from Beamer;
    - what slide tools export;
    - a natural collection of PDFs that nobody made for this experiment.
-2. **Two-screen decks.** What do Beamer's two-screen options (`show notes on second screen`) put in the PDF, and can
-   the viewer trust that deck's page labels?
+2. **Two-screen decks.** What do Beamer's two-screen options (`show notes on second screen`) put in the PDF, can
+   the viewer trust that deck's page labels, and does the text it lays over the slide half sit on the slide's words?
 3. **Flip latency.** In the Slides layout, how long does a key take to put the next slide on screen? What does a jump
    to a slide nothing has rendered yet cost? Does the engine keep the number of live page canvases bounded however
    far the presenter walks?
@@ -157,6 +162,146 @@ Pages, labels and sizes were read with pdf.js; word positions with `pdftotext -b
 - The Slides layout shows the half opposite the notes, per the `:slides-notes` preference.
 - The other half's text is hidden from find (finding 2).
 - A two-screen deck gets one frame per page and no labels (findings 3 and 4).
+
+### 4.1 · The text layer of a split page — H-SPLIT-TEXT (2026-10-18)
+
+**Terms.** The viewer shows each PDF page in a *sheet* (`.vv-pdf-sheet`): the page's canvas and, laid over it, a
+transparent *text layer* (`.vv-pdf-text`) that pdf.js's `TextLayer` fills. The layer holds one absolutely positioned
+`<span>` per piece of the page's text, a *run*, so that in-page find, selection and copy act on the words the canvas
+shows. On a *split page* — a two-screen deck shown on its slide half (the decisions above) — the sheet is the half's
+size and clips the rest (`.vv-pdf-split`). The text layer stays the whole page. `offset-layer!` moves it so that the
+shown half's corner sits at the sheet's corner, and `hide-offslide-runs!` hides the other half's runs.
+
+| Symbol | Meaning |
+|---|---|
+| $`w \times h`$ | the page's size, in bp |
+| $`s`$ | CSS px per bp at the current zoom |
+| $`(x, y)`$ and $`w' \times h'`$ | the shown half's top-left corner and its size, in bp (`deck/half-rect`; the whole page when the page is not split) |
+| $`W \times H`$ | the text layer's laid-out size, in CSS px |
+| $`L`$ | where a run in the layer's root starts, in percent of the page; pdf.js writes it as the run's `left: L%` |
+
+**The mechanism (code reading, pdf.js 5.4.149).** It was found while the presenter view's notes pane was being
+built: that pane shows one half of a page with a text layer of its own, and pdf.js's `TextLayer` constructor turned
+out to size its container itself [PDFJS-TL]. The engine's own layer is built in four steps:
+
+1. The engine writes the layer's size, $`w s \times h s`$ px, and its offset, $`(-x s, -y s)`$ px.
+2. The constructor calls `setLayerDimensions` [PDFJS-DU], which writes the size again. Where CSS `round()` is
+   supported — pdf.js asks `CSS.supports("width: round(1.5px, 1px)")`, true in Electron's Chromium — it writes
+   `width: round(down, var(--total-scale-factor) * 725.669px, var(--scale-round-x))`, where 725.669 is the page width
+   of the deck measured below, and the height the same way with `--scale-round-y`.
+3. The app defines `--total-scale-factor` on the layer. `--scale-round-x` and `--scale-round-y` are defined only by
+   pdf.js's own viewer stylesheet (`pdf_viewer.css`, on `.pdfViewer .page`) [PDFJS-CSS], and the app does not load
+   it. A `var()` that names an undefined custom property, with no fallback, makes its declaration *invalid at
+   computed-value time* [CSS-VAR], so `width` and `height` compute to their initial value, `auto`.
+4. `.vv-pdf-text` is `position: absolute; inset: 0`. An absolutely positioned box whose `width` is `auto` while its
+   `left` and `right` are set takes the width that remains between them [CSS2-ABS]:
+
+   ```math
+   W = w' s - (-x s) - 0 = (x + w')\,s, \qquad H = (y + h')\,s .
+   ```
+
+A run's `left: L%` is a percent of its containing block's width [CSS2-POS], and its containing block is the layer.
+The run therefore starts at the fraction $`\frac{L}{100} \cdot \frac{W}{w s}`$ of the page, not at $`\frac{L}{100}`$,
+and a run's `top: T%` likewise at $`\frac{T}{100} \cdot \frac{H}{h s}`$. Every case:
+
+| Page | $`(x, y)`$ | $`w' \times h'`$ | $`W / (w s)`$ | $`H / (h s)`$ | A run in the layer's root |
+|---|---|---|---|---|---|
+| whole | $`(0, 0)`$ | $`w \times h`$ | 1 | 1 | in place |
+| notes right: the slide on the left | $`(0, 0)`$ | $`\frac{w}{2} \times h`$ | $`\frac{1}{2}`$ | 1 | at half its x |
+| notes left: the slide on the right | $`(\frac{w}{2}, 0)`$ | $`\frac{w}{2} \times h`$ | 1 | 1 | in place |
+| notes bottom: the slide on top | $`(0, 0)`$ | $`w \times \frac{h}{2}`$ | 1 | $`\frac{1}{2}`$ | at half its y |
+| notes top: the slide at the bottom | $`(0, \frac{h}{2})`$ | $`w \times \frac{h}{2}`$ | 1 | 1 | in place |
+
+The layer was the right size only where the shown half ends at the page's right and bottom edges ($`x + w' = w`$ and
+$`y + h' = h`$): on whole pages, and by coincidence on two of the four halves. The default of
+`show notes on second screen` is `right` (`beamerbasenotes.sty`: `\defbeameroption{show notes on second
+screen}[right]`), so the most common two-screen deck was an affected one. A run inside a marked-content group is
+placed in page units, `calc(var(--total-scale-factor) * …px)`, not in percent, so it was in place. Untagged PDFs,
+Beamer's among them, put their runs in the layer's root.
+
+**What it cost.** On a slide-left page every run sat at half its x (measured below). On a slide-top page the same
+mechanism puts every run at half its y; that case follows from the table and was not measured. Find's highlights paint
+the runs' text, and a drag selects the runs under the pointer. So both missed the words on the canvas. That follows
+from where the runs were; the highlights and the selection were not measured separately. What find *counts* was right:
+`hide-offslide-runs!` decides from each run's own style, not from layout, which runs belong to the notes half. The
+real deck's counts in the smoke (FrameOneTitle 2, SlideOneBody 2, NotesForFrameOne 0) passed throughout. No check had
+measured where a run sits.
+
+![The engine writes the layer's size, pdf.js's TextLayer constructor overwrites it with an expression the app cannot resolve, and the layer falls back to its sheet's width; the fix writes the size again after the constructor](../diagrams/seq-split-text-layer.svg)
+
+**Hypothesis and predictions** (the experiment ledger, before any measurement; the gate's final form was registered
+before its runs). The instrument is the Electron smoke, in its "SECOND-SCREEN NOTES (S9)" block. The real LuaLaTeX deck
+`test/fixtures/beamer-notes-right.pdf` (4:3 paper doubled to 725.669 × 272.126 bp, notes on the right) is open in the
+Slides layout on its slide half, and page 1's text layer has rendered. The gate measures layout px, which no transform
+affects:
+
+```math
+\mathit{ratio} = \frac{\texttt{layer.offsetWidth}}{\texttt{sheet.offsetWidth}}, \qquad
+\mathit{runAt} = \frac{\texttt{run.offsetLeft}}{2 \cdot \texttt{sheet.offsetWidth}}, \qquad
+\mathit{want} = \frac{L}{100},
+```
+
+for the first non-empty run whose `left` is a percent. The sheet is half the page wide, so twice its width is the page's.
+The pair of runs — the base without the fix, then with it — is the control: one instrument, one deck, one difference.
+
+- **H-SPLIT-TEXT:** the layer is half the page wide, so each run sits at half its x.
+- **P1** (before the fix): $`\mathit{ratio} = 1.00 \pm 0.02`$ and $`\mathit{runAt} = \mathit{want}/2 \pm 0.005`$, so
+  the gate's assertion "the text layer of a split page is the whole page wide" fails.
+- **P3** (after the fix): $`\mathit{ratio} = 2.00 \pm 0.02`$ and $`\mathit{runAt} = \mathit{want} \pm 0.005`$, and the
+  whole smoke passes.
+- **Refuted** if P1 fails: then the layer is already the whole page and there is nothing to fix.
+
+**The fix.** `build-text-layer!` writes the size again, in px, once the constructor has run, so that the engine's
+size is the last one written:
+
+```text
+build-text-layer!(page idx, viewport vp at scale s):
+    layer ← a new .vv-pdf-text in the page's sheet
+    layer.size   ← vp.width × vp.height px      ⟨the whole page⟩
+    layer.offset ← (−x·s, −y·s) px              ⟨offset-layer!: the shown half's corner at the sheet's⟩
+    tl ← new TextLayer(container = layer, viewport = vp)
+                                                ⟨pdf.js: layer.size ← round(…, var(--scale-round-x)), unresolvable here⟩
+    layer.size   ← vp.width × vp.height px      ⟨H-SPLIT-TEXT: written again, last⟩
+    await tl.render()                           ⟨each run at left L%, top T% of the layer, now of the page⟩
+    on a split page: hide the runs outside the shown half
+```
+
+With it, $`W = w s`$ and $`H = h s`$ in every row of the table. A zoom, a re-fit or a change of layout removes the
+layer (`relayout!` → `strip-layers!`) and builds it again through this function. `TextLayer.update`, which the app
+does not call, writes only a rotation, never a size.
+
+**Considered and rejected:** defining `--scale-round-x` and `--scale-round-y` as `1px` on `.vv-pdf-text`, so that
+pdf.js's own expression resolves.
+
+- The engine already owns the rest of the layer's geometry: it computes the viewport and writes the offset. Writing
+  the size too keeps every input of the layer's box in one function, where no rule from another stylesheet can change
+  it.
+- `round(down, …, 1px)` would floor the layer to whole px, up to 1 px narrower than the page it overlays.
+
+**Results** (raw: [`data/12/split-text-layer-2026-10-18.txt`](data/12/split-text-layer-2026-10-18.txt)):
+
+| Run | Tree | $`\mathit{ratio}`$ | $`\mathit{runAt}`$ | $`\mathit{want}`$ | Predicted | Outcome |
+|---|---|---|---|---|---|---|
+| C5-3, the first observation | the presenter view's tree, before any fix | 1.0000 | not measured | not measured | P1's ratio | the presenter view's check stops the smoke: "…on a split page is the whole page wide (1.000)" |
+| negative control | `2b78f18` + the gate | 1.0000 | 0.0058 | 0.0117 | P1: $`1.00 \pm 0.02`$; $`\mathit{want}/2 = 0.00585 \pm 0.005`$ | **holds**; the smoke stops at exactly the gate's assertion, "the text layer of a split page is the whole page wide (1.000 sheets)" |
+| fix | `2b78f18` + the fix + the gate | 2.0000 | 0.0116 | 0.0117 | P3: $`2.00 \pm 0.02`$; $`\mathit{want} \pm 0.005`$ | **holds**; the whole smoke passes (158 `[ok]` lines) |
+
+- **Both predictions hold, so H-SPLIT-TEXT is confirmed.** Before the fix the layer is exactly one sheet wide, half the
+  page, and the run starts at 0.0058 of the page: half its own left, 0.0117. With the fix the layer is two sheets wide,
+  the whole page, and the run starts at 0.0116. That is within 0.0001 of its own left, the precision the gate prints.
+- **The negative control is valid.** Before it measures, the gate waits for page 1's text layer to hold a run. In the
+  negative run that wait passed, so the failure is the measured one, not a run that had not yet streamed in (the
+  addendum registered this criterion before the runs). The 57 checks the negative run passed before
+  SECOND-SCREEN NOTES are the fix run's first 57, in the same order. One line differs, and only in a frame count that
+  its check measures (13 against 14 frames).
+- **The builds.** Both trees compiled with 0 warnings. The fix tree's unit build ran 860 tests (44 375 assertions,
+  0 failures). The two runs were pinned to disjoint cores (12–21 and 22–31) and ran side by side.
+- **What C5-3 showed.** The presenter view's tree measured the width ratio first, and only the ratio. The ledger's first
+  account of that run claimed more ("P1 and P2 HOLD"). It was corrected before the pair ran; the raw file holds both
+  the run and the correction.
+- **Not measured.** P2, the whole-page control: on a whole page the smoke asserts only that a run overlaps the canvas
+  ("PDF renders in-DOM"), not where on it the run sits. Also the slide-top case (notes below). The table predicts it, and the fix covers it, because it
+  writes the size on every page. No deck in the smoke has its notes below the slide.
 
 ## 5 · The controlled Beamer corpus
 
@@ -764,6 +909,7 @@ measured:
 | two Escapes queued together take two steps through re-frame's real queue, with the one-at-a-time control (§8.8) | `test/vinary/input/escape_queue_test.cljs` |
 | each Escape step is the step's own event function, in the chain's order (§8.8) | `test/vinary/app/slides_present_test.cljs`, `slides_keys_test.cljs`, `slides_overview_test.cljs` |
 | two Escapes sent together during a show forget the typed number, then end the show (§8.8) | `test/electron-smoke.js`, "PDF presenting" |
+| on the real slide-left notes deck, the text layer is the whole page wide and a run sits at its own percent of the page (§4.1) | `test/electron-smoke.js`, "SECOND-SCREEN NOTES (S9)" |
 
 ## 11 · Reproduction
 
@@ -778,7 +924,8 @@ taskset -c 2-9 env VV_BENCH_JSON=flip.json npm run bench:flip | tee flip.txt
 node scripts/run-electron-headless.mjs --backend=x11 electron --no-sandbox scripts/probe-wheel-notch.cjs | tee wheel.txt
 node scripts/analyze-flip-runs.cjs --ref=A flip-ABC-*.json | tee analysis.txt
 npx shadow-cljs compile test && node dist/test/test.js | tee unit.txt   # E1: the "[H-ESC E1]" lines (§8.8)
-npm run test:electron | tee smoke.txt                                     # the "PDF presenting" burst (§8.8)
+npm run test:electron | tee smoke.txt                                     # the "PDF presenting" burst (§8.8), and the
+                                                                          # "[measure] H-SPLIT-TEXT" line (§4.1)
 ```
 
 ## 12 · References
@@ -807,3 +954,22 @@ npm run test:electron | tee smoke.txt                                     # the 
 - **[ELECTRON-INPUT]** Electron, `webContents.sendInputEvent`.
   <https://www.electronjs.org/docs/latest/api/web-contents#contentssendinputeventinputevent>
 - **[PDFJS]** Mozilla, *PDF.js* (pdfjs-dist 5.4.149). <https://mozilla.github.io/pdf.js/>
+- **[PDFJS-TL]** Mozilla, *PDF.js* v5.4.149, `src/display/text_layer.js`: the `TextLayer` constructor calls
+  `setLayerDimensions(container, viewport)` (line 132); `update()` passes it only `{ rotation }` (line 214).
+  <https://github.com/mozilla/pdf.js/blob/v5.4.149/src/display/text_layer.js#L132>
+- **[PDFJS-DU]** Mozilla, *PDF.js* v5.4.149, `src/display/display_utils.js`, `setLayerDimensions` (line 646): where
+  `FeatureTest.isCSSRoundSupported` holds — `CSS.supports("width: round(1.5px, 1px)")`, `src/shared/util.js` line
+  660 — it writes `round(down, var(--total-scale-factor) * <width>px, var(--scale-round-x))`, and the height the same
+  way. <https://github.com/mozilla/pdf.js/blob/v5.4.149/src/display/display_utils.js#L646>
+- **[PDFJS-CSS]** Mozilla, *PDF.js* v5.4.149, `web/pdf_viewer.css` (line 106): `.pdfViewer .page { …
+  --scale-round-x: 1px; --scale-round-y: 1px; … }`. <https://github.com/mozilla/pdf.js/blob/v5.4.149/web/pdf_viewer.css#L106>
+- **[CSS-VAR]** W3C, *CSS Custom Properties for Cascading Variables Module Level 1*, "invalid at computed-value
+  time": the computed value is "either the property's inherited value or its initial value depending on whether the
+  property is inherited or not, respectively, as if the property's value had been specified as the unset keyword".
+  <https://www.w3.org/TR/css-variables-1/#invalid-at-computed-value-time>
+- **[CSS2-ABS]** W3C, *Cascading Style Sheets Level 2 Revision 2 (CSS 2.2)*, §10.3.7 *Absolutely positioned,
+  non-replaced elements*, rule 5: "'width' is 'auto', 'left' and 'right' are not 'auto', then solve for 'width'".
+  <https://www.w3.org/TR/CSS22/visudet.html#abs-non-replaced-width>
+- **[CSS2-POS]** W3C, *CSS 2.2*, §9.3.2 *Box offsets*: the percentages of `left` and `right` "refer to width of
+  containing block", those of `top` and `bottom` "refer to height of containing block".
+  <https://www.w3.org/TR/CSS22/visuren.html#position-props>

@@ -33,3 +33,9 @@ Every file is the instrument's own output, tee'd once; nothing here was edited b
 | File | What it is |
 |---|---|
 | `escape-queue-2026-10-18.txt` | H-ESC: its pre-registration and the addendum before run 2, verbatim; experiment E1 on re-frame's real queue without and with the fix; the smoke's end-to-end burst without and with it, in two runs (§8.8). Assembled by a shell block from the logs; its `#` lines are written by hand. |
+
+## Text layers
+
+| File | What it is |
+|---|---|
+| `split-text-layer-2026-10-18.txt` | H-SPLIT-TEXT: its registration, the gate's pre-registration and addendum, verbatim; the first observation (run C5-3) and the ledger's correction of its account; the smoke's gate on the same base without and with the fix (§4.1). Assembled by a shell block from the logs; its `#` lines are written by hand. |

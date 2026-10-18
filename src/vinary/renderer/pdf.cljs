@@ -368,6 +368,7 @@
     (let [^js div (sheet-of state idx)
           tdiv    (js/document.createElement "div")]
       (set! (.-className tdiv) "vv-pdf-text")
+      ;; (the TextLayer constructor below overwrites these two; they are written again after it — H-SPLIT-TEXT)
       (set! (.. tdiv -style -width) (str (.-width vp) "px"))
       (set! (.. tdiv -style -height) (str (.-height vp) "px"))
       ;; pdf.js 5.x sizes/positions every text span with calc(var(--total-scale-factor) * …); if that custom
@@ -379,17 +380,28 @@
         (.setProperty "--scale-factor"       (str (page-scale state idx))))
       (.appendChild div tdiv)
       (offset-layer! state idx tdiv)
-      (let [side (:side @state)
-            size (nth (:sizes @state) idx nil)
-            p    (-> (.render (js/Reflect.construct (.-TextLayer ^js @pdfjs)
-                                                    #js [#js {:textContentSource (.streamTextContent pg)
-                                                              :container tdiv :viewport vp}]))
-                     ;; part of the render: find awaits this promise, so the notes runs are hidden before it reads
-                     (.then (fn [_] (when (and side size) (hide-offslide-runs! tdiv side size)) nil))
-                     ;; a failed render must not leave a poisoned entry: drop it so a later ensure retries
-                     (.catch (fn [_] (swap! state update :text-built dissoc idx) nil)))]
-        (swap! state update :text-built assoc idx p)
-        p))))
+      (let [side      (:side @state)
+            size      (nth (:sizes @state) idx nil)
+            ^js layer (js/Reflect.construct (.-TextLayer ^js @pdfjs)
+                                            #js [#js {:textContentSource (.streamTextContent pg)
+                                                      :container tdiv :viewport vp}])]
+        ;; The constructor sizes the container itself (pdf.js setLayerDimensions): round(down, var(--total-scale-factor)
+        ;; * <W>px, var(--scale-round-x)). --scale-round-x/-y are pdf_viewer.css's, which the app does not load, so the
+        ;; value is invalid at computed-value time and the layer's width and height compute to auto: under inset 0, the
+        ;; sheet's size plus the offset. That is the page on a whole page and on a half at the page's right or bottom.
+        ;; On the slide-left half (notes on the right, Beamer's default) it was half the page wide, and on the slide-top
+        ;; half (notes below) half its height, so every run, placed in percent of the layer, sat at half its x or y
+        ;; (H-SPLIT-TEXT, docs/scientific/12 §4.1). So the page's size is written again, in px, once the constructor
+        ;; has run.
+        (set! (.. tdiv -style -width) (str (.-width vp) "px"))
+        (set! (.. tdiv -style -height) (str (.-height vp) "px"))
+        (let [p (-> (.render layer)
+                    ;; part of the render: find awaits this promise, so the notes runs are hidden before it reads
+                    (.then (fn [_] (when (and side size) (hide-offslide-runs! tdiv side size)) nil))
+                    ;; a failed render must not leave a poisoned entry: drop it so a later ensure retries
+                    (.catch (fn [_] (swap! state update :text-built dissoc idx) nil)))]
+          (swap! state update :text-built assoc idx p)
+          p)))))
 
 (defn- ensure-text-at!
   "A Promise that resolves once page `idx`'s text layer EXISTS. Returns the in-flight render when one is

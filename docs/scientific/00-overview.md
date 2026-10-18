@@ -150,7 +150,9 @@ that applied it (08–12).
   canvases. Also the slide-flip latency: a frame of deferral after every key, attributed (H-sched), one refuted and
   one successful intervention, and a median key → frame of 24.3 → 7.9 ms. And two Escapes at once (H-ESC): each
   Escape's step queued behind the next key, so two took one step twice; fixed, and checked on re-frame's real queue
-  and end to end, each check first shown to fail without the fix.
+  and end to end, each check first shown to fail without the fix. And the text layer of a split page (H-SPLIT-TEXT):
+  pdf.js sized it with a CSS variable the app never defines, so on a slide-left (or slide-top) two-screen deck every
+  run sat at half its x (or y); fixed, and measured on a real slide-left LuaLaTeX deck without and with the fix.
 
 ---
 

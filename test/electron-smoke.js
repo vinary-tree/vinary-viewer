@@ -2799,6 +2799,26 @@ async function main() {
         && s.path === ${JSON.stringify(realPath)} && s.page === 0; })()`, 'the real LuaLaTeX notes deck opens on its slide half', 15000);
     s = await evalIn(win, `window.__vvdb().ui.slides`);
     assert.deepStrictEqual([s.pages, s.frames], [3, 3], 'the real deck steps page by page (its labels read 1 1 1)');
+    // the text layer is the whole PAGE wide, though the sheet shows only its slide half (H-SPLIT-TEXT, docs/scientific/12
+    // §4.1). pdf.js's TextLayer sizes its container with round(…, var(--scale-round-x)), a property only pdf_viewer.css
+    // defines; without it the layer fell back to its sheet's width — half the page on this slide-LEFT deck — and every
+    // run, placed in percent of the layer, sat at half its x, so find's highlights and the selection missed the words.
+    // Layout px (offsetWidth / offsetLeft) are free of transforms. The canvas is in place before the layer's runs are
+    // (they stream in after it), so the measurement waits for a run to measure.
+    await waitCalm(win, `[...document.querySelectorAll('#vv-pdf-page-1 .vv-pdf-sheet .vv-pdf-text span:not(.markedContent)')]
+      .some((r) => /%$/.test(r.style.left) && r.textContent.trim())`, "the real deck's text layer is laid out", 8000);
+    const textLayer = await evalIn(win, `(() => { const sheet = document.querySelector('#vv-pdf-page-1 .vv-pdf-sheet');
+      const t = sheet.querySelector('.vv-pdf-text');
+      const run = [...t.querySelectorAll('span:not(.markedContent)')]
+        .find((r) => /%$/.test(r.style.left) && r.textContent.trim());
+      return { ratio: t.offsetWidth / sheet.offsetWidth, runAt: run.offsetLeft / (2 * sheet.offsetWidth),
+               want: parseFloat(run.style.left) / 100 }; })()`);
+    console.log(`[measure] H-SPLIT-TEXT text layer / sheet width on a slide-left split page = ${textLayer.ratio.toFixed(4)}; `
+      + `a run at ${textLayer.runAt.toFixed(4)} of the page, its own left ${textLayer.want.toFixed(4)}`);
+    assert.ok(Math.abs(textLayer.ratio - 2) < 0.02,
+      `the text layer of a split page is the whole page wide (${textLayer.ratio.toFixed(3)} sheets)`);
+    assert.ok(Math.abs(textLayer.runAt - textLayer.want) < 0.005,
+      `a run sits at its own percent of the page (${textLayer.runAt.toFixed(4)} vs ${textLayer.want.toFixed(4)})`);
     await evalIn(win, `window.__vvfindtoggle()`);
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-find-input'))`), 'find over the real deck', 8000);
     const inSlides = [await findFor('FrameOneTitle'), await findFor('SlideOneBody'), await findFor('NotesForFrameOne')];
@@ -2815,7 +2835,7 @@ async function main() {
     assert.deepStrictEqual(inDocument, [6, 4, 2], 'the document layout finds every word on the page');
     await evalIn(win, `window.__vvslides('layout', null)`);
     await waitCalm(win, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))`, 'the real deck back in the slides layout', 8000);
-    console.log('[ok] PDF second-screen notes: the slides show the slide half (auto / notes=left / off), find skips the notes (a real LuaLaTeX deck too), the document layout keeps whole pages, tiles are halves, corrupt labels ignored');
+    console.log('[ok] PDF second-screen notes: the slides show the slide half (auto / notes=left / off), find skips the notes (a real LuaLaTeX deck too), the document layout keeps whole pages, tiles are halves, corrupt labels ignored; the text layer spans the whole page');
   }
 
   // ── NOTE PAGES (ADR-0048 §3, N2, N7): Beamer's `show notes` writes a note page after the slides it annotates. They

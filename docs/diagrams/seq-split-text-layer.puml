@@ -1,0 +1,61 @@
+@startuml seq-split-text-layer
+'' PlantUML over Mermaid: the defect is an ORDER OF WRITES — the engine sizes the text layer, then pdf.js's TextLayer
+'' constructor overwrites that size with an expression the app's CSS cannot resolve — so a sequence diagram with one
+'' phase per design states it exactly. Every participant is the renderer (teal, the suite's renderer / Chromium
+'' concept): the app's PDF engine, the pdf.js library it calls, the layer's inline style, and Chromium's style and
+'' layout. Red = the defect's outcome; the palest teal note = the outcome of the fix (still the renderer). Every CSS
+'' `--` in a label is written `~--`: two of them on one line are otherwise Creole strikethrough.
+!include _vv-theme.iuml
+
+title The text layer of a split page: why it was half the page wide, and the fix (docs/scientific/12 §4.1)
+
+participant "build-text-layer!\n(the PDF engine, renderer.pdf)" as E RENDERER_TINT
+participant "TextLayer constructor\n(pdf.js 5.4.149)" as P RENDERER_TINT
+participant ".vv-pdf-text\n(the layer's inline style)" as S RENDERER_TINT
+participant "Chromium\n(computed style, then layout)" as C RENDERER_TINT
+
+note over E, C RENDERER_FILL
+  <latex>w \times h</latex>: the page, in PDF points · <latex>s</latex>: CSS px per point at the current zoom
+  the shown half: its corner at <latex>(x, y)</latex>, its size <latex>w' \times h'</latex> (deck/half-rect)
+  <latex>L</latex>: where a run in the layer's root starts, in percent of the page (its style left: L%)
+end note
+
+== before: the constructor's size is the last one written ==
+E -> S : width <latex>= w s</latex> px, height <latex>= h s</latex> px (the whole page)
+E -> S : left <latex>= -x s</latex> px, top <latex>= -y s</latex> px\n(offset-layer!: the shown half's corner at the sheet's)
+E -> P : new TextLayer({container, viewport})
+activate P
+P -> S : width: round(down, var(~--total-scale-factor) * 725.669px, var(~--scale-round-x))\nheight: the same with the page height and var(~--scale-round-y)
+deactivate P
+E -> P : render(): each run in the layer's root at left: L%, top: T%
+S -> C : ~--scale-round-x and -y are defined only by pdf_viewer.css,\nwhich the app does not load
+C -> C : invalid at computed-value time:\nwidth and height compute to auto
+C -> C : inset 0, so <latex>W = (x + w')\,s,\ H = (y + h')\,s</latex>
+note right of C ERROR_FILL
+  slide on the LEFT, <latex>x = 0,\ w' = w/2</latex>:
+  the layer is half the page wide, and a run
+  at <latex>L\,\%</latex> of it sits at <latex>(L/2)\,\%</latex> of the page,
+  so find's highlights and the selection miss the words
+end note
+
+== the fix: the engine writes the size again, after the constructor ==
+E -> S : width, height, left, top (as before)
+E -> P : new TextLayer({container, viewport})
+activate P
+P -> S : width: round(…, var(~--scale-round-x)) (as before)
+deactivate P
+E -> S : width <latex>= w s</latex> px, height <latex>= h s</latex> px, written AGAIN, last
+E -> P : render(): runs at left: L%, top: T%
+S -> C : every declaration resolves
+C -> C : <latex>W = w s,\ H = h s</latex> for every page and every half
+note right of C RENDERER_FILL
+  a run at <latex>L\,\%</latex> of the layer sits at
+  <latex>L\,\%</latex> of the page, under the slide's own word
+end note
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the renderer: the PDF engine, pdf.js, the layer's style, Chromium's style and layout |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the defect's outcome |
+endlegend
+@enduml

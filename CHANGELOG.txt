@@ -602,6 +602,13 @@ Fixed
       had been blank since the tab was added: it was handed to Reagent in a
       form that Reagent (1.3.0 and later) silently discards. A lint check now
       rejects that form anywhere in the app.
+    - On a two-screen Beamer deck shown on its slide half with the slide on
+      the left (Beamer's default) or on top, find's highlights and a text
+      selection now land on the slide's words. The transparent text laid
+      over the slide was half the page wide (or tall), so every word sat at
+      half its distance from the left (or top) edge: pdf.js sized it with a
+      CSS variable this app never defines. The viewer now sets that size
+      itself.
     - Moving or resizing one window no longer cancels another window's
       pending save of its position. One save timer served every window, so
       when the second window was fullscreen -- a slide show -- the first
