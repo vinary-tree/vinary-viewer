@@ -221,6 +221,63 @@
            (transient [])
            (map-indexed vector frames))))
 
+;; ---- the audience's pages (ADR-0048 §3) ------------------------------------------------------------------
+;; A deck may carry pages the audience never sees: the note pages of Beamer's `show notes` (vinary.slides.notes finds
+;; them). They stay in the document — the engine keeps a slot per page, and the Document layout shows every page — but
+;; navigation runs over the SHOWN pages, in their order (the ORDINAL), and a hidden page SNAPS to its slide: the nearest
+;; shown page below it. Page 0 is never hidden (a note page follows the slide it annotates), so every page has one.
+
+(defn- page-set
+  "The integers of `ps` that lie in [lo, n), as a set; anything else is dropped."
+  [ps lo n]
+  (into #{} (filter #(and (integer? %) (<= lo %) (< % n))) ps))
+
+(defn- audience-pages
+  "One pass over the pages [0, n) given the `hidden` set: {:shown [p…] :ordinal [o|nil …] :snap [p' …]} — the shown
+   pages in order, each page's position among them (nil when hidden), and the page each one snaps to."
+  [n hidden]
+  (loop [p 0, last-shown 0, shown (transient []), ordinal (transient []), snap (transient [])]
+    (if (< p n)
+      (if (contains? hidden p)
+        (recur (inc p) last-shown shown (conj! ordinal nil) (conj! snap last-shown))
+        ;; the ordinal is read BEFORE the conj!: a transient grows in place, so a count taken after it is one too high
+        (let [o (count shown)]
+          (recur (inc p) p (conj! shown p) (conj! ordinal o) (conj! snap p))))
+      {:shown (persistent! shown) :ordinal (persistent! ordinal) :snap (persistent! snap)})))
+
+(defn- frames-over
+  "Frames over the SHOWN pages (physical indices `shown`): a maximal run of shown pages, adjacent in the audience's
+   order, whose labels are equal (frames-from-labels' rule, applied to the shown pages' labels) or whose later page
+   is a FORCED overlay (pdfpc's `forcedOverlay` / legacy `[skip]`: the page joins the previous frame). Each frame is
+   [first last] in physical indices — a frame may enclose hidden pages, the note pages written after its overlays."
+  [shown labels group? forced]
+  (let [m      (count shown)
+        lab    (when (and group? labels) (fn [o] (nth labels (nth shown o))))
+        joins? (fn [o] (or (contains? forced (nth shown o))
+                           (and lab (let [a (lab (dec o)) b (lab o)]
+                                      (and (string? a) (not (str/blank? a)) (= a b))))))]
+    (if (<= m 0)
+      []
+      (loop [o 1, start 0, acc (transient [])]
+        (cond
+          (>= o m)   (persistent! (conj! acc [(nth shown start) (nth shown (dec m))]))
+          (joins? o) (recur (inc o) start acc)
+          :else      (recur (inc o) o (conj! acc [(nth shown start) (nth shown (dec o))])))))))
+
+(defn- frame-lookup
+  "The page → frame vector when some pages are hidden: a page belongs to the frame of the shown page it snaps to, so a
+   note page written after a frame's last overlay — outside that frame's [first last] — belongs to its slide's frame.
+   `snap` never decreases along the pages and the frames ascend, so one pointer walks the frames once."
+  [n frames snap]
+  (let [nf (count frames)]
+    (loop [p 0, k 0, acc (transient [])]
+      (if (< p n)
+        (let [s (nth snap p)
+              k (loop [k k]
+                  (if (and (< (inc k) nf) (>= s (first (nth frames (inc k))))) (recur (inc k)) k))]
+          (recur (inc p) k (conj! acc k)))
+        (persistent! acc)))))
+
 (defn deck
   "Assemble the deck model from evidence `{:creator :producer :creator-tool :page-mode :labels :sizes}`. Frames
    are grouped by page labels only for Beamer sources (:beamer, :beamer-geometry) — other producers' labels are
@@ -233,21 +290,46 @@
    are labelled 1 1 2 2 3 3 (not 1 2 3 4 5 5), a well-formed sequence that would merge frames 1+2 and 3+4. (The
    `previous slide` variant keeps correct labels, but its pages are indistinguishable by geometry, so it is treated
    alike.) The page number is always right; a corrupt label would make the counter, typed-number goto and frame
-   steps lie."
+   steps lie. `:split-axis` names an axis to split pages along when the geometry gives none — pdfpc's notes
+   position on a deck whose pages are not a doubled Beamer paper (ADR-0048 §5); its labels are dropped alike.
+
+   The audience's pages (ADR-0048 §3, §5), all optional — without them the model is exactly ADR-0045's:
+     :hidden     pages the audience never sees (note pages); page 0 and out-of-range pages are ignored
+     :skipped    pdfpc's hidden pages: :next/:prev and the frame steps pass over them; Home, End, a typed number
+                 and the overview still reach them
+     :forced     pdfpc's forced overlays: the page joins the previous frame
+     :end-frame  pdfpc's end slide (0-based frame): End goes first to its last page
+   The model then also carries :shown (the shown pages, ascending), :ordinal (each page's position among them, nil
+   when hidden) and :snap (the page each page shows as)."
   [evidence]
   (let [cls     (classify evidence)
         n       (count (:sizes evidence))
         uniform (uniform-size (:sizes evidence))
-        axis    (when uniform (second-screen-axis uniform))
+        axis    (or (when uniform (second-screen-axis uniform))
+                    (#{:horizontal :vertical} (:split-axis evidence)))
         labels  (when-not axis (some-> (:labels evidence) vec))
+        labels  (when (= n (count labels)) labels)
         group?  (and (not axis) (contains? #{:beamer :beamer-geometry} (:source cls)))
-        frames  (frames-from-labels n labels group?)]
+        hidden  (page-set (:hidden evidence) 1 n)
+        forced  (page-set (:forced evidence) 1 n)
+        {:keys [shown ordinal snap]} (audience-pages n hidden)
+        frames  (if (and (empty? hidden) (empty? forced))
+                  (frames-from-labels n labels group?)
+                  (frames-over shown labels group? forced))
+        end     (:end-frame evidence)]
     (assoc cls
            :pages         n
            :frames        frames
-           :frame-of      (frame-index frames)
-           :labels        (when (= n (count labels)) labels)
-           :second-screen axis)))
+           :frame-of      (if (empty? hidden) (frame-index frames) (frame-lookup n frames snap))
+           :labels        labels
+           :second-screen axis
+           :hidden        hidden
+           :skipped       (page-set (:skipped evidence) 0 n)
+           :forced        forced
+           :end-frame     (when (and (integer? end) (<= 0 end) (< end (count frames))) end)
+           :shown         shown
+           :ordinal       ordinal
+           :snap          snap)))
 
 (defn summary
   "The small, serializable part of a deck for app state (:doc/deck): no per-page vectors."
@@ -276,15 +358,37 @@
   [d p]
   (-> p (max 0) (min (max 0 (dec (:pages d 0))))))
 
+(defn snap
+  "The page the audience sees for page p (clamped): p itself when it is shown, else its slide — the nearest shown
+   page BELOW it (ADR-0048 §3). A snap never moves up, so two windows that disagree for a while about which pages are
+   hidden cannot snap each other back and forth (docs/theory/11 §5.6)."
+  [d p]
+  (let [p (clamp-page d p)]
+    (if-let [s (:snap d)] (nth s p p) p)))
+
+(defn- shown-pages
+  "The shown pages of `d` — every page for a model built without :hidden (or by hand)."
+  [d]
+  (or (:shown d) (vec (range (:pages d 0)))))
+
+(defn- ordinal-of
+  "Page p's position among the shown pages (p itself for a model without the vector); nil when hidden."
+  [d p]
+  (if-let [o (:ordinal d)] (nth o p nil) p))
+
 (defn position
   "Everything a slide counter shows for page p: {:page :pages :frame :frames :overlay :overlays :label}, with
-   :overlay/:overlays 0-based/count within the frame (a one-page frame is overlay 0 of 1)."
+   :overlay/:overlays 0-based/count within the frame (a one-page frame is overlay 0 of 1), counted over the frame's
+   SHOWN pages — a hidden page reports its slide's overlay. :page and :pages stay physical (the engine's slots are)."
   [d p]
   (let [p      (clamp-page d p)
         f      (frame-of d p)
-        [s e]  (nth (:frames d) f [p p])]
+        [s e]  (nth (:frames d) f [p p])
+        os     (ordinal-of d s)
+        o      (ordinal-of d (snap d p))
+        oe     (ordinal-of d e)]
     {:page p :pages (:pages d 0) :frame f :frames (count (:frames d))
-     :overlay (- p s) :overlays (inc (- e s)) :label (label-of d p)}))
+     :overlay (- o os) :overlays (inc (- oe os)) :label (label-of d p)}))
 
 ;; ---- navigation -----------------------------------------------------------------------------------------
 
@@ -296,16 +400,18 @@
   (when (re-matches #"\d{1,7}" s) (js/parseInt s 10)))
 
 (defn resolve-goto
-  "The page a typed slide reference `s` names, or nil: first the page whose LABEL is `s` (in a Beamer deck the
+  "The page a typed slide reference `s` names, or nil: first the shown page whose LABEL is `s` (in a Beamer deck the
    label is the frame number, so \"7\" opens frame 7's first overlay — the number on the slide), else `s` as a
-   1-based physical page number."
+   1-based position among the shown pages (the physical page number when nothing is hidden). A hidden page's label —
+   a note page's own page number — is never matched (ADR-0048 §3)."
   [d s]
-  (let [s (str/trim (str s))]
+  (let [s     (str/trim (str s))
+        shown (shown-pages d)]
     (when (seq s)
       (or (when-let [labels (:labels d)]
-            (first (keep-indexed (fn [i l] (when (= l s) i)) labels)))
+            (some (fn [p] (when (= (nth labels p) s) p)) shown))
           (when-let [k (parse-pos-int s)]
-            (when (<= 1 k (:pages d 0)) (dec k)))))))
+            (when (<= 1 k (count shown)) (nth shown (dec k))))))))
 
 (defn- push-bounded [v x]
   (let [v (conj (or v []) x)]
@@ -316,44 +422,71 @@
     nav
     (assoc nav :page to :back (push-bounded (:back nav) (:page nav)) :fwd [])))
 
+(defn- unskipped
+  "The first shown page from position `o` on, stepping by `delta` (+1 forward, -1 back), that pdfpc does not skip
+   (`:skipped`); nil when there is none."
+  [d shown o delta]
+  (let [skipped (:skipped d)
+        m       (count shown)]
+    (loop [o o]
+      (when (and (<= 0 o) (< o m))
+        (let [p (nth shown o)]
+          (if (contains? skipped p) (recur (+ o delta)) p))))))
+
+(defn- unskipped-at
+  "Page t, or — when pdfpc skips it — the nearest page that is not skipped in direction `delta`; nil when none is."
+  [d shown t delta]
+  (if (contains? (:skipped d) t) (unskipped d shown (ordinal-of d t) delta) t))
+
 (defn step
-  "Apply navigation `op` to `nav` within deck `d`; returns the new nav. Ops:
-     :next / :prev               one page (one overlay) forward / back, clamped at the ends
+  "Apply navigation `op` to `nav` within deck `d`; returns the new nav. Every op runs over the SHOWN pages, from the
+   current page's snap (ADR-0048 §3):
+     :next / :prev               one shown page (one overlay) forward / back, clamped at the ends
      :next-frame                 the FIRST page of the next frame (skips the rest of this frame's overlays);
                                  on the last frame, its last page
      :prev-frame                 the LAST page of the previous frame — the slide fully built, as presenters
                                  expect when going back; on the first frame, page 0
-     :first / :last              page 0 / the last page                       (jumps)
-     [:goto p]                   physical page p, clamped                       (jump)
+     :first / :last              page 0 / the last shown page — or first the end slide's last page when the deck
+                                 names one (pdfpc's end slide, ADR-0048 §6.5)        (jumps)
+     [:goto p]                   physical page p, clamped and snapped           (jump)
      [:goto-label s]             resolve-goto; no-op when s names nothing       (jump)
      [:jump p]                   a link/outline/overview target                 (jump)
+     [:show p]                   page p, clamped and snapped — NO history: how a window follows another (ADR-0048 §8)
      :back / :forward            walk the jump history (PDF GoBack/GoForward)
-   Only JUMPS record history; sequential steps never do, so Back returns to where a link was followed from."
+   Only JUMPS record history; sequential steps never do, so Back returns to where a link was followed from. The
+   sequential steps pass over pdfpc's skipped pages (:skipped), staying put when only skipped pages lie ahead."
   [d nav op]
   (let [n (:pages d 0)]
     (if (zero? n)
       nav
-      (let [p       (clamp-page d (:page nav 0))
+      (let [p       (snap d (:page nav 0))
             nav     (assoc nav :page p)
+            shown   (shown-pages d)
+            o       (ordinal-of d p)
             frames  (:frames d)
             f       (frame-of d p)
             last-f  (dec (count frames))
             kind    (if (vector? op) (first op) op)]
         (case kind
-          :next       (assoc nav :page (min (inc p) (dec n)))
-          :prev       (assoc nav :page (max (dec p) 0))
-          :next-frame (assoc nav :page (if (< f last-f) (first (nth frames (inc f))) (second (nth frames last-f))))
-          :prev-frame (assoc nav :page (if (pos? f) (second (nth frames (dec f))) 0))
-          :first      (jump nav 0)
-          :last       (jump nav (dec n))
-          :goto       (jump nav (clamp-page d (second op)))
-          :jump       (jump nav (clamp-page d (second op)))
+          :next       (assoc nav :page (or (unskipped d shown (inc o) 1) p))
+          :prev       (assoc nav :page (or (unskipped d shown (dec o) -1) p))
+          :next-frame (assoc nav :page (or (if (< f last-f)
+                                             (unskipped-at d shown (first (nth frames (inc f))) 1)
+                                             (unskipped-at d shown (second (nth frames last-f)) 1))
+                                           p))
+          :prev-frame (assoc nav :page (or (unskipped-at d shown (if (pos? f) (second (nth frames (dec f))) 0) -1) p))
+          :first      (jump nav (first shown))
+          :last       (let [end (some->> (:end-frame d) (nth frames) second)]
+                        (jump nav (if (and end (< p end)) end (peek shown))))
+          :goto       (jump nav (snap d (second op)))
+          :jump       (jump nav (snap d (second op)))
+          :show       (assoc nav :page (snap d (second op)))
           :goto-label (if-let [t (resolve-goto d (second op))] (jump nav t) nav)
           :back       (if-let [t (peek (:back nav))]
-                        (assoc nav :page (clamp-page d t) :back (pop (:back nav)) :fwd (push-bounded (:fwd nav) p))
+                        (assoc nav :page (snap d t) :back (pop (:back nav)) :fwd (push-bounded (:fwd nav) p))
                         nav)
           :forward    (if-let [t (peek (:fwd nav))]
-                        (assoc nav :page (clamp-page d t) :fwd (pop (:fwd nav)) :back (push-bounded (:back nav) p))
+                        (assoc nav :page (snap d t) :fwd (pop (:fwd nav)) :back (push-bounded (:back nav) p))
                         nav)
           nav)))))
 

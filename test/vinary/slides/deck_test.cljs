@@ -401,3 +401,124 @@
   (is (not (deck/on-slide-half? :top 30 50.8)))
   (is (deck/on-slide-half? :bottom 3 71.2))
   (is (deck/on-slide-half? nil 99 99) "whole pages hide nothing"))
+
+;; ---- the audience's pages (ADR-0048 §3, §5) ------------------------------------------------------------------------
+;; The real LuaLaTeX `show notes` deck test/fixtures/beamer-shownotes.pdf: Intro (2 overlays + an in-frame note on
+;; each), a \note between frames, Middle, Outro (2 overlays, \note<2>), \againframe{middle}. Its labels and its note
+;; pages {1 3 4 8} were written down before it was compiled (test/fixtures/beamer-shownotes.tex).
+
+(def ^:private shownotes-evidence
+  {:creator "LaTeX with Beamer class" :producer "LuaTeX-1.24.0"
+   :labels ["1" "2" "1" "4" "5" "2" "3" "3" "9" "4"] :sizes (pages 10 b43)})
+
+(def ^:private sn (deck/deck (assoc shownotes-evidence :hidden #{1 3 4 8})))
+(defn- go-sn [page op] (:page (deck/step sn {:page page} op)))
+
+(deftest without-hidden-pages-the-model-is-adr-0045s
+  (let [d0 (deck/deck shownotes-evidence)]
+    (is (= (vec (range 10)) (:shown d0) (:ordinal d0) (:snap d0)) "every page shown, in order, snapping to itself")
+    (is (= (:frames d0) (deck/frames-from-labels 10 (:labels shownotes-evidence) true)))
+    (is (= #{} (:hidden d0) (:skipped d0) (:forced d0)))
+    (is (nil? (:end-frame d0)))))
+
+(deftest note-pages-leave-the-frames
+  (is (= [0 2 5 6 7 9] (:shown sn)))
+  (is (= [0 nil 1 nil nil 2 3 4 nil 5] (:ordinal sn)))
+  (is (= [0 0 2 2 2 5 6 7 7 9] (:snap sn)) "a note page snaps to the slide page below it")
+  (is (= [[0 2] [5 5] [6 7] [9 9]] (:frames sn)) "four frames: Intro, Middle, Outro, Middle again")
+  (is (= [0 0 0 0 0 1 2 2 2 3] (:frame-of sn)) "a note page belongs to its slide's frame")
+  (is (= 4 (:frame-count (deck/summary sn))))
+  (testing "a snap never moves up"
+    (doseq [p (range 10)] (is (<= (deck/snap sn p) p) (str "page " p)))))
+
+(deftest navigation-runs-over-shown-pages
+  (is (= 2 (go-sn 0 :next)) "Intro overlay 1 → overlay 2, past its note page")
+  (is (= 5 (go-sn 2 :next)) "…→ Middle, past two note pages")
+  (is (= 2 (go-sn 5 :prev)))
+  (is (= 9 (go-sn 9 :next)) "clamped at the last shown page")
+  (is (= 5 (go-sn 0 :next-frame)))
+  (is (= 2 (go-sn 5 :prev-frame)) "the previous frame fully built")
+  (is (= 9 (go-sn 0 :last)))
+  (is (= 0 (go-sn 7 :first)))
+  (testing "from a note page, a step starts at its slide"
+    (is (= 5 (go-sn 3 :next)))
+    (is (= 0 (go-sn 1 :prev)) "page 1 is page 0's note, and no slide comes before page 0: :prev stays on it"))
+  (testing "a goto or a jump to a note page lands on its slide, and records history"
+    (let [s (deck/step sn {:page 0} [:goto 3])]
+      (is (= 2 (:page s)))
+      (is (= [0] (:back s))))
+    (is (= 7 (go-sn 0 [:jump 8]))))
+  (testing "[:show p] follows another window: snapped, and NO history"
+    (is (= {:page 7} (deck/step sn {:page 0} [:show 8])))
+    (is (= {:page 9 :back [2] :fwd []} (deck/step sn {:page 9 :back [2] :fwd []} [:show 99])) "clamped, history untouched")))
+
+(deftest typed-numbers-name-shown-labels-then-the-ordinal
+  (is (= 5 (deck/resolve-goto sn "2")) "frame 2 — not page 2, Intro's note page (label 2)")
+  (is (= 9 (deck/resolve-goto sn "4")) "the shown page labelled 4, not note page 3 (labelled 4)")
+  (is (= 0 (deck/resolve-goto sn "1")))
+  (is (= 9 (deck/resolve-goto sn "6")) "no shown label 6: the 6th shown page")
+  (is (nil? (deck/resolve-goto sn "9")) "a note page's own number names nothing")
+  (is (= 5 (go-sn 0 [:goto-label "2"]))))
+
+(deftest counters-count-shown-overlays
+  (is (= {:page 2 :pages 10 :frame 0 :frames 4 :overlay 1 :overlays 2 :label "1"} (deck/position sn 2)))
+  (is (= {:page 3 :pages 10 :frame 0 :frames 4 :overlay 1 :overlays 2 :label "4"} (deck/position sn 3))
+      "a note page reports its slide's frame and overlay; :page and :label stay its own")
+  (is (= {:page 7 :pages 10 :frame 2 :frames 4 :overlay 1 :overlays 2 :label "3"} (deck/position sn 7))))
+
+(deftest the-overview-shows-shown-pages
+  (is (= [2 5 7 9] (mapv :page (deck/overview-tiles sn :last))))
+  (is (= [0 5 6 9] (mapv :page (deck/overview-tiles sn :first)))))
+
+(deftest hidden-pages-are-sanitized
+  (let [d (deck/deck (assoc shownotes-evidence :hidden #{0 1 10 -1 "3" 2.5}))]
+    (is (= #{1} (:hidden d)) "page 0, out-of-range pages and non-integers are ignored")
+    (is (= 0 (deck/snap d 0)))))
+
+(deftest pdfpc-skipped-pages
+  ;; five one-page frames, pdfpc hides page 2 (pages[].hidden): the steps pass over it; Home, End, a goto, the overview
+  ;; and the history still reach it (pdfpc's rule, ADR-0048 §5)
+  (let [d  (deck/deck {:sizes (pages 5 [720 540]) :skipped #{2}})
+        go (fn [p op] (:page (deck/step d {:page p} op)))]
+    (is (= #{2} (:skipped d)))
+    (is (= 3 (go 1 :next)))
+    (is (= 1 (go 3 :prev)))
+    (is (= 3 (go 1 :next-frame)))
+    (is (= 1 (go 3 :prev-frame)))
+    (is (= 2 (go 0 [:goto 2])) "a goto reaches it")
+    (is (= 3 (go 2 :next)) "and the steps leave it")
+    (is (some #{2} (map :page (deck/overview-tiles d :last))) "the overview still shows it"))
+  (testing "only skipped pages ahead: the step stays put"
+    (let [d (deck/deck {:sizes (pages 4 [720 540]) :skipped #{2 3}})]
+      (is (= 1 (:page (deck/step d {:page 1} :next))))
+      (is (= 1 (:page (deck/step d {:page 1} :next-frame))))
+      (is (= 3 (:page (deck/step d {:page 1} :last))) "End still reaches the last page"))))
+
+(deftest pdfpc-forced-overlays-join-the-previous-frame
+  (let [d (deck/deck {:sizes (pages 5 [720 540]) :forced #{2 3 0}})]
+    (is (= [[0 0] [1 3] [4 4]] (:frames d)) "pages 2 and 3 join page 1's frame; page 0 cannot be forced")
+    (is (= [0 1 1 1 2] (:frame-of d)))
+    (is (= 4 (:page (deck/step d {:page 1} :next-frame))))))
+
+(deftest pdfpc-end-slide-is-one-end-away
+  ;; six one-page frames, pdfpc's end slide is frame 3 (EndUserSlide 4): End goes there first, then to the last page
+  (let [d  (deck/deck {:sizes (pages 6 [720 540]) :end-frame 3})
+        go (fn [p op] (:page (deck/step d {:page p} op)))]
+    (is (= 3 (:end-frame d)))
+    (is (= 3 (go 0 :last)))
+    (is (= 5 (go 3 :last)) "from the end slide, the last page")
+    (is (= 5 (go 4 :last)) "…and from beyond it")
+    (is (nil? (:end-frame (deck/deck {:sizes (pages 6 [720 540]) :end-frame 6}))) "an end slide past the last frame is ignored")
+    (is (nil? (:end-frame (deck/deck {:sizes (pages 6 [720 540]) :end-frame -1}))))))
+
+(deftest a-split-axis-from-pdfpc
+  ;; pdfpc honours a notes position on pages that are no doubled Beamer paper: they split along its axis, and their
+  ;; labels are dropped as on any second-screen deck
+  (let [d (deck/deck {:creator "LaTeX with Beamer class" :labels ["1" "1" "2"] :sizes (pages 3 [800 300])
+                      :split-axis :horizontal})]
+    (is (= :horizontal (:second-screen d)))
+    (is (nil? (:labels d)))
+    (is (= 3 (count (:frames d)))))
+  (is (= :vertical (:second-screen (deck/deck {:sizes (pages 2 [362.835 544.252]) :split-axis :horizontal})))
+      "the geometry's own axis wins")
+  (is (nil? (:second-screen (deck/deck {:sizes (pages 2 [720 540]) :split-axis :sideways})))))
