@@ -59,7 +59,7 @@ M -[IPC_BORDER]> B : **vv:presenter-state** {seq: 1, page: 3, blank: null} — t
 deactivate M
 A -> A : ack 1: out = {} ; own-seq 1
 activate B
-B -> B : push seq 1 > 0, out = {} → known = page 3, and the EFFECT\n[:slides/command [:show 3]] (not the event — it would unblank):\nno history entry; the transition plays
+B -> B : push seq 1 > 0, out = {} → known = page 3, and the EFFECT\n[:slides/command [:show 3]] (not the event — it would unblank):\nno history entry; shown at once (a followed move\nhas no transition)
 B -> V : slide 4
 B -> B : the engine's report {page 3} equals known → nothing is sent\n(a window never echoes a move back)
 deactivate B

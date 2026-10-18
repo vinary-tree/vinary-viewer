@@ -558,12 +558,13 @@ window a user could see. *First introduced in `scientific/10-input-latency-exper
 
 **pdfpc** — A presenter console for PDF slides (<https://github.com/pdfpc/pdfpc>). vinary-viewer reads what pdfpc
 reads — its `\pdfpcnote` annotations, its `pdfpc:` XMP keys and its sidecar file `talk.pdfpc` beside the PDF — with
-pdfpc's semantics for the notes position, the timer, the end slide and hidden pages, and never writes any of them.
+pdfpc's semantics for the notes position, the end slide and hidden pages, and never writes any of them. (Its timer
+semantics are modelled in `vinary.slides.presenter`, for a deferred feature request — ADR-0048 §6.5.)
 *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §4–§5.*
 
 **presenter view** — The layout `s` toggles during a show or in the Slides layout: the current slide on the left, and
-a pane (`vinary.ui.slides-presenter`) holding the timer, the frame counter, the current slide's **speaker notes** and
-the next slide. In a **linked show** it is the presenter window's view. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
+a pane (`vinary.ui.slides-presenter`) holding the frame counter, the current slide's **speaker notes** and the next
+slide. (A timer is deferred to a feature request — ADR-0048 §6.5.) In a **linked show** it is the presenter window's view. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
 
 **presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)
 and recorded in `[:ui :presentation]`: the **Slides layout** without a margin, the app chrome hidden by CSS

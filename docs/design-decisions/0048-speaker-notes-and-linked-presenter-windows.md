@@ -7,6 +7,10 @@
   [ADR-0010](0010-bounded-content-retention-and-render-metadata.md) (lean DataScript entities).
 - **Date:** 2026-10-17
 - **Deciders:** vinary-viewer maintainers
+- **Scope change (2026-10-17, the user's decision):** the presenter timer, the pace and the wall clock (P4), and slide
+  transitions in the presenter view and across linked windows, are not part of this decision. They are filed as the
+  feature request `vinary-viewer-presenter-timer-pace-and-wall-clock-slide-transitions-in-the-presenter-view-and-across-linked-windows-64e248`. Their design is kept in §6.3 and §6.5 as that request's starting point; until it
+  lands, a flip with the pane shown, or followed from the other window, is instant.
 
 ## Context
 
@@ -47,7 +51,7 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | note page | A whole page of notes, interleaved after the overlay it belongs to — Beamer's `show notes`. |
 | text notes | Notes carried as text: a page's annotation contents (`\pdfpcnote`, sticky notes) or the pdfpc sidecar file. |
 | shown page · hidden page | A page the audience sees in the Slides layout · a note page, which the audience never sees there. |
-| presenter view | This window shows the current slide beside a pane with the timer, the notes and the next slide. |
+| presenter view | This window shows the current slide beside a pane with the slide counter, the notes and the next slide. |
 | audience view | This window shows only the slide — the Slides layout as ADR-0045 made it. |
 | linked show | Two windows of one deck whose slide shows move together; main runs it as a **session**. |
 | presenter window · audience window | The window that linked the show (it shows the presenter view) · the window main opened for it. |
@@ -68,8 +72,8 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | N7 | Main reads the sidecar beside the PDF — locally and over SFTP — attaches it to the PDF's payload, and watches it locally as one of the PDF's assets. |
 | P1 | `s` toggles the **presenter view** in any slides view, windowed or presenting. A single-window show starts in the audience view. |
 | P2 | The engine is never remounted: the pane is an absolutely positioned sibling of the slides, and the slides shrink beside it. |
-| P3 | The pane renders the notes regions and the next slide from the engine's document into canvases of its own (`vinary.renderer.pdf-region`); transitions are clipped to the slides. |
-| P4 | The timer is a pure function, `vinary.slides.presenter/clock`, with pdfpc's semantics; the counter counts frames up to pdfpc's end slide. |
+| P3 | The pane renders the notes regions and the next slide from the engine's document into canvases of its own (`vinary.renderer.pdf-region`). While the pane is shown, a flip is instant (transitions clipped to the slides are deferred, §6.3). |
+| P4 | The counter counts frames up to pdfpc's end slide (`vinary.slides.presenter/counter`). The timer, the pace and the wall clock are deferred to a feature request (§6.5). |
 | P5 | When a single-window show starts on a deck with notes, a hint names `s` and *Present in New Window*, once: then `:slides-notes-hinted?` is saved. |
 | F1 | `F` (Shift+f) toggles this window's fullscreen during a show, through main's existing ownership rule. |
 | L1 | **Present in New Window** (the View menu, the palette, and `S` = Shift+s; offered for every PDF view) links a second window: main opens an **audience window** from the warm pool without taking the focus, on another display when there is one, fullscreen there when the platform lets it place windows. The speaker notes stay in the window it was chosen in. |
@@ -378,10 +382,10 @@ does. Values are parsed as pdfpc parses them (`atoi` for numbers, exactly `"true
 | Setting | XMP key | Sidecar key | Used for |
 |---|---|---|---|
 | notes position | `NotesPosition` (left/right/top/bottom, else none) | `beamerNotePosition` (case-insensitive) | which half holds split notes: an explicit `:slides-notes` preference first, then this, then the geometric default. A position on a deck without a doubled page is honoured as pdfpc honours it: the page is split along that axis. |
-| duration | `Duration` (minutes) | `duration` | the countdown |
-| start / end time | `StartTime` / `EndTime` (`HH:MM`, local) | `startTime` / `endTime` | the pre-talk countdown and the duration (§6.5) |
-| last minutes | `LastMinutes` (default 5) | `lastMinutes` | the warning threshold |
-| end slide | `EndUserSlide` (1-based frame) | `endSlide` (0-based frame) | the counter's total, the pace, and where End goes first (§6.5) |
+| duration | `Duration` (minutes) | `duration` | the countdown (deferred, §6.5) |
+| start / end time | `StartTime` / `EndTime` (`HH:MM`, local) | `startTime` / `endTime` | the pre-talk countdown and the duration (deferred, §6.5) |
+| last minutes | `LastMinutes` (default 5) | `lastMinutes` | the warning threshold (deferred, §6.5) |
+| end slide | `EndUserSlide` (1-based frame) | `endSlide` (0-based frame) | the counter's total and where End goes first (§6.5); the pace (deferred, §6.5) |
 | Markdown off | `DisableMarkdown` (`"true"`) | `disableMarkdown` | plain-text notes |
 | hidden pages | — | `pages[].hidden` | `:skipped`: next and previous step over them; Home, End, typed numbers and the overview still reach them (pdfpc's rule) |
 | forced overlays | — | `pages[].forcedOverlay`; legacy `[skip]` | the page joins the previous frame (frames for decks without labels) |
@@ -408,14 +412,14 @@ writes the sidecar.
 whenever the `:slides` layer is active — windowed in the Slides layout, or while presenting. The presenter view puts the
 current slide on the left (58 % of the width) and a pane on the right holding:
 
-- a **status strip**: the timer, the wall clock, `Slide 7 / 12 · overlay 2 / 3`, and the pace in words;
+- a **status strip**: `Slide 7 / 12 · overlay 2 / 3` (the timer, the wall clock and the pace are deferred, §6.5);
 - the **notes**: the notes regions of the current page (its split half, or its note page), then its text notes;
 - the **next slide**: what the next step will show (the next shown page), or *End of the slide show*.
 
 A **single-window show starts in the audience view**, because its screen may be mirrored to a projector; the previous
 view is remembered in `[:ui :presentation :notes-view-before]` and restored when the show ends. A deck without notes
-still gets the timer, the counter and the next slide, with *This deck has no speaker notes* in the notes box, or *No
-notes on this slide* when other pages have them.
+still gets the counter and the next slide, with *This deck has no speaker notes* in the notes box, or *No notes on this
+slide* when other pages have them.
 
 **The hint (P5).** The notes a single-window show hides were the request's first complaint, so the first show that
 hides them says so. When a show starts in the audience view of a single window, and the deck has notes — split
@@ -434,7 +438,8 @@ dismisses it first. A mirrored projector shows it too, for those six seconds, on
 slot after the content view, so the engine is never remounted (remounting would end the show — ADR-0045 §5). CSS:
 `.vv-presenter-view > .vv-content { margin-right: 42% }` and `.vv-presenter-pane { position: absolute; top: 0; right: 0;
 bottom: 0; width: 42%; z-index: 5 }`. The pane is absolutely positioned because `.vv-content-wrap` is a flex column whose
-other children must not reflow. z-index 5 sits below the transition snapshot (6), the blank screen (7), the overview
+other children must not reflow. z-index 5 sits below the transition snapshot (6; no flip makes one while the pane is
+shown, §6.3), the blank screen (7), the overview
 (8), the chip (9) and find (10), so a single-window blank also covers the notes — right for a mirrored screen — and the
 overview covers the window. The slides' existing ResizeObserver refits the slide at once. **No new `--vv-*` tokens:**
 while presenting the pane uses the show's palette (`#000`, `#111`, `#ddd`); windowed, the theme's `--vv-bg`, `--vv-fg`,
@@ -452,9 +457,11 @@ half, so there is nothing to crop. A pdf.js text layer under the notes region ke
 screen reader; runs outside the region are hidden (`hide-runs-outside!`, generalizing `hide-offslide-runs!`). Each box
 re-renders on resize and on a change of the device-pixel ratio, so a 2× laptop beside a 1× projector is sharp on both.
 
-**Transitions.** The outgoing slide's snapshot is appended to `.vv-content-wrap`, and `:push` slides it by the
-scroller's width — across the pane. The snapshot is wrapped in a `.vv-slides-transition-clip` placed at `.vv-content`'s
-rectangle with `overflow: hidden`; in the other layouts the clip is the same size as before.
+**Transitions.** While the pane is shown, a flip is **instant**: the engine does not run the `:slides-transition`
+animation, because the outgoing slide's snapshot is appended to `.vv-content-wrap`, and `:push` would slide it by the
+scroller's width — across the pane. *Deferred (§6.5's feature request):* wrap the snapshot in a
+`.vv-slides-transition-clip` placed at `.vv-content`'s rectangle with `overflow: hidden` (in the other layouts the clip
+is the same size as before), so the presenter view animates like the audience view.
 
 **Find** is rooted at `.vv-content`, so it searches the slides, not the pane (documented).
 
@@ -463,10 +470,21 @@ rectangle with `overflow: hidden`; in the other layouts the clip is the same siz
 The presenter view is a layout, not a modal: Escape keeps its ADR-0045 chain and still ends the show. The pane is not
 focusable; a click on it leaves the focus on the document, so the slide keys keep working. The pane is an
 `<aside role="complementary" aria-label="Speaker notes and next slide">`; canvases are `aria-hidden` (the text layer
-carries the text); the next slide is `role="img"` with `aria-label="Next: slide 8 of 12"`; the timer is `role="timer"
-aria-live="off"`, with a visually hidden polite live region that speaks only when a threshold is crossed.
+carries the text); the next slide is `role="img"` with `aria-label="Next: slide 8 of 12"`; the counter is plain text.
+*Deferred with the timer (§6.5):* the timer is `role="timer" aria-live="off"`, with a visually hidden polite live region
+that speaks only when a threshold is crossed.
 
-#### 6.5 The timer and the counter (P4)
+#### 6.5 The counter (P4), and the deferred timer
+
+The **counter** counts frames: `Slide u+1 / e+1`, where $`e`$ is pdfpc's end slide (else the last frame), and reads like
+`23 / 20` past it (`vinary.slides.presenter/counter`, with `overlay-counter` for `overlay o / k`). **End** goes first to
+the last page of the end slide, and from there (or beyond) to the last page — so a deck's backup slides after
+`EndUserSlide` stay one more End away, as in pdfpc (`vinary.slides.deck/step :last`).
+
+**Deferred: the timer, the pace and the wall clock.** At the user's request (2026-10-17) they are not part of this
+decision; the feature request `vinary-viewer-presenter-timer-pace-and-wall-clock-slide-transitions-in-the-presenter-view-and-across-linked-windows-64e248` carries them, with the transitions of §6.3. The pure model already exists —
+`vinary.slides.presenter` (`clock`, `pace`, `schedule`, `talk-start`, …), tested but not yet shown by any view — and its
+design, kept here for that request, is:
 
 `vinary.slides.presenter/clock` is pure: given `now`, the show's start, the deck's pdfpc settings and the position, it
 returns the strings and the phase the strip shows. It follows pdfpc's `timer.vala`:
@@ -491,11 +509,7 @@ t_{\text{expected}} = D \cdot \frac{u + \tfrac{1}{2}}{e + 1},
   $`t < t_{\text{expected}} - 60\,\mathrm{s}`$.
 
 - **Restart the presenter timer** (palette, `:when :presenting?`) restarts the talk now.
-
-The **counter** counts frames: `Slide u+1 / e+1`, where $`e`$ is pdfpc's end slide (else the last frame), and reads like
-`23 / 20` past it. **End** goes first to the last page of the end slide, and from there (or beyond) to the last page —
-so a deck's backup slides after `EndUserSlide` stay one more End away, as in pdfpc. The timer is per window and is not
-synchronized: only a presenter view shows it.
+- The timer is per window and is not synchronized: only a presenter view shows it.
 
 ### 7. `F` — this window's fullscreen (F1)
 
@@ -514,21 +528,21 @@ layer, so the key works wherever the menu item does: in the document layout too,
 as F5 does. Both the menu item and the palette row carry the tooltip *Speaker notes stay in this window*. That needs
 one new optional field, `:tooltip`, on menu items and on commands, rendered as the row's `title`.
 
-The command is offered for every PDF view, not only for decks with notes. The timer, the counter and the next slide help
-without notes. And a deck without labels learns its notes only after its first paint (§2.4), so a command that appeared
+The command is offered for every PDF view, not only for decks with notes. The counter and the next slide help without
+notes. And a deck without labels learns its notes only after its first paint (§2.4), so a command that appeared
 then would be a surprise. Chosen in window A, it starts the show from the current slide if none is running — **without**
 asking for fullscreen yet — switches A to the presenter view, and asks main for a linked show. Main opens window B, the
 audience window, from the warm pool when one is ready: B appears without taking the focus (`showInactive`), on another
 display when there is one, and goes fullscreen there when the platform lets main place it. From then on either window
-drives the show — keys, clicks, swipes, overview picks, typed numbers, links, find, blanking — and the other follows,
-with the same transition. `S` again while linked re-sends the state and raises B; nothing new opens. A window takes part
+drives the show — keys, clicks, swipes, overview picks, typed numbers, links, find, blanking — and the other follows.
+A window that follows a move shows it instantly; animating both windows alike is deferred with the timer (§6.5). `S` again while linked re-sends the state and raises B; nothing new opens. A window takes part
 in at most one linked show; joining an existing window is not offered, because the audience window's whole lifecycle
 (placement, fullscreen, closing) is main's, and an existing window's is the user's.
 
 #### 8.2 Who owns what
 
 Main owns the session: its members and their roles, the `seq`, and the authoritative position. Each window owns how it
-renders: its layout, view, transitions, notes model, zoom, overview, typed digits, find, history, timer and fullscreen.
+renders: its layout, view, transitions, notes model, zoom, overview, typed digits, find, history and fullscreen.
 A position is a **physical page index** of the same bytes — main has no deck model (pdf.js runs only in renderers) —
 and a move is a whole position, never a step, so "the last move wins" is well defined.
 
@@ -536,8 +550,8 @@ and a move is a whole position, never a step, so "the last move wins" is well de
 |---|---|
 | the page shown | the layout and the presenter/audience view, zoom, device-pixel ratio |
 | the blank colour | the overview, typed digits and their chip, find |
-| the end of the show | the jump history (a follower uses `[:show p]`), fullscreen, the timer, tabs, focus |
-| | the transition kind — not synchronized but the same, because the preference reaches every window (ADR-0047) |
+| the end of the show | the jump history (a follower uses `[:show p]`), fullscreen, tabs, focus |
+| | transitions: a window animates only the flips it makes itself; a move it follows is shown at once (§8.1) |
 
 In the presenter view of a linked show, blanking shows a badge (*Audience: black*) instead of blacking the presenter's
 screen.
@@ -745,12 +759,12 @@ new boundary.
 **What the user sees.**
 
 - In any show, `s` shows the notes beside the slide — split halves, note pages, `\pdfpcnote` and sidecar notes —
-  with the next slide, a timer and the frame counter. A single-window show still starts as the audience sees it.
+  with the next slide and the frame counter. A single-window show still starts as the audience sees it.
 - A `show notes` deck is presented without its note pages: they leave the slide sequence, the overview, the counter and
   typed numbers, and appear in the presenter view instead. A deck without page labels (a single XeLaTeX pass) gets the
   same once its background scan ends.
 - *Present in New Window* (Shift+S) puts the audience view on the other display and keeps the presenter view here;
-  either window drives the show, with the same transitions, and Escape in either ends it. *Swap screens* fixes a wrong
+  either window drives the show, and Escape in either ends it. *Swap screens* fixes a wrong
   guess of which display is the projector.
 - The first single-window show of a deck with notes says, once, how to see them.
 - `F` fullscreens the window it is pressed in.
@@ -765,8 +779,9 @@ new boundary.
   channel that must agree with the report; rejected.
 - A key pressed in one window within the same frame as a move arriving from the other is superseded by it: the arriving
   move was ordered first, and the key had not been reported yet. Both windows still agree.
-- pdfpc features outside notes and timing — its transitions, bookmarks, note editing and note font size — are not
-  adopted; vinary-viewer never writes the sidecar.
+- pdfpc features outside notes — its timer (deferred with this decision's own, §6.5), transitions, bookmarks, note
+  editing and note font size — are not adopted; vinary-viewer never writes the sidecar.
+- The presenter view has no timer yet, and its flips — and every flip a window follows — are instant (§6.3, §6.5).
 - On native Wayland the audience window must be moved to the projector by hand (Shift+F then fullscreens it), and
   *Swap screens* is not offered.
 - A swap briefly shows both windows windowed while they change displays.
@@ -835,7 +850,7 @@ new boundary.
 
 **The command and the hint** (chosen with the user).
 - *Offering Present in New Window only for decks with notes*: a deck without labels learns its notes after its first
-  paint, so the command would appear late, and the timer, the counter and the next slide help without notes.
+  paint, so the command would appear late, and the counter and the next slide help without notes.
 - *Binding `S` in the `:slides` layer only*: the menu item, offered in the document layout too, would then show a key
   that does nothing there.
 - *No swap, moving the windows by hand*: a wrong guess of the projector would cost leaving fullscreen in each window,
@@ -852,7 +867,7 @@ new boundary.
 | The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; a corpus of real Beamer output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) with its expected decisions written down before the run (both to be written) |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures |
-| The presenter view, the pane, transitions, find | `npm run test:electron` blocks |
+| The presenter view, the pane, instant flips while it is shown, find | `npm run test:electron` blocks |
 | The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages; seven negative controls); unit and randomized simulation tests of both pure models (to be written) |
 | Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (to be written) |
 | The real main: link, both directions, crossing moves, blanking, lifecycle, swap, window.edn | `test/presenter-e2e.js`, with two displays faked over one wide virtual screen (to be written) |
