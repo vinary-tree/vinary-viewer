@@ -1,0 +1,68 @@
+# H-ESC — two Escapes at once (docs/scientific/12 §8.8). Assembled 2026-10-18 by a shell block from the
+# instruments' own outputs: every line not starting with '#' is copied verbatim from the log named above it.
+# Lines starting with '#' are written by hand. Absolute scratch paths in the logs are shortened to <scratch>.
+
+# ---- the pre-registration, before any experiment (the experiment ledger, verbatim) ----
+==== H-ESC — pre-registered 2026-10-18, before any experiment ====
+Observation: two Escapes sent in one burst (sendChord twice, no wait) after a typed digit leave the show running.
+Mechanism hypothesised: vinary.input.events/escape-fx answers each Escape with [:dispatch <step>] — the step
+(here :slides/digits-clear) is QUEUED behind events already in re-frame's queue. Both keydowns run before the
+router's next-tick flush (the burst is delivered as consecutive input tasks), so the queue holds
+[:input/escape :input/escape]; the first queues :slides/digits-clear AFTER the second Escape, the second sees the
+digit still typed and queues another :slides/digits-clear; the show is never stopped.
+Experiment E1 (cljs test build, real re-frame router, Node): app-db ← a running show (:fullscreen? false, so no
+window effect) with [:ui :slides :digits] "2"; (rf/dispatch [:input/escape]) twice in the same tick; read app-db
+after the queue drains (setTimeout 50 ms).
+  P-E1a (H-ESC): [:ui :presentation] is STILL present and the digit is gone — the second Escape was spent on a step
+         already taken.        Null: [:ui :presentation] is gone.
+  P-E1b (control, both hypotheses): one Escape, drain, a second Escape, drain → [:ui :presentation] is gone.
+Fix design (F1), applied only if P-E1a holds: escape-fx applies its step in Escape's OWN event — it returns the
+step's {:db :fx} (the same pure fns the step events use: slides-overview-close-fx, the digits clear,
+slides/clear-blank, slides-stop-fx; and the palette/find close handlers' db + fx) instead of dispatching it — so
+consecutive Escapes, however queued, each see the previous one's result.
+  P-F1a: E1 passes with F1 (the show ends after two queued Escapes; three would leave Vim's mode switch next).
+  P-F1b: the smoke step that failed in C5-1 passes unchanged (it is the E2E negative control: it failed before F1).
+
+# ---- the observation: the presenter-view smoke step, before F1 (run C5-1's log) ----
+Error: Timed out waiting for Escape forgets the digit, then ends the show (last=false)
+
+# ---- E1 on 7b141ad WITHOUT F1: the test build with only escape_queue_test added (unit-e1-neg.log) ----
+Testing vinary.input.escape-queue-test
+[H-ESC E1] two queued Escapes; events the router ran: [:input/escape :input/escape :slides/digits-clear :slides/digits-clear]
+
+FAIL in (two-queued-escapes-take-two-steps) (vinary/input/escape_queue_test.cljs:50:26)
+the second ends the show
+expected: (nil? (get-in db [:ui :presentation]))
+  actual: (not (nil? {:active? true, :tab-id 1, :path "/d/talk.pdf", :from :first, :fullscreen? false}))
+[H-ESC E1 control] the first Escape alone; events the router ran: [:input/escape :slides/digits-clear]
+[H-ESC E1 control] the second Escape alone; events the router ran: [:input/escape :slides/stop]
+Ran 858 tests containing 44364 assertions.
+1 failures, 0 errors.
+
+# ---- E1 on 7b141ad WITH F1: the commit's tree (unit2-fix.log) ----
+Testing vinary.input.escape-queue-test
+[H-ESC E1] two queued Escapes; events the router ran: [:input/escape :input/escape]
+[H-ESC E1 control] the first Escape alone; events the router ran: [:input/escape]
+[H-ESC E1 control] the second Escape alone; events the router ran: [:input/escape]
+Ran 858 tests containing 44370 assertions.
+0 failures, 0 errors.
+
+# ---- end to end, run 1: 7b141ad + the smoke check (one wait), without F1 (smoke-neg.log) ----
+Error: Timed out waiting for two Escapes sent together: the first forgets the typed number, the second ends the show (last=false)
+# ---- … and with F1 (smoke-fix.log) ----
+[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds (two at once take two steps), Shift+F5 from current, leaving fullscreen ends it
+[ok] Electron smoke test passed
+
+# ---- the addendum, registered before run 2 (the ledger, verbatim) ----
+==== H-ESC E2E — addendum, pre-registered 2026-10-18 before run 2 ====
+The check is split into two waits so a failure names its half: "two Escapes sent together: the first forgets the
+typed number" (no digits), then "…and the second ends the show" (no [:ui :presentation]).
+  wt-hesc-neg (no F1): predicted to pass the first wait and time out at the second — the number forgotten (twice),
+                       the show still running: P-E1a's E2E form, now observed directly.
+  wt-hesc (F1):        predicted to pass the whole smoke again.
+
+# ---- end to end, run 2: the wait split in two, without F1 (smoke2-neg.log) ----
+Error: Timed out waiting for …and the second ends the show (last=false)
+# ---- … and with F1 (smoke2-fix.log) ----
+[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds (two at once take two steps), Shift+F5 from current, leaving fullscreen ends it
+[ok] Electron smoke test passed

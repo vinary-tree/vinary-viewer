@@ -105,14 +105,23 @@
     (is (nil? (events/slides-click-fx shown-db false)) "no click-advance outside a show")))
 
 (deftest escape-unwinds-a-show-step-by-step
-  (let [typed+blank (-> (presenting-db) (assoc-in [:ui :slides :digits] "2") (assoc-in [:ui :slides :blank] :black))]
-    (is (= {:fx [[:dispatch [:slides/digits-clear]]]} (input-events/escape-fx typed+blank)) "1. the typed number")
-    (is (= {:fx [[:dispatch [:slides/unblank]]]}
-           (input-events/escape-fx (assoc-in typed+blank [:ui :slides :digits] nil))) "2. the blank screen")
-    (is (= {:fx [[:dispatch [:slides/stop]]]} (input-events/escape-fx (presenting-db))) "3. the show itself")
-    (is (= :normal (get-in (:db (input-events/escape-fx (assoc-in shown-db [:ui :input :mode] :insert)))
-                           [:ui :input :mode]))
-        "4. only then the mode switch")))
+  ;; each Escape APPLIES its step — the step event's own {:db :fx} — so the next Escape sees it taken (H-ESC; the
+  ;; queue itself: test/vinary/input/escape_queue_test.cljs)
+  (let [typed+blank (-> (presenting-db) (assoc-in [:ui :slides :digits] "2") (assoc-in [:ui :slides :blank] :black)
+                        (assoc-in [:ui :input :mode] :insert))
+        step1       (input-events/escape-fx typed+blank)
+        step2       (input-events/escape-fx (:db step1))
+        step3       (input-events/escape-fx (:db step2))
+        step4       (input-events/escape-fx (:db step3))]
+    (is (= (events/slides-digits-clear-fx typed+blank) step1) "1. the typed number…")
+    (is (= [nil :black true] [(slides/digits (:db step1)) (slides/blank (:db step1)) (slides/presenting? (:db step1))])
+        "…only")
+    (is (= {:db (slides/clear-blank (:db step1))} step2) "2. the blank screen")
+    (is (= (events/slides-stop-fx (:db step2) {}) step3) "3. the show itself")
+    (is (= [[:vv/set-fullscreen {:on false}]] (:fx step3)) "…leaving the fullscreen it asked for")
+    (is (= [nil :insert] [(slides/presentation (:db step3)) (get-in (:db step3) [:ui :input :mode])])
+        "no mode side effect while a slide step was cancelled")
+    (is (= :normal (get-in (:db step4) [:ui :input :mode])) "4. only then the mode switch")))
 
 (deftest f5-keys-in-every-preset
   (doseq [preset [:default :vim :emacs]]

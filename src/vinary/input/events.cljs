@@ -7,6 +7,7 @@
             [vinary.input.keymap :as keymap]
             [vinary.input.keymaps-registry :as registry]
             [vinary.input.kbedit-history :as hist]
+            [vinary.app.events :as events]
             [vinary.app.slides :as slides]
             [vinary.input.fx]))
 
@@ -35,26 +36,40 @@
  (fn [db _] (-> db (assoc-in [:ui :input :sequence] []) (assoc-in [:ui :input :count] nil))))
 
 ;; ---- universal escape/cancel ----
+;; closing cancels a pending query commit, so a debounce armed by the last character cannot land after the
+;; overlay is gone and leave a stale query behind for the next time it opens
+(defn palette-close-fx
+  "Effects of closing the command palette (:palette/close, and Escape's first step)."
+  [db]
+  {:db (assoc-in db [:ui :palette :open?] false)
+   :fx [[:async/cancel :palette/query]]})
+
 (defn escape-fx
   "PURE: what Escape does in app-db `db` — the FIRST cancel step that applies, in order: close the palette, close
    the find bar, the slide show's own steps (the overview grid, a half-typed slide number, a blanked screen, then
    the running show itself), switch to Vim's normal mode, else clear the pending key sequence. The slide show's steps come
    BEFORE the mode switch, so Escape never has a mode side effect while it is cancelling something on a slide
-   (ADR-0045 §Keys)."
+   (ADR-0045 §Keys).
+
+   Each step is APPLIED here, in Escape's own event — its {:db :fx} is the one the step's own event produces
+   (palette-close-fx, events/find-close-fx, events/slides-overview-close-fx, …) — never dispatched: a dispatched step
+   is queued BEHIND the keys already waiting, so of two Escapes that arrive together (a burst, or keys queued while
+   the renderer was busy — none is dropped, ADR-0033) both saw the same state and took the same step, and the show
+   never ended (H-ESC, docs/scientific/12 §8.8)."
   [db]
   (let [palette? (get-in db [:ui :palette :open?])
         find?    (get-in db [:ui :find :visible?])
         mode     (get-in db [:ui :input :mode])]
     (cond
-      palette?            {:fx [[:dispatch [:palette/close]]]}
-      find?               {:fx [[:dispatch [:find/close]]]}
-      (slides/overview? db) {:fx [[:dispatch [:slides/overview-close]]]}
-      (slides/digits db)  {:fx [[:dispatch [:slides/digits-clear]]]}
-      (slides/blank db)   {:fx [[:dispatch [:slides/unblank]]]}
-      (slides/presenting? db) {:fx [[:dispatch [:slides/stop]]]}
-      (not= mode :normal) {:db (assoc-in db [:ui :input :mode] :normal)}
-      :else               {:db (-> db (assoc-in [:ui :input :sequence] [])
-                                   (assoc-in [:ui :input :count] nil))})))
+      palette?                (palette-close-fx db)
+      find?                   (events/find-close-fx db)
+      (slides/overview? db)   (events/slides-overview-close-fx db)
+      (slides/digits db)      (events/slides-digits-clear-fx db)
+      (slides/blank db)       {:db (slides/clear-blank db)}
+      (slides/presenting? db) (events/slides-stop-fx db {})
+      (not= mode :normal)     {:db (assoc-in db [:ui :input :mode] :normal)}
+      :else                   {:db (-> db (assoc-in [:ui :input :sequence] [])
+                                       (assoc-in [:ui :input :count] nil))})))
 
 (rf/reg-event-fx :input/escape (fn [{:keys [db]} _] (escape-fx db)))
 
@@ -95,13 +110,8 @@
           (assoc-in [:ui :palette :query] "")
           (assoc-in [:ui :palette :selected] 0))))
 
-;; closing cancels a pending query commit, so a debounce armed by the last character cannot land after the
-;; overlay is gone and leave a stale query behind for the next time it opens
-(rf/reg-event-fx
- :palette/close
- (fn [{:keys [db]} _]
-   {:db (assoc-in db [:ui :palette :open?] false)
-    :fx [[:async/cancel :palette/query]]}))
+;; closing cancels a pending query commit (palette-close-fx, beside escape-fx)
+(rf/reg-event-fx :palette/close (fn [{:keys [db]} _] (palette-close-fx db)))
 
 ;; Debounced for the same reason the file-tree filter is: committing the query is what re-ranks the
 ;; candidate pool (:palette/candidates), which for the :file source spans every open project. The box

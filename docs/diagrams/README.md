@@ -368,6 +368,7 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `seq-git-open-diff.puml` | sequence | `design-decisions/0039-…` · `features/32-commits-tab.md` |
 | `component-git-integration.puml` | component | `design-decisions/0040-…` · `features/33-commit-graph.md` · `features/34-git-blame-and-file-history.md` |
 | `seq-key-to-frame.puml` | sequence | `scientific/12-slide-deck-detection-and-flip-latency.md` |
+| `seq-escape-queue.puml` | sequence | `scientific/12-slide-deck-detection-and-flip-latency.md` |
 | `state-slides-modes.puml` | state | `design-decisions/0045-slide-deck-presentation.md` · `features/35-slide-shows.md` |
 | `activity-pdf-deck-detection.puml` | activity | `design-decisions/0045-slide-deck-presentation.md` · `features/35-slide-shows.md` |
 | `activity-note-page-decision.puml` | activity | `design-decisions/0048-speaker-notes-and-linked-presenter-windows.md` · `features/35-slide-shows.md` |

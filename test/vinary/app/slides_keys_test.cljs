@@ -132,13 +132,15 @@
     (is (= {:path "/d/a.pdf" :layout :slides} (slides/merge-report nil {:path "/d/a.pdf" :layout :slides})))))
 
 (deftest escape-cancels-slide-input-before-switching-mode
-  (let [typed (assoc-in slides-db [:ui :slides :digits] "3")]
-    (is (= {:fx [[:dispatch [:slides/digits-clear]]]}
-           (input-events/escape-fx (assoc-in typed [:ui :input :mode] :insert)))
-        "a typed number is cancelled first — no mode side effect")
-    (is (= {:fx [[:dispatch [:find/close]]]}
-           (input-events/escape-fx (assoc-in typed [:ui :find :visible?] true)))
+  (let [typed (assoc-in slides-db [:ui :slides :digits] "3")
+        typed-insert (assoc-in typed [:ui :input :mode] :insert)
+        typed-find   (assoc-in typed [:ui :find :visible?] true)]
+    (is (= (events/slides-digits-clear-fx typed-insert) (input-events/escape-fx typed-insert))
+        "a typed number is cancelled first…")
+    (is (= :insert (get-in (:db (input-events/escape-fx typed-insert)) [:ui :input :mode])) "…with no mode side effect")
+    (is (= (events/find-close-fx typed-find) (input-events/escape-fx typed-find))
         "the find bar still closes before the slide steps")
+    (is (= "3" (slides/digits (:db (input-events/escape-fx typed-find)))) "…keeping the typed number")
     (is (= :normal (get-in (:db (input-events/escape-fx (assoc-in slides-db [:ui :input :mode] :insert)))
                            [:ui :input :mode]))
         "with nothing typed, Escape switches to normal mode as before")))

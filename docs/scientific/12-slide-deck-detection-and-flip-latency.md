@@ -11,6 +11,9 @@
 - **Flip latency.** The first measurement missed its model by a whole frame. The cause was found (H-sched): after a
   key, Chromium renders the next frame before ordinary posted tasks. One intervention was refuted (H-sync); a second
   held (H-sync2). The median key → frame time fell from 24.3 ms to 7.9 ms, and every guard holds (§8).
+- **Two Escapes at once.** Two Escapes that reached the renderer together took one step of Escape's chain twice, so a
+  show could not be ended that way (H-ESC). Each Escape now applies its step in its own event; a unit experiment on
+  re-frame's real queue and an end-to-end check, both shown to fail first, confirm the fix (§8.8).
 
 These experiments support [ADR-0045 — Slide-deck presentation](../design-decisions/0045-slide-deck-presentation.md).
 Under ADR-0045, a PDF the detector recognizes as a slide deck opens in a one-slide-per-screen *Slides layout*, and keys
@@ -35,6 +38,8 @@ flip slides. The methodology is that of [07 — Measurement methodology](07-meas
 3. **Flip latency.** In the Slides layout, how long does a key take to put the next slide on screen? What does a jump
    to a slide nothing has rendered yet cost? Does the engine keep the number of live page canvases bounded however
    far the presenter walks?
+4. **Queued keys.** Do two Escapes that arrive together take two steps of Escape's chain, as two Escapes pressed
+   apart do?
 
 ## 2 · Definitions — the detector
 
@@ -618,6 +623,127 @@ pins the units, the sign and the zoom-independence.
 **Threats.** Only X11 was measured. Wayland, macOS and Windows deliver their own notch sizes, which the normalization
 handles alike as long as a notch is at least 90 device-independent pixels; a smaller notch takes two.
 
+### 8.8 · Two Escapes at once — H-ESC (2026-10-18)
+
+**Observation.** A smoke step written for the presenter view
+([ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)) typed a slide number during a
+show, then sent two Escapes back to back with no wait between them. The first Escape forgot the number, as it
+should; the show ran on.
+
+**Escape's chain.** [ADR-0045 §4](../design-decisions/0045-slide-deck-presentation.md) gives Escape a fixed
+precedence, and one Escape takes the first step that applies:
+
+| Order | Condition | Step |
+|---|---|---|
+| 1 | the palette is open | close it |
+| 2 | the find bar is visible | close it |
+| 3 | the overview is open | close it |
+| 4 | a slide number is being typed | forget it |
+| 5 | the show is blanked | unblank |
+| 6 | a show is running | end the show |
+| 7 | the mode is not `:normal` | switch to `:normal` |
+| 8 | otherwise | clear the pending key sequence |
+
+Until this fix, `vinary.input.events/escape-fx` took steps 1–6 by **dispatching** them as events of their own —
+`[:dispatch [:slides/digits-clear]]` and so on. Steps 7 and 8 were always applied in Escape's own event.
+
+**The queue.** re-frame keeps one first-in, first-out queue of dispatched events [RF-ROUTER]. A run of its router
+handles the events queued when the run starts; an event dispatched during the run waits for the next run, a tick
+later. A key reaches `:input/escape` through `rf/dispatch`: Escape is not one of §8.4's immediate commands, because it
+moves no view.
+
+**H-ESC.** Let $`c(d)`$ be the step the chain chooses in app-db $`d`$, and $`d \cdot s`$ the app-db after step
+$`s`$. Escapes handled one at a time compute
+
+```math
+d_{k+1} = d_k \cdot c(d_k), \qquad k = 0, 1, \dots, n - 1 .
+```
+
+But when $`n`$ Escapes reach the renderer before the router's next run, all $`n`$ are queued first. Each dispatched
+step then lands **behind the Escapes still waiting** (first in, first out), so every Escape reads the same $`d_0`$,
+chooses the same $`c(d_0)`$, and the keys after the first are spent repeating a step already taken. With a number
+typed during a show: two Escapes forget the number twice, and the show is never ended.
+
+![Two Escapes at once on a slide show: why the show ran on, and the fix](../diagrams/seq-escape-queue.svg)
+
+*Diagram source: [`../diagrams/seq-escape-queue.puml`](../diagrams/seq-escape-queue.puml).*
+
+**Experiment E1** (registered before the run, reproduced with its results in
+[`data/12/escape-queue-2026-10-18.txt`](data/12/escape-queue-2026-10-18.txt)). The unit build's real re-frame router,
+in Node:
+
+- app-db holds a running show — not fullscreen, so no window effect — with the number `2` typed;
+- `(rf/dispatch [:input/escape])` is called twice in the same tick;
+- app-db is read once the queue has drained (50 ms), and a post-event callback records the order the router ran the
+  events in.
+
+E1 ran first on the presenter view's tree, then on this fix's own base, 7b141ad, with the same results:
+
+| Case | Events the router ran | The show afterwards | Prediction |
+|---|---|---|---|
+| two Escapes queued together, before the fix | `:input/escape :input/escape :slides/digits-clear :slides/digits-clear` | still running | P-E1a (H-ESC) **holds** |
+| control: one Escape, drained, then the second | `:input/escape :slides/digits-clear`, then `:input/escape :slides/stop` | ended | P-E1b **holds** |
+| two Escapes queued together, with F1 | `:input/escape :input/escape` | ended | P-F1a **holds** |
+
+**The fix (F1).** Each step is **applied in Escape's own event**. `escape-fx` returns the step's `{:db :fx}`,
+computed by the same function the step's own event uses:
+
+| Step | Applied with | Its own event |
+|---|---|---|
+| 1 | `input-events/palette-close-fx` | `:palette/close` |
+| 2 | `events/find-close-fx` | `:find/close` |
+| 3 | `events/slides-overview-close-fx` | `:slides/overview-close` |
+| 4 | `events/slides-digits-clear-fx` | `:slides/digits-clear` |
+| 5 | `slides/clear-blank` | `:slides/unblank` |
+| 6 | `events/slides-stop-fx` | `:slides/stop` |
+
+The step events remain, for their other senders: the palette's and the find bar's own controls, the overview's own
+keys, and the typed number's 2.5 s timeout. Each is now that function and nothing else, so the two paths cannot
+drift; the unit tests pin `escape-fx` to the functions step by step. Every Escape now reads the state the previous
+one left, so queued Escapes compute the recurrence above however they were queued.
+
+**End to end.** The smoke's "PDF presenting" block sends the burst through the real app: Shift+F5, `2`, then two
+`sendChord` calls in a row. Those are four `webContents.sendInputEvent` calls in one task of the main process. The
+block then waits — 4 s at most each — for the number to go and then for the show to end, and checks that the slide
+is unchanged. Both trees are 7b141ad plus the new check:
+
+| Tree | Run 1 | Run 2 (the wait split in two, so a failure names its half) |
+|---|---|---|
+| without F1 — the negative control | **fails** at that wait | passes the first wait, then **fails** at the second: the number is forgotten and the show runs on |
+| with F1 and its unit tests | passes, and so does the whole smoke | passes, and so does the whole smoke |
+
+The presenter view's own smoke step failed the same way before F1 and passed after it.
+
+**Scope.** F1 covers Escapes that reach `:input/escape`. Two neighbours were found by reading the code, and **not**
+measured:
+
+- **Overlays that handle Escape themselves.** The overview grid and the palette's input handle Escape in their own
+  keydown handlers, which dispatch `:slides/overview-close` and `:palette/close`. A second Escape that arrives before
+  the overlay has gone is caught by the same handler and spent closing it again. The overview's Tab and `o` behave
+  alike.
+- **The same shape elsewhere.** Six handlers that keys reach compute an absolute target from app-db and dispatch it.
+  Two of them queued together therefore make one step, where two keys handled apart make two:
+
+  | Handler | Reached from | Two queued together |
+  |---|---|---|
+  | `:tab/close-active` | Close Tab (Ctrl+W) | close one tab, not two |
+  | `:tab/toggle-source` | Ctrl+Shift+S | show the source twice, not source and then preview |
+  | `:tab/toggle-diff-view` | Ctrl+Shift+B | the same, for the unified and split diff |
+  | `:pdf/layout-toggle` | View as Slide Show / Document | the same, for the two layouts |
+  | `:theme/cycle` | Vim's `SPC t t` | advance one theme, not two |
+  | `:git-graph/cursor-move` | ↑ ↓ PgUp PgDn Home End in the commit graph | move the cursor one step, not two |
+
+  These are recorded for a separate change; F1's pattern — apply the step in the key's own event — fixes each.
+
+**Threats to validity.**
+
+- **The burst is synthetic.** A person's two Escapes arrive tens of milliseconds apart. They queue together only
+  when the renderer is busy for that long, for example while a heavy slide renders. Keys are not dropped while it is
+  busy ([ADR-0033](../design-decisions/0033-asynchronous-text-input.md)), so they then arrive
+  together. That case follows from the mechanism; it was **not measured**.
+- **One router version.** The mechanism is re-frame 1.4.3's (its tagged source is byte-identical to the jar in use).
+  E1 runs that router itself, so a re-frame upgrade that changed the queue's order would show in E1.
+
 ## 9 · Refuted (kept)
 
 - **The flip model's baseline estimate** (median ≈ 10 ms): the baseline measured 24.3 ms. The model was right about
@@ -635,6 +761,9 @@ handles alike as long as a notch is at least 90 device-independent pixels; a sma
 | `--deck-info` evidence and verdicts on a real Beamer deck, a PowerPoint-shaped export and an ordinary PDF; a missing file reported without stopping the rest | `test/cli-smoke.js` |
 | the flip bounds H-flip-1…4 (a manual, pinned run) | `npm run bench:flip` |
 | one wheel notch flips one slide at every measured zoom (§8.7) | `test/vinary/slides/deck_test.cljs` |
+| two Escapes queued together take two steps through re-frame's real queue, with the one-at-a-time control (§8.8) | `test/vinary/input/escape_queue_test.cljs` |
+| each Escape step is the step's own event function, in the chain's order (§8.8) | `test/vinary/app/slides_present_test.cljs`, `slides_keys_test.cljs`, `slides_overview_test.cljs` |
+| two Escapes sent together during a show forget the typed number, then end the show (§8.8) | `test/electron-smoke.js`, "PDF presenting" |
 
 ## 11 · Reproduction
 
@@ -648,6 +777,8 @@ npm run compile
 taskset -c 2-9 env VV_BENCH_JSON=flip.json npm run bench:flip | tee flip.txt
 node scripts/run-electron-headless.mjs --backend=x11 electron --no-sandbox scripts/probe-wheel-notch.cjs | tee wheel.txt
 node scripts/analyze-flip-runs.cjs --ref=A flip-ABC-*.json | tee analysis.txt
+npx shadow-cljs compile test && node dist/test/test.js | tee unit.txt   # E1: the "[H-ESC E1]" lines (§8.8)
+npm run test:electron | tee smoke.txt                                     # the "PDF presenting" burst (§8.8)
 ```
 
 ## 12 · References
@@ -666,6 +797,9 @@ node scripts/analyze-flip-runs.cjs --ref=A flip-ABC-*.json | tee analysis.txt
   (Widescreen) slide sizes, named without dimensions (archived). <https://support.apple.com/en-ca/101426>
 - **[KN-1920]** "Presentation App Default Page Size", *The PowerPoint Blog*, 2026-01-13 — "Apple Keynote: 1920 x 1080px
   (~96ppi), 26.67 x 15in" (26.67 × 15 in is 1920 × 1080 bp). <https://thepowerpointblog.com/2026/01/13/>
+- **[RF-ROUTER]** re-frame 1.4.3, `src/re_frame/router.cljc`, the router loop's design notes: "maintain a FIFO queue
+  of `dispatched` events", and "if any new events are dispatched during this cycle of processing, don't do them
+  immediately. Leave them queued." <https://github.com/day8/re-frame/blob/v1.4.3/src/re_frame/router.cljc>
 - **[RF-SYNC]** re-frame API, `dispatch-sync`: "It is an error to use `dispatch-sync` within an event handler."
   <https://day8.github.io/re-frame/api-re-frame.core/>
 - **[HTML-EL]** WHATWG HTML Living Standard, §8.1.7.3 *Processing model* (the event loop and its "update the

@@ -1,0 +1,59 @@
+@startuml seq-escape-queue
+'' PlantUML over Mermaid: the defect is an ORDERING — where a dispatched step lands in re-frame's first-in,
+'' first-out queue relative to a second Escape already waiting there — so a sequence diagram with one phase per
+'' design states it exactly. Magenta = keyboard input and the keymap resolver, blue = re-frame (the queue and the
+'' :input/escape handler), blue-violet = app-db (what each handler reads and writes), red = the defect's outcome.
+!include _vv-theme.iuml
+
+title Two Escapes at once on a slide show: why the show ran on, and the fix (docs/scientific/12 §8.8)
+
+participant "keyboard\n(two Escapes in one burst)" as K KEYMAP_TINT
+participant "keydown handler\n(keymap resolver → commands/run)" as H KEYMAP_TINT
+participant "re-frame queue\n(first in, first out)" as Q REFRAME_TINT
+participant ":input/escape\n(escape-fx)" as E REFRAME_TINT
+participant "app-db\n(a show, the number 2 typed)" as D APPDB_TINT
+
+== before: each Escape DISPATCHES its step ==
+K -> H : Escape 1 (keydown)
+H -> Q : rf/dispatch [:input/escape]
+K -> H : Escape 2 (keydown), before the router's next run
+H -> Q : rf/dispatch [:input/escape]
+note over Q #E2EBF3: queue: [:input/escape :input/escape]
+Q -> E : the router runs Escape 1
+activate E
+E -> D : reads the typed number "2"
+E -> Q : [:dispatch [:slides/digits-clear]]\nqueued BEHIND Escape 2
+deactivate E
+note over Q #E2EBF3: queue: [:input/escape :slides/digits-clear]
+Q -> E : the router runs Escape 2
+activate E
+E -> D : reads the typed number "2" (still typed)
+E -> Q : [:dispatch [:slides/digits-clear]] again
+deactivate E
+note over Q #E2EBF3: queue: [:slides/digits-clear :slides/digits-clear]
+Q -> D : the number is forgotten twice
+note right of D #F5E1E0: the show runs on:\nthe second Escape was spent\non a step already taken
+
+== the fix (F1): each Escape APPLIES its step in its own event ==
+K -> H : Escape 1, then Escape 2 (one burst)
+H -> Q : rf/dispatch [:input/escape] (twice)
+note over Q #E2EBF3: queue: [:input/escape :input/escape]
+Q -> E : the router runs Escape 1
+activate E
+E -> D : (slides-digits-clear-fx db)\nthe number is forgotten in THIS event
+deactivate E
+Q -> E : the router runs Escape 2
+activate E
+E -> D : reads: no number, no blank screen, a show
+E -> D : (slides-stop-fx db {})\nthe show ends, the window leaves fullscreen
+deactivate E
+note right of D #E3E7F2: each Escape sees the state\nthe previous one left,\nhowever the two were queued
+
+legend right
+  |= Colour |= Concept |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| keyboard input and the keymap resolver |
+  |<#4F97D7>&#160;&#160;&#160;&#160;| re-frame: the event queue and the :input/escape handler |
+  |<#7590DB>&#160;&#160;&#160;&#160;| app-db: what each handler reads and writes |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the defect's outcome |
+endlegend
+@enduml

@@ -1767,11 +1767,14 @@
    {:db (-> db (assoc-in [:ui :find :count] 0) (assoc-in [:ui :find :idx] 0) bump-gen)
     :fx [[:async/cancel find-debounce-key] [:find/clear]]}))
 
-(rf/reg-event-fx
- :find/close
- (fn [{:keys [db]} _]
-   {:db (-> db (assoc-in [:ui :find :visible?] false) bump-gen)
-    :fx [[:async/cancel find-debounce-key] [:find/clear]]}))
+(defn find-close-fx
+  "Effects of closing the find bar: hide it, drop the highlights (a new generation) and cancel a pending query. Also
+   Escape's find step, applied in Escape's own event (input-events/escape-fx)."
+  [db]
+  {:db (-> db (assoc-in [:ui :find :visible?] false) bump-gen)
+   :fx [[:async/cancel find-debounce-key] [:find/clear]]})
+
+(rf/reg-event-fx :find/close (fn [{:keys [db]} _] (find-close-fx db)))
 
 ;; ---- table of contents ----
 ;; jump to a section: in the web view (HTTP) ask its preload to scroll; in Markdown scroll the content
@@ -2177,12 +2180,14 @@
 (rf/reg-event-fx :slides/enter     (fn [{:keys [db]} _] (slides-enter-fx db)))
 (rf/reg-event-fx :slides/backspace (fn [{:keys [db]} _] (slides-backspace-fx db)))
 
-(rf/reg-event-fx
- :slides/digits-clear
- (fn [{:keys [db]} _]
-   ;; the 2.5 s timeout, Escape, or anything else that abandons the typed number (cancelling the timer is
-   ;; harmless when it is the timer that fired)
-   {:db (slides/clear-digits db) :fx [[:async/cancel slides-digits-key]]}))
+(defn slides-digits-clear-fx
+  "Effects of abandoning the typed slide number: forget it and cancel its timeout (harmless when it is the timeout that
+   fired). The 2.5 s timeout's event, and Escape's typed-number step, applied in Escape's own event
+   (input-events/escape-fx)."
+  [db]
+  {:db (slides/clear-digits db) :fx [[:async/cancel slides-digits-key]]})
+
+(rf/reg-event-fx :slides/digits-clear (fn [{:keys [db]} _] (slides-digits-clear-fx db)))
 
 ;; ---- presenting: the fullscreen slide show (ADR-0045 §Presenting) ---------------------------------------
 ;; A show is of the shown PDF in THIS window: [:ui :presentation] {:active? :tab-id :path :from :fullscreen?}. The

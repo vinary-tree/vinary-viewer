@@ -148,7 +148,9 @@ that applied it (08–12).
   detector checked four ways: Beamer's two-screen pages, a controlled 42-case Beamer corpus, a 2456-PDF natural
   corpus (counts only) and a controlled Impress corpus, which together found and closed a gap in the export
   canvases. Also the slide-flip latency: a frame of deferral after every key, attributed (H-sched), one refuted and
-  one successful intervention, and a median key → frame of 24.3 → 7.9 ms.
+  one successful intervention, and a median key → frame of 24.3 → 7.9 ms. And two Escapes at once (H-ESC): each
+  Escape's step queued behind the next key, so two took one step twice; fixed, and checked on re-frame's real queue
+  and end to end, each check first shown to fail without the fix.
 
 ---
 

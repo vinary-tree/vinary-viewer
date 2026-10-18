@@ -27,3 +27,9 @@ Every file is the instrument's own output, tee'd once; nothing here was edited b
 | `flip-AC-{A,C}-{1,2,3}.{txt,json}` | The sequence that judged H-sync2 (C = both hops synchronous). The instrument then recorded the `scrollTop` write only after its own listener ran, so C's write delay reads "no scrollTop write observed" (§8.4). |
 | `flip-ABC-{A,B,C}-{1,2,3}.{txt,json}` | The replication with the final instrument, all three builds alternated |
 | `flip-ABC-analysis.txt` | `scripts/analyze-flip-runs.cjs` over the replication: pooled quantiles, per-run medians, bootstrap intervals |
+
+## Queued keys
+
+| File | What it is |
+|---|---|
+| `escape-queue-2026-10-18.txt` | H-ESC: its pre-registration and the addendum before run 2, verbatim; experiment E1 on re-frame's real queue without and with the fix; the smoke's end-to-end burst without and with it, in two runs (§8.8). Assembled by a shell block from the logs; its `#` lines are written by hand. |

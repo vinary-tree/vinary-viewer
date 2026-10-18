@@ -591,6 +591,13 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - In a slide show, two Escapes pressed together now take two steps: with a
+      slide number half-typed, the first forgets the number and the second ends
+      the show. Each Escape used to take its step by sending it on as another
+      event, which waited behind the second Escape, so both found the number
+      still typed and the show ran on. Keys arrive together like this when the
+      app is busy, for example while a heavy slide renders. Each Escape now
+      takes its step itself, so every Escape sees what the one before it did.
     - Moving or resizing one window no longer cancels another window's
       pending save of its position. One save timer served every window, so
       when the second window was fullscreen -- a slide show -- the first

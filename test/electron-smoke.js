@@ -2284,7 +2284,22 @@ async function main() {
     await waitCalm(win, `!window.__vvdb().ui.presentation`, 'leaving the show\'s fullscreen ends the show', 8000);
     assert.deepStrictEqual((state.fullscreenRequests || []).slice(fsBefore), [true, false, true],
       'no extra exit request when the window already left fullscreen');
-    console.log('[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds, Shift+F5 from current, leaving fullscreen ends it');
+    // two Escapes that arrive together take two steps (H-ESC, docs/scientific/12 §8.8). Sent back to back, both keys
+    // are queued before re-frame runs the first; each Escape applies its step in its own event, so the second sees the
+    // typed number gone and ends the show. (Before the fix the first queued its step BEHIND the second: both forgot
+    // the number, and the show ran on.)
+    await sendChord(win, 'F5', ['shift']);
+    await waitCalm(win, showing, 'Shift+F5 starts a show again', 8000);
+    await sendChord(win, '2');
+    await waitCalm(win, `(document.querySelector('.vv-slides-goto b') || {}).textContent === '2'`,
+      'a slide number typed during the show', 4000);
+    await sendChord(win, 'Escape');
+    await sendChord(win, 'Escape');
+    await waitCalm(win, `!(window.__vvdb().ui.slides || {}).digits`,
+      'two Escapes sent together: the first forgets the typed number', 4000);
+    await waitCalm(win, `!window.__vvdb().ui.presentation`, '…and the second ends the show', 4000);
+    assert.strictEqual(await page(), 3, '…on the slide it was on');
+    console.log('[ok] PDF presenting: F5 fullscreen show (chrome hidden, no margin), keys + blanking + click-advance, SSH prompt over the show, Escape unwinds (two at once take two steps), Shift+F5 from current, leaving fullscreen ends it');
   }
 
   // ── OVERVIEW GRID (ADR-0045 §Overview): o / Tab open a focused grid of FRAMES over the slides layout; arrows move,

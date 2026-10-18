@@ -53,8 +53,11 @@
 (deftest escape-closes-the-grid-first
   (let [db (-> slides-db (assoc-in [:ui :slides :overview?] true) (assoc-in [:ui :slides :digits] "2")
                (assoc-in [:ui :presentation] {:active? true :path "/d/talk.pdf"}))]
-    (is (= {:fx [[:dispatch [:slides/overview-close]]]} (input-events/escape-fx db))
-        "the grid before the typed number, the blank screen and the show")))
+    (is (= (events/slides-overview-close-fx db) (input-events/escape-fx db))
+        "the grid before the typed number, the blank screen and the show — closed in Escape's own event")
+    (let [after (:db (input-events/escape-fx db))]
+      (is (= [false "2" true] [(slides/overview? after) (slides/digits after) (slides/presenting? after)])
+          "only the grid"))))
 
 (deftest the-representative-page-preference
   (is (= :last (slides/overview-page {:ui {}})) "fully built by default (pdfpc)")
