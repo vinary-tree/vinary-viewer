@@ -1,7 +1,8 @@
 # docs/scientific/10 §12–§13 — raw record (2026-10-17).
 # Machine: the same 64-CPU workstation as §11 (32-core Threadripper PRO 5975WX), Linux, Xvfb (X11) backend, hardware
 # acceleration off, dev build, performance governor; every run pinned with taskset -c 2-9; the 1-minute load average
-# on 64 CPUs stayed between 5 and 9 throughout (logged per run in the scratch logs). Values in ms unless noted.
+# on 64 CPUs stayed between 5 and 9 throughout §1–§14 (logged per run in the scratch logs); §15 logs each run's load,
+# which reached 62.8. Values in ms unless noted.
 # Command: [VV_BENCH_*=…] taskset -c 2-9 npm run bench:input (the knobs are documented in the script's header).
 # lagmax/p95 = main-process round-trip probe (every 25 ms); taskmax = longest longtask; gapmax = longest rAF interval.
 
@@ -394,3 +395,61 @@
     no10x run  8: start 16 | find-small lagmax 4 gapmax - | find-large lagmax 21 gapmax - | find-pdf lagmax 6 gapmax -
     no10x run  9: start 14 | find-small lagmax 4 gapmax - | find-large lagmax 24 gapmax - | find-pdf lagmax 9 gapmax -
     no10x run 10: start 15 | find-small lagmax 3 gapmax - | find-large lagmax 25 gapmax - | find-pdf lagmax 5 gapmax -
+
+## 15. H-PDF6 — the full ladder (every scenario, 150 / 40 / 25 ms per char): stock vs re-frame-10x removed
+  Registered 2026-10-17 ~11:43, before the first build (the text is in §12.7). Two fresh worktrees of 724d9cc —
+  stock, and §14's A/B #2 edit (shadow-cljs.edn: :preloads [devtools.preload], re-frame tracing false) — each built
+  once and checked by its load list: 97 day8.re_frame_10x namespaces loaded by the stock main.js, none by the
+  variant's (whose one mention of re_frame_10x is the app's own :devtools/re-frame-10x effect, which only looks the
+  panel up on window); 4 runs per arm INTERLEAVED, the bench's defaults (no VV_BENCH_SCENARIOS),
+  taskset -c 2-9 npm run bench:input, one JSON and one console log per run. The 1-minute load average is logged per
+  run here (unlike §1–§14 it did not stay under 9). Per run: start time, load, the painting probe's animation frames in
+  300 ms at start-up, GPU compositing (n = software); then find-pdf per cadence — worst round trip (lagmax), longest
+  rAF interval over 32 ms (gapmax; '-' = none), main-thread blocks the long-task observer saw, find's own time, and
+  whether find reused its cached flattened buffer (ADR-0033).
+    stock-1  start 11:45:39 load  8.69 frames 15 gpu n
+               @150: lagmax 145 gapmax 164.7 blocks 0 find 0.2 ms cached y
+               @40: lagmax 174 gapmax 181.1 blocks 0 find 3.6 ms cached n
+               @25: lagmax 176 gapmax 181.7 blocks 0 find 3.4 ms cached n
+    no10x-1  start 11:52:47 load  9.56 frames 15 gpu n
+               @150: lagmax 7 gapmax - blocks 0 find 0.1 ms cached y
+               @40: lagmax 134 gapmax 151.5 blocks 0 find 3.6 ms cached n
+               @25: lagmax 135 gapmax 160.7 blocks 0 find 3.3 ms cached n
+    stock-2  start 11:59:42 load  6.42 frames 14 gpu n
+               @150: lagmax 36 gapmax 41.9 blocks 0 find 0.1 ms cached y
+               @40: lagmax 175 gapmax 178.1 blocks 0 find 3.5 ms cached n
+               @25: lagmax 160 gapmax 187.1 blocks 0 find 3.3 ms cached n
+    no10x-2  start 12:06:36 load  7.21 frames 16 gpu n
+               @150: lagmax 7 gapmax - blocks 0 find 0.1 ms cached y
+               @40: lagmax 147 gapmax 165.9 blocks 0 find 3.4 ms cached n
+               @25: lagmax 144 gapmax 172.1 blocks 0 find 3.4 ms cached n
+    stock-3  start 12:13:42 load  9.49 frames  8 gpu n
+               @150: lagmax 28 gapmax 43.9 blocks 0 find 0.3 ms cached y
+               @40: lagmax 166 gapmax 194.5 blocks 0 find 3.4 ms cached n
+               @25: lagmax 177 gapmax 195.3 blocks 0 find 3.5 ms cached n
+    no10x-3  start 12:21:39 load 62.79 frames 15 gpu n
+               @150: lagmax 5 gapmax - blocks 0 find 0.4 ms cached y
+               @40: lagmax 163 gapmax 186.9 blocks 0 find 3.6 ms cached n
+               @25: lagmax 152 gapmax 168.2 blocks 0 find 3.8 ms cached n
+    stock-4  start 12:30:53 load 28.48 frames 10 gpu n
+               @150: lagmax 34 gapmax 45.5 blocks 0 find 0.1 ms cached y
+               @40: lagmax 161 gapmax 195.0 blocks 0 find 3.7 ms cached n
+               @25: lagmax 202 gapmax 213.2 blocks 0 find 3.7 ms cached n
+    no10x-4  start 12:39:13 load 24.12 frames 16 gpu n
+               @150: lagmax 6 gapmax - blocks 0 find 0.3 ms cached y
+               @40: lagmax 170 gapmax 179.8 blocks 0 find 3.6 ms cached n
+               @25: lagmax 151 gapmax 173.8 blocks 0 find 3.9 ms cached n
+  Conditions (from the run log, written while the runs ran):
+    stock-1  FLAGGED: an unpinned filesystem-wide `find` of mine ran 11:49:38–11:51:38 (disk I/O, CPU on any core)
+    no10x-1  clean: nothing of mine running but file reads
+    stock-2  clean
+    no10x-2  flagged: two PlantUML renders + rsvg (12:04) and TLC (12:12:31, 1.4 s; 12:13:17–12:13:45), all pinned to
+             cores 16–31 (no L3 shared with 2–9; memory bandwidth is shared)
+    stock-3  flagged: two deep TLC runs, 16 workers at 100 % on cores 16–31, 12:14:03–12:18:22
+    no10x-3  flagged: another project's test suite, unpinned, from ~12:22, on cores including 3, 5, 6 and the SMT
+             siblings 33–42 of the bench's 2–9 (load 62.8 at the run's start)
+    stock-4  flagged: the same external load
+    no10x-4  flagged: the same external load
+  Registered criterion: refuted if any no10x row reaches 100 ms → no10x-1 (clean) has 134 and 135 ms: REFUTED.
+  Not made (deviation): the registered replacement for the flagged stock-1 — the external load made a clean run
+  impossible; a refutation rests on the no10x arm alone.

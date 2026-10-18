@@ -1,6 +1,9 @@
 # 10 — The text-input latency experiments
 
-**Status: complete for v0.3.0-dev.** A user reported that typing into the in-page find widget lagged by
+**Status: complete for v0.3.0-dev, except one open attribution:** §12.7's `find-pdf` stall is the app's own
+(H-PDF6), and H-PDF7, registered, waits for a quiet machine.
+
+A user reported that typing into the in-page find widget lagged by
 "a few hundred milliseconds" per character and that "if I type too quickly some keys are missed". The two
 halves of that sentence turned out to be **two independent defects with different mechanisms**, present in
 different widgets, and neither is fixed by fixing the other. This is the ledger of how each was isolated,
@@ -869,6 +872,56 @@ interleaved, `find-small,find-large,find-pdf` at 150 ms, pinned:
   stock build, against 14–17 without re-frame-10x.
 - So re-frame-10x lengthens every worst case this bench reports. Whether the rare 150–180 ms stall is also its
   doing needs a run order that reproduces the stall reliably.
+
+**H-PDF6, registered before the run (2026-10-17 11:43): the full ladder.** The ladder — every scenario at 150, 40
+and 25 ms per character, the bench's defaults — is the order in whose every row the stall had appeared (§12.5), so
+it is the run order the last bullet asks for. Prediction: with re-frame-10x removed (A/B #2's edit, in a fresh
+worktree of `724d9cc`), `find-pdf`'s worst round trip stays under 100 ms in all 12 rows of the variant (4 runs × 3
+cadences), while the stock build stalls (≥ 120 ms) in at least one row of each of its 4 runs and in at least 8 of
+its 12 rows. Refuted if any variant row reaches 100 ms; no power (inconclusive) if the stock build stalls in fewer
+than 8 rows or in fewer than 4 runs; if it holds, the run-level exact test gives $`p = 1/\binom{8}{4} \approx 0.014`$.
+The decision it settles: whether the bench must measure a build without the panel. The runs were interleaved and
+pinned (`taskset -c 2-9`); the stock `main.js` loads 97 re-frame-10x namespaces, the variant's none. The machine's
+1-minute load average is logged per run, and every run during which something else ran is flagged:
+
+| Run, in order | Start, load | 150 ms/char | 40 ms/char | 25 ms/char | Condition |
+|---|---|---|---|---|---|
+| stock 1 | 11:45, 8.7 | 145 | 174 | 176 | flagged: a filesystem-wide `find` of mine ran unpinned from 11:49:38 to 11:51:38 |
+| variant 1 | 11:52, 9.6 | 7 | **134** | **135** | clean: nothing of mine ran but file reads |
+| stock 2 | 11:59, 6.4 | 36 | 175 | 160 | clean |
+| variant 2 | 12:06, 7.2 | 7 | 147 | 144 | flagged: diagram renders and model checking of mine, pinned to cores 16–31 |
+| stock 3 | 12:13, 9.5 | 28 | 166 | 177 | flagged: model checking of mine, 16 workers at 100 % for 4.3 min on cores 16–31 |
+| variant 3 | 12:21, 62.8 | 5 | 163 | 152 | flagged: another project's test suite, unpinned, on the bench's cores and their SMT siblings |
+| stock 4 | 12:30, 28.5 | 34 | 161 | 202 | flagged: the same |
+| variant 4 | 12:39, 24.1 | 6 | 170 | 151 | flagged: the same |
+
+The values are `find-pdf`'s worst round trip in ms; the raw rows are in the data file (§15).
+
+- **H-PDF6 is refuted, on a clean run.** The first variant run, with nothing of mine running and the load at 9.6,
+  had worst round trips of 134 and 135 ms at 40 and 25 ms per character, and every variant run did the same in
+  those two rows (134–170 ms). Removing re-frame-10x does not remove the stall: it is the app's own, so `bench:input`
+  keeps measuring the development build.
+- **A deviation from the registration.** It planned a replacement for the flagged stock run 1, after the eight. The
+  external load made a clean run impossible then, and it was not made. The verdict does not need it: a refutation
+  rests on the variant arm alone, and the stock arm only gave the test its power.
+- **What the rows show — not registered, so reported as an observation.** In the variant, the rows whose find reused
+  its flattened buffer (ADR-0033; every 150 ms/char row) stayed at 5–7 ms, and every row whose find did not (the 40
+  and 25 ms/char rows) stalled. Each stalled row had one frame interval over 32 ms — 151–187 ms; its median, 95th
+  percentile and maximum coincide — no main-thread block the long-task observer saw, and 3.3–3.9 ms of find's own
+  work, under software compositing. One long frame with no long task points away from the renderer's main thread,
+  which is what H-PDF7 tests.
+
+**H-PDF7, registered 2026-10-17 12:50, before any attribution run.** The stall at 40 and 25 ms per character is one
+long *frame* whose cost is not a task on the renderer's main thread. For the variant build at the full ladder, on a
+quiet machine (load under 12, nothing else of mine running), in 2 runs: (a) a renderer CPU profile over the
+`find-pdf` rows has no JavaScript or task stretch of 100 ms or more within 200 ms of the stall; and (b) a Chromium
+trace (categories `cc`, `viz`, `gpu`, `benchmark`, `devtools.timeline` and
+`disabled-by-default-devtools.timeline`) shows a paint, raster or compositor task of 100 ms or more — on the
+compositor or a raster thread, or in the GPU/viz process — overlapping the stall. Refuted if (a) finds such a
+main-thread stretch (then the cost is on the main thread and the bench's long-task observer misses it) or if (b)
+finds no such task. The decision: (a) and (b) together place the fix in what find makes the compositor paint (its
+highlights, the scroll that brings a canvas page into view); a refutation through (a) calls for a profile-guided fix
+of the main-thread work. It waits for a quiet machine.
 
 ### 12.8 What this changes in the record
 

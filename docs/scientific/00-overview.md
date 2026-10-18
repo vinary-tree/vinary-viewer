@@ -134,7 +134,10 @@ that applied it (08–12).
 - **[10 — Text-input latency.](10-input-latency-experiments.md)** "Lag per character" and "missed keys" were two
   defects with different mechanisms; the typist-latency gate of `find-e2e` (T1–T4) and its benchmark come from here,
   as does ADR-0033 (asynchronous text input). §10 records T3's sensitivity to machine load, and §11 attributes
-  the main-process stall behind it.
+  the main-process stall behind it. §12 finds that the benchmark had been measuring the hidden warm-pool window and
+  re-measures in the window the user sees; its one open item is `find-pdf`'s single long frame at the fast cadences
+  (134–202 ms), shown to be the app's own (H-PDF6), whose attribution (H-PDF7) is registered. §13 is the Preferences
+  field's own save coming back.
 
 - **[11 — Remote read & reload safety.](11-remote-read-and-reload-safety-experiments.md)** How long a whole remote
   file takes over SFTP as a function of size, round-trip time and server identity, and how much a better reader
