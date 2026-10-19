@@ -1,0 +1,11 @@
+
+Testing vinary.slides.notes-signature-equivalence-test
+[H-PAIRWORK E1] 24000 generated pairs at the real caps; the reference's verdicts: {true 6172, false 17737, nil 91}
+[H-PAIRWORK E1] 4800 generated pairs at match caps 0…144; verdicts per cap: [{true 0, false 171, nil 229} {true 18, false 208, nil 174} {true 28, false 240, nil 132} {true 32, false 254, nil 114} {true 42, false 244, nil 114} {true 61, false 244, nil 95} {true 81, false 249, nil 70} {true 86, false 262, nil 52} {true 71, false 271, nil 58} {true 77, false 283, nil 40} {true 97, false 263, nil 40} {true 92, false 280, nil 28}]
+[H-PAIRWORK E1] 6000 pairs with huge, infinite, NaN or ±0 cell indices; the reference's verdicts: {true 3638, false 2339, nil 23}
+[H-PAIRWORK E1] every cell in one bucket: 4000 + 2000 pairs; the reference's verdicts: {true 1013, false 2971, nil 16} {true 1201, false 796, nil 3}
+[H-PAIRWORK E1] prefix-count over 2001 slide heights × ~2003 note heights, and on every 9-height range for 40 of those slide heights (every 50th)
+[H-PAIRWORK E1] 6000 pairs of adversarial strings; the reference's verdicts: {true 3327, false 2661, nil 12}
+
+Ran 14 tests containing 2126 assertions.
+0 failures, 0 errors.

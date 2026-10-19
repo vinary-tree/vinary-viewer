@@ -1,0 +1,151 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -17,6 +17,15 @@
+ //   C     65 536 matches that no copy can cover (need 508 characters, 16 to be had): copy-covers?'s eight grid
+ //         passes run in full, result false.
+ //   D     a real-sized pair: 60 words and their thumbnail at σ = 0.25, plus 30 words of note text, result true.
++// and three cases of one shape that aim at the cells' hashing (docs/scientific/14 §8, H-FLOOD and H-FAR): 16 slide
++// runs "x" at height 10 at the origin, plus the run of 1000 "z" (need 508 is unreachable: every pass runs in full),
++// and 4096 note runs "x", each placed so that its cell is one chosen triple (a, b, c) in all eight grids — height
++// 10·1.02^(a + ¾), origin ((b + ¾)·tol, (c + ¾)·tol). The 16 slide runs share each cell: 65 536 matches, 4096 cells.
++//   rand  the triples at random, within the packing range of the cell key (|index| ≤ 65535).
++//   flood triples within the range whose packed keys share one bucket of a 4096-entry js/Map under V8's number hash
++//         as this script models it (ComputeLongHash, Thomas Wang's 64-bit mix, of the double's bits), found by search.
++//   far   triples whose x index lies beyond the range (100 000 … 2 000 000).
++// --matches=<X> (a multiple of 16, at most 65 536) gives C, rand, flood and far X matches instead: X/16 note runs.
+ // Each case runs its warm-ups, then its timed runs; median, p95 (nearest rank), min and max in milliseconds.
+ // VV_BENCH_JSON=<path> writes every sample.
+ 
+@@ -34,6 +43,11 @@
+ const BUNDLE = opt('bundle', 'dev');
+ const RUNS_SCALE = Number(opt('runs', 1));
+ const ONLY = opt('only', 'A,B,C,D').split(',');
++const MATCHES = Number(opt('matches', 65536));
++if (!(Number.isInteger(MATCHES) && MATCHES % 16 === 0 && MATCHES >= 16 && MATCHES <= 65536)) {
++  throw new Error('--matches must be a multiple of 16 in [16, 65536]');
++}
++const SHAPED_NOTE_RUNS = MATCHES / 16;
+ 
+ // ---- loading the compiled notes model --------------------------------------------------------------------------------
+ 
+@@ -101,9 +115,94 @@
+   const slide = [];
+   for (let i = 0; i < 16; i++) slide.push(run('x', 10, 20 * i, 20 * i));
+   slide.push(run('z'.repeat(1000), 10, 0, 250));
+-  const note = new Array(4096);
+-  for (let k = 0; k < 4096; k++) note[k] = run('x', 1, rnd() * W, rnd() * H);
+-  return { slide: page(slide), note: page(note), want: false, visits: 16 * 4096 };
++  const note = new Array(SHAPED_NOTE_RUNS);     // at --matches=65536, the 4096 runs of the first (pre-fix) runs
++  for (let k = 0; k < SHAPED_NOTE_RUNS; k++) note[k] = run('x', 1, rnd() * W, rnd() * H);
++  return { slide: page(slide), note: page(note), want: false, visits: 16 * SHAPED_NOTE_RUNS };
++};
++
++// ---- the shaped cases: each note run's cell chosen, the same in all eight grids ------------------------------------
++
++const TOL = 0.005 * DIAG;                      // offset-tolerance × diag (the max with 1e-9 does not bind here)
++const LOG_CELL = Math.log(1.02);               // ln(1 + scale-tolerance)
++const PACK = 65535;                            // the cell key's packing range
++
++// V8's hash of a number outside the int32 range, as this script models it: ComputeLongHash (Thomas Wang's 64-bit
++// integer mix) of the double's bits, masked to a Smi. A js/Map's bucket is its low bits.
++const F64 = new Float64Array(1);
++const U64 = new BigUint64Array(F64.buffer);
++const M64 = (1n << 64n) - 1n;
++const v8NumberHash = (x) => {
++  F64[0] = x;
++  let h = U64[0];
++  h = ((~h & M64) + (h << 18n)) & M64;
++  h ^= h >> 31n;
++  h = (h * 21n) & M64;
++  h ^= h >> 11n;
++  h = (h + (h << 6n)) & M64;
++  h ^= h >> 22n;
++  return Number(h & 0x3fffffffn);
++};
++const packed = (a, b, c) => (a + 65536) * 17179869184 + (b + 65536) * 131072 + (c + 65536);
++
++const shapedTriples = (kind) => {
++  const n = SHAPED_NOTE_RUNS;
++  const rnd = mulberry32({ rand: 15, flood: 16, far: 17 }[kind]);
++  const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
++  const seen = new Set();
++  const out = [];
++  // a js/Map of n entries has n / 2 buckets (V8's OrderedHashMap: capacity the least power of two ≥ n, two entries
++  // per bucket); keys that share their low log2(n / 2) hash bits share a bucket at that size and at every smaller one
++  const bucketMask = Math.max(1, n / 2) - 1;
++  let draws = 0;
++  while (out.length < n) {
++    draws++;
++    const a = int(-200, -48);
++    const b = kind === 'far' ? int(100000, 2000000) : int(-60000, 60000);
++    const c = int(-60000, 60000);
++    const p = packed(a, b, c);
++    if (seen.has(p)) continue;
++    if (kind === 'flood' && (v8NumberHash(p) & bucketMask) !== 0) continue;
++    seen.add(p);
++    out.push([a, b, c]);
++  }
++  return { triples: out, draws, bucketMask };
++};
++
++const caseShaped = (kind) => () => {
++  const t0 = process.hrtime.bigint();
++  const { triples, draws, bucketMask } = shapedTriples(kind);
++  const searchMs = Number(process.hrtime.bigint() - t0) / 1e6;
++  const slide = [];
++  for (let i = 0; i < 16; i++) slide.push(run('x', 10, 0, 0));
++  slide.push(run('z'.repeat(1000), 10, 0, 250));
++  // each note run's height and origin; run() writes exactly these doubles into its transform [h 0 0 h x y]
++  const placed = triples.map(([a, b, c]) => [10 * Math.exp((a + 0.75) * LOG_CELL), (b + 0.75) * TOL, (c + 0.75) * TOL]);
++  const note = placed.map(([h, x, y]) => run('x', h, x, y));
++  // the cells, recomputed as the comparison computes them (σ = h / 10, t = note origin − σ · 0), checked in every grid
++  const cells = new Set();
++  triples.forEach(([a, b, c], k) => {
++    const [h, x, y] = placed[k];
++    const sigma = h / 10;
++    if (!(sigma > 0 && sigma <= notes.max_thumbnail_scale)) throw new Error(`${kind}: note run ${k} has σ ${sigma}`);
++    const q = [Math.log(sigma) / LOG_CELL, (x - sigma * 0) / TOL, (y - sigma * 0) / TOL];
++    for (const s of [0, 0.5]) {
++      const got = q.map((v) => Math.floor(v - s));
++      if (got[0] !== a || got[1] !== b || got[2] !== c) {
++        throw new Error(`${kind}: note run ${k} lands in (${got}) at shift ${s}, not (${a},${b},${c})`);
++      }
++    }
++    const inRange = [a, b, c].every((v) => Math.abs(v) <= PACK);
++    if (inRange !== (kind !== 'far')) throw new Error(`${kind}: note run ${k}'s cell is ${inRange ? 'inside' : 'outside'} the packing range`);
++    cells.add(packed(a, b, c));
++  });
++  if (cells.size !== SHAPED_NOTE_RUNS) throw new Error(`${kind}: ${cells.size} distinct cells, not ${SHAPED_NOTE_RUNS}`);
++  if (kind === 'flood') {
++    const buckets = new Set(triples.map(([a, b, c]) => v8NumberHash(packed(a, b, c)) & bucketMask));
++    if (buckets.size !== 1) throw new Error(`flood: the modelled hashes fill ${buckets.size} buckets, not 1`);
++  }
++  console.log(`${kind.padEnd(8)} : ${SHAPED_NOTE_RUNS} cells in ${(searchMs / 1000).toFixed(1)} s (${draws} draws; ` +
++              `bucket mask ${bucketMask})`);
++  return { slide: page(slide), note: page(note), want: false, visits: 16 * SHAPED_NOTE_RUNS };
+ };
+ const caseD = () => {
+   const slide = [];
+@@ -124,6 +223,7 @@
+   { name: 'B', group: 'B', build: caseB, warm: 3, runs: 30 },
+   { name: 'C', group: 'C', build: caseC, warm: 3, runs: 15 },
+   { name: 'D', group: 'D', build: caseD, warm: 50, runs: 500 },
++  ...['rand', 'flood', 'far'].map((kind) => ({ name: kind, group: kind, build: caseShaped(kind), warm: 3, runs: 15 })),
+ ].filter((c) => ONLY.includes(c.group));
+ 
+ // ---- timing --------------------------------------------------------------------------------------------------------
+@@ -143,6 +243,7 @@
+ console.log(`load average : ${os.loadavg().map((x) => x.toFixed(2)).join(' ')}`);
+ console.log(`page         : ${W} × ${H} (diag ${DIAG.toFixed(3)}); max-signature-runs ${notes.max_signature_runs}, ` +
+             `max-signature-matches ${notes.max_signature_matches}, max-thumbnail-scale ${notes.max_thumbnail_scale}`);
++console.log(`shaped cases : C, rand, flood and far with ${MATCHES} matches (${SHAPED_NOTE_RUNS} note runs)`);
+ 
+ const results = {};
+ for (const c of CASES) {
+@@ -170,5 +271,5 @@
+             `A(1024)/A(512) ${ratio('A(1024)', 'A(512)')}`);
+ if (process.env.VV_BENCH_JSON) {
+   fs.writeFileSync(process.env.VV_BENCH_JSON, JSON.stringify({ bundle: BUNDLE, node: process.version, affinity,
+-    governor, page: { W, H, diag: DIAG }, results }, null, 2));
++    governor, page: { W, H, diag: DIAG }, matches: MATCHES, results }, null, 2));
+ }

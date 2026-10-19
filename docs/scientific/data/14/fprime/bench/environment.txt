@@ -1,0 +1,12 @@
+# environment 2026-10-18T13:02:09-04:00
+CPU(s):                                  64
+Model name:                              AMD Ryzen Threadripper PRO 5975WX 32-Cores
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      74%
+CPU max MHz:                             4561.8330
+cpu3 governor: performance; siblings 3,35
+node versions: {"node":"26.11.1","v8":"14.6.202.34-node.37"}
+electron versions: {"electron":"42.5.0","node":"24.17.0","v8":"14.8.178.33-electron.0"}
+F′ bundle sha256: 648d937c6797db9524b5c2323ef3377fc1e09c8a79b0b45b48a053703fae93ff
+F  bundle sha256: f3871cd644e70636e5f684d920a9f267faa1a19464f72a441a42fc92da04635c
+F′ notes.cljs sha256: 3ffb781d2e7cab27fce101faee23c71b29f3137c4b5a45f5f9ae28c76cba3916

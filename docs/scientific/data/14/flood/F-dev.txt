@@ -1,0 +1,13 @@
+bundle       : dev (dist/test/test.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 1826016's current affinity list: 3; governor performance
+load average : 10.49 15.45 15.04
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 65536, max-thumbnail-scale 0.4
+shaped cases : C, rand, flood and far with 65536 matches (4096 note runs)
+C        : median 60.147 ms, p95 68.992 ms, min 59.525 ms, max 68.992 ms; 15 runs; 65536 visits (917.8 ns each at the median); result false
+rand     : 4096 cells in 0.0 s (4096 draws; bucket mask 2047)
+rand     : median 42.036 ms, p95 44.624 ms, min 41.516 ms, max 44.624 ms; 15 runs; 65536 visits (641.4 ns each at the median); result false
+flood    : 4096 cells in 2.5 s (8253387 draws; bucket mask 2047)
+flood    : median 2271.273 ms, p95 2275.331 ms, min 2267.079 ms, max 2275.331 ms; 15 runs; 65536 visits (34656.9 ns each at the median); result false
+far      : 4096 cells in 0.0 s (4096 draws; bucket mask 2047)
+far      : median 227.807 ms, p95 231.390 ms, min 226.077 ms, max 231.390 ms; 15 runs; 65536 visits (3476.1 ns each at the median); result false
+scaling      : A(4096)/A(2048) n/a, A(2048)/A(1024) n/a, A(1024)/A(512) n/a

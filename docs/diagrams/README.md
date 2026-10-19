@@ -386,6 +386,9 @@ exactly the four superseded design diagrams noted below, and a defect for anythi
 | `seq-notes-gap-decomposition.puml` | sequence | `theory/12-speaker-notes-detection.md` |
 | `seq-notes-restart-lemma.puml` | sequence | `theory/12-speaker-notes-detection.md` |
 | `timing-notes-shifted-grids.puml` | timing | `theory/12-speaker-notes-detection.md` |
+| `seq-note-signature-thread.puml` | sequence | `scientific/14-note-signature-cost.md` |
+| `activity-note-signature-cost.puml` | activity | `scientific/14-note-signature-cost.md` |
+| `object-note-signature-layout.puml` | object | `scientific/14-note-signature-cost.md` |
 
 ### Keeping this table honest
 

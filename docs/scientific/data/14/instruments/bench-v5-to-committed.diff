@@ -1,0 +1,39 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -10,14 +10,14 @@
+ // --bundle=dev (default) loads the COMPILED test build (dev-mode ClojureScript, as the renderer's dev build runs it)
+ // without running its tests: dist/test/test.js minus its last module, the test runner's main. --bundle=release loads
+ // the :simple-compiled cli build, dist/cli/vv-cli.js, without calling its main: the code as the shipped bundles
+-// compile it. The cases (docs/scientific/14 §2):
++// compile it. The cases (docs/scientific/14 §3.1):
+ //   A(n)  slide and note page of n upright runs "x" at one height (σ = 1 > max-thumbnail-scale): every pair of equal
+ //         strings is visited, and none counts toward max-signature-matches. n² visits, result false.
+ //   B     the note page's runs at σ = 0.1: the match cap trips (after (⌊cap / 4096⌋ + 1) · 4096 visits), result nil.
+ //   C     as many matches as the cap allows that no copy can cover (need 508 characters, 16 to be had):
+ //         copy-covers?'s eight grid passes run in full, result false.
+ //   D     a real-sized pair: 60 words and their thumbnail at σ = 0.25, plus 30 words of note text, result true.
+-// and three cases of one shape that aim at the cells' hashing (docs/scientific/14 §8, H-FLOOD and H-FAR): 16 slide
++// and three cases of one shape that aim at the cells' hashing (docs/scientific/14 §6.3, H-FLOOD and H-FAR): 16 slide
+ // runs "x" at height 10 at the origin, plus the run of 1000 "z" (need 508 is unreachable: every pass runs in full),
+ // and 4096 note runs "x", each placed so that its cell is one chosen triple (a, b, c) in all eight grids — height
+ // 10·1.02^(a + ¾), origin ((b + ¾)·tol, (c + ¾)·tol). The 16 slide runs share each cell: 65 536 matches, 4096 cells.
+@@ -28,7 +28,7 @@
+ // --matches=<X> (a multiple of 16, at most the match cap in force) gives C, rand, flood and far X matches instead of
+ // the cap's: X/16 note runs. --cap=<X> rebinds max-signature-matches for the run (the comparison reads it at call
+ // time), so that a shape above the bundle's own cap can be timed.
+-// Two shapes of one kind aim at the grouping of the note page's strings (docs/scientific/14 §10, H-PAIRWORK-FIX″):
++// Two shapes of one kind aim at the grouping of the note page's strings (docs/scientific/14 §6.6, H-PAIRWORK-FIX″):
+ // both pages hold 4096 upright runs at height 10 (σ = 1: no match, result false), so only the grouping and the
+ // slide's look-ups are timed.
+ //   S-index  the strings String(k·2048): array indices whose values share their low 11 bits — one bucket of a
+@@ -40,8 +40,8 @@
+ //   L-equal  one string, repeated: every comparison reads all of it.
+ //   L-wide   as L-prefix with every code unit two-byte (U+043F …, U+0410 …).
+ //   L-mixed  as L-prefix with half the strings two-byte (a last unit at U+0100 …): a one-byte string against a
+-//            two-byte one is compared unit by unit (docs/scientific/14, H-TEXT2).
+-// Last, four that load the three caps at once (docs/scientific/14, H-COMBINED): X-prefix, X-equal, X-wide and X-mixed
++//            two-byte one is compared unit by unit (docs/scientific/14 §6.7, H-TEXT2).
++// Last, four that load the three caps at once (docs/scientific/14 §6.8, H-COMBINED): X-prefix, X-equal, X-wide and X-mixed
+ // are L's pages at T with C's match block put in — slide runs 0 … 15 the string Xs at height 10, origin (20 i, 20 i),
+ // note runs 0 … M/16 − 1 Xs at height 1 (σ = 0.1) at C's random origins, M = --matches; Xs is the kind's prefix of
+ // ℓ − 2 units and two units no other string of the kind uses. 4096 runs and T code units a page, exactly M matches,

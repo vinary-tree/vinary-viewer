@@ -1,0 +1,7 @@
+A(512)   release/dev median 0.88  min 0.86
+A(1024)  release/dev median 0.84  min 0.85
+A(2048)  release/dev median 0.85  min 0.86
+A(4096)  release/dev median 0.86  min 0.86
+B        release/dev median 0.67  min 0.87
+C        release/dev median 0.89  min 0.92
+D        release/dev median 0.82  min 0.84

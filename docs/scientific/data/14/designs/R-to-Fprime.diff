@@ -1,0 +1,304 @@
+--- a/src/vinary/slides/notes.cljs
++++ b/src/vinary/slides/notes.cljs
+@@ -209,41 +209,182 @@
+   ;; matches in one cell have scale ratios below 1 + scale-tolerance
+   (js/Math.log (+ 1 scale-tolerance)))
+ 
++(def ^:private half-cell
++  ;; an axis's two shifts: none, and half a cell
++  [0 0.5])
++
+ (def ^:private grid-shifts
+   ;; the eight grids, shifted by half a cell along any of the three axes
+-  (vec (for [a [0 0.5] b [0 0.5] c [0 0.5]] [a b c])))
++  (vec (for [a half-cell b half-cell c half-cell] [a b c])))
++
++(defn hash-tables
++  "The tables of the cells' hash (copy-covers?): for each of a cell's three axes and each of the 8 bytes of an index,
++   256 random 32-bit words — 6 144 in all, the table of (axis x, byte j) at offset (8x + j)·256 — drawn from the
++   platform's cryptographic generator on every call, so that no PDF can be made whose cells collide: the cells are
++   fixed before the tables are drawn."
++  []
++  (let [tables (js/Int32Array. 6144)]
++    (.getRandomValues (.-crypto js/globalThis) tables)
++    tables))
++
++(defn- index-hash
++  "The hash of one cell index `v` on axis `x` (0, 1 or 2) under `tables`: the XOR of 8 entries, one per byte of v's
++   CANONICAL bits — −0 as +0, and every NaN as 0x7FF8000000000000 — so that the indices that `same-index?` equates
++   hash alike. `bits` and `words` are a Float64Array of one element and a Uint32Array over its buffer."
++  [^js tables ^js bits ^js words x v]
++  (let [nan? (not (== v v))
++        _    (when-not nan? (aset bits 0 (if (== v 0) 0 v)))
++        lo   (if nan? 0 (aget words 0))
++        hi   (if nan? 0x7ff80000 (aget words 1))
++        o    (* x 2048)]
++    (bit-xor (aget tables (+ o (bit-and lo 255)))
++             (aget tables (+ o 256 (bit-and (unsigned-bit-shift-right lo 8) 255)))
++             (aget tables (+ o 512 (bit-and (unsigned-bit-shift-right lo 16) 255)))
++             (aget tables (+ o 768 (unsigned-bit-shift-right lo 24)))
++             (aget tables (+ o 1024 (bit-and hi 255)))
++             (aget tables (+ o 1280 (bit-and (unsigned-bit-shift-right hi 8) 255)))
++             (aget tables (+ o 1536 (bit-and (unsigned-bit-shift-right hi 16) 255)))
++             (aget tables (+ o 1792 (unsigned-bit-shift-right hi 24))))))
++
++(defn- same-index?
++  "Equal as cell indices: SameValueZero, so −0 equals +0 and NaN equals NaN — exactly when `str` prints two indices
++   alike, as the cell keys of the comparison before docs/scientific/14 did."
++  [x y]
++  (or (== x y) (and (not (== x x)) (not (== y y)))))
+ 
+ (defn- copy-covers?
+-  "Does one COPY among `matches` [{:i :ls :tx :ty}…] cover at least `need` characters of the slide (`glyph-of`: the
+-   characters of slide run i)? A copy is the matches in one cell of a grid over (ln σ, tx, ty) whose cells are
+-   ln(1 + scale-tolerance) wide in ln σ and `tol` wide in each offset, or of one of the seven grids shifted from it by
+-   half a cell: every copy found agrees within the tolerances, and every set of matches that agrees within half of
+-   them falls into one cell of some grid (docs/theory/12 §3). A slide run counts once per copy, however many runs of
+-   the note page repeat its string. Linear in the matches: 8 passes over hash maps, stopping at the first copy that
+-   covers enough."
+-  [glyph-of matches tol need]
+-  (let [m (count matches)]
+-    (loop [g 0]
+-      (if (= g (count grid-shifts))
+-        false
+-        (let [[s0 s1 s2] (nth grid-shifts g)
+-              seen (js/Map.)
+-              sums (js/Map.)
+-              hit? (loop [k 0]
+-                     (if (= k m)
+-                       false
+-                       (let [{:keys [i ls tx ty]} (nth matches k)
+-                             cell (str (js/Math.floor (- (/ ls log-scale-cell) s0)) ","
+-                                       (js/Math.floor (- (/ tx tol) s1)) ","
+-                                       (js/Math.floor (- (/ ty tol) s2)))
+-                             ids  (or (.get seen cell) (let [ids (js/Set.)] (.set seen cell ids) ids))]
+-                         (if (.has ids i)
+-                           (recur (inc k))
+-                           (let [sum (+ (or (.get sums cell) 0) (nth glyph-of i))]
+-                             (.add ids i)
+-                             (.set sums cell sum)
+-                             (if (>= sum need) true (recur (inc k))))))))]
+-          (if hit? true (recur (inc g))))))))
++  "Does one COPY among the matches cover at least `need` characters of the slide (`glyph-of`, an Int32Array: the
++   characters of slide run i)? Match k is slide run (aget mi k), with the cell quotients (aget qls k) = ln σ / ln(1 + scale-tolerance),
++   (aget qtx k) = tx / tol and (aget qty k) = ty / tol. A copy is the matches in one cell of a grid over (ln σ, tx, ty)
++   whose cells are ln(1 + scale-tolerance) wide in ln σ and `tol` wide in each offset, or of one of the seven grids
++   shifted from it by half a cell: every copy found agrees within the tolerances, and every set of matches that agrees
++   within half of them falls into one cell of some grid (docs/theory/12 §3). A slide run counts once per copy, however
++   many runs of the note page repeat its string: the matches come grouped by slide run, in order, so a cell has
++   counted run i already exactly when the last run it counted is i. The verdict does not depend on the matches' order,
++   since a cell's sum only grows.
++   The cells of a grid live in a hash table of this function's own, on typed arrays: B buckets (the least power of two
++   ≥ 2m, at least 16) chained through `nexts`, and per cell its three indices, the last slide run counted and the sum.
++   A bucket's `stamps` entry names the grid (1–8) that last wrote its head, so each grid starts with an empty table at
++   no cost. A cell's hash is SIMPLE TABULATION over its indices' canonical bytes, with tables drawn at random on every
++   call (hash-tables): two distinct cells share a bucket with probability exactly 1/B whatever the PDF, so a lookup
++   walks under 1.5 cells on average (docs/scientific/14 §9). The hash only decides where a cell is kept; `same-index?`
++   decides which matches share a cell, so the verdict does not depend on the tables drawn. Each match's six per-axis
++   hashes (two shifts × three axes) are computed once; a pass XORs three of them. 8 passes, each O(m) expected,
++   stopping at the first copy that covers enough."
++  [^js glyph-of ^js mi ^js qls ^js qtx ^js qty need]
++  (let [m (.-length mi)]
++    (if (zero? m)
++      false
++      (let [[h0 h1] half-cell
++            tables  (hash-tables)
++            bits    (js/Float64Array. 1)
++            words   (js/Uint32Array. (.-buffer bits))
++            ;; match k's index hashes, each computed as a pass computes its index: ℓ under h0 and h1, x …, y …
++            axes    (js/Int32Array. (* 6 m))
++            _       (dotimes [k m]
++                      (let [o (* 6 k)]
++                        (aset axes o (index-hash tables bits words 0 (js/Math.floor (- (aget qls k) h0))))
++                        (aset axes (+ o 1) (index-hash tables bits words 0 (js/Math.floor (- (aget qls k) h1))))
++                        (aset axes (+ o 2) (index-hash tables bits words 1 (js/Math.floor (- (aget qtx k) h0))))
++                        (aset axes (+ o 3) (index-hash tables bits words 1 (js/Math.floor (- (aget qtx k) h1))))
++                        (aset axes (+ o 4) (index-hash tables bits words 2 (js/Math.floor (- (aget qty k) h0))))
++                        (aset axes (+ o 5) (index-hash tables bits words 2 (js/Math.floor (- (aget qty k) h1))))))
++            nb     (loop [b 16] (if (< b (* 2 m)) (recur (* 2 b)) b))
++            mask   (dec nb)
++            heads  (js/Int32Array. nb)        ; per bucket: its newest cell, when its stamp is this grid's
++            stamps (js/Int32Array. nb)        ; per bucket: the grid (1–8) that last wrote its head; 0 = none
++            nexts  (js/Int32Array. m)         ; per cell (numbered in the order first seen): the next cell of its bucket, −1 at the end
++            ca     (js/Float64Array. m)       ; …its three indices
++            cb     (js/Float64Array. m)
++            cc     (js/Float64Array. m)
++            last   (js/Int32Array. m)         ; …the last slide run counted
++            sums   (js/Float64Array. m)]      ; …and the characters of its distinct slide runs
++        (loop [g 0]
++          (if (= g (count grid-shifts))
++            false
++            (let [[s0 s1 s2] (nth grid-shifts g)
++                  tag  (inc g)
++                  hl   (if (== s0 h0) 0 1)
++                  hx   (if (== s1 h0) 2 3)
++                  hy   (if (== s2 h0) 4 5)
++                  hit? (loop [k 0, n 0]
++                         (if (== k m)
++                           false
++                           (let [a      (js/Math.floor (- (aget qls k) s0))
++                                 b      (js/Math.floor (- (aget qtx k) s1))
++                                 c      (js/Math.floor (- (aget qty k) s2))
++                                 o      (* 6 k)
++                                 bucket (bit-and (bit-xor (aget axes (+ o hl)) (aget axes (+ o hx)) (aget axes (+ o hy)))
++                                                 mask)
++                                 chain  (if (== (aget stamps bucket) tag) (aget heads bucket) -1)
++                                 cell   (loop [x chain]
++                                          (if (or (neg? x)
++                                                  (and (same-index? (aget ca x) a) (same-index? (aget cb x) b)
++                                                       (same-index? (aget cc x) c)))
++                                            x
++                                            (recur (aget nexts x))))
++                                 i      (aget mi k)]
++                             (cond
++                               (neg? cell)
++                               (let [sum (aget glyph-of i)]
++                                 (aset ca n a)
++                                 (aset cb n b)
++                                 (aset cc n c)
++                                 (aset nexts n chain)
++                                 (aset heads bucket n)
++                                 (aset stamps bucket tag)
++                                 (aset last n i)
++                                 (aset sums n sum)
++                                 (if (>= sum need) true (recur (inc k) (inc n))))
++
++                               (== i (aget last cell))
++                               (recur (inc k) n)
++
++                               :else
++                               (let [sum (+ (aget sums cell) (aget glyph-of i))]
++                                 (aset last cell i)
++                                 (aset sums cell sum)
++                                 (if (>= sum need) true (recur (inc k) n)))))))]
++              (if hit? true (recur (inc g))))))))))
++
++(defn- by-height
++  "The note page's upright runs, grouped by string: a js/Map from each string to #js [heights xs ys], three
++   Float64Arrays holding its runs' run-height and origin in ascending order of height."
++  [note]
++  (let [groups (js/Map.)]
++    (doseq [r note]
++      (when (upright? r)
++        (if-let [rs (.get groups (:str r))] (.push rs r) (.set groups (:str r) #js [r]))))
++    (let [out (js/Map.)]
++      (.forEach groups
++                (fn [^js rs s]
++                  (let [n      (.-length rs)
++                        h      (js/Float64Array. n)
++                        _      (dotimes [k n] (aset h k (run-height (aget rs k))))
++                        order  (let [o (js/Array. n)] (dotimes [k n] (aset o k k)) o)
++                        ;; heights are never NaN (upright?), but may be +∞, so compare, never subtract
++                        _      (.sort order (fn [a b] (let [x (aget h a) y (aget h b)] (cond (< x y) -1 (> x y) 1 :else 0))))
++                        hs     (js/Float64Array. n)
++                        xs     (js/Float64Array. n)
++                        ys     (js/Float64Array. n)]
++                    (dotimes [k n]
++                      (let [j (aget order k)
++                            [_ _ _ _ x y] (:t (aget rs j))]
++                        (aset hs k (aget h j))
++                        (aset xs k x)
++                        (aset ys k y)))
++                    (.set out s #js [hs xs ys]))))
++      out)))
++
++(defn- prefix-count
++  "How many of the ascending `heights` give h / hs ≤ bound. A prefix: h ↦ h / hs never decreases (IEEE division is
++   monotone; NaN, from ∞/∞, comes only last and is ≤ nothing)."
++  [^js heights hs bound]
++  (loop [lo 0, hi (.-length heights)]
++    (if (< lo hi)
++      (let [mid (unsigned-bit-shift-right (+ lo hi) 1)]
++        (if (<= (/ (aget heights mid) hs) bound) (recur (inc mid) hi) (recur lo mid)))
++      lo)))
+ 
+ (defn note-page-signature?
+   "SIG (ADR-0048 §2.2): does page `note` (its runs) annotate slide page `slide` (its runs)? `diag` is the note page's
+@@ -252,7 +393,11 @@
+    origin, covering at least half of the slide's characters; false otherwise. When the slide has no upright text, the
+    default template's date decides: true when the note page has a rotated date, false when it has none, and nil (no
+    evidence) when it has no text at all. nil also when a page exceeds max-signature-runs or the pairs exceed
+-   max-signature-matches."
++   max-signature-matches.
++   The MATCHES of a slide run are the note page's upright runs of its string with σ = h / hs in
++   (0, max-thumbnail-scale]. Sorted by height, they are one index range (two binary searches, prefix-count), so the
++   pairs that cannot match are never visited; they are counted before one is built, and built into arrays of exactly
++   that size (docs/theory/12 §3.7, docs/scientific/14)."
+   [slide note diag]
+   (when (and (<= (count slide) max-signature-runs) (<= (count note) max-signature-runs))
+     (let [s-runs   (into [] (filter #(and (upright? %) (pos? (glyphs %)))) slide)
+@@ -260,28 +405,52 @@
+           total    (reduce + 0 glyph-of)]
+       (if (zero? total)
+         (when (some #(pos? (glyphs %)) note) (rotated-date? note))
+-        (let [by-str  (group-by :str (filter upright? note))
+-              tol     (max 1e-9 (* offset-tolerance diag))
+-              matches (loop [i 0, acc (transient [])]
+-                        (cond
+-                          (> (count acc) max-signature-matches) nil
+-                          (= i (count s-runs))                  (persistent! acc)
+-                          :else
+-                          (let [r  (nth s-runs i)
+-                                hs (run-height r)
+-                                [_ _ _ _ xs ys] (:t r)]
+-                            (recur (inc i)
+-                                   (reduce (fn [acc k]
+-                                             (let [sigma (/ (run-height k) hs)
+-                                                   [_ _ _ _ xk yk] (:t k)]
+-                                               (if (and (pos? sigma) (<= sigma max-thumbnail-scale))
+-                                                 (conj! acc {:i i :ls (js/Math.log sigma)
+-                                                             :tx (- xk (* sigma xs)) :ty (- yk (* sigma ys))})
+-                                                 acc)))
+-                                           acc
+-                                           (get by-str (:str r)))))))]
+-          (when matches
+-            (copy-covers? glyph-of matches tol (/ total 2))))))))
++        (let [groups (by-height note)
++              tol    (max 1e-9 (* offset-tolerance diag))
++              n      (count s-runs)
++              kept   (js/Int32Array. (* 2 n))   ; slide run i keeps its string's runs [kept[2i], kept[2i+1])
++              m      (loop [i 0, m 0]
++                       (cond
++                         (> m max-signature-matches) nil
++                         (= i n)                     m
++                         :else
++                         (let [r (nth s-runs i)]
++                           (if-let [^js g (.get groups (:str r))]
++                             (let [hs (run-height r)
++                                   lo (prefix-count (aget g 0) hs 0)
++                                   hi (prefix-count (aget g 0) hs max-thumbnail-scale)]
++                               (aset kept (* 2 i) lo)
++                               (aset kept (inc (* 2 i)) hi)
++                               (recur (inc i) (+ m (- hi lo))))
++                             (recur (inc i) m)))))]
++          (when m
++            (let [mi  (js/Int32Array. m)
++                  qls (js/Float64Array. m)
++                  qtx (js/Float64Array. m)
++                  qty (js/Float64Array. m)]
++              (loop [i 0, at 0]
++                (when (< i n)
++                  (let [lo (aget kept (* 2 i))
++                        hi (aget kept (inc (* 2 i)))]
++                    (if (< lo hi)
++                      (let [r  (nth s-runs i)
++                            hs (run-height r)
++                            [_ _ _ _ sx sy] (:t r)
++                            ^js g (.get groups (:str r))
++                            gh (aget g 0)
++                            gx (aget g 1)
++                            gy (aget g 2)]
++                        (dotimes [d (- hi lo)]
++                          (let [k     (+ lo d)
++                                sigma (/ (aget gh k) hs)
++                                j     (+ at d)]
++                            (aset mi j i)
++                            (aset qls j (/ (js/Math.log sigma) log-scale-cell))
++                            (aset qtx j (/ (- (aget gx k) (* sigma sx)) tol))
++                            (aset qty j (/ (- (aget gy k) (* sigma sy)) tol))))
++                        (recur (inc i) (+ at (- hi lo))))
++                      (recur (inc i) at)))))
++              (copy-covers? (js/Int32Array.from (into-array glyph-of)) mi qls qtx qty (/ total 2)))))))))
+ 
+ ;; ---- 2.3 the probe, 2.4 the scan, 2.5 the confirmation --------------------------------------------------------------
+ 

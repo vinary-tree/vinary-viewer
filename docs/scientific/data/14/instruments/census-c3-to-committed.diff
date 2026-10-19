@@ -1,0 +1,18 @@
+--- a/scripts/exp-note-signature-census.cjs
++++ b/scripts/exp-note-signature-census.cjs
+@@ -1,5 +1,5 @@
+ 'use strict';
+-// The pair work of the note-page comparison on REAL pages — the census behind docs/scientific/14 §5 (H-PAIRWORK-FIX).
++// The pair work of the note-page comparison on REAL pages — the census behind docs/scientific/14 §3.2 (H-PAIRWORK-FIX).
+ //
+ // QUESTION. vinary.slides.notes/note-page-signature? pairs every upright slide run with the note page's upright runs
+ // of the same string: those are its VISITS. It keeps a visit as a MATCH when the scale σ = note height / slide height
+@@ -18,7 +18,7 @@
+ // page's text would bound.
+ // --differential also calls, on every pair, both the namespace's note-page-signature? and the reference
+ // implementation of the test build (vinary.slides.notes-reference, the code before H-PAIRWORK-FIX), with the note
+-// page's own diagonal, and counts their verdicts and every pair on which they differ (check E2 of docs/scientific/14).
++// page's own diagonal, and counts their verdicts and every pair on which they differ (check E2 of docs/scientific/14 §7.2).
+ //
+ // PRIVACY. A file is named only in the --list file, which must lie outside the repository. The output carries counts
+ // by GROUP, the label each line of the list gives its file, never a path, a title or a page's text.

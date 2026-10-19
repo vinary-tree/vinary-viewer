@@ -1,0 +1,164 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -13,9 +13,9 @@
+ // compile it. The cases (docs/scientific/14 §2):
+ //   A(n)  slide and note page of n upright runs "x" at one height (σ = 1 > max-thumbnail-scale): every pair of equal
+ //         strings is visited, and none counts toward max-signature-matches. n² visits, result false.
+-//   B     the note page's runs at σ = 0.1: the match cap trips after 17 · 4096 visits, result nil.
+-//   C     65 536 matches that no copy can cover (need 508 characters, 16 to be had): copy-covers?'s eight grid
+-//         passes run in full, result false.
++//   B     the note page's runs at σ = 0.1: the match cap trips (after (⌊cap / 4096⌋ + 1) · 4096 visits), result nil.
++//   C     as many matches as the cap allows that no copy can cover (need 508 characters, 16 to be had):
++//         copy-covers?'s eight grid passes run in full, result false.
+ //   D     a real-sized pair: 60 words and their thumbnail at σ = 0.25, plus 30 words of note text, result true.
+ // and three cases of one shape that aim at the cells' hashing (docs/scientific/14 §8, H-FLOOD and H-FAR): 16 slide
+ // runs "x" at height 10 at the origin, plus the run of 1000 "z" (need 508 is unreachable: every pass runs in full),
+@@ -25,7 +25,19 @@
+ //   flood triples within the range whose packed keys share one bucket of a 4096-entry js/Map under V8's number hash
+ //         as this script models it (ComputeLongHash, Thomas Wang's 64-bit mix, of the double's bits), found by search.
+ //   far   triples whose x index lies beyond the range (100 000 … 2 000 000).
+-// --matches=<X> (a multiple of 16, at most 65 536) gives C, rand, flood and far X matches instead: X/16 note runs.
++// --matches=<X> (a multiple of 16, at most the match cap in force) gives C, rand, flood and far X matches instead of
++// the cap's: X/16 note runs. --cap=<X> rebinds max-signature-matches for the run (the comparison reads it at call
++// time), so that a shape above the bundle's own cap can be timed.
++// Two shapes of one kind aim at the grouping of the note page's strings (docs/scientific/14 §10, H-PAIRWORK-FIX″):
++// both pages hold 4096 upright runs at height 10 (σ = 1: no match, result false), so only the grouping and the
++// slide's look-ups are timed.
++//   S-index  the strings String(k·2048): array indices whose values share their low 11 bits — one bucket of a
++//            string-keyed js/Map in Electron's V8.
++//   S-rand   String(k·2048 + u), u in [1, 2047] at random: distinct, the same lengths, random low bits.
++// And two that aim at the text: both pages 4096 upright runs of ℓ = T/4096 code units, T = --chars (default the
++// bundle's max-signature-chars, or 32 768 when it has none; the cap is raised to T for the run when below it).
++//   L-prefix distinct strings with a common prefix of ℓ − 2 code units: every comparison reads the prefix.
++//   L-equal  one string, repeated: every comparison reads all of it.
+ // Each case runs its warm-ups, then its timed runs; median, p95 (nearest rank), min and max in milliseconds.
+ // VV_BENCH_JSON=<path> writes every sample.
+ 
+@@ -43,11 +55,9 @@
+ const BUNDLE = opt('bundle', 'dev');
+ const RUNS_SCALE = Number(opt('runs', 1));
+ const ONLY = opt('only', 'A,B,C,D').split(',');
+-const MATCHES = Number(opt('matches', 65536));
+-if (!(Number.isInteger(MATCHES) && MATCHES % 16 === 0 && MATCHES >= 16 && MATCHES <= 65536)) {
+-  throw new Error('--matches must be a multiple of 16 in [16, 65536]');
+-}
+-const SHAPED_NOTE_RUNS = MATCHES / 16;
++const MATCHES_OPT = opt('matches', null);
++const CAP_OPT = opt('cap', null);
++const CHARS_OPT = opt('chars', null);
+ 
+ // ---- loading the compiled notes model --------------------------------------------------------------------------------
+ 
+@@ -80,6 +90,29 @@
+   throw new Error(`vinary.slides.notes is not in ${BUNDLE_FILE}: compile it first (see the header)`);
+ }
+ 
++// ---- the caps in force -----------------------------------------------------------------------------------------------
++
++const BUNDLE_CAP = notes.max_signature_matches;
++if (CAP_OPT !== null) {
++  const x = Number(CAP_OPT);
++  if (!(Number.isInteger(x) && x >= 16)) throw new Error('--cap must be an integer of at least 16');
++  notes.max_signature_matches = x;
++}
++const CAP = notes.max_signature_matches;
++const MATCHES = MATCHES_OPT === null ? Math.min(CAP, 65536) : Number(MATCHES_OPT);
++if (!(Number.isInteger(MATCHES) && MATCHES % 16 === 0 && MATCHES >= 16 && MATCHES <= Math.min(CAP, 65536))) {
++  throw new Error(`--matches must be a multiple of 16 in [16, ${Math.min(CAP, 65536)}] (the match cap in force, and ` +
++                  '4096 note runs at most)');
++}
++const SHAPED_NOTE_RUNS = MATCHES / 16;
++const BUNDLE_TEXT_CAP = typeof notes.max_signature_chars === 'number' ? notes.max_signature_chars : null;
++const CHARS = CHARS_OPT === null ? (BUNDLE_TEXT_CAP === null ? 32768 : BUNDLE_TEXT_CAP) : Number(CHARS_OPT);
++if (!(Number.isInteger(CHARS) && CHARS % 4096 === 0 && CHARS >= 2 * 4096)) {
++  throw new Error('--chars must be a multiple of 4096, at least 8192');
++}
++if (ONLY.includes('L') && BUNDLE_TEXT_CAP !== null && CHARS > BUNDLE_TEXT_CAP) notes.max_signature_chars = CHARS;
++const TEXT_CAP = BUNDLE_TEXT_CAP === null ? null : notes.max_signature_chars;
++
+ // ---- the pages -----------------------------------------------------------------------------------------------------
+ 
+ const kw = (s) => cljs.keyword(s);
+@@ -109,7 +142,7 @@
+ };
+ 
+ const caseA = (n) => ({ slide: grid(n, 10), note: grid(n, 10), want: false, visits: n * n });
+-const caseB = () => ({ slide: grid(4096, 10), note: grid(4096, 1), want: null, visits: 17 * 4096 });
++const caseB = () => ({ slide: grid(4096, 10), note: grid(4096, 1), want: null, visits: (Math.floor(CAP / 4096) + 1) * 4096 });
+ const caseC = () => {
+   const rnd = mulberry32(14);
+   const slide = [];
+@@ -217,6 +250,41 @@
+   return { slide: page(slide), note: page(note), want: true, visits: 60 };
+ };
+ 
++// ---- the strings' shapes: S (the grouping) and L (the text) ---------------------------------------------------------
++
++const textOf = (strs) => strs.reduce((n, x) => n + x.length, 0);
++const stringsPage = (strs) => page(strs.map((x, i) => run(x, 10, (i % 64) * (W / 64), Math.floor(i / 64) * (H / 64))));
++const checkText = (name, strs) => {
++  const units = textOf(strs);
++  if (TEXT_CAP !== null && units > TEXT_CAP) throw new Error(`${name}: ${units} code units, above the text cap ${TEXT_CAP}`);
++  return units;
++};
++const caseS = (kind) => () => {
++  const rnd = mulberry32(18);
++  const strs = new Array(4096);
++  for (let k = 0; k < 4096; k++) strs[k] = String(k * 2048 + (kind === 'rand' ? 1 + Math.floor(rnd() * 2047) : 0));
++  if (new Set(strs).size !== 4096) throw new Error(`S-${kind}: the strings are not distinct`);
++  if (kind === 'index' && !strs.every((x) => (Number(x) & 2047) === 0 && String(Number(x)) === x)) {
++    throw new Error('S-index: a string is not an array index with its low 11 bits zero');
++  }
++  const units = checkText(`S-${kind}`, strs);
++  console.log(`S-${kind.padEnd(6)} : 4096 strings, ${units} code units a page, first ${strs.slice(0, 3).join(', ')}`);
++  return { slide: stringsPage(strs), note: stringsPage(strs), want: false, visits: 4096 };
++};
++const caseL = (kind) => () => {
++  const n = 4096;
++  const len = CHARS / n;
++  const strs = new Array(n);
++  const prefix = 'p'.repeat(len - 2);
++  for (let k = 0; k < n; k++) {
++    strs[k] = kind === 'equal' ? 'e'.repeat(len) : prefix + String.fromCharCode(0x41 + (k >> 6), 0x41 + (k & 63));
++  }
++  if (kind === 'prefix' && new Set(strs).size !== n) throw new Error('L-prefix: the strings are not distinct');
++  const units = checkText(`L-${kind}`, strs);
++  console.log(`L-${kind.padEnd(6)} : ${n} runs of ${len} code units, ${units} a page (text cap in force ${TEXT_CAP})`);
++  return { slide: stringsPage(strs), note: stringsPage(strs), want: false, visits: kind === 'equal' ? n * n : n };
++};
++
+ const CASES = [
+   ...['A'].flatMap(() => [512, 1024, 2048, 4096].map((n) => ({ name: `A(${n})`, group: 'A', build: () => caseA(n),
+     warm: n >= 2048 ? 2 : 3, runs: { 512: 30, 1024: 20, 2048: 10, 4096: 10 }[n] }))),
+@@ -224,6 +292,8 @@
+   { name: 'C', group: 'C', build: caseC, warm: 3, runs: 15 },
+   { name: 'D', group: 'D', build: caseD, warm: 50, runs: 500 },
+   ...['rand', 'flood', 'far'].map((kind) => ({ name: kind, group: kind, build: caseShaped(kind), warm: 3, runs: 15 })),
++  ...['index', 'rand'].map((kind) => ({ name: `S-${kind}`, group: 'S', build: caseS(kind), warm: 3, runs: 15 })),
++  ...['prefix', 'equal'].map((kind) => ({ name: `L-${kind}`, group: 'L', build: caseL(kind), warm: 3, runs: 15 })),
+ ].filter((c) => ONLY.includes(c.group));
+ 
+ // ---- timing --------------------------------------------------------------------------------------------------------
+@@ -242,8 +312,12 @@
+ console.log(`node         : ${process.version}; cpu ${os.cpus()[0].model}; affinity ${affinity}; governor ${governor}`);
+ console.log(`load average : ${os.loadavg().map((x) => x.toFixed(2)).join(' ')}`);
+ console.log(`page         : ${W} × ${H} (diag ${DIAG.toFixed(3)}); max-signature-runs ${notes.max_signature_runs}, ` +
+-            `max-signature-matches ${notes.max_signature_matches}, max-thumbnail-scale ${notes.max_thumbnail_scale}`);
+-console.log(`shaped cases : C, rand, flood and far with ${MATCHES} matches (${SHAPED_NOTE_RUNS} note runs)`);
++            `max-signature-matches ${CAP}${CAP === BUNDLE_CAP ? '' : ` (rebound from the bundle's ${BUNDLE_CAP})`}, ` +
++            `max-thumbnail-scale ${notes.max_thumbnail_scale}`);
++console.log(`text cap     : max-signature-chars ${BUNDLE_TEXT_CAP === null ? 'none (the bundle has no text cap)' : TEXT_CAP}` +
++            `${TEXT_CAP !== BUNDLE_TEXT_CAP ? ` (raised from the bundle's ${BUNDLE_TEXT_CAP} for the L shapes)` : ''}`);
++console.log(`shaped cases : C, rand, flood and far with ${MATCHES} matches (${SHAPED_NOTE_RUNS} note runs); L with ${CHARS} ` +
++            'code units a page');
+ 
+ const results = {};
+ for (const c of CASES) {
+@@ -271,5 +345,6 @@
+             `A(1024)/A(512) ${ratio('A(1024)', 'A(512)')}`);
+ if (process.env.VV_BENCH_JSON) {
+   fs.writeFileSync(process.env.VV_BENCH_JSON, JSON.stringify({ bundle: BUNDLE, node: process.version, affinity,
+-    governor, page: { W, H, diag: DIAG }, matches: MATCHES, results }, null, 2));
++    governor, page: { W, H, diag: DIAG }, matches: MATCHES, cap: CAP, bundleCap: BUNDLE_CAP, chars: CHARS,
++    textCap: TEXT_CAP, bundleTextCap: BUNDLE_TEXT_CAP, results }, null, 2));
+ }

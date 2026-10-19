@@ -1,0 +1,14 @@
+--- a/scripts/exp-note-signature-census.cjs
++++ b/scripts/exp-note-signature-census.cjs
+@@ -77,9 +77,10 @@
+   let chars = 0;                          // the page's text, in UTF-16 code units: every run's string
+   let longest = 0;
+   for (const it of items) {
+-    if (typeof it.str === 'string') { chars += it.str.length; longest = Math.max(longest, it.str.length); }
+     if (typeof it.str === 'string' && Array.isArray(it.transform) && it.transform.length === 6) {
+       runs.push(asRun(it.str, it.transform.slice()));
++      chars += it.str.length;
++      longest = Math.max(longest, it.str.length);
+     }
+   }
+   const slide = [];                       // [string, height] of the upright runs with a glyph: the slide's side

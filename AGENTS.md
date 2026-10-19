@@ -35,6 +35,11 @@
 - `npm run bench:tree-scopes`: the Files tree's directory-scope derivation behind docs/scientific/10 §11, old against
   new, on this repository's own listing (the compiled test build, its tests not run). Pin it:
   `taskset -c 2 npm run bench:tree-scopes | tee …`; `VV_BENCH_JSON=<path>` writes the summary.
+- `npm run bench:note-signature`: one note-page comparison (`vinary.slides.notes/note-page-signature?`) against the
+  crafted pages behind docs/scientific/14, on the compiled test build (its tests not run); after
+  `npx shadow-cljs release cli`, `-- --bundle=release` times the shipped compilation. Pin it:
+  `taskset -c 3 npm run bench:note-signature | tee …`; `-- --only=A,B,C,D,…` picks the cases, and
+  `VV_BENCH_JSON=<path>` writes every sample.
 - `VV_FIND_E2E_DIAG=<dir> npm run test:find-e2e` attributes a tree-filter stall: main's event-loop delay, CPU
   profiles of main AND the renderer, and main's git processes; `node scripts/analyze-cpuprofile.cjs <profile>`
   reads a profile (self time, longest runs, longest busy stretches).

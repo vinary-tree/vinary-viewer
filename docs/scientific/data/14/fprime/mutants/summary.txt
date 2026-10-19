@@ -1,0 +1,13 @@
+m1-nan-equal-dropped EXIT=1 failing: a-nan-index-is-one-cell-whatever-its-bits the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+m2-signed-zero-hashed EXIT=1 failing: an-index-hash-depends-only-on-the-index-class a-zero-index-is-one-cell-whatever-its-sign the-fixed-signature-equals-the-reference-on-general-path-pairs 
+m3-nan-bits-hashed EXIT=1 failing: a-nan-index-is-one-cell-whatever-its-bits an-index-hash-depends-only-on-the-index-class 
+m4-chain-cut EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+m5-equality-partial EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+m6-dedup-off EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+m7-tables-once EXIT=1 failing: the-tables-are-fresh-on-every-call 
+m8-sweep-strict EXIT=1 failing: prefix-count-is-the-linear-count-on-a-sweep-of-heights the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+mE1-lower-bound-dropped EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+mE2-strict-scale EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-general-path-pairs the-fixed-signature-equals-the-reference-on-generated-pairs the-fixed-signature-equals-the-reference-when-every-cell-collides 
+mE4-cap-off-by-one EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-at-the-real-match-cap 
+restored F′'s notes.cljs; recompiled EXIT=0
+DONE

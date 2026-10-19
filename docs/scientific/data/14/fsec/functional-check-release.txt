@@ -1,0 +1,28 @@
+bundle       : release (dist/cli/vv-cli.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 3212683's current affinity list: 3; governor performance
+load average : 8.99 8.16 7.90
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 16384, max-thumbnail-scale 0.4
+text cap     : max-signature-chars 32768
+shaped cases : C, rand, flood and far with 16384 matches (1024 note runs); L with 32768 code units a page
+A(512)   : median 0.937 ms, p95 9.170 ms, min 0.768 ms, max 9.170 ms; 6 runs; 262144 visits (3.6 ns each at the median); result false
+A(1024)  : median 1.460 ms, p95 4.367 ms, min 1.450 ms, max 4.367 ms; 4 runs; 1048576 visits (1.4 ns each at the median); result false
+A(2048)  : median 3.064 ms, p95 8.779 ms, min 3.064 ms, max 8.779 ms; 2 runs; 4194304 visits (0.7 ns each at the median); result false
+A(4096)  : median 5.416 ms, p95 5.429 ms, min 5.416 ms, max 5.429 ms; 2 runs; 16777216 visits (0.3 ns each at the median); result false
+B        : median 5.241 ms, p95 5.444 ms, min 5.217 ms, max 5.444 ms; 6 runs; 20480 visits (255.9 ns each at the median); result null
+C        : median 8.382 ms, p95 9.905 ms, min 8.199 ms, max 9.905 ms; 3 runs; 16384 visits (511.6 ns each at the median); result false
+D        : median 0.163 ms, p95 0.821 ms, min 0.154 ms, max 3.034 ms; 100 runs; 60 visits (2709.3 ns each at the median); result true
+rand     : 1024 cells in 0.0 s (1024 draws; bucket mask 511)
+rand     : median 9.136 ms, p95 14.362 ms, min 5.877 ms, max 14.362 ms; 3 runs; 16384 visits (557.6 ns each at the median); result false
+flood    : 1024 cells in 0.2 s (501561 draws; bucket mask 511)
+flood    : median 5.846 ms, p95 6.002 ms, min 5.793 ms, max 6.002 ms; 3 runs; 16384 visits (356.8 ns each at the median); result false
+far      : 1024 cells in 0.0 s (1024 draws; bucket mask 511)
+far      : median 6.370 ms, p95 6.416 ms, min 6.367 ms, max 6.416 ms; 3 runs; 16384 visits (388.8 ns each at the median); result false
+S-index  : 4096 strings, 28126 code units a page, first 0, 2048, 4096
+S-index  : median 8.666 ms, p95 9.189 ms, min 8.292 ms, max 9.189 ms; 3 runs; 4096 visits (2115.8 ns each at the median); result false
+S-rand   : 4096 strings, 28130 code units a page, first 816, 3284, 5174
+S-rand   : median 8.310 ms, p95 8.354 ms, min 8.280 ms, max 8.354 ms; 3 runs; 4096 visits (2028.9 ns each at the median); result false
+L-prefix : 4096 runs of 8 code units, 32768 a page (text cap in force 32768)
+L-prefix : median 8.127 ms, p95 8.141 ms, min 8.119 ms, max 8.141 ms; 3 runs; 4096 visits (1984.1 ns each at the median); result false
+L-equal  : 4096 runs of 8 code units, 32768 a page (text cap in force 32768)
+L-equal  : median 5.572 ms, p95 5.575 ms, min 5.571 ms, max 5.575 ms; 3 runs; 16777216 visits (0.3 ns each at the median); result false
+scaling      : A(4096)/A(2048) 1.77, A(2048)/A(1024) 2.10, A(1024)/A(512) 1.56

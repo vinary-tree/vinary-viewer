@@ -1,0 +1,111 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -34,13 +34,18 @@
+ //   S-index  the strings String(k·2048): array indices whose values share their low 11 bits — one bucket of a
+ //            string-keyed js/Map in Electron's V8.
+ //   S-rand   String(k·2048 + u), u in [1, 2047] at random: distinct, the same lengths, random low bits.
+-// And two that aim at the text: both pages 4096 upright runs of ℓ = T/4096 code units, T = --chars (default the
++// And four that aim at the text: both pages 4096 upright runs of ℓ = T/4096 code units, T = --chars (default the
+ // bundle's max-signature-chars, or 32 768 when it has none; the cap is raised to T for the run when below it).
+ //   L-prefix distinct strings with a common prefix of ℓ − 2 code units: every comparison reads the prefix.
+ //   L-equal  one string, repeated: every comparison reads all of it.
+ //   L-wide   as L-prefix with every code unit two-byte (U+043F …, U+0410 …).
+ //   L-mixed  as L-prefix with half the strings two-byte (a last unit at U+0100 …): a one-byte string against a
+ //            two-byte one is compared unit by unit (docs/scientific/14, H-TEXT2).
++// Last, four that load the three caps at once (docs/scientific/14, H-COMBINED): X-prefix, X-equal, X-wide and X-mixed
++// are L's pages at T with C's match block put in — slide runs 0 … 15 the string Xs at height 10, origin (20 i, 20 i),
++// note runs 0 … M/16 − 1 Xs at height 1 (σ = 0.1) at C's random origins, M = --matches; Xs is the kind's prefix of
++// ℓ − 2 units and two units no other string of the kind uses. 4096 runs and T code units a page, exactly M matches,
++// and no copy covers (16 ℓ characters matched of about T): result false.
+ // Each case runs its warm-ups, then its timed runs; median, p95 (nearest rank), min and max in milliseconds.
+ // VV_BENCH_JSON=<path> writes every sample.
+ 
+@@ -113,7 +118,9 @@
+ if (!(Number.isInteger(CHARS) && CHARS % 4096 === 0 && CHARS >= 2 * 4096)) {
+   throw new Error('--chars must be a multiple of 4096, at least 8192');
+ }
+-if (ONLY.includes('L') && BUNDLE_TEXT_CAP !== null && CHARS > BUNDLE_TEXT_CAP) notes.max_signature_chars = CHARS;
++if ((ONLY.includes('L') || ONLY.includes('X')) && BUNDLE_TEXT_CAP !== null && CHARS > BUNDLE_TEXT_CAP) {
++  notes.max_signature_chars = CHARS;
++}
+ const TEXT_CAP = BUNDLE_TEXT_CAP === null ? null : notes.max_signature_chars;
+ 
+ // ---- the pages -----------------------------------------------------------------------------------------------------
+@@ -274,9 +281,7 @@
+   console.log(`S-${kind.padEnd(6)} : 4096 strings, ${units} code units a page, first ${strs.slice(0, 3).join(', ')}`);
+   return { slide: stringsPage(strs), note: stringsPage(strs), want: false, visits: 4096 };
+ };
+-const caseL = (kind) => () => {
+-  const n = 4096;
+-  const len = CHARS / n;
++const lStrings = (kind, n, len) => {   // L(kind)'s n strings of len code units, checked
+   const strs = new Array(n);
+   const prefix = 'p'.repeat(len - 2);
+   const widePrefix = '\u043f'.repeat(len - 2);
+@@ -290,10 +295,49 @@
+   const wide = strs.filter((x) => [...x].some((c) => c.charCodeAt(0) > 0xff)).length;
+   const wantWide = { prefix: 0, equal: 0, wide: n, mixed: n / 2 }[kind];
+   if (wide !== wantWide) throw new Error(`L-${kind}: ${wide} strings wider than one byte, not ${wantWide}`);
++  return strs;
++};
++const caseL = (kind) => () => {
++  const n = 4096;
++  const len = CHARS / n;
++  const strs = lStrings(kind, n, len);
+   const units = checkText(`L-${kind}`, strs);
+   console.log(`L-${kind.padEnd(6)} : ${n} runs of ${len} code units, ${units} a page (text cap in force ${TEXT_CAP})`);
+   return { slide: stringsPage(strs), note: stringsPage(strs), want: false, visits: kind === 'equal' ? n * n : n };
+ };
++const caseX = (kind) => () => {
++  const n = 4096;
++  const len = CHARS / n;
++  const strs = lStrings(kind, n, len);
++  const xs = kind === 'wide' ? '\u043f'.repeat(len - 2) + '\u040f\u040f'
++    : (kind === 'equal' ? 'e' : 'p').repeat(len - 2) + '@@';
++  if (strs.includes(xs)) throw new Error(`X-${kind}: the match block's string is one of L's`);
++  const at = (x, i) => run(x, 10, (i % 64) * (W / 64), Math.floor(i / 64) * (H / 64));   // L's grid
++  const rnd = mulberry32(14);                                                          // C's origins, in C's order
++  const slideRuns = strs.map((x, i) => (i < 16 ? run(xs, 10, 20 * i, 20 * i) : at(x, i)));
++  const noteRuns = new Array(n);
++  for (let i = 0; i < n; i++) noteRuns[i] = i < SHAPED_NOTE_RUNS ? run(xs, 1, rnd() * W, rnd() * H) : at(strs[i], i);
++  // the instrument's own count of what the caps see: runs, code units, and the pairs of equal strings at 0 < \u03c3 \u2264 0.4
++  const plain = (r) => ({ s: cljs.get(r, K_STR), h: cljs.nth(cljs.get(r, K_T), 0) });
++  const slidePlain = slideRuns.map(plain);
++  const notePlain = noteRuns.map(plain);
++  const heightsOf = new Map();
++  for (const { s, h } of notePlain) heightsOf.set(s, [...(heightsOf.get(s) || []), h]);
++  let pairs = 0;
++  for (const { s, h } of slidePlain) {
++    for (const g of heightsOf.get(s) || []) if (g / h > 0 && g / h <= notes.max_thumbnail_scale) pairs++;
++  }
++  const slideUnits = checkText(`X-${kind} slide`, slidePlain.map((r) => r.s));
++  const noteUnits = checkText(`X-${kind} note`, notePlain.map((r) => r.s));
++  if (slideRuns.length !== n || noteRuns.length !== n) throw new Error(`X-${kind}: not ${n} runs a page`);
++  if (slideUnits !== CHARS || noteUnits !== CHARS) {
++    throw new Error(`X-${kind}: ${slideUnits} and ${noteUnits} code units, not ${CHARS} a page`);
++  }
++  if (pairs !== MATCHES) throw new Error(`X-${kind}: ${pairs} pairs at a thumbnail's scale, not ${MATCHES}`);
++  console.log(`X-${kind.padEnd(6)} : ${n} runs of ${len} code units a page, ${pairs} matches (cap in force ${CAP}; ` +
++              `text cap in force ${TEXT_CAP})`);
++  return { slide: page(slideRuns), note: page(noteRuns), want: false, visits: pairs };
++};
+ 
+ const CASES = [
+   ...['A'].flatMap(() => [512, 1024, 2048, 4096].map((n) => ({ name: `A(${n})`, group: 'A', build: () => caseA(n),
+@@ -304,6 +348,7 @@
+   ...['rand', 'flood', 'far'].map((kind) => ({ name: kind, group: kind, build: caseShaped(kind), warm: 3, runs: 15 })),
+   ...['index', 'rand'].map((kind) => ({ name: `S-${kind}`, group: 'S', build: caseS(kind), warm: 3, runs: 15 })),
+   ...['prefix', 'equal', 'wide', 'mixed'].map((kind) => ({ name: `L-${kind}`, group: 'L', build: caseL(kind), warm: 3, runs: 15 })),
++  ...['prefix', 'equal', 'wide', 'mixed'].map((kind) => ({ name: `X-${kind}`, group: 'X', build: caseX(kind), warm: 3, runs: 15 })),
+ ].filter((c) => ONLY.includes(c.group));
+ 
+ // ---- timing --------------------------------------------------------------------------------------------------------
+@@ -327,7 +372,7 @@
+ console.log(`text cap     : max-signature-chars ${BUNDLE_TEXT_CAP === null ? 'none (the bundle has no text cap)' : TEXT_CAP}` +
+             `${TEXT_CAP !== BUNDLE_TEXT_CAP ? ` (raised from the bundle's ${BUNDLE_TEXT_CAP} for the L shapes)` : ''}`);
+ console.log(`shaped cases : C, rand, flood and far with ${MATCHES} matches (${SHAPED_NOTE_RUNS} note runs); L with ${CHARS} ` +
+-            'code units a page');
++            `code units a page; X with both`);
+ 
+ const results = {};
+ for (const c of CASES) {

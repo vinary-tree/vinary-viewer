@@ -1,0 +1,24 @@
+bundle       : dev (dist/test/test.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 3229576's current affinity list: 3; governor performance
+load average : 5.91 7.22 7.59
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 16384, max-thumbnail-scale 0.4
+text cap     : max-signature-chars 32768
+shaped cases : C, rand, flood and far with 16384 matches (1024 note runs); L with 32768 code units a page
+A(512)   : median 0.879 ms, p95 6.669 ms, min 0.797 ms, max 10.850 ms; 30 runs; 262144 visits (3.4 ns each at the median); result false
+A(1024)  : median 1.616 ms, p95 3.787 ms, min 1.519 ms, max 7.316 ms; 20 runs; 1048576 visits (1.5 ns each at the median); result false
+A(2048)  : median 3.335 ms, p95 9.403 ms, min 3.109 ms, max 9.403 ms; 10 runs; 4194304 visits (0.8 ns each at the median); result false
+A(4096)  : median 6.343 ms, p95 10.359 ms, min 6.094 ms, max 10.359 ms; 10 runs; 16777216 visits (0.4 ns each at the median); result false
+B        : median 4.971 ms, p95 5.521 ms, min 4.925 ms, max 9.538 ms; 30 runs; 20480 visits (242.7 ns each at the median); result null
+C        : median 8.481 ms, p95 16.865 ms, min 8.264 ms, max 16.865 ms; 15 runs; 16384 visits (517.7 ns each at the median); result false
+D        : median 0.171 ms, p95 0.307 ms, min 0.162 ms, max 3.037 ms; 500 runs; 60 visits (2846.6 ns each at the median); result true
+rand     : 1024 cells in 0.0 s (1024 draws; bucket mask 511)
+rand     : median 7.221 ms, p95 8.120 ms, min 7.146 ms, max 8.120 ms; 15 runs; 16384 visits (440.8 ns each at the median); result false
+flood    : 1024 cells in 0.2 s (501561 draws; bucket mask 511)
+flood    : median 7.293 ms, p95 8.119 ms, min 7.196 ms, max 8.119 ms; 15 runs; 16384 visits (445.2 ns each at the median); result false
+far      : 1024 cells in 0.0 s (1024 draws; bucket mask 511)
+far      : median 7.236 ms, p95 7.444 ms, min 7.172 ms, max 7.444 ms; 15 runs; 16384 visits (441.6 ns each at the median); result false
+S-index  : 4096 strings, 28126 code units a page, first 0, 2048, 4096
+S-index  : median 9.028 ms, p95 9.416 ms, min 8.989 ms, max 9.416 ms; 15 runs; 4096 visits (2204.1 ns each at the median); result false
+S-rand   : 4096 strings, 28130 code units a page, first 816, 3284, 5174
+S-rand   : median 9.050 ms, p95 11.433 ms, min 9.007 ms, max 11.433 ms; 15 runs; 4096 visits (2209.4 ns each at the median); result false
+scaling      : A(4096)/A(2048) 1.90, A(2048)/A(1024) 2.06, A(1024)/A(512) 1.84

@@ -1,0 +1,112 @@
+--- a/scripts/exp-note-signature-census.cjs
++++ b/scripts/exp-note-signature-census.cjs
+@@ -14,12 +14,16 @@
+ //   matches = the visits whose σ is in (0, max-thumbnail-scale]
+ // The comparison gives up (nil) when matches exceed max-signature-matches, or when either page has more than
+ // max-signature-runs runs; the census counts the pairs where that happens.
++// --differential also calls, on every pair, both the namespace's note-page-signature? and the reference
++// implementation of the test build (vinary.slides.notes-reference, the code before H-PAIRWORK-FIX), with the note
++// page's own diagonal, and counts their verdicts and every pair on which they differ (check E2 of docs/scientific/14).
+ //
+ // PRIVACY. A file is named only in the --list file, which must lie outside the repository. The output carries counts
+ // by GROUP, the label each line of the list gives its file, never a path, a title or a page's text.
+ //
+ //   npx shadow-cljs compile test
+ //   node scripts/exp-note-signature-census.cjs --list=<file of "group<TAB>path" lines> [--json=<summary.json>]
++//                                             [--differential]
+ 
+ const fs = require('fs');
+ const path = require('path');
+@@ -34,6 +38,7 @@
+ };
+ const LIST = opt('list', null);
+ const JSON_OUT = opt('json', null);
++const DIFFERENTIAL = process.argv.includes('--differential');
+ if (!LIST) throw new Error('--list=<file of "group<TAB>path" lines> is required');
+ const listAbs = path.resolve(LIST);
+ if (listAbs.startsWith(ROOT + path.sep)) throw new Error('--list must lie outside the repository (it carries paths)');
+@@ -48,9 +53,13 @@
+   { filename: TEST_JS })(require, module, module.exports, path.dirname(TEST_JS), TEST_JS);
+ const cljs = global.cljs.core;
+ const notes = global.vinary.slides.notes;
+-for (const f of ['upright_QMARK_', 'glyphs', 'run_height']) {
++for (const f of ['upright_QMARK_', 'glyphs', 'run_height', 'note_page_signature_QMARK_']) {
+   if (typeof notes[f] !== 'function') throw new Error(`vinary.slides.notes/${f} is not in ${TEST_JS}`);
+ }
++const reference = global.vinary.slides.notes_reference;
++if (DIFFERENTIAL && !(reference && typeof reference.note_page_signature_reference_QMARK_ === 'function')) {
++  throw new Error(`--differential: vinary.slides.notes-reference is not in ${TEST_JS}`);
++}
+ const MAX_SCALE = notes.max_thumbnail_scale;
+ const MAX_RUNS = notes.max_signature_runs;
+ const MAX_MATCHES = notes.max_signature_matches;
+@@ -61,7 +70,7 @@
+ 
+ // ---- one page: the runs the comparison uses, grouped ----------------------------------------------------------------
+ 
+-function pageModel(items) {
++function pageModel(items, diag) {
+   const runs = [];
+   for (const it of items) {
+     if (typeof it.str === 'string' && Array.isArray(it.transform) && it.transform.length === 6) {
+@@ -80,7 +89,7 @@
+     hs.push(h);
+   }
+   for (const hs of byStr.values()) hs.sort((a, b) => a - b);
+-  return { runs: runs.length, slide, byStr };
++  return { runs: runs.length, slide, byStr, diag, page: DIFFERENTIAL ? cljs.PersistentVector.fromArray(runs, true) : null };
+ }
+ 
+ // how many of the ascending heights `hs` give σ = h / hSlide in (0, MAX_SCALE]: σ is monotone in h, so a prefix
+@@ -110,7 +119,8 @@
+ 
+ const THRESHOLDS = [256, 1024, 4096, 16384, 65536];
+ const newGroup = () => ({ files: 0, unreadable: 0, pages: 0, pairs: 0, adjacent: 0, maxRuns: 0,
+-  runCapPairs: 0, matchCapPairs: 0, visits: [], matches: [], adjVisits: [], adjMatches: [] });
++  runCapPairs: 0, matchCapPairs: 0, visits: [], matches: [], adjVisits: [], adjMatches: [],
++  verdicts: { true: 0, false: 0, null: 0 }, disagreements: 0 });
+ 
+ const quantile = (xs, p) => {
+   if (xs.length === 0) return 0;
+@@ -137,7 +147,8 @@
+       pages = [];
+       for (let p = 1; p <= doc.numPages; p++) {
+         const page = await doc.getPage(p);
+-        pages.push(pageModel((await page.getTextContent()).items));
++        const [x0, y0, x1, y1] = page.view;
++        pages.push(pageModel((await page.getTextContent()).items, Math.hypot(x1 - x0, y1 - y0)));
+       }
+       await doc.destroy();
+     } catch (_e) {
+@@ -149,6 +160,12 @@
+     for (let j = 1; j < pages.length; j++) {
+       for (let s = 0; s < j; s++) {
+         g.pairs++;
++        if (DIFFERENTIAL) {
++          const got = notes.note_page_signature_QMARK_(pages[s].page, pages[j].page, pages[j].diag);
++          const want = reference.note_page_signature_reference_QMARK_(pages[s].page, pages[j].page, pages[j].diag);
++          g.verdicts[String(want)]++;
++          if (got !== want) g.disagreements++;
++        }
+         if (pages[s].runs > MAX_RUNS || pages[j].runs > MAX_RUNS) { g.runCapPairs++; continue; }
+         const { visits, matches } = pairWork(pages[s], pages[j]);
+         if (matches > MAX_MATCHES) g.matchCapPairs++;
+@@ -169,6 +186,7 @@
+       visits: { max: quantile(g.visits, 1), p99: quantile(g.visits, 0.99), median: quantile(g.visits, 0.5), over: over(g.visits) },
+       matches: { max: quantile(g.matches, 1), p99: quantile(g.matches, 0.99), median: quantile(g.matches, 0.5), over: over(g.matches) },
+       adjacent: { visitsMax: quantile(g.adjVisits, 1), matchesMax: quantile(g.adjMatches, 1) },
++      ...(DIFFERENTIAL ? { differential: { verdicts: g.verdicts, disagreements: g.disagreements } } : {}),
+     };
+     summary.groups[name] = row;
+     console.log(`${name}: ${row.files} files (${row.unreadable} unreadable), ${row.pages} pages, ${row.pairs} pairs ` +
+@@ -178,6 +196,10 @@
+       `${THRESHOLDS.join('/')}: ${row.visits.over.join('/')}; adjacent max ${row.adjacent.visitsMax}`);
+     console.log(`  matches : max ${row.matches.max}, p99 ${row.matches.p99}, median ${row.matches.median}; pairs over ` +
+       `${THRESHOLDS.join('/')}: ${row.matches.over.join('/')}; adjacent max ${row.adjacent.matchesMax}`);
++    if (DIFFERENTIAL) {
++      console.log(`  E2      : the reference's verdicts true ${g.verdicts.true}, false ${g.verdicts.false}, ` +
++        `nil ${g.verdicts.null}; pairs where the fixed signature differs: ${g.disagreements}`);
++    }
+   }
+   if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify(summary, null, 1));
+ }

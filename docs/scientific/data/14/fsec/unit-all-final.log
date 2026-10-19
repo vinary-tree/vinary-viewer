@@ -1,0 +1,254 @@
+
+Testing vinary.app.commits-test
+
+Testing vinary.app.content-guard-test
+
+Testing vinary.app.diff-collapse-test
+
+Testing vinary.app.facet-test
+
+Testing vinary.app.nav-test
+
+Testing vinary.app.projects-test
+
+Testing vinary.app.refresh-note-test
+
+Testing vinary.app.reopen-test
+
+Testing vinary.app.slides-keys-test
+
+Testing vinary.app.slides-link-sim-test
+
+Testing vinary.app.slides-link-test
+
+Testing vinary.app.slides-overview-test
+
+Testing vinary.app.slides-present-test
+
+Testing vinary.app.slides-test
+
+Testing vinary.app.subs-test
+
+Testing vinary.app.tree-model-test
+
+Testing vinary.app.tree-state-test
+
+Testing vinary.app.uri-test
+
+Testing vinary.async.scheduler-test
+
+Testing vinary.core-test
+
+Testing vinary.diff-test
+
+Testing vinary.file-type-test
+
+Testing vinary.git.blame-test
+
+Testing vinary.git.graph-geometry-test
+
+Testing vinary.git.graph-test
+
+Testing vinary.git.log-test
+
+Testing vinary.grammar-catalog-test
+
+Testing vinary.input.escape-queue-test
+[H-ESC E1] two queued Escapes; events the router ran: [:input/escape :input/escape]
+[H-ESC E1 control] the first Escape alone; events the router ran: [:input/escape]
+[H-ESC E1 control] the second Escape alone; events the router ran: [:input/escape]
+
+Testing vinary.input.scroll-math-test
+
+Testing vinary.ir.backend.ansi-test
+
+Testing vinary.ir.backend.html-test
+
+Testing vinary.ir.backend.parity-test
+
+Testing vinary.ir.capability.toc-test
+
+Testing vinary.ir.decode-test
+
+Testing vinary.ir.earley-test
+
+Testing vinary.ir.forest-test
+
+Testing vinary.ir.frontend.data-test
+
+Testing vinary.ir.frontend.html-test
+
+Testing vinary.ir.frontend.log-stream-test
+
+Testing vinary.ir.frontend.office-test
+
+Testing vinary.ir.frontend.org-test
+
+Testing vinary.ir.frontend.pdf-test
+
+Testing vinary.ir.frontend.source-test
+
+Testing vinary.ir.meta-test
+
+Testing vinary.ir.node-test
+
+Testing vinary.ir.parity-test
+
+Testing vinary.ir.semiring-test
+
+Testing vinary.ir.transducer-test
+
+Testing vinary.ir.wpda-test
+
+Testing vinary.main.content-flight-test
+
+Testing vinary.main.diff-source-test
+
+Testing vinary.main.dir-walk-test
+
+Testing vinary.main.displays-test
+
+Testing vinary.main.doc-overrides-test
+
+Testing vinary.main.edn-echo-test
+
+Testing vinary.main.file-kind-test
+
+Testing vinary.main.listing-flight-test
+
+Testing vinary.main.remote-subs-test
+
+Testing vinary.main.retention-test
+
+Testing vinary.main.revalidate-test
+
+Testing vinary.main.service-util-test
+
+Testing vinary.main.shell-test
+
+Testing vinary.main.slides-link-test
+
+Testing vinary.main.startup-test
+
+Testing vinary.main.tree-listing-test
+[tree] listing [:git "/repo"] failed: Error: boom
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:127:55
+[tree] listing [:git "/repo"] failed: Error: synchronous boom
+    at fexpr__51801 (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:137:83)
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:205:34
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary.main.tree_listing.js:402:3
+    at Object.vinary$main$tree_listing$launch_BANG_ [as launch_BANG_] (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary.main.tree_listing.js:405:4)
+    at vinary.main.tree-listing/run-effects! (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:243:17)
+    at t (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:242:48)
+    at drain! (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:43:81)
+    at Object.obj [as cljs$core$IFn$_invoke$arity$1] (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:139:8)
+    at cljs.test/run-block (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/cljs/test.cljs:450:10)
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/cljs/test.cljs:450:30
+[tree] listing [:git "/repo"] failed: Error: synchronous boom
+    at fexpr__51801 (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:137:83)
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:205:34
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary.main.tree_listing.js:402:3
+    at Object.vinary$main$tree_listing$launch_BANG_ [as launch_BANG_] (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary.main.tree_listing.js:405:4)
+    at vinary.main.tree-listing/run-effects! (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:243:17)
+    at t (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:242:48)
+    at drain! (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:43:81)
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:144:23
+[tree] delivering watcher refreshes of [:git "/repo"] failed: Error: a window vanished mid-send
+    at fexpr__51930 (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing_test.cljs:156:71)
+    at Object.vinary$main$tree_listing$deliver_BANG_ [as deliver_BANG_] (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:234:12)
+    at vinary.main.tree-listing/run-effects! (<scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:244:17)
+    at <scratch>/wt-pairwork/.shadow-cljs/builds/test/dev/out/cljs-runtime/vinary/main/tree_listing.cljs:208:30
+
+Testing vinary.main.web-policy-test
+
+Testing vinary.main.window-test
+
+Testing vinary.main.windows-test
+
+Testing vinary.renderer.figures-test
+
+Testing vinary.renderer.find-scan-test
+
+Testing vinary.renderer.latex-structure-test
+
+Testing vinary.renderer.latex-test
+
+Testing vinary.renderer.math-test
+
+Testing vinary.renderer.media-test
+
+Testing vinary.renderer.org-handlers-test
+
+Testing vinary.renderer.pdf-cache-test
+
+Testing vinary.renderer.pdf-layout-test
+
+Testing vinary.renderer.scroll-test
+
+Testing vinary.renderer.source-nav-test
+
+Testing vinary.renderer.source-view-test
+
+Testing vinary.renderer.text-edit-test
+
+Testing vinary.renderer.toc-test
+
+Testing vinary.renderer.warm-cache-test
+
+Testing vinary.search.cursor-test
+
+Testing vinary.search.match-test
+
+Testing vinary.search.query-test
+
+Testing vinary.search.scan-test
+
+Testing vinary.slides.deck-test
+
+Testing vinary.slides.evidence-test
+
+Testing vinary.slides.notes-signature-equivalence-test
+[H-PAIRWORK E1] 24000 generated pairs at the real caps; the reference's verdicts: {true 6172, false 17737, nil 91}
+[H-PAIRWORK E1] 4800 generated pairs at match caps 0…144; verdicts per cap: [{true 0, false 171, nil 229} {true 18, false 208, nil 174} {true 28, false 240, nil 132} {true 32, false 254, nil 114} {true 42, false 244, nil 114} {true 61, false 244, nil 95} {true 81, false 249, nil 70} {true 86, false 262, nil 52} {true 71, false 271, nil 58} {true 77, false 283, nil 40} {true 97, false 263, nil 40} {true 92, false 280, nil 28}]
+[H-PAIRWORK E1] 6000 pairs with huge, infinite, NaN or ±0 cell indices; the reference's verdicts: {true 3638, false 2339, nil 23}
+[H-PAIRWORK E1] every cell in one bucket: 4000 + 2000 pairs; the reference's verdicts: {true 1013, false 2971, nil 16} {true 1201, false 796, nil 3}
+[H-PAIRWORK E1] prefix-count over 2001 slide heights × ~2003 note heights, and on every 9-height range for 40 of those slide heights (every 50th)
+[H-PAIRWORK E1] 6000 pairs of adversarial strings; the reference's verdicts: {true 3327, false 2661, nil 12}
+
+Testing vinary.slides.notes-test
+
+Testing vinary.slides.presenter-test
+
+Testing vinary.stream.flag-test
+
+Testing vinary.stream.transport-test
+
+Testing vinary.terminal.caps-test
+
+Testing vinary.terminal.graphics-test
+
+Testing vinary.tui.find-test
+
+Testing vinary.tui.keys-test
+
+Testing vinary.tui.state-test
+
+Testing vinary.tui.toc-test
+
+Testing vinary.tui.viewport-test
+
+Testing vinary.ui.commits-body-test
+
+Testing vinary.ui.content-route-test
+
+Testing vinary.ui.icons-test
+
+Testing vinary.ui.pdf-view-lifecycle-test
+
+Testing vinary.ui.slides-entry-test
+
+Testing vinary.ui.text-input-test
+
+Ran 874 tests containing 46501 assertions.
+0 failures, 0 errors.
+UNIT EXIT=0

@@ -337,6 +337,35 @@ third-party parser libraries or in the local XML/ZIP/TAR traversal code. That ri
 current **trusted local document** model. It would not be sufficient for hostile internet attachments
 without stronger sandboxing, stricter IPC path authorization, and parser isolation.
 
+### A PDF's text in the notes detector (ADR-0048 §2.2, §8.9)
+
+When a Beamer deck's page labels cannot say which pages are speaker-note pages, the renderer reads page text through
+pdf.js and compares pages (`vinary.slides.notes/note-page-signature?`). The PDF chooses that text, so this work is a
+trust boundary. It runs on the renderer's main thread, where a slow comparison freezes the window. The risk is
+denial of service through algorithmic complexity [Crosby and Wallach], not a loss of confidentiality or integrity.
+
+- **Reads.** At most 2 000 page-text reads per deck (`max-content-pages`), which bounds what pdf.js's worker spends
+  extracting text.
+- **One comparison.** A page of more than 4 096 runs or 65 536 UTF-16 code units of text, or a pair of pages with
+  more than 16 384 matches, is not compared: the signature is `nil`, no evidence. Within the caps the comparison
+  groups the note page's strings with a merge sort and finds a slide's strings by binary search, so no choice of
+  strings slows it beyond its count of comparisons. It keeps its cells in a hash table of its own, hashed by simple
+  tabulation with 6 144 words drawn from `crypto.getRandomValues` on every call, after the pages are fixed. Two cells
+  then share a bucket with probability exactly $`1/B`$ for a table of $`B`$ buckets, whatever the PDF
+  ([scientific/14](../scientific/14-note-signature-cost.md) §5.3). No engine hash table is keyed by the PDF's strings
+  or numbers in the comparison.
+- **Why not the engine's tables.** V8 hashes number keys without a seed, and Electron's V8 buckets array-index
+  strings (`"0"`, `"2048"`, …) by their value, so a PDF can choose keys that share one bucket. Both floods were
+  measured: 77.6 times a random control for number keys, and 295 times for array-index strings in Electron
+  (scientific/14 §6.3 and §6.5). V8 gained a seeded array-index hash behind a build flag. Node.js turns it on, since
+  its March 2026 security release (CVE-2026-21717), and Chrome's build, which Electron uses, leaves it off.
+- **Measured.** The slowest crafted pages take about 16 ms per comparison at the median, in node's V8 and Electron's,
+  against 2.58 s before the fix (scientific/14 §6.1 and §6.6–§6.8).
+
+**Residual.** Other code that keys an engine or ClojureScript hash table by values a document chooses could be
+flooded the same way. ClojureScript's string hash, for one, is an unseeded polynomial, so `"Aa"` and `"BB"` collide
+(scientific/14 §9.3). An audit of the rest of the code for such tables is proposed, not done.
+
 ---
 
 ## 5. Rendered-markdown XSS
@@ -620,3 +649,8 @@ the roadmap to a posture that would also be safe for **untrusted** input.
   <https://www.electronjs.org/docs/latest/tutorial/security> (no DOI).
 - W3C, *CSS Custom Highlight API Module Level 1* (relevant to the find feature's no-DOM-mutation
   highlighting) — <https://www.w3.org/TR/css-highlight-api-1/> (no DOI).
+- S. A. Crosby and D. S. Wallach, "Denial of Service via Algorithmic Complexity Attacks", *Proceedings of the 12th
+  USENIX Security Symposium*, 2003 — <https://www.usenix.org/legacy/events/sec03/tech/full_papers/crosby/crosby.pdf>
+  (no DOI). Hash flooding (§4, the notes detector).
+- NIST, National Vulnerability Database, CVE-2026-21717: V8's "integer-like strings" hashed "to their numeric value,
+  making hash collisions trivially predictable" — <https://nvd.nist.gov/vuln/detail/CVE-2026-21717> (no DOI).

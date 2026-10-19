@@ -1,0 +1,69 @@
+@startuml seq-note-signature-thread
+'' PlantUML over Mermaid because the point of this diagram is WHICH THREAD runs each step, and in what order: pdf.js
+'' extracts a page's text in its worker, but the comparison runs afterwards, synchronously, on the renderer's main
+'' thread, inside the promise callback that receives the text. A sequence diagram with a box per thread states that
+'' exactly; a coloured activation bar marks the one step that can become a long task; PlantUML takes every
+'' participant's colour from the shared theme and renders the SVG byte-reproducibly (README §4).
+'' Colours, from the shared palette: magenta = the person and their keys; teal = the renderer (vinary.renderer.pdf,
+'' vinary.slides.evidence and pdf.js, whose worker is a thread of the renderer process); orange = the pure model
+'' vinary.slides.notes, here note-page-signature?; red = the comparison's run, the step that can be a long task.
+!include _vv-theme.iuml
+
+title One note-page comparison (scientific/14 §1): pdf.js reads the text in its worker, the comparison runs on the renderer's main thread
+
+actor "user" as U KEYMAP_TINT
+box "the renderer's main thread: one task at a time" RENDERER_FILL
+participant "vinary.renderer.pdf\n(settle-notes!, settled)" as R RENDERER_TINT
+participant "vinary.slides.evidence\n(settle; scan · probe · confirm;\nruns-reader, page-runs, read-pair)" as E RENDERER_TINT
+participant "vinary.slides.notes\n(note-page-signature?)" as N IR_TINT
+end box
+box "pdf.js's worker thread" RENDERER_FILL
+participant "pdf.js worker\n(parses a page's content,\nextracts its text items)" as W RENDERER_TINT
+end box
+
+== the deck's first frame is out ==
+R -> R : settle-notes!: requestAnimationFrame, then setTimeout 0
+R -> E : settled → evidence/settle (doc, notes model, page sizes, alive?)
+activate E
+E -> E : the work the first paint left pending:\n:scan, :probe or :confirm (ADR-0048 §2.3–§2.5)
+
+loop each pair (s, j) the work compares: up to 2 003 in one decision (theory/12 Theorem 31)
+  E -[RENDERER_BORDER]> W : read j, and s unless runs-reader kept it:\npage-runs → getPage, getTextContent (messages to the worker)
+  deactivate E
+  activate W
+  W -> W : parse the page's content stream and\nextract its text items, off the main thread
+  W -[RENDERER_BORDER]-> E : the text content (a message back): the promise resolves
+  deactivate W
+  activate E
+  E -> E : the callback (a task): the runs, the items whose str is a\nstring and whose transform has 6 entries (page-runs)
+  E -> N : note-page-signature? (slide runs, note runs, page diagonal)
+  activate N ERROR_TINT
+  U -[KEYMAP_BORDER]>> R : a key pressed now waits in the task queue:\nthe thread runs nothing else until the call returns
+  note right of N
+    One synchronous call, inside one task.
+    A task of 50 ms or more is a **long task**.
+    Before the fix: up to 2.58 s (A(4096), release, §6.1).
+    After it (F″): at most about 16 ms at the median,
+    for every shape measured (§6.6–§6.8).
+  end note
+  N --> E : true, false or nil (no evidence)
+  deactivate N
+  E -> E : scan-step · probe-next · confirmed?:\nthe next read, or the decision
+  note over R, N
+    Between two callbacks the event loop runs the other tasks:
+    the queued key, and updating the rendering.
+  end note
+end
+
+E --> R : the settled notes model (settle resolves)
+deactivate E
+R -> R : the view takes the model (rebuild-deck!):\nthe note pages leave the audience's sequence
+
+legend right
+  |= Colour |= Concept |
+  |<#BC6EC5>&#160;&#160;&#160;&#160;| the person and their keys |
+  |<#2D9574>&#160;&#160;&#160;&#160;| the renderer: vinary.renderer.pdf, vinary.slides.evidence, pdf.js and its worker |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure model vinary.slides.notes: the comparison itself |
+  |<#E0211D>&#160;&#160;&#160;&#160;| the comparison's run on the main thread: the step that can be a long task |
+endlegend
+@enduml

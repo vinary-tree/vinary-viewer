@@ -6,7 +6,8 @@
 [`formal/speaker-notes/`](formal/speaker-notes/check.sh) (§7.1): exhaustively over every small deck, by evaluating
 the model's own source text, and over pdf.js's own decoder. This document changes no code. Where it finds the ADR or
 a docstring wrong, it says so (§7.3) and leaves the decision to the maintainer. The statements it found wrong have
-since been corrected; §7.3 gives each finding's status.**
+since been corrected, and findings F10 and F11 led to a change of the code
+([experiment 14](../scientific/14-note-signature-cost.md)); §7.3 gives each finding's status.**
 
 A Beamer deck compiled with `\setbeameroption{show notes}` puts **note pages** between its slides. A slide show must
 hide them from the audience. vinary-viewer decides where they are from the page labels when it can, and from the
@@ -20,7 +21,7 @@ it is exact, and when it can be wrong and in which direction.
 | 2.1 | The **label automaton** (`interleaving`) | The valid readings of the labels are a product of independent per-gap choices, found in one pass (Theorem 4). |
 | 2.2–2.3 | Its statuses | With a first label of 0 or 1, every ambiguity is the choice of the first note page in the deck's plain run (Theorem 11), and `:undecidable` is unreachable (Theorem 12). |
 | 2.4 | The **restart guard** (`restartable?`) | A label that drops does not always invalidate every parse (Proposition 9). `restartable?` holds exactly when the labels also read as all slides once restarts are admitted (Theorem 14). The guard still lets $`W(n)`$ restart decks per page count $`n`$ through, wrongly hidden at once (Theorem 21). No rule on the labels alone can catch them (Proposition 22). |
-| 3 | The **copy test** (`note-page-signature?`) | Shifted grids are sound within one cell and complete within half a cell (Theorems 23–24), and they run in time linear in the matches. |
+| 3 | The **copy test** (`note-page-signature?`) | Shifted grids are sound within one cell and complete within half a cell (Theorems 23–24). The caps bound one comparison's cost, which experiment 14 measured at a median of at most about 16 ms (§3.7). |
 | 4 | The **probe**, the **scan**, the page budget | At most one candidate passes (Theorem 27). Under Beamer's rules the probe never hides a slide (Theorem 28). The 2000-page budget bounds the work (Theorem 31). |
 | 5 | **CONFIRM** | A confirmed parse hides no slide, whatever the labels say (Theorem 32). |
 | 6 | **$`\textsf{PDFDOC}^{-1}`$** and **REPAIR** | pdf.js's decoding is injective on the escape-free strings that reach its table branch whole, but not on escapes, across its branches, or within its BOM branch (Theorem 34). REPAIR has an exact change condition, which gives its mis-decodings (Theorems 36–38). |
@@ -868,7 +869,8 @@ that cost and the $`W(n)`$ risk belongs to the maintainer; this document changes
 A thumbnail carries the slide's own strings at $`\sigma`$ times their height, at positions
 $`\sigma \cdot (x, y) + (t_x, t_y)`$, for one scale $`\sigma`$ and one offset $`(t_x, t_y)`$ (ADR-0048 §2.2).
 $`\textsf{SIG}(s, j)`$ asks whether page $`j`$ holds such a copy of page $`s`$. Instead of clustering, the code buckets
-the evidence in hash grids. This section proves what the grids find and miss, and what they cost.
+the evidence in eight shifted grids. This section proves what the grids find and miss. §3.7 gives what they cost, which
+[experiment 14](../scientific/14-note-signature-cost.md) proved and measured.
 
 ### 3.1 · Matches and copies
 
@@ -893,8 +895,11 @@ A shift vector $`\mathbf{s} = (s_\ell, s_x, s_y) \in \{0, \tfrac{1}{2}\}^3`$ def
 \mathrm{cell}_{\mathbf{s}}(\mu) = \Bigl(\Bigl\lfloor \frac{\ell}{w_\ell} - s_\ell \Bigr\rfloor,\ \Bigl\lfloor \frac{t_x}{w_t} - s_x \Bigr\rfloor,\ \Bigl\lfloor \frac{t_y}{w_t} - s_y \Bigr\rfloor\Bigr),
 ```
 
-which is the code's `cell` string. Along one axis with width $`w`$ and shift $`\sigma_0`$, the cells are the half-open
-intervals $`[(q + \sigma_0) w,\ (q + 1 + \sigma_0) w)`$, $`q \in \mathbb{Z}`$.
+which is the triple of indices that `copy-covers?` computes for a match in each grid. It keeps a grid's cells in a
+hash table of its own, and two matches share a cell exactly when their indices agree on all three axes under
+SameValueZero (`same-index?`), as the string keys of the code before experiment 14 did (its Lemma 7). Along one axis
+with width $`w`$ and shift $`\sigma_0`$, the cells are the half-open intervals
+$`[(q + \sigma_0) w,\ (q + 1 + \sigma_0) w)`$, $`q \in \mathbb{Z}`$.
 
 ```
 ⟨copy-covers?(matches, need)⟩ ≡
@@ -970,8 +975,10 @@ and Williams's fixed-radius near-neighbour method [5].
 
 ### 3.5 · Each slide run counts once per copy
 
-`seen` maps a cell to the set of slide runs already counted in it, and a match whose slide run is already counted
-there adds nothing. So a cell's sum is the coverage of the matches in it. A note page that repeats a slide string
+Each cell records the last slide run counted in it (`last`), and a match whose slide run is already counted there adds
+nothing. The matches come grouped by slide run, in ascending order, so a cell has counted slide run $`i`$ already
+exactly when the last run it counted is $`i`$ (experiment 14, Lemma 9). So a cell's sum is the coverage of the matches
+in it. A note page that repeats a slide string
 cannot add that run's characters twice. That covers a heading drawn twice, or a word that the notes text repeats at
 a small size (unit test `a-repeated-string-counts-once`).
 
@@ -984,12 +991,16 @@ note run witnesses both slide runs' characters.
 
 `note-page-signature?` gives:
 
-- $`\mathit{nil}`$ when either page has more than 4096 runs (`max-signature-runs`);
+- $`\mathit{nil}`$ when either page has more than 4096 runs (`max-signature-runs`), or its runs' strings hold more
+  than 65,536 UTF-16 code units (`max-signature-chars`);
 - when $`\Gamma = 0`$, the empty-slide rule of §3.8;
-- $`\mathit{nil}`$ when there are more than 65,536 matches (`max-signature-matches`);
+- $`\mathit{nil}`$ when there are more than 16,384 matches (`max-signature-matches`);
 - otherwise, true exactly when `copy-covers?` finds a cell whose coverage reaches $`\Gamma / 2`$.
 
-**Theorem 26.** Suppose the slide has upright text ($`\Gamma > 0`$) and neither cap applies.
+The checks run in this order. Experiment 14 set the text cap and the match cap by registered rules (its §6.4 and
+§6.8). Before it, there was no text cap, and the match cap was 65,536.
+
+**Theorem 26.** Suppose the slide has upright text ($`\Gamma > 0`$) and no cap applies.
 
 1. If $`\textsf{SIG}(s, j) = \mathit{true}`$, page $`j`$ holds a set of matches that agrees within
    $`(w_\ell, w_t)`$, has scales at most 0.4, and covers at least half of the slide's characters.
@@ -1006,25 +1017,44 @@ ADR-0048 §2.2 justifies the two constants. The bound $`\sigma \le 0.4`$ admits 
 ($`\sigma = 0.25`$ and $`0.125`$) and excludes a theme's footline ($`\sigma = 1`$) and the template's own frame title
 ($`\sigma = 0.69`$). Half the characters leave room for runs that pdf.js splits differently.
 
-### 3.7 · Linear time, and what the caps bound
+### 3.7 · The cost, and what the caps bound
 
-Building the matches groups the note page's upright runs by string. For each slide run it then visits the note runs that
-carry its string, which is $`P_{\mathrm{eq}}`$ pair visits in all, each $`O(1)`$. `copy-covers?` makes eight passes,
-each of $`O(\lvert M \rvert)`$ expected hash-map operations, for $`\lvert M \rvert`$ matches. Its cell key is a short
-string of three integers. So one comparison takes $`O(r_s + r_j + P_{\mathrm{eq}})`$ expected time, for pages of $`r_s`$
-and $`r_j`$ runs, and $`O(r_s + r_j + \lvert M\rvert)`$ space. It is linear in the matches, and it stops at the first
-copy that covers enough.
+Building the matches sorts the note page's upright runs by string, then by height, with a stable merge sort, and
+records where each string's block of runs begins. For each slide run, a binary search finds the block of its string.
+The heights ascend within the block, so the runs whose scale lies in $`(0, 0.4]`$ form one contiguous range, and two
+more binary searches find it. So the code counts the matches before it builds any, and it never visits a pair that
+cannot match. `copy-covers?` keeps each grid's cells in a hash table of its own, on typed arrays. It hashes a cell by
+simple tabulation [11], [12], with tables drawn from the platform's cryptographic generator on every call, after the
+pages are fixed. Two distinct cells then share a bucket with probability exactly $`1/B`$, for a table of $`B`$
+buckets, whatever the PDF.
 
-**What the caps bound, and what they do not (finding F11).**
+[Experiment 14](../scientific/14-note-signature-cost.md) proves that this returns what the earlier code returned on
+every pair within the caps (its Theorem 10). Take pages of $`r_s`$ and $`r_j`$ runs whose strings hold $`T_s`$ and
+$`T_j`$ UTF-16 code units, and let $`M' = M`$ when the pair has $`M \le 16{,}384`$ matches, and $`M' = 0`$ otherwise,
+because a pair over the cap stops at the count. One comparison then takes time
 
-- The run cap bounds $`r_s, r_j \le 4096`$, and with them $`P_{\mathrm{eq}} \le 4096^2 \approx 1.68 \times 10^7`$.
-- The match cap is checked once per slide run, so the code holds at most $`65{,}536 + 4{,}096`$ matches.
-- The match cap does **not** bound $`P_{\mathrm{eq}}`$. A pair whose scale exceeds 0.4 is visited and not counted. A
-  slide and a note page that each hold 4096 runs of one string at one height cost $`1.68 \times 10^7`$ visits and
-  produce no match.
+```math
+O\bigl((r_s + r_j + T_s + T_j)\,\log(2 + r_j)\bigr) + O(M'),
+```
 
-With at most 2003 comparisons per decision (§4.5), the work is bounded, but it is not small, and it runs on the
-renderer thread. Its time has not been measured.
+the second term in expectation over the tables, for every input. It takes $`O(r_s + r_j + M')`$ words of memory
+besides the pages (its Theorem 11), and it stops at the first copy that covers enough.
+
+**What the caps bound (finding F11).**
+
+- The run cap bounds $`r_s, r_j \le 4096`$, and the text cap bounds $`T_s, T_j \le 65{,}536`$. The text cap exists
+  because the sort and the searches compare strings, at a cost that grows with their length.
+- The match cap is checked against the count before any match is built, so `copy-covers?` holds at most 16,384
+  matches.
+- No pair is visited that cannot match. The code before experiment 14 visited every pair of runs with equal strings,
+  up to $`4096^2 \approx 1.68 \times 10^7`$ of them, and its match cap did not bound them: a pair whose scale
+  exceeds 0.4 was visited and not counted.
+
+Experiment 14 measured both versions, in the release build on one machine (its §3.5). Under the earlier code, two
+pages of 4096 runs of one string at one height took 2.58 s for one comparison and produced no match. That is 51 times
+the 50 ms of a long task, on the renderer thread. Under the committed code, every crafted case has a median of at
+most about 16 ms, in both node's V8 and Electron's, including a page that loads all three caps at once (its
+§6.6–§6.8). A decision makes at most 2003 comparisons (§4.5).
 
 ### 3.8 · The empty slide: ROTATED-DATE
 
@@ -1203,8 +1233,8 @@ probe and the CONFIRM after it share it.
    a contradiction too. So at most three comparisons are free, every other comparison makes at least one of the at
    most 2000 reads of item 1, and the comparisons number at most $`2000 + 3`$. ∎
 
-**What it does not guarantee.** The budget counts reads, not time. A comparison can cost up to
-$`1.68 \times 10^7`$ pair visits (§3.7). Also, `plan`'s check for CONFIRM counts *distinct* pages
+**What it does not guarantee.** The budget counts reads, not time. The time of one comparison is bounded by the caps
+of §3.6 instead (§3.7). Also, `plan`'s check for CONFIRM counts *distinct* pages
 (`confirm-page-count`). The cache keeps four pages, so CONFIRM reads a slide again when it has five or more note pages
 (§5). A CONFIRM that passed the check can therefore still run out of reads, and end `:too-many-pages`. That outcome is
 safe, but it is not, as the `max-content-pages` docstring said, "refused before any page is read". The docstring and
@@ -1495,12 +1525,14 @@ which reads the file with the Clojure reader and evaluates the twelve forms, fro
 `confirm-page-count`, as they are written. It refuses to run if one is missing. So those scripts check the code
 itself, not a port of it.
 
-The forms that use JavaScript interop are $`\textsf{SIG}`$ (`copy-covers?` and `note-page-signature?`),
-`rotated-date?`, `pdfdoc-bytes`, `repair`, and the reader of `evidence.cljs`. The unit tests of
-`vinary.slides.notes-test` test them on real and constructed pages. The two JavaScript scripts check them by
-transcription. `pdfdoc_check.cjs` runs pdf.js's own decoder and reads the model's tables from `notes.cljs`, but
-transcribes the logic of `pdfdoc-bytes` and `repair`. `grid_and_budget_check.cjs` transcribes `copy-covers?`'s cell
-formula and the reader's eviction rule. Those transcriptions are the places where the checks do not run the code
+The forms that use JavaScript interop are $`\textsf{SIG}`$ (`note-page-signature?`, `copy-covers?` and the helpers
+from `hash-tables` to `prefix-count`), `rotated-date?`, `pdfdoc-bytes`, `repair`, and the reader of `evidence.cljs`.
+The unit tests of `vinary.slides.notes-test` test them on real and constructed pages, and
+`vinary.slides.notes-signature-equivalence-test` tests $`\textsf{SIG}`$ against the code it replaced (experiment 14
+§7.1). The two JavaScript scripts check them by transcription. `pdfdoc_check.cjs` runs pdf.js's own decoder and reads
+the model's tables from `notes.cljs`, but transcribes the logic of `pdfdoc-bytes` and `repair`.
+`grid_and_budget_check.cjs` transcribes the cell formula, which `note-page-signature?` and `copy-covers?` compute
+between them, and the reader's eviction rule. Those transcriptions are the places where the checks do not run the code
 itself.
 
 | Script | What it checks | Over |
@@ -1520,7 +1552,10 @@ the guard.
 The run of `check.sh --full` recorded here was on 2026-10-18, on the code of commit `7d75f8e`. It was pinned to eight
 cores (`taskset -c 2-9`) of an AMD Ryzen Threadripper PRO 5975WX with the `performance` governor. Every script
 passed, in 7 minutes 18 seconds, most of it the $`n \le 6`$ enumeration (5 minutes 15 seconds). No process exceeded
-1.7 GB of resident memory. The times only tell you what to expect; they are not a performance claim.
+1.7 GB of resident memory. The times only tell you what to expect; they are not a performance claim. After experiment
+14 changed $`\textsf{SIG}`$, `check.sh --full` was run again on 2026-10-18, on the code it committed, pinned to cores
+12–19 of the same machine. Every script passed, in 6 minutes 25 seconds, and each script's output was identical to
+the first run's, apart from the path of `notes.cljs` that it prints.
 
 | Script | Result |
 |---|---|
@@ -1538,16 +1573,16 @@ passed, in 7 minutes 18 seconds, most of it the $`n \le 6`$ enumeration (5 minut
 | the statuses (Theorems 10–12) | `interleaving` (78–132) |
 | candidate $`a`$, the fallback | `candidate-notes` (147–150), `fallback-notes` (152–156) |
 | `restartable?` (Theorem 14) | `restartable?` (134–145) |
-| the guard, the trusted Producer | `plan` (785–815), `trusted-producer-re` and `trusts-labels?` (356–365) |
-| matches, the grids, $`\textsf{SIG}`$ (§3) | `copy-covers?` (222–252), `note-page-signature?` (254–290), the constants (160–181) |
-| $`\textsf{ROTATED-DATE}`$ | `rotated-date?` (205–212) |
-| the probe (§4.3) | `probe-next` (294–314); `evidence.cljs` `probe` (149–158), `read-pair` (136–147) |
-| the scan (§4.4) | `scan-step` (316–323); `evidence.cljs` `scan` (174–192) |
-| CONFIRM (§5) | `confirm-pairs` (325–334), `confirmed?` (336–339); `evidence.cljs` `confirm` (160–172) |
-| the budget (§4.5) | `max-content-pages` (341–347), `confirm-page-count` (349–354); `evidence.cljs` `kept-pages`, `runs-reader` (107–131) |
+| the guard, the trusted Producer | `plan` (1023–1053), `trusted-producer-re` and `trusts-labels?` (594–603) |
+| matches, the grids, $`\textsf{SIG}`$ (§3) | `note-page-signature?` (455–526), `copy-covers?` (270–364), the constants (160–190); experiment 14 §4.5 maps the rest |
+| $`\textsf{ROTATED-DATE}`$ | `rotated-date?` (214–221) |
+| the probe (§4.3) | `probe-next` (530–550); `evidence.cljs` `probe` (149–158), `read-pair` (136–147) |
+| the scan (§4.4) | `scan-step` (552–559); `evidence.cljs` `scan` (174–192) |
+| CONFIRM (§5) | `confirm-pairs` (561–570), `confirmed?` (572–575); `evidence.cljs` `confirm` (160–172) |
+| the budget (§4.5) | `max-content-pages` (577–585), `confirm-page-count` (587–592); `evidence.cljs` `kept-pages`, `runs-reader` (107–131) |
 | the decision after the first paint | `evidence.cljs` `settle` (194–233) |
-| $`\delta`$, $`\textsf{PDFDOC}^{-1}`$ | `pdfdoc-low`, `pdfdoc-high`, `pdfdoc-inverse`, `never-decoded` (704–721), `pdfdoc-bytes` (723–740) |
-| REPAIR | `repair` (744–756) |
+| $`\delta`$, $`\textsf{PDFDOC}^{-1}`$ | `pdfdoc-low`, `pdfdoc-high`, `pdfdoc-inverse`, `never-decoded` (942–959), `pdfdoc-bytes` (961–978) |
+| REPAIR | `repair` (982–994) |
 
 ### 7.3 · Findings
 
@@ -1562,6 +1597,9 @@ Each finding ends with its status:
 - **Corrected.** ADR-0048 and the docstrings were changed to state what is proved here, when
   [experiment 13](../scientific/13-speaker-note-detection.md) was integrated. No code changed. The finding quotes
   the text as it stood before.
+- **Fixed.** [Experiment 14](../scientific/14-note-signature-cost.md) measured the defect, and the code was changed
+  together with ADR-0048 and the docstrings. The finding quotes the text, and describes the code, as they stood
+  before.
 - **Open.** A proposal that the maintainer has not decided. The code is as the finding describes it.
 
 **Paths that can hide a slide.**
@@ -1622,13 +1660,18 @@ Each finding ends with its status:
   a hostile PDF from occupying pdf.js's worker for minutes", and ADR-0048 §8.9 says that, with the run and match caps,
   "a hostile PDF cannot occupy pdf.js's worker for long". The page budget does bound the worker's text extraction. The
   signature, however, runs on the thread that calls it, the renderer's in the GUI, so the caps protect that thread
-  rather than the worker, and only partly (F11). *Open.*
+  rather than the worker, and only partly (F11). *Fixed:* the `max-content-pages` docstring and ADR-0048 §8.9 now
+  credit the page budget to the worker's text extraction, and the caps to the thread that runs the comparison, whose
+  cost experiment 14 bounded and measured (§3.7).
 
 **Remarks on the code** (none changes what is shown).
 
 - **F11.** The match cap does not bound the pair work: up to $`4096^2`$ visits per comparison, unmeasured (§3.7).
   ADR-0048 §2.2 describes the cap as "a pair whose equal strings pair up more than 65 536 times", but only the pairs
-  with $`\sigma \le 0.4`$ count toward it. *Open.*
+  with $`\sigma \le 0.4`$ count toward it. *Fixed:* experiment 14 measured up to 2.58 s per comparison in the release
+  build. The code now visits only the pairs that can match and counts them before it builds any. It also caps a page's
+  text at 65,536 code units and lowers the match cap to 16,384. Every crafted case measured has a median of at most
+  about 16 ms (§3.7). ADR-0048 §2.2 now says that only the pairs with $`\sigma \le 0.4`$ count toward the cap.
 - **F12.** The first `:undecidable` condition, `(> (count multi) 1)`, is dead code (Proposition 8). ADR-0048 §2.1's
   table lists "more than one gap with a choice" among the undecidable cases, which never occurs. *The statement is
   corrected:* §2.1 now says that the condition never occurs, and that `:undecidable` needs $`L_0 \ge 2`$. *The test is
@@ -1681,3 +1724,8 @@ Each finding ends with its status:
    <https://ctan.org/pkg/appendixnumberbeamer>: the frame counter restarted at `\appendix` (§1.4, §2.4).
 10. Mozilla. pdf.js v5.4.149, `src/shared/util.js`, `PDFStringTranslateTable` and `stringToPDFString`:
     <https://github.com/mozilla/pdf.js/blob/v5.4.149/src/shared/util.js#L1030-L1089>.
+11. J. L. Carter, M. N. Wegman. *Universal classes of hash functions.* Journal of Computer and System Sciences
+    **18**(2), 143–154, 1979. DOI [10.1016/0022-0000(79)90044-8](https://doi.org/10.1016/0022-0000(79)90044-8).
+    Hashing with a function drawn at random from a family (§3.7).
+12. M. Pătraşcu, M. Thorup. *The Power of Simple Tabulation Hashing.* Journal of the ACM **59**(3), article 14, 2012.
+    DOI [10.1145/2220357.2220361](https://doi.org/10.1145/2220357.2220361). Simple tabulation, the cells' hash (§3.7).

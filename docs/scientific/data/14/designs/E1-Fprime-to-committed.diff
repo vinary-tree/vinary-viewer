@@ -1,0 +1,217 @@
+--- a/test/vinary/slides/notes_signature_equivalence_test.cljs
++++ b/test/vinary/slides/notes_signature_equivalence_test.cljs
+@@ -3,10 +3,13 @@
+    the implementation before the fix, verbatim (vinary.slides.notes-reference) — returns, on generated page pairs
+    built to reach every branch: thumbnail copies at and around max-thumbnail-scale with offsets on and beside the
+    grids' cell boundaries, noise, many runs of one string, magnitudes that underflow, overflow or are not numbers,
+-   transforms that are not upright, and the match cap, both at its real value and rebound small with set!. Further
+-   tests check the parts of the fix one at a time: the cells' hash (a function of an index's SameValueZero class,
+-   with fresh tables on every call), cells whose indices are huge, infinite, NaN or ±0, a table in which every cell
+-   collides, and the binary search over a sweep of heights from the least subnormal to +∞."
++   transforms that are not upright, and the match cap, both at its real value and rebound with set!. Further tests
++   check the parts of the fix one at a time: the cells' hash (a function of an index's SameValueZero class, with fresh
++   tables on every call), cells whose indices are huge, infinite, NaN or ±0, a table in which every cell collides, the
++   binary search over a sweep of heights from the least subnormal to +∞, strings chosen to defeat a hash or a
++   comparison (array indices, long common prefixes, lone surrogates, non-strings), the cap on a page's text, and the
++   merge sort that groups the note page's strings. The reference has no text cap: it is compared only on pages within
++   it, and (h) checks the cap itself."
+   (:require [cljs.test :refer [deftest is]]
+             [vinary.slides.notes :as notes]
+             [vinary.slides.notes-reference :as reference]))
+@@ -142,20 +145,39 @@
+         (is (every? #(pos? (get-in % [:tally nil])) (rest results)) "every small cap is reached"))
+       (finally (set! notes/max-signature-matches cap)))))
+ 
+-(deftest the-fixed-signature-equals-the-reference-at-the-real-match-cap
+-  ;; 64 slide runs "x" × 1024 note runs "x" at σ = 0.1 is exactly 65 536 matches: not more than the cap, so the copy
+-  ;; decides (the note runs sit where a copy of the slide would, so it covers); one more matched pair (a "y") is 65 537:
+-  ;; nil. The same 65 536 matches against a slide that also holds 1000 characters no note run repeats need 532
+-  ;; characters, of 64 to be had, so no copy covers (docs/scientific/14's case C): false, after all eight passes.
+-  (let [slide    (vec (for [i (range 64)] (run "x" 10 (* 5 (mod i 8)) (* 5 (quot i 8)))))
+-        covering (vec (for [k (range 1024)] (let [i (mod k 64)] (run "x" 1 (+ 50 (* 0.5 (mod i 8))) (+ 50 (* 0.5 (quot i 8)))))))
++(defn- cap-cases
++  "Three pairs at a match cap of `cap` (a multiple of 64): 64 slide runs \"x\" × cap/64 note runs \"x\" at σ = 0.1 is
++   exactly cap matches — not more than the cap, so the copy decides (the note runs sit where a copy of the slide would,
++   so it covers): true; one more matched pair (a \"y\") is cap + 1: nil; the same matches against a slide that also
++   holds 1000 characters no note run repeats need 532 characters, of 64 to be had, so no copy covers
++   (docs/scientific/14's case C): false, after all eight passes."
++  [cap]
++  (let [per      (quot cap 64)
++        slide    (vec (for [i (range 64)] (run "x" 10 (* 5 (mod i 8)) (* 5 (quot i 8)))))
++        covering (vec (for [k (range per)] (let [i (mod k 64)] (run "x" 1 (+ 50 (* 0.5 (mod i 8))) (+ 50 (* 0.5 (quot i 8)))))))
+         rnd      (generator 7)
+-        scatter  (vec (for [_ (range 1024)] (run "x" 1 (between rnd 0 360) (between rnd 0 270))))
++        scatter  (vec (for [_ (range per)] (run "x" 1 (between rnd 0 360) (between rnd 0 270))))
+         slide+y  (conj slide (run "y" 10 300 200))
+-        slide+z  (conj slide (run (apply str (repeat 1000 "z")) 10 0 250))
+-        cases    [[slide covering true] [slide+y (conj covering (run "y" 1 80 70)) nil] [slide+z scatter false]]]
+-    (doseq [[s n want] cases]
+-      (is (= want (reference/note-page-signature-reference? s n 453.544)) "the reference, as registered")
++        slide+z  (conj slide (run (apply str (repeat 1000 "z")) 10 0 250))]
++    [[slide covering true] [slide+y (conj covering (run "y" 1 80 70)) nil] [slide+z scatter false]]))
++
++(deftest the-fixed-signature-equals-the-reference-at-a-match-cap-of-65536
++  ;; registered (design F) at the cap of 65 536, then the real one; the cap is now lower (H-PAIRWORK-FIX′'s Q2′), so it
++  ;; is bound to 65 536 here, and (j) runs the same cases at the real cap
++  (let [cap notes/max-signature-matches]
++    (try
++      (set! notes/max-signature-matches 65536)
++      (doseq [[s n want] (cap-cases 65536)]
++        (is (= want (reference/note-page-signature-reference? s n 453.544)) "the reference, as registered")
++        (is (identical? (reference/note-page-signature-reference? s n 453.544) (notes/note-page-signature? s n 453.544))))
++      (finally (set! notes/max-signature-matches cap)))))
++
++(deftest the-fixed-signature-equals-the-reference-at-the-real-match-cap
++  ;; Test (j): the same three cases at the cap in force
++  (let [cap notes/max-signature-matches]
++    (is (zero? (mod cap 64)) "the cap is a multiple of 64")
++    (doseq [[s n want] (cap-cases cap)]
++      (is (= want (reference/note-page-signature-reference? s n 453.544)) "the reference, at the real cap")
+       (is (identical? (reference/note-page-signature-reference? s n 453.544) (notes/note-page-signature? s n 453.544))))))
+ 
+ ;; ---- (a), (b): the cells' hash ---------------------------------------------------------------------------------------
+@@ -304,13 +326,16 @@
+ (deftest prefix-count-is-the-linear-count-on-a-sweep-of-heights
+   ;; Test (e): one string's heights, 2 000 log-spaced from 5e−324 to 1e300 and +∞; for each slide height hs of the
+   ;; sweep, the heights next to 0.4·hs are added. prefix-count must count exactly the heights with h/hs ≤ bound, and
+-  ;; [lo, hi) must be exactly the heights the reference keeps (0 < σ ≤ max-thumbnail-scale).
++  ;; [lo, hi) must be exactly the heights the reference keeps (0 < σ ≤ max-thumbnail-scale). For every 50th slide
++  ;; height it must do the same on each range [from, from + 9) of the sorted heights: a group is a range of the note
++  ;; page's sorted runs (by-height).
+   (let [prefix-count #'notes/prefix-count
+         sweep        (vec (concat [5e-324]
+                                   (for [k (range 1 1999)] (js/Math.pow 10 (+ -323 (* k (/ 623 1999)))))
+                                   [1e300 js/Infinity]))
+         bound        notes/max-thumbnail-scale
+-        failures     (volatile! [])]
++        failures     (volatile! [])
++        slid         (volatile! 0)]
+     (doseq [hs sweep]
+       (let [edge    (* bound hs)
+             near    (if (and (js/isFinite edge) (pos? edge))
+@@ -319,16 +344,25 @@
+             heights (.sort (js/Float64Array.from (to-array (concat sweep near))))   ; a typed array sorts numerically
+             n       (.-length heights)
+             linear  (fn [b] (loop [k 0, c 0] (if (= k n) c (recur (inc k) (if (<= (/ (aget heights k) hs) b) (inc c) c)))))
+-            lo      (prefix-count heights hs 0)
+-            hi      (prefix-count heights hs bound)
++            lo      (prefix-count heights 0 n hs 0)
++            hi      (prefix-count heights 0 n hs bound)
+             kept    (loop [k 0, acc []]
+                       (if (= k n)
+                         acc
+                         (let [s (/ (aget heights k) hs)]
+                           (recur (inc k) (if (and (pos? s) (<= s bound)) (conj acc k) acc)))))]
+         (when-not (and (= lo (linear 0)) (= hi (linear bound)) (= kept (vec (range lo hi))))
+-          (vswap! failures conj {:hs hs :lo lo :hi hi :linear [(linear 0) (linear bound)]}))))
+-    (println "[H-PAIRWORK E1] prefix-count over" (count sweep) "slide heights × ~2003 note heights")
++          (vswap! failures conj {:hs hs :lo lo :hi hi :linear [(linear 0) (linear bound)]}))
++        (when (zero? (mod (vswap! slid inc) 50))
++          (doseq [from (range 0 (- n 8))
++                  b    [0 bound]]
++            (let [to   (+ from 9)
++                  want (+ from (loop [k from, c 0] (if (= k to) c (recur (inc k) (if (<= (/ (aget heights k) hs) b) (inc c) c)))))
++                  got  (prefix-count heights from to hs b)]
++              (when-not (= want got)
++                (vswap! failures conj {:hs hs :range [from to] :bound b :got got :want want})))))))
++    (println "[H-PAIRWORK E1] prefix-count over" (count sweep) "slide heights × ~2003 note heights, and on every"
++             "9-height range for" (quot @slid 50) "of those slide heights (every 50th)")
+     (is (empty? @failures) (pr-str (take 3 @failures)))))
+ 
+ ;; ---- (f): two crafted pairs where the grouping of a NaN or a ±0 index decides --------------------------------------
+@@ -357,3 +391,95 @@
+     (is (true? (reference/note-page-signature-reference? slide note 453.544)) "the reference, as constructed")
+     (dotimes [_ 40]
+       (is (true? (notes/note-page-signature? slide note 453.544))))))
++
++;; ---- (g): strings chosen to defeat a hash or a comparison ------------------------------------------------------------
++
++(defn- family-string
++  "A :str from one of test (g)'s families: array-index strings whose values share their low bits (one bucket of a
++   string-keyed js/Map in Electron's V8, docs/scientific/14), a long common prefix with the last code unit differing,
++   strings that are prefixes of each other, lone surrogates and code units around them and at the top of the range, the
++   empty string and white space, ordinary words, and values that are not strings."
++  [rnd]
++  (case (upto rnd 6)
++    0 (str (* 2048 (upto rnd 4095)))
++    1 (str (apply str (repeat 40 "p")) (pick rnd ["A" "B" "C" "D"]))
++    2 (subs "abcdef" 0 (upto rnd 6))
++    3 (pick rnd ["\uD800" "\uDBFF" "\uDC00" "\uDFFF" "\uD7FF" "\uE000" "\uFFFF" "\uFFFE" "\uD800\uDC00" "\uDC00\uD800"])
++    4 (pick rnd ["" " " "  " "\t" "\n x" "x\n"])
++    5 (pick rnd ["x" "ab" "Title"])
++    (pick rnd [nil 0 1 2048 negative-zero])))
++
++(defn- family-pair
++  "A pair whose strings are drawn from family-string, with a copy of some of the slide's runs at a thumbnail scale
++   (so that what matches turns on how the strings group) and runs that repeat the families at other scales."
++  [rnd]
++  (let [diag   453.544
++        tol    (* notes/offset-tolerance diag)
++        slide  (vec (for [_ (range (inc (upto rnd 15)))]
++                      (run (family-string rnd) (between rnd 5 20) (between rnd 0 300) (between rnd 0 250))))
++        sigma  (pick rnd [0.125 0.25 0.4 0.41])
++        ox     (between rnd 0 100)
++        oy     (between rnd 0 100)
++        copied (for [{s :str [a _ _ d e f] :t} slide :when (< (rnd) 0.7)]
++                 {:str s :t [(* sigma a) 0 0 (* sigma d) (+ ox (* sigma e) (* (pick rnd [0 0.49 -0.49 1]) 0.5 tol))
++                             (+ oy (* sigma f))]})
++        others (repeatedly (upto rnd 10)
++                           #(run (family-string rnd) (between rnd 0.5 30) (between rnd 0 300) (between rnd 0 250)))]
++    [slide (shuffle-with rnd (concat copied others)) diag]))
++
++(deftest the-fixed-signature-equals-the-reference-on-adversarial-strings
++  (let [{:keys [tally first-disagreement]} (agree-on (generator 2048) 6000 family-pair)]
++    (println "[H-PAIRWORK E1] 6000 pairs of adversarial strings; the reference's verdicts:" tally)
++    (is (nil? first-disagreement) (pr-str first-disagreement))
++    (is (every? #(<= 50 (get tally %)) [true false]) "the generators reach true and false")))
++
++;; ---- (h): the cap on a page's text ----------------------------------------------------------------------------------
++
++(deftest the-text-cap-bounds-each-page
++  ;; Test (h). A slide of 64 runs "x" and a note page holding their copy at σ = 0.25: true. Either page is padded by a
++  ;; ROTATED run of "q"s — counted in its text, but not in the slide's characters nor among the note page's upright runs
++  ;; — to exactly max-signature-chars code units (compared: the reference's true), or one more (nil). A run whose :str
++  ;; is not a string counts nothing.
++  (let [cap    notes/max-signature-chars
++        slide  (vec (for [i (range 64)] (run "x" 10 (* 5 (mod i 8)) (* 5 (quot i 8)))))
++        note   (vec (for [i (range 64)] (run "x" 2.5 (+ 50 (* 1.25 (mod i 8))) (+ 50 (* 1.25 (quot i 8))))))
++        units  (fn [page] (reduce + (map #(count (:str %)) page)))
++        pad    (fn [page total] {:str (apply str (repeat (- total (units page)) "q")) :t [0 10 -10 0 300 20]})
++        padded (fn [page total] (conj page (pad page total)))
++        sig    (fn [s n] (notes/note-page-signature? s n 453.544))
++        ref    (fn [s n] (reference/note-page-signature-reference? s n 453.544))]
++    (is (true? (ref slide note)) "the pair, as constructed")
++    (is (true? (sig (padded slide cap) note)) "a slide of exactly the cap is compared")
++    (is (true? (ref (padded slide cap) note)) "…as the reference compares it")
++    (is (nil? (sig (padded slide (inc cap)) note)) "a slide one code unit over the cap is not")
++    (is (true? (sig slide (padded note cap))) "a note page of exactly the cap is compared")
++    (is (true? (ref slide (padded note cap))) "…as the reference compares it")
++    (is (nil? (sig slide (padded note (inc cap)))) "a note page one code unit over the cap is not")
++    (is (true? (sig (conj (padded slide cap) {:str nil :t [10 0 0 10 0 0]} {:str 12345 :t [10 0 0 10 0 0]}) note))
++        "a run whose :str is not a string counts nothing")))
++
++;; ---- (i): the merge sort ------------------------------------------------------------------------------------------
++
++(deftest the-merge-sort-is-the-stable-sort
++  ;; Test (i). A stable sort by a total preorder has exactly one result, so sorted-runs must return what
++  ;; Array.prototype.sort (stable since ES2019) returns with the same order: 2 000 random inputs of 0 to 300 runs,
++  ;; with repeated keys, (g)'s strings and heights that include +∞.
++  (let [sorted-runs #'notes/sorted-runs
++        rnd         (generator 9)
++        mismatches  (volatile! [])]
++    (dotimes [t 2000]
++      (let [n    (upto rnd 300)
++            strs (js/Array. n)
++            hs   (js/Float64Array. n)]
++        (dotimes [k n]
++          (aset strs k (let [s (family-string rnd)] (if (string? s) s (str s))))
++          (aset hs k (pick rnd [1 2 2 3 js/Infinity (between rnd 0.5 30)])))
++        (let [got  (vec (js/Array.from (sorted-runs strs hs n)))
++              want (vec (.sort (to-array (range n))
++                               (fn [a b] (let [c (compare (aget strs a) (aget strs b))]
++                                           (cond (not (zero? c))             c
++                                                 (< (aget hs a) (aget hs b)) -1
++                                                 (> (aget hs a) (aget hs b)) 1
++                                                 :else                       0)))))]
++          (when-not (= got want) (vswap! mismatches conj {:t t :n n})))))
++    (is (empty? @mismatches) (pr-str (take 3 @mismatches)))))

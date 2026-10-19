@@ -1,0 +1,362 @@
+# MANIFEST of docs/scientific/data/14: every file of the experiment's scratch directory, published or not.
+# One line per file: sha256 of the ORIGINAL file, its size in bytes, its path, and what became of it:
+#   published                 copied unchanged, at the same path
+#   published, paths short    copied with the scratch/repository paths shortened (README.md, Substitutions)
+#   published as <path>       copied (paths relative) under another name
+#   not published: <reason>
+# The first 64 960 bytes of PREREGISTRATION.txt are the ledger's copy PREREGISTRATION.before-text2-result.txt.
+f629335ec3ac9aa29b74b86598a6e70c67374ca8b59dd28b6cbdc26a9444571d     64960  PREREGISTRATION.before-text2-result.txt  not published: a copy of the ledger taken before H-TEXT2's result was appended: the first 64 960 bytes of PREREGISTRATION.txt, byte for byte
+22b9be0884d126a433832dadf2e61f499b994b2ab03c5c295697e0b5656909c3     81869  PREREGISTRATION.txt  published
+9b3b0625c21b38e0b71aa3412e05fb2008574d9c39997b47f81d2b3ee8d6e8d7       301  arm-ratios.txt  published
+77d0a6e1a058e6d184f48feee3281943367188fc4b20c4e808e150b4cae48516     21694  bench-before-combined.cjs  not published: bench v4: rebuilt from the committed bench by instruments/, reversed
+f83f7c2a5399411a06bf7ea81242c0abe562e41e7a1836da115617c5bb27697c     15780  bench-before-fsec.cjs  not published: bench v2: rebuilt from the committed bench by instruments/, reversed
+e159291b619acc50b02de31c1f168a5ae5396474648a9533410aa3720697905f     20862  bench-before-text2.cjs  not published: bench v3: rebuilt from the committed bench by instruments/, reversed
+21c4e6a8dfd56686ee9bd3501455949a746e3fda2e0cf83148b23221bfb9781b      4642  census-all.json  published
+1204c2c645b2c5b51a12b352e27e0399f99c79c20cd0fb72d3aef9f424260917      3327  census-all.txt  published
+7a457990f91fa4e4d4b57a997b99e86d9a309421598b467e91b95f6044d2bee2      2714  census-synthetic.json  published
+cdb0786d5e4c101dddce3c31ed94815ce050cc9cafc5e30004696b68de5f3677     18312  census-synthetic.list  published, paths short
+a72ce778efaa13f52f37b630600c4854d077bcc6da042a07724f9764114870fb      1842  census-synthetic.txt  published
+debb14819cfc2466681ee25f84b95ab6b8e66c50020eadf45f75025fb5734c0e       302  compile-dev.log  published, paths short
+6a5ac8a87068c4ea4d50635d12912e836debeb1bd7f3463b819bed5076ed6ccf       300  compile-fix-dev.log  published, paths short
+e10f0810e2730042417938643d8aace860ccc59da123b367fae37114bc8aae62       300  compile-fix-dev2.log  published, paths short
+e10f0810e2730042417938643d8aace860ccc59da123b367fae37114bc8aae62       300  compile-fix-dev3.log  published, paths short
+610d2a1d6511c5726057343e4774eb1e5388fd41cf30d08188a0180d14967375       298  compile-fix-release.log  published, paths short
+f225d289e95f6034e0b3d2af488f1bcc6f7a6307842ed3b04654e017254264b7       299  compile-release.log  published, paths short
+6bcca601e86994c3bbc8252aec0973561b42297ebed5a549c0439d884df16906     12893  dev.json  published
+4c6d4be55285496015b8c73da8f03a57bb8ab49bd99ec2738b0064c93e108c11      1425  dev.txt  published
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  e3-after.err  not published: empty
+15044915f549883725d8b615900add4ab2fa6c41706932448ccfc31756c3324d     81349  e3-after.jsonl  not published: E3 on F, F′, F″: byte-identical to e3-before.jsonl (published as e3-deck-info.jsonl)
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  e3-before.err  not published: empty
+15044915f549883725d8b615900add4ab2fa6c41706932448ccfc31756c3324d     81349  e3-before.jsonl  published as e3-deck-info.jsonl
+edb6b6a0a6c86de870d2db06479f06e93af55ad5c59507c81d8dd1bd30121b6d     15630  e3-files.txt  published, paths short
+b6b3b264cec28021973f6d3b1037fecc1f04102e8fd83d0879219c7699b48986       950  environment.txt  published
+b7b19d4212a0d9adee1166a6fd5a919d1490428dc6ddf8a8bb181da61f4e9016      9172  equivalence-test-F.cljs  not published: E1 for F (the two are identical): rebuilt from the committed E1 by designs/E1-Fprime-to-committed.diff, then designs/E1-F-to-Fprime.diff, both reversed
+599a267b7042993051a7d03cfb97a7f87f0d39f4cd1ec3b5d58c6c5b6686b204     21864  equivalence-test-fprime-before-fsec.cljs  not published: E1 for F′ (the two are identical): rebuilt from the committed E1 by designs/E1-Fprime-to-committed.diff, reversed
+599a267b7042993051a7d03cfb97a7f87f0d39f4cd1ec3b5d58c6c5b6686b204     21864  equivalence-test-fprime.cljs  not published: E1 for F′ (the two are identical): rebuilt from the committed E1 by designs/E1-Fprime-to-committed.diff, reversed
+b7b19d4212a0d9adee1166a6fd5a919d1490428dc6ddf8a8bb181da61f4e9016      9172  equivalence-test.cljs  not published: E1 for F (the two are identical): rebuilt from the committed E1 by designs/E1-Fprime-to-committed.diff, then designs/E1-F-to-Fprime.diff, both reversed
+fdf3c9a30ac52ff34aa59677e176a851f1500496758378a9f791ccffa17e2fa9      2280  flood/F-dev.json  published
+82dfc9de74e43f2d99b5f88cd613baa426fdf0616741ec5bf6b062c9fd37e2b3      1257  flood/F-dev.txt  published
+2930ed65f4922e801f0a8e22dd2a1a883af4cef81eab9d53fbfde933742ba4ba      2283  flood/F-release.json  published
+8959cb38e63da031d1f0193564e7533d694bd2ce6aec5492b0d76aa59bd9013a      1262  flood/F-release.txt  published
+0120a294a29f0f54f61d8fe5b78fc9390a07dd3bc4ac48ec1012630d5ee94c71      1119  flood/functional-check-F-release.txt  published
+958128a67be9cd00c18976b3d5063071180d8b5afbc56c8e0f816ff90770a9bd      1469  flood/probe-string-hash.cjs  published
+02c38db85be5eb4c2b97ebf430b7a08dbc7b8008b16e84fade8334a64af74b3c       286  flood/probe-string-hash.txt  published
+152f5ced0c4b5ed61a5125846af508ba8be27a8ed50ff3b94bc2076a66f9c6f2       297  flood/ref-compile-test.log  published, paths short
+98361dd5f1afe56e4d12caf730706be2968f78cf96bdf76c76fcc86b8ad27861      2289  flood/ref-dev.json  published
+2ee3e2f41b1d9f9914f159dc67bb8104c6d1bcdff93b56b90f3361f87258b9bd      1263  flood/ref-dev.txt  published
+fadf52ab0a93f29d6445d1cb7b942bad9d50453054eb643025f59c5e805699ac       294  flood/ref-release-cli.log  published, paths short
+7379235b55a0887eb1944ff5998e67a3327bcee5587b702d72cde9c259b8dd65      2298  flood/ref-release.json  published
+c96c23d3aabe44239ef1e183147be39046134294f187633d65b6135eabbe10fb      1267  flood/ref-release.txt  published
+9bc541fcb0c93a8c67e1d9eb3fa18312161a2e9d47f278f564c583cb2e98ed57      1317  flood/run.sh  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  flood/runner.log  not published: empty
+7481f948d86a5d249f0fe156b4c28a8ceccb5981b4acb82185830dc33335e213       816  flood/summary.txt  published
+9283dc0d0429cee6acdb028b7df585d726a052536b7a09044007bce4187d43ed      1794  fprime/bench/F-electron-release.json  published
+1065d3b048827233562c7bb68753cd9b414f36e212796c233ca6de7b3c019829      1119  fprime/bench/F-electron-release.txt  published
+a293b3bbad709d75ed1cf28d9875fe55fcaf616812c75d387f2220481436b7be       755  fprime/bench/environment.txt  published
+26b458b7312590988cace6a89bb4a7ba152920383ab33d7563775c725775f209     14207  fprime/bench/fprime-dev.json  published
+1a507472aa106a7150c63352c85d1d69408b63b443e181be3dac70112ffb587b      2054  fprime/bench/fprime-dev.txt  published
+32eddfe4d158525687c79bd84283b29aa0471e29d43fd1a28fe5432f2d60aebe      1738  fprime/bench/fprime-electron-release.json  published
+4e14dff0d37e577c7c6cc156fa9baa08c513235625125bdfd66797d0d4416ab0      1104  fprime/bench/fprime-electron-release.txt  published
+233e8096af9c97bcc91f3046d3127a7b55d839f5aa493d7fe8205272f1ec73cf      2162  fprime/bench/fprime-release-m16384.json  published
+52e4c5a99efda17f355882fdd007fd7063c45fc933a1ed6eca560f558d90afbf      1230  fprime/bench/fprime-release-m16384.txt  published
+f762ae79aaa7db593a4a3ed4872b145cc9f164c614031a3904ea397f6a6bdf81      2223  fprime/bench/fprime-release-m32768.json  published
+4d21917ccd37c463376f62d5fe1f649bc3f154f8be6f8440c27235e5b2427925      1244  fprime/bench/fprime-release-m32768.txt  published
+effaa6ce4a00a67759d0a38513c52953eb9d3e8b01f0da09e525d478bf5c8154      2146  fprime/bench/fprime-release-m8192.json  published
+c02c9fff1c636338e2c80b9029439dbc29681faa1db0ab46c0793b4a9f3880d0      1215  fprime/bench/fprime-release-m8192.txt  published
+43e321ede1d4374dee7e82abb60444420ba1cc0e68f203d316e03d108b8af4a1     14197  fprime/bench/fprime-release.json  published
+8afb19702ec8f82c0bc496742280118066c26018cf8aabb7964f42253b780bac      2060  fprime/bench/fprime-release.txt  published
+907e615c6729cc44719b170536ec1166cd936e011e6ae19840c738ca4d883501       289  fprime/bench/probe-string-hash-electron.txt  published
+7c917e9bbb625dcd91c6a143aee7723104ef94b05aa32dfda0671311d87e7e61      3235  fprime/bench/run.sh  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fprime/bench/runner.log  not published: empty
+4b7b8a2199cd3e082b2f53e94e886555296f27bef3988773eebbbf78247aabb9      1417  fprime/bench/summary.txt  published
+21c4e6a8dfd56686ee9bd3501455949a746e3fda2e0cf83148b23221bfb9781b      4642  fprime/census-fprime.json  published
+aa2b5ee590aea9376bff8fff99880f2d00a610a5517f8833f510226a25772b19      3341  fprime/census-fprime.txt  published
+0151d786ea53f1c206518b110eda132b9aefcd2e90061fce4c6809e56ac993b4       300  fprime/compile-1.log  published, paths short
+3d7eec2157ced1950c1695c115d0aecabc61cd52d5602523e9fd55b9a9dc4893       297  fprime/compile-release.log  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fprime/e3-fprime.err  not published: empty
+15044915f549883725d8b615900add4ab2fa6c41706932448ccfc31756c3324d     81349  fprime/e3-fprime.jsonl  not published: E3 on F, F′, F″: byte-identical to e3-before.jsonl (published as e3-deck-info.jsonl)
+6c67d125011f98a8e430033f5206ffe0c30bd687e3db0b9f0e9c3c48b6a9ea44      2050  fprime/functional-check-release.txt  published
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fprime/mutants-runner.log  not published: empty
+8480fd1eb61b0e1b07745de5f651dabe262751d99275051bbc74c44a15a65f1d       300  fprime/mutants/compile-m1-nan-equal-dropped.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+0151d786ea53f1c206518b110eda132b9aefcd2e90061fce4c6809e56ac993b4       300  fprime/mutants/compile-m2-signed-zero-hashed.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+e60d2fb36b5a1ace5db65d5bfec9991d055a72850a97bd4a46eaa1e605508648       300  fprime/mutants/compile-m3-nan-bits-hashed.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+8480fd1eb61b0e1b07745de5f651dabe262751d99275051bbc74c44a15a65f1d       300  fprime/mutants/compile-m4-chain-cut.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+2f238631416c2d658b140dc1e51ffdc1073d51e0a6fa98b7a2eb4e992aa92de3       300  fprime/mutants/compile-m5-equality-partial.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+4e6332e781ee2e95e1edfde3f376b30173acd48a8e3a23c31c9aca540d4f2c28       300  fprime/mutants/compile-m6-dedup-off.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+a9ea6df41c84918e890a9f629efd4add5d0fc0ce65484d57693df55d679e552e       300  fprime/mutants/compile-m7-tables-once.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+0151d786ea53f1c206518b110eda132b9aefcd2e90061fce4c6809e56ac993b4       300  fprime/mutants/compile-m8-sweep-strict.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+b38dd49f8535ba87b169805eb86f9f011b71b361eb05aa8671fac2ae63a03580       300  fprime/mutants/compile-mE1-lower-bound-dropped.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+4f4df7272d85c2e3c81a092fc93578c278d262641e33d2345cc3d0f07eb0331c       300  fprime/mutants/compile-mE2-strict-scale.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+7d12ab29be21b3276ef75f8ca1c87d4cecff77c1c0c35957e5e756c7f51fa258       300  fprime/mutants/compile-mE4-cap-off-by-one.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+ce89d50c1b1e7a1db47d2eb3e250197f723c912b76b0ba34b2e75320e19fe3de       300  fprime/mutants/compile-restored.log  not published: the build after the original was restored (summary.txt in the same directory records its exit status)
+d7b35c63ac567e1abeab830b01e31b87bbfe892cc3d301aae354f8fbf5f69ee2      2597  fprime/mutants/summary.txt  published
+a8b16dfee2c07da4e83325bfb3e86295ca54398f328d68aaa6a12c5b32817fa8     13748  fprime/mutants/unit-m1-nan-equal-dropped.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+f29316a71b112d43aa81961484e083aae46e2a4f61da22eea4d7a393024d2a07     12611  fprime/mutants/unit-m2-signed-zero-hashed.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+1f1dd4c79aa99ded4ece82c55ec3d646491decdb29512b4747e7898a14920275     10156  fprime/mutants/unit-m3-nan-bits-hashed.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+b195b305907aaba0922bf03c024821e03014d26b8b4221c2aa5a0987e96b8abf     28458  fprime/mutants/unit-m4-chain-cut.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+0f32f39d61cb30f8daf841462de8fcab7fc1119fbab60c82a58ca4a8c2ef47c8     20292  fprime/mutants/unit-m5-equality-partial.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+4f99cc92453cf9b6b1dfed5c608a50bada5ab7e1849fb403194f11a8d3e49dd5     22826  fprime/mutants/unit-m6-dedup-off.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+002b727f74bca4e8b5d3269d5bca1ed2bab0a17c80d03c629b6fffd5a99cedef    136326  fprime/mutants/unit-m7-tables-once.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+cfa3bb30f3dd2606fc1efb8d9d7b3f72fa37cda60e4b1efe7c74bf0960384b26    160055  fprime/mutants/unit-m8-sweep-strict.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+e1f4546a74f368cc92c71589e7cd99a2749378415cb37605f3a134cfee394a31     16921  fprime/mutants/unit-mE1-lower-bound-dropped.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+9b3348e2fa2f30246145760041726dfbebf8f7a56582f86f6da405a7fe7fac17     45415  fprime/mutants/unit-mE2-strict-scale.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+e17f8e52ffd3ebac6e74147200cdc29208949982e2f079b1c4a5868b796f5411     16875  fprime/mutants/unit-mE4-cap-off-by-one.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+7cbe356d587013f34776ad9d175d4f062c60e09ba7f40b463deede565cd17c6b      1272  fprime/nan-bits.cjs  published
+3f0e5fa67edd2f40b5eb9257c9b858a43147863c2d6e69370695fef17291cd94      9007  fprime/unit-all.log  published, paths short
+2a33cfd88ce09fd97b6a3ab64c40e31dde6c925e9249a85a254721a5d44a4217      1022  fprime/unit-e1-1.log  published
+2a33cfd88ce09fd97b6a3ab64c40e31dde6c925e9249a85a254721a5d44a4217      1022  fprime/unit-e1-control.log  published
+63f58dfc0103789b0546d014849648bd46a6dbf7ae21e4728250a67c9d226ac5      1032  fsec/bench/environment.txt  published
+404f2b1c743cad4ab020e6461a907d1ad904921cc52ab08686c9ddd3f88fb6da      1334  fsec/bench/fprime-electron-release-S.json  published
+7ab06eac05361254569915fd8265ec5d69f18a96390429f184e4abf702c94dc8      1019  fsec/bench/fprime-electron-release-S.txt  published
+87501a9dc63f55376f0ba6faf4b1ed90c4d04499dc3083ed40449d86197543df      1323  fsec/bench/fprime-node-release-S.json  published
+7040cad7d098c2db1709ca1a2bed2214668cd70c2bba1a378ee135b30d3d38e6      1014  fsec/bench/fprime-node-release-S.txt  published
+6c8135de1a87681ac5e7a2dc6fb679713950ed406ff63338d85ae9457e90236a      1325  fsec/bench/fsec-electron-release-L1048576.json  published
+c18ad0394d0cd655d9b69bc1a2ddca697f5b71c8e745d83f873d6dfd6b22fb0a      1063  fsec/bench/fsec-electron-release-L1048576.txt  published
+66fce0a6e6460a8e94541a04b9f14b05220fcf28211573b21a92b4ed6bc79452      1322  fsec/bench/fsec-electron-release-L131072.json  published
+53ac3ef0ebba5777c5dc3c996faefcb060ab7b89350f6cf2c819a6441e21d8e3      1055  fsec/bench/fsec-electron-release-L131072.txt  published
+5860963cd25e63b492866cf8d63dca4ccc802e72ca9f134d552ab2efd827aff3      1318  fsec/bench/fsec-electron-release-L262144.json  published
+ada797e4f4a1c95b12b1aa982e5b987c249b66d0c37dfa1acdaa1d945bd122a0      1055  fsec/bench/fsec-electron-release-L262144.txt  published
+b6e844333eee8b6aa775cb30ebf26ca2c4ed9403d8e84eb9da2d1a8d819d7110      1319  fsec/bench/fsec-electron-release-L32768.json  published
+9d9a77de01396f8b94ae6ab98dc77f6c5d02bec86e4b996a1fc15d901f82b8b1       997  fsec/bench/fsec-electron-release-L32768.txt  published
+a5d5b56e0d81e8ca0a737b2aff7acae0fa163c1425b34ce90e418fdbca38dc9d      1314  fsec/bench/fsec-electron-release-L524288.json  published
+84938c39ecc1ac3cc36ac45a7ac9bcaf3d98cea07dc6ecb4708dee24502e42d8      1057  fsec/bench/fsec-electron-release-L524288.txt  published
+c25c327af908231bf61ad5828ffe984332a9164e799f9a5ffba6db7e09980e91      1326  fsec/bench/fsec-electron-release-L65536.json  published
+9a5c8e7835dd767ec7e6a1597946108ca344f4f2129b45fec658f0d2986b87fe      1051  fsec/bench/fsec-electron-release-L65536.txt  published
+cfe83dcbc87dd64c0d8a72f0113ba19ebeab56a7965a5c73f639f4ad1681b5ee     15179  fsec/bench/fsec-electron-release.json  published
+3b1c88f880b239f9572d97214b11cdc2e23963cd2fe2973089d15e4fe9cb9e1d      2533  fsec/bench/fsec-electron-release.txt  published
+6546a024aedd156da9c0470abdba3b3978ec1e6c2b2db8624a46009ac96e3105     15174  fsec/bench/fsec-node-dev.json  published
+0ba047499590be49dd23696a6e85da291799d4c792a0e371459dbd8d5d02ec80      2529  fsec/bench/fsec-node-dev.txt  published
+003f9db759af33aaf93331dc8ef08c7b16dab403f8b2de4e049a1b2ffeb994a2      1326  fsec/bench/fsec-node-release-L1048576.json  published
+2000afdeb392168822f8af8d8cfe83d4260d2e4f9621d404e14b9cbdb160eccd      1065  fsec/bench/fsec-node-release-L1048576.txt  published
+793c43ac3a89b8a52d5ddb769979a2b7c55dc946b841c4f05e661acf759f58eb      1324  fsec/bench/fsec-node-release-L131072.json  published
+393685f5f59f737588498e644d09637f745c751e589011864723ff617b28f784      1057  fsec/bench/fsec-node-release-L131072.txt  published
+f5d0eeb78c4ac0bb068c0dfc7de311ec07ccfe1bb549d249dd850e7524cdc6c9      1325  fsec/bench/fsec-node-release-L262144.json  published
+c5c407d38babba86423e798e517d82b901a5fb9b50c26fec7a954949b838fa55      1055  fsec/bench/fsec-node-release-L262144.txt  published
+c87404493db1986eccc8fea5ee6a82114462a152fb88b890526625d2ec0d7b58      1322  fsec/bench/fsec-node-release-L32768.json  published
+5e5921f172d4e06fd7b7564e1b06aeb6cd7347d18c8f62b38fa64753902f644a       999  fsec/bench/fsec-node-release-L32768.txt  published
+bf1e7304f51a0f51a78c0e245d1e7eeeae77f56271e1e5d267b1f074f2ec9019      1323  fsec/bench/fsec-node-release-L524288.json  published
+d4ed836a9f83f9f76d0793a80fc82a1830f8fa3a42725b474fa4530cc007550a      1059  fsec/bench/fsec-node-release-L524288.txt  published
+cf4f189954431c5a1d90570b969d4cb5dae8e7cc103b0e836d91bf846ab24453      1321  fsec/bench/fsec-node-release-L65536.json  published
+3fdc57e923191f763a951be8687bc333280ea7cbadd6bd31c6a285202561be68      1051  fsec/bench/fsec-node-release-L65536.txt  published
+090c73f539d74203d65e441b6478d404be192b280f8cef8cff81a0c7d4d7bb0a      2322  fsec/bench/fsec-node-release-cap65536.json  published
+dd5d8085be129329b035f7788dfdc63c8e73e878d06def32ff2fc021d522403c      1351  fsec/bench/fsec-node-release-cap65536.txt  published
+470d24c9371b85c739a93b1d7a14ba8786038c64947cf44923e9ebf097602ba6     15190  fsec/bench/fsec-node-release.json  published
+71c9e416361f982b473e184605fef083610c51a31aefe66fb1f54eeaf040ebad      2532  fsec/bench/fsec-node-release.txt  published
+df6ca612049c2ea834c4a85a46a4378bd5937582e9d36d4d2800cf76b3fee0f9      3242  fsec/bench/run.sh  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fsec/bench/runner.log  not published: empty
+7f048fb9c8366929f27d5a072d7f0b7e0f94ff1069846e5bf58e9fe0ca8fe4a2      3440  fsec/bench/summary.txt  published
+92e3e9a01ff29b5bf500f5c5cfdfd9c8414e6c6fae564e0787db86d0537e6eba      5315  fsec/census-fsec.json  published
+0be7039b5ac968a37f7332b7e3d3a105956f666d1743f92ff4e5fa3423ec2a39      3877  fsec/census-fsec.txt  published
+724b10ba90e13465d7f000072b191c9485f656ef9edb7b8c891c201b06c1d960      2344  fsec/combined/electron-T1048576-M16384.json  published
+10842259e8595e6cc52485ad3e02861fcb9c163464b7cb43c3ab4650c9e2d076      1634  fsec/combined/electron-T1048576-M16384.txt  published
+4370cad7cadca4c09535a76a1e29b527ac37a0e34682b4466f94dd78383396f0      2326  fsec/combined/electron-T1048576-M4096.json  published
+c959be9cca85372d79e8beb2952763921ac22f45acf43f9ef08904360e0ea520      1623  fsec/combined/electron-T1048576-M4096.txt  published
+001927566df4a489363467a4b21909e14113da44a45d08c664db146533026a95      2318  fsec/combined/electron-T1048576-M8192.json  published
+a0b84b74469563439b52736f36a7221a9daf9f0899dc5b6f3e8f5481034a519c      1621  fsec/combined/electron-T1048576-M8192.txt  published
+76f885e4c298ed38747d1e3cc506b409ebcda550a454dcedf5577beb9141d434      2345  fsec/combined/electron-T131072-M16384.json  published
+1417692255fbee949aa4bca917dec79d4413487d4861de21f40a590cb4afef1d      1621  fsec/combined/electron-T131072-M16384.txt  published
+e8ce41865781283ed28c0a32895bde1cec2c35565b386f025dff1be9a093d4d0      2286  fsec/combined/electron-T131072-M4096.json  published
+071caeaa6f3a8f9382c0dd70b1ca4682c01f5a7b3c289cbeb5055edccc727a9f      1607  fsec/combined/electron-T131072-M4096.txt  published
+6b7d655c255ca6c7a82222d5437bca3554f0430b1daa4489a54c5668b74563b0      2325  fsec/combined/electron-T131072-M8192.json  published
+eb7c94c2530f83c97b185e52560548214f0f84048e907b07e452e46bed17176c      1613  fsec/combined/electron-T131072-M8192.txt  published
+570af70242da6bf1c0c930532b6c46bfc4a025fdf55c9375e24df86fb7b16903      2343  fsec/combined/electron-T262144-M16384.json  published
+f0a8232e239a0394bc1ab60e26590d74e8d5096405c1d5e5da4deaa8854f0aa4      1623  fsec/combined/electron-T262144-M16384.txt  published
+a78a62af28ce219f953a7e8c804380e87adf7d709fe6ebc9cdbf754c965f34fb      2305  fsec/combined/electron-T262144-M4096.json  published
+871891a05ad2319170fea1b4a6deb09422ef14d631895f60bb5a5c6cab9dc64a      1611  fsec/combined/electron-T262144-M4096.txt  published
+2a88e4b6b82cc3d25288b7d777af0663cd06e28403a7a6495ad72bc491668dd0      2316  fsec/combined/electron-T262144-M8192.json  published
+40caca7336641d18cb4a45c55757ade3def1bedab9fd4b1052a3e8ab794c2e9c      1613  fsec/combined/electron-T262144-M8192.txt  published
+1694e00a8c82a99cf5ac38a325c282e5ce6c0bf97008f64d08c77fc5f2320f4b      2341  fsec/combined/electron-T32768-M16384.json  published
+b33b07436a1e680c26cf5eff6777e6c8cfcabce0c8579b4902388fe542920219      1561  fsec/combined/electron-T32768-M16384.txt  published
+0afe273e99516b75e6af176c938762c99cb0f43c0e948031c668cf20b8b776f4      2269  fsec/combined/electron-T32768-M4096.json  published
+bfa130fc8087d7ca8eddfdef799a69b972aee789fd4b0103be9c088456bbd9cd      1543  fsec/combined/electron-T32768-M4096.txt  published
+f57de4c4e398c82193a9f6013729f1ca111cad9d30de439c81e17bc9ed09044e      2323  fsec/combined/electron-T32768-M8192.json  published
+3dfff97025db631c925db8063c4280d0c3ab79ebe29a5784a4b5c2bab7dffb4e      1553  fsec/combined/electron-T32768-M8192.txt  published
+c6b6dc25e282c14f27c302ef5413f8d9c3c65458c943715e78dad06ef91c2d49      2347  fsec/combined/electron-T524288-M16384.json  published
+cf0e97e7e88d12637ccdbe9d9bfdfb3eb112010e387fb384a841f04675d7ea57      1627  fsec/combined/electron-T524288-M16384.txt  published
+97ce4a2a445d5fe78813f9d9e8af5bd4d483f7a982575e0f5b462ce8614f21f3      2305  fsec/combined/electron-T524288-M4096.json  published
+5d60b2459156f6fa220083d20dfa5b84519ab6f4c3339e901888bbe9747b6e52      1615  fsec/combined/electron-T524288-M4096.txt  published
+2e99a90a19541364ddfb65780ca9644f8fb66a4f5677d52d2482297d0a7567aa      2326  fsec/combined/electron-T524288-M8192.json  published
+ecfca1b0500bf277d79651303984987fd900d8902e21819f976254d43c12e93e      1617  fsec/combined/electron-T524288-M8192.txt  published
+f577bd8ab8957536652f27f39d07842c45aeb4f1aab3c87f29a573bf9e0b9c71      2341  fsec/combined/electron-T65536-M16384.json  published
+aa9d8b603cf5891b3134083eee543fc9d83b90a33411ff3f2f902546636cb001      1615  fsec/combined/electron-T65536-M16384.txt  published
+83f0df91ac38e038768e0c179c60701e0846aca50eaf967c03f235408de1a9ba      2261  fsec/combined/electron-T65536-M4096.json  published
+b30c1393f655684ad6273dd06ce46eaf6a22ca2f3b48e270ddeac2c112a90872      1599  fsec/combined/electron-T65536-M4096.txt  published
+1d3affcd341efb7267cc7cfeeb2be62c94e81733571039dcef0d5e76e81be88c      2313  fsec/combined/electron-T65536-M8192.json  published
+322d5a883e3f8c093237b0a5f16df53a814a86438121b413c3e2988440cd2461      1606  fsec/combined/electron-T65536-M8192.txt  published
+ea037622ec498b8d77bdd2121502269a1a2bbcf41c1ad669d646729e36f575f8       239  fsec/combined/environment.txt  published
+d83dc6453f632cc1c7b9fd5cb1f4e2dee4625ae8a7a1d4cc77929da3e03e6e36      4805  fsec/combined/functional-check.txt  published
+ffa0530fdd63881f3b301ed191c6ddda08f8ea9e7da6bc664389bd281f103d37      2347  fsec/combined/node-T1048576-M16384.json  published
+5f933d4e525ded449315142cacdde078c28ec69755201714dfaeeef3682856a6      1634  fsec/combined/node-T1048576-M16384.txt  published
+007bcd35430a0663e2bd8586d7779ef27973feb3ef1bb0bd27e8ebc6909c8754      2325  fsec/combined/node-T1048576-M4096.json  published
+348bb05b38e2939272743baeb6542cc4634f799a14a04300c3cf82bff210acd1      1623  fsec/combined/node-T1048576-M4096.txt  published
+4afb4540265e9aefd32a57c85786948610b68b0d4b6c538f1be0b62027dc147e      2329  fsec/combined/node-T1048576-M8192.json  published
+fc678254d9c4f82d46b75ff206853892e5d49d72a75be54a17fdfebd83183bf9      1623  fsec/combined/node-T1048576-M8192.txt  published
+873150586c9afaf80063f2b54b89c156e51de7d15a15d2bd6f7fdd34b8269d20      2343  fsec/combined/node-T131072-M16384.json  published
+09eb1becd0d7be6075dad6f449acc9a513996ff9f3ddbd137c9abf4d9b2cdc34      1621  fsec/combined/node-T131072-M16384.txt  published
+677496f204f746e5f97c386decd7f3601be0394d1366e828447342584cdd33e0      2285  fsec/combined/node-T131072-M4096.json  published
+991d4d2ab8defd56d727b6e8a01685f3321eca54f750ce59054b9874102cd71d      1607  fsec/combined/node-T131072-M4096.txt  published
+ba89abc18bef51936084cdfba5e258f156c6fa9e535f52b71dcdc097d59903fe      2324  fsec/combined/node-T131072-M8192.json  published
+2e8fe67282a180574ac3cccdb30188ac1abe36b36d183e5fffc1a5b6eae74b2a      1611  fsec/combined/node-T131072-M8192.txt  published
+fa15752f7a68ab9f3cb4486fa23b4d2384f29af3046c9d40cc4fd3e74eb55a5f      2348  fsec/combined/node-T262144-M16384.json  published
+24f6a13dc9daf1fae98c35852a8c251fd0ede88393eb2062d2756c97e69f2587      1622  fsec/combined/node-T262144-M16384.txt  published
+8537abd6027a952b9dc5010d8740d55fa98e80bf2e5e806a9f04738aaf46ba08      2310  fsec/combined/node-T262144-M4096.json  published
+37a720600b01151ea967503b2346206b7fd804707f3bd371c9fbe6ca705e8e39      1611  fsec/combined/node-T262144-M4096.txt  published
+2d60fec42b3389ebd3bd78a28a5d321b21a806017f325ddfc876436968c292ae      2317  fsec/combined/node-T262144-M8192.json  published
+d2d628167e6bce8e364e4ebb3223688177c61af8df76e7c4d9ef2cbf4d3902b3      1613  fsec/combined/node-T262144-M8192.txt  published
+d7d9e285dfd51c79a78840def45172c203944b902d4f1cd08bfb22ffe924a805      2340  fsec/combined/node-T32768-M16384.json  published
+2f195c5d48556cd93a08b1f4c47d02d68158d894257f661a7fc4c2f0a6b01da4      1561  fsec/combined/node-T32768-M16384.txt  published
+764120795de9959490c2f229e4b7ba6651926176b1f8e564c8c188c5be41301c      2285  fsec/combined/node-T32768-M4096.json  published
+7b7f68ac822a536140f153ecc347953d7a0eb8a16a917d5ef9cf10b5774ca5ca      1548  fsec/combined/node-T32768-M4096.txt  published
+e2df31f4dfb62dbc45e596b6912e83d76e2d2932a6b0bcda99d3cd05299db450      2321  fsec/combined/node-T32768-M8192.json  published
+08deaaeabcda7d77d34bac64aaf4509ca917f32127079f51b7d188502bd26c6d      1553  fsec/combined/node-T32768-M8192.txt  published
+5d88554261cdcf587a30e62d77f65dc20899d258c0ce8fdf950ed9f6fd18eb52      2343  fsec/combined/node-T524288-M16384.json  published
+e891a5ad43f51faf2f2ad18eb97fcf89c60ea6848c50e1921cac662656929b55      1626  fsec/combined/node-T524288-M16384.txt  published
+a5707d1d4a2d1dfa95209cb40a7e8770974a661963545012ca4608a417a3c998      2307  fsec/combined/node-T524288-M4096.json  published
+7acebae6c321cf0cce51587949fdf03f422460e19f3e185a8bc1773387a1653d      1616  fsec/combined/node-T524288-M4096.txt  published
+e8aa66baa7a61f403b29943f50be1a4d35477263173c07141980c7cb27a9ccab      2319  fsec/combined/node-T524288-M8192.json  published
+ac56f595fdbfd370a2e1f937f7946fb4fd49ec480549e263b787016d8fbde918      1617  fsec/combined/node-T524288-M8192.txt  published
+6ed36fd8f9baf2dca66c2ccfccad614393b1d7065ae1b1d4fc9bc55e530e85cb      2347  fsec/combined/node-T65536-M16384.json  published
+6175a2f8dec4c898954b828a0f0d4e14c85788a1724636b3bcc12ee2c939c9bb      1615  fsec/combined/node-T65536-M16384.txt  published
+72d4b9b5966196f193241bf6691d9c5ac25762fdc6f37858a9f7471e1d778abb      2295  fsec/combined/node-T65536-M4096.json  published
+2875737cc5ea58f6d307f5a8a35c0aa7cad8b744ff61fa167718c20c6b26b286      1603  fsec/combined/node-T65536-M4096.txt  published
+40d8bfcf0437d19a0988171c361c2e3cca9d41d24574bea35547a76f79cccd51      2319  fsec/combined/node-T65536-M8192.json  published
+7faae05c1341d9a34f54b78c769b21d8ba9ff3f0a49a24a6f307bfeb675ba089      1607  fsec/combined/node-T65536-M8192.txt  published
+604a992341a0185dba60f0783d22ccfa28d28042cf81fb96fed07c6487c0e69b      1894  fsec/combined/run.sh  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fsec/combined/runner.log  not published: empty
+e604f9debe1003d22a7765b7c0e2ee94f5f260c9daa72255b55523e7c3128114      6540  fsec/combined/summary.txt  published
+e4e2aa72e999d4f4c10a704c969628a6c8971be167c4359cb0f983c5f8bfcd6d      3178  fsec/compile-1.log  published, paths short
+b85354e73f5eaefa8e5c9b82882454053a5c59cced78f6336a651a9b2920807c       300  fsec/compile-2.log  published, paths short
+d1a16a60c7216cde671e064e3a6a5b46db6f5da7098ba8b2cec18b5153058d56       300  fsec/compile-3.log  published, paths short
+e11900c8016765341a4f8a5c682dcc5533fd4da714c36d5b2ee40f1a01778ea9       297  fsec/compile-final-release.log  published, paths short
+43b6c6d17aa68894f529fa4dcd755a9a7bdd7509af7b28546157ba59b796d210       300  fsec/compile-final-test.log  published, paths short
+096ea3cf7d2604238fd8cfcdcae13fa58db68dd070f2058f9b6d865cc220bda5       297  fsec/compile-release-1.log  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fsec/e3-fsec.err  not published: empty
+15044915f549883725d8b615900add4ab2fa6c41706932448ccfc31756c3324d     81349  fsec/e3-fsec.jsonl  not published: E3 on F, F′, F″: byte-identical to e3-before.jsonl (published as e3-deck-info.jsonl)
+49af2ada0b108b0ec09af5761225659d5eaf87a85f38d3c7b6600c3ac0c2197f      1013  fsec/functional-check-fprime-S-electron.txt  published
+40b35e6b4b4da7ccb6dc714ed4d2f8524c88b1bf43b81ab9386a55f7e68a17db      1014  fsec/functional-check-fprime-S-node.txt  published
+64c9798afa6a92e7cb212d86ef8bdea97a1dbcaf12ed9602234ff082fc229979      2943  fsec/functional-check-release.txt  published
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fsec/mutants-runner.log  not published: empty
+42a22a3aadcbde1efd841c89feed4b04a1fc422ce7fedd464656f641faf9204d       300  fsec/mutants/compile-m1-nan-equal-dropped.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+83eb1ab40e735e30f571f7d373c2467fed932c90394daa151f45a7c55d5e2b00       300  fsec/mutants/compile-m2-signed-zero-hashed.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+432382acad314bf25803685ed3c49bc72f88fb5e7b6656fe7f54e50e4148bd45       300  fsec/mutants/compile-m3-nan-bits-hashed.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+43b6c6d17aa68894f529fa4dcd755a9a7bdd7509af7b28546157ba59b796d210       300  fsec/mutants/compile-m4-chain-cut.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+4e6332e781ee2e95e1edfde3f376b30173acd48a8e3a23c31c9aca540d4f2c28       300  fsec/mutants/compile-m5-equality-partial.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+43b6c6d17aa68894f529fa4dcd755a9a7bdd7509af7b28546157ba59b796d210       300  fsec/mutants/compile-m6-dedup-off.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+21ca6c50d676a8ceaf1eaf7215d956b8a23051d047cf92c59a505db0025e183a       300  fsec/mutants/compile-m7-tables-once.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+43b6c6d17aa68894f529fa4dcd755a9a7bdd7509af7b28546157ba59b796d210       300  fsec/mutants/compile-m8-sweep-strict.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+2b38e88ae94b8da629e9d1f7c7da8a34bc5e6cbf6828804fe292100a4f8a3a61       300  fsec/mutants/compile-mE1-lower-bound-dropped.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+83eb1ab40e735e30f571f7d373c2467fed932c90394daa151f45a7c55d5e2b00       300  fsec/mutants/compile-mE2-strict-scale.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+4e6332e781ee2e95e1edfde3f376b30173acd48a8e3a23c31c9aca540d4f2c28       300  fsec/mutants/compile-mE4-cap-off-by-one.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+43b6c6d17aa68894f529fa4dcd755a9a7bdd7509af7b28546157ba59b796d210       300  fsec/mutants/compile-mpp1-lookup-first-unit.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+bdc295d91f3cc15ca32e98ac31b3ae63b0c30a92ea903059baea1e4ba4aa7bc1       300  fsec/mutants/compile-mpp2-sort-string-only.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+f64c49f7c0a8196fe29ab44be25e8b4e154f77e65597332d0ab0e81587df1c2b       300  fsec/mutants/compile-mpp3-group-end-short.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+42a22a3aadcbde1efd841c89feed4b04a1fc422ce7fedd464656f641faf9204d       300  fsec/mutants/compile-mpp4-text-cap-strict.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+432382acad314bf25803685ed3c49bc72f88fb5e7b6656fe7f54e50e4148bd45       300  fsec/mutants/compile-mpp5-text-cap-upright.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+8480fd1eb61b0e1b07745de5f651dabe262751d99275051bbc74c44a15a65f1d       300  fsec/mutants/compile-mpp6-text-cap-slide.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+08528c3df5bf8f8fbb5bde635e22615d22c887d3cd9ce394de2a1d7d26900214       300  fsec/mutants/compile-mpp7-merge-pass-short.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+2f238631416c2d658b140dc1e51ffdc1073d51e0a6fa98b7a2eb4e992aa92de3       300  fsec/mutants/compile-restored.log  not published: the build after the original was restored (summary.txt in the same directory records its exit status)
+5a7995c07496b5f63361d0c2c1cb8e27db0b647e5d38a2710b28fd6b76c2603c      4866  fsec/mutants/summary.txt  published
+b2ab6385bcc705b545ea2d489f61c92da1b24e915f353af5d3b33692e3ae88a9      1203  fsec/mutants/unit-control.log  published
+7ea8a38e995c8cd7cece0d2d0610ffa224e7bba758354b5bcc1ecfb6d24e8705     13929  fsec/mutants/unit-m1-nan-equal-dropped.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+8e61791704806938bc31f5fb22d40593f02b4c8553c00d618907332d7b036961     13421  fsec/mutants/unit-m2-signed-zero-hashed.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+16b411c23933536edf504c3cbf2f32d69e6765b723f41b79ace17f1ce45601f1      9911  fsec/mutants/unit-m3-nan-bits-hashed.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+365484e67082b2ebd9ac964da4e72f1e426231e81a34c1a9b3d2b8e64f392781     25249  fsec/mutants/unit-m4-chain-cut.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+be2d105de8564c35746cc495ea05fb988904d13a4689449012d77579b6c115ac     28509  fsec/mutants/unit-m5-equality-partial.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+be784c498d0a716de45bd6c731ebcfdc292acf7eeb48e8bcad85e741702de60d     23007  fsec/mutants/unit-m6-dedup-off.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+3acb1cf7ebdb7272ed9b840051bb789ed00d66ccfa4b19ac0226395749d96582    136307  fsec/mutants/unit-m7-tables-once.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+7071a06fc2c8cfb2f4fb2bb6b8e52854073f3faf1ab387c36db58f0d87b24291    927778  fsec/mutants/unit-m8-sweep-strict.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+94eac5b7f3c263a44bca53ba793b3a7ef3ed83a869592ad832336ba6273fb51b     17102  fsec/mutants/unit-mE1-lower-bound-dropped.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+481e103dc0c6b1532b830611878fdf4713581d38ec8e4285ed70b72575fc074b     50456  fsec/mutants/unit-mE2-strict-scale.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+64b399b387b6462d27cb3bef063e39dc8eef5c830117c846a03eed966eab2c91     17645  fsec/mutants/unit-mE4-cap-off-by-one.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+09addae3641c3da2f538622ee42537706a422328d6658f3e7eb0028a7ad58bdb     42055  fsec/mutants/unit-mpp1-lookup-first-unit.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+edbc8178c07f971a8c74279134845ec8d21669e2e9803f066b7397334b38c832     76922  fsec/mutants/unit-mpp2-sort-string-only.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+7a35cad40d9793dd4fc7c64c32928c36cb8d5df7c612e47a01e3b0b774f5be5f     60527  fsec/mutants/unit-mpp3-group-end-short.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+dc8a05d9c9f871ab66c1f891d70ef0a92ac405c506f68f1d1d708a1806b98485      1935  fsec/mutants/unit-mpp4-text-cap-strict.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+60a49a70ededa11af026d07d6743fbcb847b747aab3ac1a9f336e23b659ba1a8      1655  fsec/mutants/unit-mpp5-text-cap-upright.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+a7b5855e6d69d5b20dc1d975de1e4be2fca39f619fbcabc540c708265e0cc973      1431  fsec/mutants/unit-mpp6-text-cap-slide.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+1bf2e1a69833386aff4218020f18a02ca07370dedefedeff205b83c44014239f     79519  fsec/mutants/unit-mpp7-merge-pass-short.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+023efefa8b51deaf1efbd4cc3fb275d857e8677c9a67c31fc866b370319f3d7c   1272436  fsec/prof/CPU.20261018.133303.3215193.0.001.cpuprofile  not published: the CPU profile behind fsec/prof/S-release-self.txt (1.2 MB)
+336568e1ae15837ded287d1b1bef73e30951cbd54a8fdd0074b7853ae6a87de6      2395  fsec/prof/S-release-self.txt  published
+e29d2454a560b7d2499ea5b46065643176cf0c1b4082da051b211638e5d08185      2312  fsec/text2/electron-L1048576.json  published
+04bb8c1380be61539eb5f455d9de997bbc00899fa4403adaef59c1af2c2ae829      1509  fsec/text2/electron-L1048576.txt  published
+8069e5a21cbda499e8b9e62677143b509a439e943c3f4dfa37755c055259080a      2272  fsec/text2/electron-L131072.json  published
+2b867d9dd8e15ac130aecf9ab6848a322f9b8644fce62fe002d27ba13fa7b154      1489  fsec/text2/electron-L131072.txt  published
+bc2c8fed5b62b9ab443b1f0651f37c26ce3b7e7abbad913eef9e58d47c4ce960      2276  fsec/text2/electron-L262144.json  published
+57e03bf684101c60fc2c1d5f478d19b6a7f72c91eb7e18378e2e40208c406123      1491  fsec/text2/electron-L262144.txt  published
+6e0e6f877f945aff1508b93ad33c135ef562c1d3c553a20bca40e3419c14c3a2      2275  fsec/text2/electron-L32768.json  published
+a2a77279bc6261b992e5875044c890ad9511c7b3c182c717e3ec20acdf175242      1426  fsec/text2/electron-L32768.txt  published
+cb4f421f24a1e525c391e6722c9592851ac6eb6cca6c043a6c389237b47b4bf4      2304  fsec/text2/electron-L524288.json  published
+ace6f5ccbc671e77891be50499a0688187071cf289c6a7f96126b6b39b82e92f      1499  fsec/text2/electron-L524288.txt  published
+f4b20748c6fc9beb54813f974ca0c38de3df602614093792d61ccd9eb1e29001      2268  fsec/text2/electron-L65536.json  published
+526eb8eb24e13620e914a5fe47a86468e93497bf54808422b8b1775166703739      1477  fsec/text2/electron-L65536.txt  published
+06447e57700adf6ad78916582f7b109c3c0bda54fc82c6ab250038f936cf3450       239  fsec/text2/environment.txt  published
+b5786fc5e03a2cce8e00448119481d398f1f91476ee439ae67041966b89f2674      1425  fsec/text2/functional-check.txt  published
+005799738f25f551326de6755e9feadcaac862453b6cf63dedb8986e19e21ba1      2313  fsec/text2/node-L1048576.json  published
+8f551a4f9e27072b8079319f7a43c645037621e5aba0896404564ceacca38140      1511  fsec/text2/node-L1048576.txt  published
+faacfadcc23fab983ad2e39540070f85b517316eacf8ab0a715831a812d6e3c3      2294  fsec/text2/node-L131072.json  published
+8bf863b2a8a6910c8f85764ece27d245f9ef07ee4786b8fce9c421e5b3c6ad8b      1493  fsec/text2/node-L131072.txt  published
+f023cef29ff462f8dfc86c39253efdebcdaad6a711d18248f848cca55868cf1a      2292  fsec/text2/node-L262144.json  published
+ed8da5c9830c82fb870978412c3f00a86deb09f20a625084a969debdaa3ce763      1492  fsec/text2/node-L262144.txt  published
+95d8c8951112150aebb27db293cb5739ec4acae5a6329e16b0044517b683e9a4      2278  fsec/text2/node-L32768.json  published
+9c82feb17ff3085085eebc6b4c9fd5502c80c96230b3b0904a47cda73b3baf3a      1427  fsec/text2/node-L32768.txt  published
+9f2ed6640f33068e5f67ce8180ea607567b2a6d72b498da3f46210b550248abb      2302  fsec/text2/node-L524288.json  published
+255a1d9e49bed465f6efceab9519a353ef64e81d70181d0a50261ff6388ee80b      1498  fsec/text2/node-L524288.txt  published
+a9a24b6dbefe6beb4316054f650dadf66dac5d036810a07b6d532734e3307ad9      2274  fsec/text2/node-L65536.json  published
+4a05c6265e3953cf10324e306c213b80f40014008f3265f98e4b6287dd4f6516      1483  fsec/text2/node-L65536.txt  published
+bde7a97a23292079279a5ff754899ee07a2f62a351c1589b1b5ee636dbb2153d      1819  fsec/text2/run.sh  published, paths short
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  fsec/text2/runner.log  not published: empty
+73d46a21e952c03336a44608fc17bab7557de9726316d6560e4825dd27fac40c      2032  fsec/text2/summary.txt  published
+69dfa7cc660e4c3d20db856617dfe6e537a1da30f071f972da791ff6ab4a73a2      9188  fsec/unit-all-1.log  published, paths short
+496c1ea5a954fd4781bf3a6ad4a0c4961cb8aa6f59e9f261a0df0b6b80ecd016      9200  fsec/unit-all-final.log  published, paths short
+2a33cfd88ce09fd97b6a3ab64c40e31dde6c925e9249a85a254721a5d44a4217      1022  fsec/unit-e1-1.log  published
+8ba575662b630178190b38e8a8e065a08aecd379147de505285875ebadeacbbd      1183  fsec/unit-e1-2.log  published
+b2ab6385bcc705b545ea2d489f61c92da1b24e915f353af5d3b33692e3ae88a9      1203  fsec/unit-e1-final.log  published
+5fe413b53e8c6472de3cc4b70c682535d7c1546e1df2c5059ae13b8681980acc       556  functional-check-release.txt  published
+f4a9876a6546d6774d2b094dd1035e201587e8f35444d11b943c861fd3e46dd7       833  functional-check.txt  published
+5c463f48cf124ad8a17f1cd48b2ee2d127f3b30b385f58eafbfdfb99fd18f42e     20324  local/census-all.list  not published: lists or describes the user's own decks: never published (the census reports counts only)
+05d806c8ec0c402742c188e7ecc82ffac953d8659797d2f96ee619c2a2dae13b      2012  local/census-local-real.list  not published: lists or describes the user's own decks: never published (the census reports counts only)
+67aa6c9d3659c659739382bc8dd408175e53681db5f80196e157e738bc36f7f7      2884  local/census-local.list  not published: lists or describes the user's own decks: never published (the census reports counts only)
+1431dbcc354191e97e86ab5882dd90380f758525b512ca5570c6cb5db41cba09      5005  local/classify.txt  not published: lists or describes the user's own decks: never published (the census reports counts only)
+fb72bb2b1c21afd42741d1b5cba807925ad9e7c24496d2790590166a139b584a   1165961  local/deck-info.jsonl  not published: lists or describes the user's own decks: never published (the census reports counts only)
+7bd4cf2abf510ce201d8b7bd1a8ac4c4af94c22f8f436ab884496e05cc126ce0    223512  local/pdfs.txt  not published: lists or describes the user's own decks: never published (the census reports counts only)
+2ff772bf7f2a98371a7eda679b5d3b0616f88c914793976d0b8e7a7ddc997f10      3964  local/summary.json  not published: lists or describes the user's own decks: never published (the census reports counts only)
+f890e2fffe282937d2cabaad250377191a28f70942fd3eeaae628a2288586303      1383  mutants-fprime.sh  published, paths short
+9cded6cfe93446bac4cb8ea4887f5b99b58cd0ee3e2289766bdd9ff7c66dc59a      1804  mutants-fsec.sh  published, paths short
+ae0830eac7ca2647af91809347618379835045b23a7b1b915bb1a3768e1de639      1266  mutants.sh  published, paths short
+1707281e0976c6a01397f6cace5031cdb142f69f5f885084ee0e8e14b338fbf6       300  mutants/compile-mE1.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+35be7c9693304f504e814c12b768ce1c8530f6b068bdee33923cccc636083ea3       300  mutants/compile-mE2.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+fc11167416235da76cffee929a2d87f07c89e7155869a2d255a27164bd027097       300  mutants/compile-mE3.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+8ef7931e598918bc04b197b05f299ebbfda4024541ecc9f2fc3bff87bbe9b64e       300  mutants/compile-mE4.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+604c8d3b3aca33af48ecb60ef4ef0fd9b3663330d944cc4fa1081debf5678b70       300  mutants/compile-mE5.log  not published: one mutant's build log (summary.txt in the same directory has its result)
+71595c80283475297fdd7cd25b692dfd84c7e3809fc65d3502441e120d5ca24f       300  mutants/compile-restored.log  not published: the build after the original was restored (summary.txt in the same directory records its exit status)
+b87f842d27c7c7f72769bcadfca606fca499ef2324c897a23d39c7116ad01be7       692  mutants/summary.txt  published
+8248e7b92b97430e419d4735e8dd3fa798e88947a9cc31eea54f3021d4ce647e     11859  mutants/unit-mE1.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+60ad4a8adbad019411dbf5814fab155670f794e5589c2adc5906f90e69ff9ada     32459  mutants/unit-mE2.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+cad792d3152e448b285576e8a95abb49334d8ea1cac6a2fdd79b2d0e319bca03     10812  mutants/unit-mE3.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+d9fe28c7b4be260ddb1ca8dc853215e56580142ff72fd8914f01b147c267bd70     16517  mutants/unit-mE4.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+fbed55d1c2f059560385f667b39798efc34f114149fa8d294f43985a97c5c4fa       872  mutants/unit-mE5.log  not published: one mutant's E1 run (summary.txt in the same directory lists its failing tests)
+0068623bbc126ba90118bd6113951a85040f1d3d3fe7aa9310109531de90f4ee      2158  mutate-fprime.py  published
+994a7936f41edbcebd4fd4ce6b96166a4890db2f45ee287b68d63cd746ea5830      3381  mutate-fsec.py  published
+c1b5ee1baa6cf4d32d8a2e3043877a5bfd7adb4808fbbe39a358d9b9c83ae8d6       777  mutate.py  published
+cd8ae0e473ce2432314ec499b493e546dd309a2413139907d257bf0ce535bf66     54404  notes-fixed.cljs  not published: design F: rebuilt by designs/R-to-F.diff
+3ffb781d2e7cab27fce101faee23c71b29f3137c4b5a45f5f9ae28c76cba3916     59326  notes-fprime-before-fsec.cljs  not published: design F′ (the two are identical): rebuilt by designs/R-to-Fprime.diff
+3ffb781d2e7cab27fce101faee23c71b29f3137c4b5a45f5f9ae28c76cba3916     59326  notes-fprime.cljs  not published: design F′ (the two are identical): rebuilt by designs/R-to-Fprime.diff
+9e19b3d322b91bb2779d614fccd1181dd2a0dde3ffd8fe9b72b630d41e36a990     63033  notes-fsec.cljs  not published: the final F″: rebuilt by designs/R-to-Fsec-benched.diff, then designs/Fsec-benched-to-Fsec.diff
+e6466fdce5cb8d454b51d7e3eeae7f0f1087aa1d2b236a6465e1afaf4cd4d736      8181  quiet/find-e2e.log  not published: the H-LOAD find-e2e re-run the waiter ran before the bench (another experiment's run, not data of this page)
+c85531b031d6c6da2d23eef2ebd14ecf7bec9c4b08db7a029c794629d08d0d95     12724  quiet/fixed-dev.json  published
+38804b0dabc3a29a7defd18e720575e973cafb00371a330d533a31508abf8b85      1376  quiet/fixed-dev.txt  published
+8bcc2457df7cd2b2aaf0934dd405cca7f02d05e968a3a93556fc37d430f20668     12687  quiet/fixed-release.json  published
+36f35d97bbea4ed9b8190ab6b1fd165826ffa77b4d910863cdbd95ca0862dabf      1379  quiet/fixed-release.txt  published
+ecd88e9f846f654dfc0ddee0626bad2df2bc978c322ffdea306282124f76940a       349  quiet/summary.txt  published
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855         0  quiet/waiter.log  not published: empty
+57bff94eded8673ea4c2a99a131616546e34859db0736a0edcf42bcc7726f44d     12901  release.json  published
+94fa2e4f79a36f18ae11534ac0c6c46a6845ba684b4a15b4e0b7c53c1a35da71      1427  release.txt  published
+12f127a18c333899a752fe3830a685c3444bdbd2c34fa154857ad4331c69c7b6      4429  strflood/census-text.json  published
+67b7e92a60461199a56ca34d6c4996daaaf042b435482dd75d091d3a81a29235      3114  strflood/census-text.txt  published
+5568d631a548cc1f8bd46f867277dd359e113abd3da1e60d697ef918d0834aff      1124  strflood/electron.txt  published
+fae0fb5881166b72014ee6ae0abb6782e852969037c9a4ae45439d568fe76eaa      1096  strflood/node.txt  published
+461c6d2ad1a2d554b7ddb18dee3d107609a281c0b0c80bce5313db4a52e63d99      2402  strflood/probe-string-keys.cjs  published
+ffe02e0e1ac6e02b0dd068a2a915b9411ab21b2acb5f3dba560dd41fec8a5b73       664  unit-e1-control.log  published
+6f2a0fd25243daa474016171324b81d0f1f40ae3c5834f06f9682981343922c7     10136  unit-fix-1.log  published, paths short
+66a45d3748b87dd300e59d9365c0333d4a0cfa1ed2e4bfd9836eec0f7d471dad      8652  unit-fix-2.log  published, paths short
+20b17501d686753db584a570d7a801eb7621cd5861b7260b362cfa0da6e617fb      1438  wait-quiet.sh  published, paths short

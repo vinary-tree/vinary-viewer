@@ -6,6 +6,8 @@ node_modules/
 .cache/
 target/
 *.log
+# experiment logs are data, kept beside the write-ups that cite them
+!docs/scientific/data/**/*.log
 
 # Generated/vendored WebAssembly artifacts, copied into resources/public/js/ at build time so the
 # compiled app and the bundled CLI/TUI load them from disk (found relative to the script's __dirname):

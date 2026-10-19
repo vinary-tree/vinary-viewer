@@ -105,7 +105,7 @@ legend right
   |<#E67E22>&#160;&#160;&#160;&#160;| the pure notes model, at the first paint (vinary.slides.notes) |
   |<#2D9574>&#160;&#160;&#160;&#160;| the background work over page text, and the views that adopt it |
   |<#E0211D>&#160;&#160;&#160;&#160;| a reason: no page is hidden, the deck is shown as it is |
-  SIG compares two pages' text runs (§2.2); the bounds of 4 096 runs
-  and 65 536 matches make it "no evidence" beyond them.
+  SIG compares two pages' text runs (§2.2). Beyond the bounds of 4 096 runs and
+  65 536 code units a page, and 16 384 matches a pair, it gives "no evidence".
 endlegend
 @enduml

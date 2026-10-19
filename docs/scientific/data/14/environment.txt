@@ -1,0 +1,26 @@
+# H-PAIRWORK environment, 2026-10-18T11:17:41-04:00
+CPU(s):                                  64
+Model name:                              AMD Ryzen Threadripper PRO 5975WX 32-Cores
+Thread(s) per core:                      2
+Core(s) per socket:                      32
+Socket(s):                               1
+CPU(s) scaling MHz:                      61%
+CPU max MHz:                             4561.8330
+CPU min MHz:                             412.2140
+L3 cache:                                128 MiB (4 instances)
+cpu3 siblings: 3,35
+cpu3 governor: performance; cur 1429008 kHz; max 4561833 kHz
+load: 10.49 10.02 10.42 10/7269 881777
+top by CPU:
+    PID PSR %CPU COMMAND
+1345786  33 85.8 pgmcp
+ 713103  23 45.8 postgres
+ 744080  22 24.9 postgres
+   5270  48 22.5 postgres
+   5271  18 20.8 postgres
+ 850196  49 20.6 postgres
+ 208761  12 20.5 codex
+ 126259   0 19.8 codex
+   5272  49 19.3 postgres
+ 859670  16 17.9 postgres
+ 107064  27 14.4 codex

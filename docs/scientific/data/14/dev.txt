@@ -1,0 +1,12 @@
+bundle       : dev (dist/test/test.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 882122's current affinity list: 3; governor performance
+load average : 10.30 10.00 10.41
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 65536, max-thumbnail-scale 0.4
+A(512)   : median 47.714 ms, p95 51.519 ms, min 47.366 ms, max 56.248 ms; 30 runs; 262144 visits (182.0 ns each at the median); result false
+A(1024)  : median 191.003 ms, p95 196.263 ms, min 189.510 ms, max 197.474 ms; 20 runs; 1048576 visits (182.2 ns each at the median); result false
+A(2048)  : median 754.763 ms, p95 933.353 ms, min 749.837 ms, max 933.353 ms; 10 runs; 4194304 visits (179.9 ns each at the median); result false
+A(4096)  : median 2990.979 ms, p95 3181.628 ms, min 2981.941 ms, max 3181.628 ms; 10 runs; 16777216 visits (178.3 ns each at the median); result false
+B        : median 35.305 ms, p95 138.560 ms, min 26.763 ms, max 161.536 ms; 30 runs; 69632 visits (507.0 ns each at the median); result null
+C        : median 592.923 ms, p95 741.507 ms, min 542.113 ms, max 741.507 ms; 15 runs; 65536 visits (9047.3 ns each at the median); result false
+D        : median 0.185 ms, p95 0.628 ms, min 0.157 ms, max 5.666 ms; 500 runs; 60 visits (3087.0 ns each at the median); result true
+scaling      : A(4096)/A(2048) 3.96, A(2048)/A(1024) 3.95, A(1024)/A(512) 4.00

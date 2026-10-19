@@ -1,0 +1,116 @@
+@startuml object-note-signature-layout
+'' PlantUML over Mermaid because this is a DATA LAYOUT: typed arrays with exact lengths, and the index relations
+'' between them (a permutation, a group's range, a match's slide run, a bucket's chain of cells). A PlantUML object
+'' diagram shows each array as a record with its type and length, packages group the arrays by the function that owns
+'' them, links carry the indexing, and the formulas render as LaTeX; Mermaid has no object notation with per-record
+'' fields inside coloured packages. The SVG renders byte-reproducibly (README §4).
+'' Colours, from the shared palette: teal = what the renderer's platform hands the model (pdf.js's text runs, through
+'' vinary.slides.evidence/page-runs, and the generator crypto.getRandomValues); orange = the pure model
+'' vinary.slides.notes, one call of note-page-signature?: the palest orange packages group the arrays by the function
+'' that owns them, and every array (the mid orange) is sized before it is filled.
+!include _vv-theme.iuml
+
+title The arrays of one comparison under F″ (scientific/14 §4.4): each sized before it is filled
+
+object "slide runs" as SR RENDERER_TINT {
+  <latex>r_s</latex> maps {:str s, :t [a b c d e f]}
+  in page order (page-runs)
+}
+object "note runs" as NR RENDERER_TINT {
+  <latex>r_j</latex> maps {:str s, :t [a b c d e f]}
+  in page order (page-runs)
+}
+object "crypto.getRandomValues" as RNG RENDERER_TINT {
+  the platform's cryptographic generator:
+  one call per comparison with a match
+}
+
+package "by-height: the note page sorted by string, then height (no hash)" IR_FILL {
+  object "runs" as U IR_TINT {
+    <latex>p \le r_j</latex>: the upright runs
+    whose :str is a string
+  }
+  object "strs · h" as SH IR_TINT {
+    strs = js/Array p (the strings)
+    h = Float64Array p (the heights)
+  }
+  object "order" as O IR_TINT {
+    Int32Array p: the stable merge
+    sort's permutation (sorted-runs;
+    two buffers, swapped each pass)
+  }
+  object "strings · starts" as G IR_TINT {
+    strings = js/Array p, the first G used
+    starts = Int32Array G + 1
+    group g = [starts[g], starts[g + 1])
+  }
+  object "hs · xs · ys" as HXY IR_TINT {
+    Float64Array p each: the heights
+    and origins, in sorted order
+  }
+}
+
+package "note-page-signature?: count the matches, then build them" IR_FILL {
+  object "s-runs · glyph-of" as S IR_TINT {
+    s-runs = the n upright slide
+    runs with a glyph
+    glyph-of = Int32Array n
+  }
+  object "kept" as K IR_TINT {
+    Int32Array 2n: slide run i keeps
+    the sorted runs [kept[2i], kept[2i + 1])
+  }
+  object "mi · qls · qtx · qty" as MQ IR_TINT {
+    mi = Int32Array M (the slide run)
+    qls, qtx, qty = Float64Array M
+    (the three cell quotients)
+  }
+}
+
+package "copy-covers?: the call's own hash table" IR_FILL {
+  object "tables" as T IR_TINT {
+    Int32Array 6 144: one table of 256
+    words per (axis, byte), 3 × 8 of them
+  }
+  object "axes" as AX IR_TINT {
+    Int32Array 6M: per match, index-hash
+    of each axis under each shift
+  }
+  object "heads · stamps" as HB IR_TINT {
+    Int32Array B each
+    <latex>B = \max(16,\ 2^{\lceil \log_2 2M \rceil})</latex>
+    stamps[β] = the grid (1–8) that wrote heads[β]
+  }
+  object "nexts · last · ca · cb · cc · sums" as CELLS IR_TINT {
+    nexts, last = Int32Array M
+    ca, cb, cc, sums = Float64Array M
+    one entry per cell, in the order first seen
+  }
+}
+
+NR -[IR_BORDER]-> U : upright?, :str a string
+U -[IR_BORDER]-> SH
+SH -[IR_BORDER]-> O : <latex>< p \lceil \log_2 p \rceil</latex> comparisons\n(string, then height)
+O -[IR_BORDER]-> G : one pass in sorted order:\na new group where the string changes
+O -[IR_BORDER]-> HXY
+SR -[IR_BORDER]-> S : upright?, glyphs > 0
+S -[IR_BORDER]-> K : group-of: a binary search of strings;\nprefix-count twice within the group
+G -[IR_BORDER]-> K
+HXY -[IR_BORDER]-> K
+K -[IR_BORDER]-> MQ : the count <latex>M \le C_m</latex>, else nil;\nthen one match per k in kept_i
+HXY -[IR_BORDER]-> MQ : <latex>\sigma = hs_k / h_i</latex>
+S -[IR_BORDER]-> MQ : slide run i: its height and origin
+RNG -[RENDERER_BORDER]-> T : 6 144 fresh words each time
+T -[IR_BORDER]-> AX
+MQ -[IR_BORDER]-> AX : <latex>\lfloor q - s \rfloor</latex>, canonical bits
+AX -[IR_BORDER]-> HB : <latex>\beta = (a_\ell \oplus a_x \oplus a_y) \wedge (B - 1)</latex>
+HB -[IR_BORDER]-> CELLS : the chain: heads[β], then nexts
+S -[IR_BORDER]-> CELLS : glyph-of[i] into sums,\nonce per cell (last)
+
+legend right
+  |= Colour |= Concept |
+  |<#2D9574>&#160;&#160;&#160;&#160;| what the renderer's platform hands the model: pdf.js's runs, the random words |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the pure model vinary.slides.notes: one call's arrays, grouped by the function that owns them |
+  Lengths: <latex>p \le r_j \le C_r</latex>, <latex>n \le r_s \le C_r</latex>, <latex>G \le p</latex>, <latex>M \le C_m</latex>. In all <latex>O(r_s + r_j + M)</latex> words (§5.2).
+endlegend
+@enduml

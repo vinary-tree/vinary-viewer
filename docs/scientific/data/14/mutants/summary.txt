@@ -1,0 +1,7 @@
+mE1 EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-generated-pairs 
+mE2 EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-generated-pairs 
+mE3 EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-on-generated-pairs 
+mE4 EXIT=1 failing: the-fixed-signature-equals-the-reference-around-a-small-match-cap the-fixed-signature-equals-the-reference-at-the-real-match-cap 
+mE5 EXIT=1 failing: a-cell-key-names-one-cell 
+restored the fixed notes.cljs; recompiled EXIT=0
+DONE

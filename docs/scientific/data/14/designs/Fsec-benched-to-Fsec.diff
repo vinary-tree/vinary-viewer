@@ -1,0 +1,33 @@
+--- a/src/vinary/slides/notes.cljs
++++ b/src/vinary/slides/notes.cljs
+@@ -167,14 +167,15 @@
+ (def max-signature-runs
+   "A page with more text runs than this is not compared (the signature is nil, no evidence). No slide comes near it:
+    the most on a measured real page is 443. With max-signature-chars and max-signature-matches it bounds what one
+-   comparison costs (docs/scientific/14)."
++   comparison costs the thread that calls it, the renderer's in the GUI: the slowest pages measured, which load all
++   three caps at once, take about 16 ms (docs/scientific/14)."
+   4096)
+ 
+ (def max-signature-chars
+   "…nor is a page whose runs' strings hold more UTF-16 code units than this: the comparison sorts the note page's
+    strings and looks the slide's up among them, work that grows with the text (docs/scientific/14). The most on a
+    measured real page is 1 569."
+-  32768)
++  65536)
+ 
+ (def max-signature-matches
+   "The comparison gives up (nil, no evidence) when more pairs of runs with one string than this have a scale a
+@@ -569,8 +570,10 @@
+ (def max-content-pages
+   "The background reads the text of at most this many pages for one deck (ADR-0048 §8.9). A deck whose decision needs
+    more is shown as it is, :reason :too-many-pages: a scan of a longer deck, or a confirmation of more pages, is refused
+-   before any page is read, and a probe walk stops when it would read more. Real decks are well below it; the bound
+-   keeps a hostile PDF from occupying pdf.js's worker for minutes."
++   before any page is read, and a probe walk stops when it would read more. Real decks are well below it. The bound
++   keeps a hostile PDF from occupying pdf.js's worker, which extracts each page's text, for minutes; the comparisons
++   of those pages run on the thread that calls them, each bounded by max-signature-runs, max-signature-chars and
++   max-signature-matches."
+   2000)
+ 
+ (defn confirm-page-count

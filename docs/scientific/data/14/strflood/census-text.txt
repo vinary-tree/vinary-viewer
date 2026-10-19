@@ -1,0 +1,29 @@
+caps: max-thumbnail-scale 0.4, max-signature-runs 4096, max-signature-matches 65536
+local:slide-export: 12 files (0 unreadable), 656 pages, 30679 pairs (644 adjacent); most runs on a page 443; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 1569, p99 1319, median 224; longest run 176
+  visits  : max 15400, p99 124, median 0; pairs over 256/1024/4096/16384/65536: 153/63/22/0/0; adjacent max 15400
+  matches : max 372, p99 0, median 0; pairs over 256/1024/4096/16384/65536: 4/0/0/0/0; adjacent max 93
+local:beamer: 8 files (0 unreadable), 271 pages, 5303 pairs (263 adjacent); most runs on a page 283; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 1489, p99 1144, median 375; longest run 176
+  visits  : max 2204, p99 508, median 12; pairs over 256/1024/4096/16384/65536: 132/9/0/0/0; adjacent max 1208
+  matches : max 0, p99 0, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 0
+corpus13:lualatex: 27 files (0 unreadable), 171 pages, 511 pairs (144 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 126, p99 126, median 35; longest run 58
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:pdflatex: 23 files (0 unreadable), 141 pages, 413 pairs (118 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 126, p99 126, median 35; longest run 58
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:xelatex: 27 files (0 unreadable), 171 pages, 511 pairs (144 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 126, p99 126, median 35; longest run 58
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:xelatex2: 69 files (0 unreadable), 423 pages, 1239 pairs (354 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 126, p99 126, median 35; longest run 58
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+fixtures: 9 files (0 unreadable), 53 pages, 174 pairs (44 adjacent); most runs on a page 12; pairs past the run cap 0, past the match cap 0
+  text    : code units per page max 121, p99 121, median 35; longest run 41
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 2, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 2

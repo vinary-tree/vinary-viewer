@@ -1,0 +1,278 @@
+--- a/test/vinary/slides/notes_signature_equivalence_test.cljs
++++ b/test/vinary/slides/notes_signature_equivalence_test.cljs
+@@ -3,7 +3,10 @@
+    the implementation before the fix, verbatim (vinary.slides.notes-reference) — returns, on generated page pairs
+    built to reach every branch: thumbnail copies at and around max-thumbnail-scale with offsets on and beside the
+    grids' cell boundaries, noise, many runs of one string, magnitudes that underflow, overflow or are not numbers,
+-   transforms that are not upright, and the match cap, both at its real value and rebound small with set!."
++   transforms that are not upright, and the match cap, both at its real value and rebound small with set!. Further
++   tests check the parts of the fix one at a time: the cells' hash (a function of an index's SameValueZero class,
++   with fresh tables on every call), cells whose indices are huge, infinite, NaN or ±0, a table in which every cell
++   collides, and the binary search over a sweep of heights from the least subnormal to +∞."
+   (:require [cljs.test :refer [deftest is]]
+             [vinary.slides.notes :as notes]
+             [vinary.slides.notes-reference :as reference]))
+@@ -26,7 +29,14 @@
+ 
+ (def ^:private words ["x" "x" "ab" "Title" "1" "a b" "  " "" "Ünïcode" "x "])
+ (def ^:private extreme-magnitudes [5e-324 1e-310 1e-300 1e-160 1e160 1e300 js/Number.MAX_VALUE js/Infinity])
+-(def ^:private extreme-coordinates [0 -0 1e15 -1e15 1e300 -1e300 js/Infinity (- js/Infinity) js/NaN 7.5e9])
++(def ^:private extreme-coordinates
++  ;; NB the reader reads -0 as the integer 0, so the second entry is +0, as it was when this list was first run (H-PAIRWORK-FIX
++  ;; E1 for design F); a true −0 is built at run time (negative-zero) by general-pair and the tests of ±0 below
++  [0 -0 1e15 -1e15 1e300 -1e300 js/Infinity (- js/Infinity) js/NaN 7.5e9])
++
++(def ^:private negative-zero
++  ;; −0, computed: a -0 literal would be +0
++  (/ -1 js/Infinity))
+ (def ^:private scales [0.125 0.25 0.4 (- 0.4 1e-12) (+ 0.4 1e-12) 0.39 0.41 0.69 1 1e-320])
+ 
+ (defn- run [s h x y] {:str s :t [h 0 0 h x y]})
+@@ -100,16 +110,20 @@
+                         (vec (repeatedly (upto rnd 10) #(random-run rnd)))])]
+     [slide note diag]))
+ 
+-(defn- agree-on [rnd n]
+-  (loop [k 0, tally {true 0 false 0 nil 0}, first-disagreement nil]
+-    (if (= k n)
+-      {:tally tally :first-disagreement first-disagreement}
+-      (let [[slide note diag] (a-pair rnd)
+-            want (reference/note-page-signature-reference? slide note diag)
+-            got  (notes/note-page-signature? slide note diag)]
+-        (recur (inc k) (update tally want inc)
+-               (or first-disagreement
+-                   (when-not (identical? want got) {:k k :want want :got got :slide slide :note note :diag diag})))))))
++(defn- agree-on
++  "Draws `n` pairs from `pair-of` (default a-pair) and compares the two signatures on each: the tally of the
++   reference's verdicts and the first pair on which they differ, if any."
++  ([rnd n] (agree-on rnd n a-pair))
++  ([rnd n pair-of]
++   (loop [k 0, tally {true 0 false 0 nil 0}, first-disagreement nil]
++     (if (= k n)
++       {:tally tally :first-disagreement first-disagreement}
++       (let [[slide note diag] (pair-of rnd)
++             want (reference/note-page-signature-reference? slide note diag)
++             got  (notes/note-page-signature? slide note diag)]
++         (recur (inc k) (update tally want inc)
++                (or first-disagreement
++                    (when-not (identical? want got) {:k k :want want :got got :slide slide :note note :diag diag}))))))))
+ 
+ (deftest the-fixed-signature-equals-the-reference-on-generated-pairs
+   (let [{:keys [tally first-disagreement]} (agree-on (generator 20261018) 24000)]
+@@ -144,17 +158,202 @@
+       (is (= want (reference/note-page-signature-reference? s n 453.544)) "the reference, as registered")
+       (is (identical? (reference/note-page-signature-reference? s n 453.544) (notes/note-page-signature? s n 453.544))))))
+ 
+-(deftest a-cell-key-names-one-cell
+-  ;; the generators never span 65 536 cells, so the packing's digits are checked here directly: every triple of indices
+-  ;; at and around the packing's limits, and beyond them (the string keys), has its own key — 0 and −0 one key, as the
+-  ;; reference's (str -0) is "0"
+-  (let [cell-key #'notes/cell-key
+-        in       [-65535 -65534 -1 0 1 65534 65535]
+-        out      [-65536 65536 -1e9 1e9 js/Infinity (- js/Infinity)]
+-        triples  (for [a (concat in out) b (concat in out) c (concat in out)] [a b c])
+-        keys     (map (fn [[a b c]] (cell-key a b c)) triples)]
+-    (is (= (count triples) (count (set keys))) "distinct triples, distinct keys")
+-    (is (every? number? (for [a in b in c in] (cell-key a b c))) "inside the limits, one exact double")
+-    (is (every? string? (for [a out] (cell-key a 0 0))) "outside them, the string")
+-    (is (identical? (cell-key -0 0 -0) (cell-key 0 -0 0)) "−0 and 0 are one cell")
+-    (is (< (cell-key 65535 65535 65535) (js/Math.pow 2 51)) "below 2^51, so exact")))
++;; ---- (a), (b): the cells' hash ---------------------------------------------------------------------------------------
++
++(defn- double-of
++  "The double whose 64 bits are hi:lo (two unsigned 32-bit words), built without arithmetic, so a NaN keeps its bits."
++  [hi lo]
++  (let [view (js/DataView. (js/ArrayBuffer. 8))]
++    (.setUint32 view 0 hi)
++    (.setUint32 view 4 lo)
++    (.getFloat64 view 0)))
++
++(defn- words-of
++  "The two unsigned 32-bit words hi, lo of the double x."
++  [x]
++  (let [view (js/DataView. (js/ArrayBuffer. 8))]
++    (.setFloat64 view 0 x)
++    [(.getUint32 view 0) (.getUint32 view 4)]))
++
++(deftest an-index-hash-depends-only-on-the-index-class
++  ;; Test (a). For random tables, two different table entries are equal with probability 2^-32, so a check that two
++  ;; hashes differ fails by chance with at most that probability; the ~2 400 such checks below, at most ~6e-7.
++  (let [index-hash #'notes/index-hash
++        tables     (notes/hash-tables)
++        bits       (js/Float64Array. 1)
++        words      (js/Uint32Array. (.-buffer bits))
++        h          (fn [axis v] (index-hash tables bits words axis v))
++        nans       [(double-of 0x7ff80000 0) (double-of 0xfff80000 0) (double-of 0x7ff00000 1)]
++        values     [0 1 -1 65535 -65535 65536 -65536 (js/Math.pow 2 53) (- (js/Math.pow 2 53)) 1e300 -1e300
++                    js/Infinity (- js/Infinity)]]
++    (is (every? js/isNaN nans) "the three bit patterns are NaNs")
++    (is (and (zero? negative-zero) (neg? (/ 1 negative-zero))) "negative-zero is −0")
++    (doseq [axis [0 1 2]]
++      (is (identical? (h axis 0) (h axis negative-zero)) "−0 and +0 hash alike")
++      (is (apply = (map #(h axis %) nans)) "every NaN hashes alike, whatever its bits")
++      (is (every? #(and (number? %) (js/Number.isInteger %) (<= -2147483648 % 2147483647))
++                  (map #(h axis %) (concat values nans)))
++          "a hash is a 32-bit integer")
++      (is (= (inc (count values)) (count (set (map #(h axis %) (conj values (first nans))))))
++          "distinct classes, distinct hashes")
++      ;; every one of the 8 bytes takes part: flip each bit of each value; a flip that lands in another class
++      ;; (a NaN, or ±0) is skipped
++      (doseq [v (remove zero? values)
++              bit (range 64)]
++        (let [[hi lo] (words-of v)
++              flipped (if (< bit 32)
++                        (double-of hi (unsigned-bit-shift-right (bit-xor lo (bit-shift-left 1 bit)) 0))
++                        (double-of (unsigned-bit-shift-right (bit-xor hi (bit-shift-left 1 (- bit 32))) 0) lo))]
++          (when-not (or (js/isNaN flipped) (zero? flipped))
++            (is (not= (h axis v) (h axis flipped)) (str "flipping bit " bit " of " v " changes its hash"))))))
++    (is (not= (h 0 1) (h 1 1)) "each axis has its own tables")))
++
++(deftest the-tables-are-fresh-on-every-call
++  ;; Test (b): 6 144 random words per call. Two draws are equal with probability 2^-196608; 6 144 random words have
++  ;; fewer than 6 100 distinct values with probability far below 2^-100.
++  (let [t1 (notes/hash-tables)
++        t2 (notes/hash-tables)]
++    (is (instance? js/Int32Array t1))
++    (is (= 6144 (.-length t1) (.-length t2)))
++    (is (not= (vec (js/Array.from t1)) (vec (js/Array.from t2))) "two calls draw different tables")
++    (is (< 6100 (count (set (js/Array.from t1)))) "the words look random")))
++
++;; ---- (c): cells whose indices are huge, infinite, NaN or ±0 --------------------------------------------------------
++
++(defn- copy-pair
++  "A slide and a note page holding a copy of some of its runs at scale σ, with the copy's origin offset by the
++   output of `offset` (called once per copied run with the run's index), plus noise. The slide's runs are placed by
++   `origin` (called with the run's index)."
++  [rnd sigma origin offset]
++  (let [n      (inc (upto rnd 11))
++        slide  (vec (for [i (range n)] (let [[x y] (origin i)] (run (pick rnd words) (between rnd 5 20) x y))))
++        copied (for [[i {s :str [a _ _ d e f] :t}] (map-indexed vector slide) :when (< (rnd) 0.85)]
++                 (let [[ox oy] (offset i)]
++                   {:str s :t [(* sigma a) 0 0 (* sigma d) (+ ox (* sigma e)) (+ oy (* sigma f))]}))
++        noise  (repeatedly (upto rnd 4) #(random-run rnd))]
++    [slide (shuffle-with rnd (concat copied noise))]))
++
++(defn- general-pair
++  "A pair whose cells' indices lie beyond ±65 535, or are ±∞, NaN or ±0 (test (c))."
++  [rnd]
++  (let [diag  453.544
++        tol   (* notes/offset-tolerance diag)
++        sigma (pick rnd [0.125 0.25 0.4])
++        far   #(* (pick rnd [1 -1]) (between rnd 65536 1e7) tol)
++        half  #(* (pick rnd [0 0 0.49 0.51 -0.49 -0.51]) tol)
++        inf   #(pick rnd [js/Infinity (- js/Infinity)])
++        [slide note]
++        (case (upto rnd 4)
++          ;; far offsets: every cell's offset indices beyond the old packing's ±65 535, some straddling a boundary
++          0 (let [ox (far) oy (far)]
++              (copy-pair rnd sigma (fn [_] [(between rnd 0 300) (between rnd 0 250)]) (fn [_] [(+ ox (half)) (+ oy (half))])))
++          ;; NaN origins: σ·NaN makes the copy's x offset NaN for the slide runs placed at x = NaN
++          1 (copy-pair rnd sigma (fn [_] [(if (< (rnd) 0.7) js/NaN (between rnd 0 300)) (between rnd 0 250)])
++                       (fn [_] [(between rnd 0 2) 40]))
++          ;; infinite origins: x = ±∞ on the slide and ±∞ or finite on the note page — ∞ − ∞ is NaN, x − ∞ is −∞
++          2 (let [[slide note] (copy-pair rnd sigma (fn [_] [(if (< (rnd) 0.6) (inf) (between rnd 0 300)) 10])
++                                          (fn [_] [0 (between rnd 0 3)]))]
++              [slide (mapv (fn [r] (if (< (rnd) 0.5) (assoc-in r [:t 4] (inf)) r)) note)])
++          ;; signed zeros: slide runs at y = 0, the copies at y = +0, −0 or just above, so a c index is +0, −0 or 0
++          ;; (the copy's y is set, not added: −0 + σ·0 would be +0)
++          3 (let [[slide note] (copy-pair rnd sigma (fn [_] [(if (< (rnd) 0.5) js/NaN (between rnd 0 300)) 0])
++                                          (fn [_] [(between rnd 0 2) 0]))]
++              [slide (mapv (fn [r] (if (= 6 (count (:t r)))
++                                     (assoc-in r [:t 5] (pick rnd [0 negative-zero (* 0.3 tol) (* 0.7 tol)]))
++                                     r))
++                           note)])
++          ;; everything at once, with a true −0 among the coordinates
++          (let [coords (conj extreme-coordinates negative-zero)
++                mag    #(if (< (rnd) 0.5) (pick rnd extreme-magnitudes) (between rnd 0.5 30))
++                coord  #(if (< (rnd) 0.5) (pick rnd coords) (between rnd 0 300))
++                page   (fn [] (vec (repeatedly (inc (upto rnd 8)) #(run (pick rnd words) (mag) (coord) (coord)))))]
++            [(page) (page)]))]
++    [slide note diag]))
++
++(deftest the-fixed-signature-equals-the-reference-on-general-path-pairs
++  (let [{:keys [tally first-disagreement]} (agree-on (generator 65536) 6000 general-pair)]
++    (println "[H-PAIRWORK E1] 6000 pairs with huge, infinite, NaN or ±0 cell indices; the reference's verdicts:" tally)
++    (is (nil? first-disagreement) (pr-str first-disagreement))
++    (is (every? #(<= 50 (get tally %)) [true false]) "the generators reach true and false")))
++
++;; ---- (d): every cell collides ----------------------------------------------------------------------------------------
++
++(deftest the-fixed-signature-equals-the-reference-when-every-cell-collides
++  ;; with every table word 0, every cell of every grid hashes to 0 and shares bucket 0: the chains alone keep the cells
++  ;; apart, which the hash's randomness otherwise hides
++  (with-redefs [notes/hash-tables (fn [] (js/Int32Array. 6144))]
++    (let [first-4000 (agree-on (generator 20261018) 4000)
++          general    (agree-on (generator 65536) 2000 general-pair)]
++      (println "[H-PAIRWORK E1] every cell in one bucket: 4000 + 2000 pairs; the reference's verdicts:"
++               (:tally first-4000) (:tally general))
++      (is (nil? (:first-disagreement first-4000)) (pr-str (:first-disagreement first-4000)))
++      (is (nil? (:first-disagreement general)) (pr-str (:first-disagreement general))))))
++
++;; ---- (e): the binary search over a sweep of heights ------------------------------------------------------------------
++
++(defn- adjacent-double
++  "The double next to the positive finite x: above it for step 1, below it for step −1."
++  [x step]
++  (let [[hi lo] (words-of x)
++        lo'     (+ lo step)]
++    (cond
++      (> lo' 0xffffffff) (double-of (inc hi) 0)
++      (neg? lo')         (double-of (dec hi) 0xffffffff)
++      :else              (double-of hi lo'))))
++
++(deftest prefix-count-is-the-linear-count-on-a-sweep-of-heights
++  ;; Test (e): one string's heights, 2 000 log-spaced from 5e−324 to 1e300 and +∞; for each slide height hs of the
++  ;; sweep, the heights next to 0.4·hs are added. prefix-count must count exactly the heights with h/hs ≤ bound, and
++  ;; [lo, hi) must be exactly the heights the reference keeps (0 < σ ≤ max-thumbnail-scale).
++  (let [prefix-count #'notes/prefix-count
++        sweep        (vec (concat [5e-324]
++                                  (for [k (range 1 1999)] (js/Math.pow 10 (+ -323 (* k (/ 623 1999)))))
++                                  [1e300 js/Infinity]))
++        bound        notes/max-thumbnail-scale
++        failures     (volatile! [])]
++    (doseq [hs sweep]
++      (let [edge    (* bound hs)
++            near    (if (and (js/isFinite edge) (pos? edge))
++                      (filterv #(and (js/isFinite %) (pos? %)) [(adjacent-double edge -1) edge (adjacent-double edge 1)])
++                      [])
++            heights (.sort (js/Float64Array.from (to-array (concat sweep near))))   ; a typed array sorts numerically
++            n       (.-length heights)
++            linear  (fn [b] (loop [k 0, c 0] (if (= k n) c (recur (inc k) (if (<= (/ (aget heights k) hs) b) (inc c) c)))))
++            lo      (prefix-count heights hs 0)
++            hi      (prefix-count heights hs bound)
++            kept    (loop [k 0, acc []]
++                      (if (= k n)
++                        acc
++                        (let [s (/ (aget heights k) hs)]
++                          (recur (inc k) (if (and (pos? s) (<= s bound)) (conj acc k) acc)))))]
++        (when-not (and (= lo (linear 0)) (= hi (linear bound)) (= kept (vec (range lo hi))))
++          (vswap! failures conj {:hs hs :lo lo :hi hi :linear [(linear 0) (linear bound)]}))))
++    (println "[H-PAIRWORK E1] prefix-count over" (count sweep) "slide heights × ~2003 note heights")
++    (is (empty? @failures) (pr-str (take 3 @failures)))))
++
++;; ---- (f): two crafted pairs where the grouping of a NaN or a ±0 index decides --------------------------------------
++
++(deftest a-nan-index-is-one-cell-whatever-its-bits
++  ;; Slide: "aaaaaaaaaa" and "cccccccccc" at x = NaN, "bbbbbbbbbb" at x = +∞, and 20 characters no copy carries:
++  ;; need = 25. Their copies at σ = 0.25: σ·NaN gives a NaN offset with js/NaN's bits; ∞ − σ·∞ = ∞ − ∞ gives the
++  ;; platform's default NaN (on x86-64, with the sign bit set). The reference's keys print both "NaN", so one cell
++  ;; holds 30 characters: true. A NaN that is not equal to itself, or hashed by its own bits, splits them.
++  (let [slide [(run "aaaaaaaaaa" 10 js/NaN 0) (run "bbbbbbbbbb" 10 js/Infinity 0) (run "cccccccccc" 10 js/NaN 0)
++               (run "dddddddddddddddddddd" 10 50 200)]
++        note  [(run "aaaaaaaaaa" 2.5 100 50) (run "bbbbbbbbbb" 2.5 js/Infinity 50) (run "cccccccccc" 2.5 100 50)]]
++    (is (true? (reference/note-page-signature-reference? slide note 453.544)) "the reference, as constructed")
++    (dotimes [_ 40]                                    ; 40 fresh draws of the tables
++      (is (true? (notes/note-page-signature? slide note 453.544))))))
++
++(deftest a-zero-index-is-one-cell-whatever-its-sign
++  ;; Slide: three runs of 10 characters at y = 0 and 20 characters no copy carries: need = 25. Their copies at
++  ;; σ = 0.25 sit at y = +0, −0 and 0.7 of a cell, so their c indices are +0, −0 and +0 in the unshifted grids (one
++  ;; cell, 30 characters: true, as the reference's keys print both zeros "0"), and −1, −1, 0 in the shifted ones (20
++  ;; characters at most). A −0 hashed by its own bits splits the unshifted cell too.
++  (let [tol   (* notes/offset-tolerance 453.544)
++        slide [(run "aaaaaaaaaa" 10 0 0) (run "bbbbbbbbbb" 10 0 0) (run "cccccccccc" 10 0 0)
++               (run "dddddddddddddddddddd" 10 50 200)]
++        note  [(run "aaaaaaaaaa" 2.5 100 0) (run "bbbbbbbbbb" 2.5 100 negative-zero) (run "cccccccccc" 2.5 100 (* 0.7 tol))]]
++    (is (true? (reference/note-page-signature-reference? slide note 453.544)) "the reference, as constructed")
++    (dotimes [_ 40]
++      (is (true? (notes/note-page-signature? slide note 453.544))))))

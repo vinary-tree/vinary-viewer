@@ -1,0 +1,7 @@
+
+Testing vinary.slides.notes-signature-equivalence-test
+[H-PAIRWORK E1] 24000 generated pairs at the real caps; the reference's verdicts: {true 6172, false 17737, nil 91}
+[H-PAIRWORK E1] 4800 generated pairs at match caps 0…144; verdicts per cap: [{true 0, false 171, nil 229} {true 18, false 208, nil 174} {true 28, false 240, nil 132} {true 32, false 254, nil 114} {true 42, false 244, nil 114} {true 61, false 244, nil 95} {true 81, false 249, nil 70} {true 86, false 262, nil 52} {true 71, false 271, nil 58} {true 77, false 283, nil 40} {true 97, false 263, nil 40} {true 92, false 280, nil 28}]
+
+Ran 4 tests containing 15 assertions.
+0 failures, 0 errors.

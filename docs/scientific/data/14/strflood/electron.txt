@@ -1,0 +1,12 @@
+engine: node 24.17.0, v8 14.8.178.33-electron.0, electron 42.5.0
+index k·2048 (≤ 7 digits)             : median 38.198 ms (min 38.024); first keys 0, 2048, 4096
+index k (consecutive)                 : median 0.609 ms (min 0.595); first keys 0, 1, 2
+index k·4096                          : median 37.954 ms (min 37.891); first keys 0, 4096, 8192
+index k·2048 + 2^24 (8 digits)        : median 39.355 ms (min 39.303); first keys 16777216, 16779264, 16781312
+index k·65536 (up to 9 digits)        : median 55.796 ms (min 55.424); first keys 0, 65536, 131072
+integer k·2048 + 2^32 (not index)     : median 0.479 ms (min 0.422); first keys 4294967296, 4294969344, 4294971392
+"-" + k·2048                          : median 0.557 ms (min 0.410); first keys -0, -2048, -4096
+"0" + k·2048 (leading zero)           : median 0.417 ms (min 0.409); first keys 00, 02048, 04096
+k·2048 + ".5"                         : median 0.368 ms (min 0.358); first keys 0.5, 2048.5, 4096.5
+"x" + k·2048                          : median 0.355 ms (min 0.347); first keys x0, x2048, x4096
+random index below 2^23: keys not distinct, skipped

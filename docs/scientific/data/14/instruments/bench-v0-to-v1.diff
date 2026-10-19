@@ -1,0 +1,21 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -48,7 +48,17 @@
+ };
+ 
+ const loadRelease = () => {
+-  throw new Error('--bundle=release: not yet wired (see docs/scientific/14 §3)');
++  // A :simple release is one function scope that ends by calling the cli's main; that call is replaced by an export
++  // of the two namespaces the benchmark needs, so loading the bundle runs its namespaces' top levels and nothing else.
++  const file = path.join(ROOT, 'dist', 'cli', 'vv-cli.js');
++  const main = 'cljs.core.apply.cljs$core$IFn$_invoke$arity$2(vinary.cli.core.main,process.argv.slice(2));';
++  const src = fs.readFileSync(file, 'utf8').replace(/^#!.*\n/, '');
++  if (src.includes('SHADOW_IMPORT(')) throw new Error(`${file} is a dev build: run npx shadow-cljs release cli`);
++  if (src.split(main).length !== 2) throw new Error(`${file}: the cli's main call is not found exactly once`);
++  const exported = 'global.__vvNoteSignatureBench = { cljs: cljs.core, notes: vinary.slides.notes };';
++  vm.runInThisContext(`(function (require, module, exports, __dirname, __filename) {${src.replace(main, exported)}\n})`,
++    { filename: file })(require, module, module.exports, path.dirname(file), file);
++  return { file, ...global.__vvNoteSignatureBench };
+ };
+ 
+ const { file: BUNDLE_FILE, cljs, notes } = BUNDLE === 'release' ? loadRelease() : loadDev();

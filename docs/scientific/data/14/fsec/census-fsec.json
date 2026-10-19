@@ -1,0 +1,380 @@
+{
+ "caps": {
+  "maxThumbnailScale": 0.4,
+  "maxSignatureRuns": 4096,
+  "maxSignatureMatches": 16384
+ },
+ "thresholds": [
+  256,
+  1024,
+  4096,
+  16384,
+  65536
+ ],
+ "groups": {
+  "local:slide-export": {
+   "files": 12,
+   "unreadable": 0,
+   "pages": 656,
+   "pairs": 30679,
+   "adjacentPairs": 644,
+   "maxRunsPerPage": 443,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 1569,
+    "p99": 1319,
+    "median": 224,
+    "longestRun": 176
+   },
+   "visits": {
+    "max": 15400,
+    "p99": 124,
+    "median": 0,
+    "over": [
+     153,
+     63,
+     22,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 372,
+    "p99": 0,
+    "median": 0,
+    "over": [
+     4,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 15400,
+    "matchesMax": 93
+   },
+   "differential": {
+    "verdicts": {
+     "true": 0,
+     "false": 30679,
+     "null": 0
+    },
+    "disagreements": 0
+   }
+  },
+  "local:beamer": {
+   "files": 8,
+   "unreadable": 0,
+   "pages": 271,
+   "pairs": 5303,
+   "adjacentPairs": 263,
+   "maxRunsPerPage": 283,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 1489,
+    "p99": 1144,
+    "median": 375,
+    "longestRun": 176
+   },
+   "visits": {
+    "max": 2204,
+    "p99": 508,
+    "median": 12,
+    "over": [
+     132,
+     9,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 0,
+    "p99": 0,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 1208,
+    "matchesMax": 0
+   },
+   "differential": {
+    "verdicts": {
+     "true": 0,
+     "false": 5303,
+     "null": 0
+    },
+    "disagreements": 0
+   }
+  },
+  "corpus13:lualatex": {
+   "files": 27,
+   "unreadable": 0,
+   "pages": 171,
+   "pairs": 511,
+   "adjacentPairs": 144,
+   "maxRunsPerPage": 15,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 126,
+    "p99": 126,
+    "median": 35,
+    "longestRun": 58
+   },
+   "visits": {
+    "max": 10,
+    "p99": 6,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 7,
+    "p99": 2,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 10,
+    "matchesMax": 7
+   },
+   "differential": {
+    "verdicts": {
+     "true": 47,
+     "false": 458,
+     "null": 6
+    },
+    "disagreements": 0
+   }
+  },
+  "corpus13:pdflatex": {
+   "files": 23,
+   "unreadable": 0,
+   "pages": 141,
+   "pairs": 413,
+   "adjacentPairs": 118,
+   "maxRunsPerPage": 15,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 126,
+    "p99": 126,
+    "median": 35,
+    "longestRun": 58
+   },
+   "visits": {
+    "max": 10,
+    "p99": 6,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 7,
+    "p99": 2,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 10,
+    "matchesMax": 7
+   },
+   "differential": {
+    "verdicts": {
+     "true": 35,
+     "false": 372,
+     "null": 6
+    },
+    "disagreements": 0
+   }
+  },
+  "corpus13:xelatex": {
+   "files": 27,
+   "unreadable": 0,
+   "pages": 171,
+   "pairs": 511,
+   "adjacentPairs": 144,
+   "maxRunsPerPage": 15,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 126,
+    "p99": 126,
+    "median": 35,
+    "longestRun": 58
+   },
+   "visits": {
+    "max": 10,
+    "p99": 6,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 7,
+    "p99": 2,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 10,
+    "matchesMax": 7
+   },
+   "differential": {
+    "verdicts": {
+     "true": 47,
+     "false": 458,
+     "null": 6
+    },
+    "disagreements": 0
+   }
+  },
+  "corpus13:xelatex2": {
+   "files": 69,
+   "unreadable": 0,
+   "pages": 423,
+   "pairs": 1239,
+   "adjacentPairs": 354,
+   "maxRunsPerPage": 15,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 126,
+    "p99": 126,
+    "median": 35,
+    "longestRun": 58
+   },
+   "visits": {
+    "max": 10,
+    "p99": 6,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 7,
+    "p99": 2,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 10,
+    "matchesMax": 7
+   },
+   "differential": {
+    "verdicts": {
+     "true": 105,
+     "false": 1116,
+     "null": 18
+    },
+    "disagreements": 0
+   }
+  },
+  "fixtures": {
+   "files": 9,
+   "unreadable": 0,
+   "pages": 53,
+   "pairs": 174,
+   "adjacentPairs": 44,
+   "maxRunsPerPage": 12,
+   "runCapPairs": 0,
+   "matchCapPairs": 0,
+   "pageChars": {
+    "max": 121,
+    "p99": 121,
+    "median": 35,
+    "longestRun": 41
+   },
+   "visits": {
+    "max": 10,
+    "p99": 6,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "matches": {
+    "max": 2,
+    "p99": 2,
+    "median": 0,
+    "over": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "adjacent": {
+    "visitsMax": 10,
+    "matchesMax": 2
+   },
+   "differential": {
+    "verdicts": {
+     "true": 12,
+     "false": 162,
+     "null": 0
+    },
+    "disagreements": 0
+   }
+  }
+ }
+}

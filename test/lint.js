@@ -51,6 +51,11 @@ const jsFiles = [
   'scripts/bench-tree-scopes.cjs',
   // the speaker-notes corpus experiment of docs/scientific/13 (ADR-0048) and its registered expectations' derivation
   'scripts/exp-notes-corpus.cjs', 'scripts/notes-corpus/derive-expectations.cjs',
+  // the note-page comparison's benchmark and census of docs/scientific/14 (ADR-0048 §2.2), and the probes kept with
+  // its data
+  'scripts/bench-note-signature.cjs', 'scripts/exp-note-signature-census.cjs',
+  'docs/scientific/data/14/flood/probe-string-hash.cjs', 'docs/scientific/data/14/fprime/nan-bits.cjs',
+  'docs/scientific/data/14/strflood/probe-string-keys.cjs',
   // the cold-start profiler (docs/optimization/cold-start/ledger.md) and the vendored-asset tools
   'scripts/profile-cold-start.mjs', 'scripts/sync-assets.mjs', 'scripts/check-assets.mjs',
   // the daemon client seam: the `vv` launcher, the ping/stop tool install.sh + uninstall.sh call, and the

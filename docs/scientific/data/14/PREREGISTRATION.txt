@@ -1,0 +1,826 @@
+H-PAIRWORK LEDGER — the cost of one note-page comparison (vinary.slides.notes/note-page-signature?). Pre-registered
+before each run; results appended, never edited.
+
+==== H-PAIRWORK — pre-registered 2026-10-18, before any measurement ====
+Question. docs/theory/12 §3.7 (finding F11): the run cap bounds the pair visits of one comparison at 4096² ≈ 1.68e7,
+the match cap counts only pairs with σ ≤ 0.4, and "its time has not been measured". The claims under test:
+  K1 the max-signature-runs docstring: "the bound keeps a hostile PDF from making the background comparison slow";
+  K2 ADR-0048 §2.2: the two caps "keep a hostile PDF from making the background comparison slow";
+  K3 ADR-0048 §8.9: with the page budget, "a hostile PDF cannot occupy pdf.js's worker for long" (theory/12 F10: the
+     signature runs on the CALLING thread — the renderer's in the GUI — not the worker).
+Threshold. A comparison runs synchronously in one task on the renderer thread (vinary.slides.evidence read-pair / scan:
+inside a promise callback between two page reads). A task of ≥ 50 ms is a LONG TASK (W3C Long Tasks API); during it
+the window takes no input. "Slow" is judged against that threshold: K1/K2 hold iff the worst case of one comparison,
+within the caps, is < 50 ms.
+Instrument. scripts/bench-note-signature.cjs (new), on HEAD 2b78f18 (notes.cljs unchanged since 7d75f8e), in a
+scratch worktree ($J/wt-pairwork): synthetic pages of {:str :t} runs (the shape vinary.slides.evidence/page-runs
+gives), page 362.835 × 272.126 (Beamer's 128 × 96 mm), diag = hypot of those. Each case: warm-ups, then timed runs
+(process.hrtime.bigint), median / p95 / min / max by nearest rank; the result value is printed and checked.
+  A(n)  the F11 case: slide = n upright runs "x" at height 10, note = n upright runs "x" at height 10 (σ = 1 > 0.4:
+        every pair is visited, none counts), n ∈ {512, 1024, 2048, 4096}. Visits n²; result false (no copy).
+  B     the match cap: slide = 4096 runs "x" at 10, note = 4096 runs "x" at 1 (σ = 0.1): the cap trips before slide
+        run 17, after 17 · 4096 = 69 632 visits; result nil.
+  C     copy-covers? at the cap: slide = 16 runs "x" at 10 (spaced 20 apart) + one run of 1000 "z" (no match, so
+        need = 508 cannot be reached), note = 4096 runs "x" at 1 at seeded-random positions: 65 536 matches, all 8
+        grid passes run in full; result false.
+  D     a real-sized pair (the control): slide = 60 runs of distinct words at 10, note = its thumbnail at σ = 0.25
+        plus 30 runs of other words at 10; result true.
+Arms. dev = the compiled test build (dev-mode ClojureScript, as the renderer's dev build runs it) — primary;
+release = the :simple-compiled cli build (vinary.slides.notes as the shipped bundles compile it), loaded without its
+main — the shipped figure. One core: taskset -c 3 (benchmarks on 2–9; the verification lanes use 12–31).
+Predictions (dev):
+  P1 A(4096) median in [0.5 s, 5 s] — K1/K2 are FALSE (≥ 50 ms).
+  P2 A scales quadratically: median A(4096) / median A(2048) in [3, 5], and A(2048)/A(1024) in [3, 5].
+  P3 B median < 100 ms, and far below A(4096) (the match cap does bound the counted pairs).
+  P4 C median ≥ 50 ms — copy-covers? at the match cap is itself a long task.
+  P5 D median < 1 ms (a real pair is cheap).
+Release: the same ordering; each median within a factor 0.3–1.5 of dev's (simple optimizations do not change the
+algorithm). If dev's A(4096) or C falls in [50, 150] ms, the verdict on K1/K2 is taken from the release arm.
+Consequences, decided now:
+  · K1/K2 refuted (A(4096) or C ≥ 50 ms in the deciding arm) → a defect against the caps' stated purpose (a hostile
+    PDF can hold the renderer for that long per comparison, and up to ~2000 comparisons per decision). A fix is
+    designed and pre-registered BEFORE it is written, with its own predictions (the worst case < 50 ms; every
+    decision of experiment 13's corpus unchanged; the unit build green), and verified like H-SPLIT-TEXT.
+  · K1/K2 hold → the docs are corrected with the measured worst case only.
+  · K3 is corrected either way: the comparison does not run in pdf.js's worker (theory/12 F10).
+
+==== H-PAIRWORK — FUNCTIONAL CHECK of the instrument (2026-10-18; NOT the result) ====
+wt-pairwork (2b78f18 + scripts/bench-note-signature.cjs), dev test build compiled (0 warnings). `--only=B,C,D
+--runs=0.1` on core 3 (governor performance; load 12.78, the H-SPLIT-TEXT verification on 12–31): every case
+returned its expected value (B nil, C false, D true); B 59.7 ms, C 582.8 ms, D 0.200 ms at the median of 3 / 2 / 50
+runs (log functional-check.txt). These few runs on a loaded machine are not the measurement: the registered runs follow,
+unchanged, once the verification lanes are done. The instrument is not edited between this check and those runs
+(except to wire --bundle=release, which does not touch the dev path).
+
+==== H-PAIRWORK — RESULT (2026-10-18, 11:18–11:21; logs dev.txt / release.txt, samples dev.json / release.json,
+     environment.txt, arm-ratios.txt) ====
+Both arms on core 3 (governor performance; load ≈ 10 from the user's pgmcp / postgres / codex, none pinned to 3/35),
+the instrument as registered (the release loader wired as the functional check said). Medians (min) in ms:
+              dev                 release             visits      ns/visit at the median (dev / release)
+  A(512)        47.7 (47.4)         41.8 (41.0)       262 144     182 / 159
+  A(1024)      191.0 (189.5)       161.3 (160.7)    1 048 576     182 / 154
+  A(2048)      754.8 (749.8)       643.5 (642.1)    4 194 304     180 / 153
+  A(4096)     2991.0 (2981.9)     2576.5 (2571.8)  16 777 216     178 / 154
+  B             35.3 (26.8)         23.6 (23.3)        69 632
+  C            592.9 (542.1)       525.5 (499.4)       65 536 matches, 8 full passes
+  D             0.185 (0.157)       0.152 (0.133)          60
+Every case returned its registered value (A false, B nil, C false, D true).
+  P1 A(4096) dev median 2991 ms ∈ [0.5 s, 5 s] — HOLDS.
+  P2 dev A(4096)/A(2048) 3.96, A(2048)/A(1024) 3.95 ∈ [3, 5] — HOLDS (quadratic; release 4.00, 3.99).
+  P3 B 35.3 ms < 100 ms and ≈ 1/85 of A(4096) — HOLDS.
+  P4 C 592.9 ms ≥ 50 ms — HOLDS: copy-covers? at the match cap is itself a long task.
+  P5 D 0.185 ms < 1 ms — HOLDS.
+  Release: the same ordering; release/dev medians 0.67–0.89 ∈ [0.3, 1.5] — HOLDS.
+VERDICT. K1 and K2 are REFUTED in both arms: within the caps, one comparison holds the renderer thread for up to
+2.58 s (release, A(4096)) — 51× the long-task threshold — and 0.53 s at the match cap (C). Already A(1024), two pages
+of 1024 runs of one string, is a 161 ms task. With up to ~2000 comparisons per decision (theory/12 §4.5) a hostile PDF
+could keep the renderer busy for about 2000 × 2.6 s ≈ 86 min, in tasks of 2.6 s. K3 stands corrected regardless (the
+comparison runs on the calling thread). Per the registration: a fix is designed and pre-registered before it is
+written (H-PAIRWORK-FIX), with predictions: the worst case < 50 ms, every decision of experiment 13's corpus
+unchanged, the unit build green.
+
+==== H-PAIRWORK — census of the synthetic decks (2026-10-18; census-synthetic.{txt,json}) — context for the fix ====
+scripts/exp-note-signature-census.cjs (new) over every ordered page pair (s < j) of experiment 13's run-1 artifacts
+(146 PDFs: pdflatex 23, lualatex 27, xelatex 27, xelatex2 69) and the 9 test fixtures: at most 15 runs on a page,
+at most 10 visits and 7 matches per pair; no pair near either cap. These decks are small by construction: they
+cannot show what dense real slides need. The local real decks (experiment 12's classifier, re-run; counts only)
+are being collected for that.
+
+==== H-PAIRWORK-FIX — the fix, designed and pre-registered 2026-10-18 BEFORE it is written ====
+Requirement. Same value as today's note-page-signature? on EVERY input (exact equivalence: no decision of any deck
+may change), with every case of the H-PAIRWORK bench far below the long-task threshold. Target: each case's release
+median ≤ 16 ms on this machine (core 3, governor performance), so that a 3× slower machine stays under 50 ms.
+Design F (three changes, each proved equivalent):
+  F-a  The visits that cannot match are never made. For a slide run of height hs, the kept note runs of its string
+       are {k : 0 < h_k/hs ≤ max-thumbnail-scale} (h_k = run-height k > 0, upright?). With the string's runs sorted
+       by height ascending, h ↦ h/hs is non-decreasing (IEEE division is monotone), so "h_k/hs ≤ 0" (underflow,
+       or hs = +∞) holds on a prefix and "h_k/hs ≤ 0.4" on a longer prefix (NaN, from ∞/∞, only at the end):
+       the kept runs are the index range [lo, hi), found by two binary searches. Cost per slide run O(log r_j).
+  F-b  A counting pass first: total = Σ (hi − lo). Today's loop returns nil iff the TOTAL exceeds
+       max-signature-matches (its cap check precedes the end test, and the count only grows); so nil iff total > cap,
+       decided before a match is built. Otherwise the matches are built into preallocated typed arrays of exactly
+       `total` entries: slide-run index i, and the three cell quotients ln σ / ln(1.02), tx/tol, ty/tol — each the
+       same double today's code computes in every pass (same expressions on the same doubles).
+  F-c  copy-covers? keeps its eight grids, its cell formula floor(q − shift) and its order-free verdict (true iff
+       some grid has a cell whose DISTINCT slide runs carry ≥ need glyphs: sums only grow, so the early exit does not
+       change the verdict). Cell keys: the three integers packed into one exact double when each lies in
+       [−65535, 65535] ((a+2^16)·2^34 + (b+2^16)·2^17 + (c+2^16) < 2^51; −0 and 0 pack alike, as str prints both
+       "0"), else today's string key (a number never equals a string in a js/Map: the encoding stays injective).
+       The per-cell js/Set of slide runs becomes a per-cell "last slide run": matches come grouped by i in ascending
+       order, so "i already in this cell" ⟺ "the cell's last run is i".
+Predictions (release arm, the same bench, unchanged except that it now also times the fixed code):
+  Q1 A(4096) ≤ 10 ms, B ≤ 10 ms, D ≤ 1 ms (medians).
+  Q2 C ≤ 50 ms. If C > 16 ms, max-signature-matches is lowered to the largest power of two whose C median ≤ 16 ms,
+     PROVIDED the census of real decks shows max matches ≤ cap/16 (a 16× margin); otherwise this stops and is
+     reported. (Lowering the cap is the only change that could alter a result: nil for 16 384 < matches ≤ 65 536.)
+  Q3 Equivalence, measured three ways: (E1) a property test — the fixed and a verbatim copy of today's
+     implementation (a test-only reference namespace) agree on ≥ 20 000 generated pairs, generators covering repeated
+     strings, σ at and around 0.4, underflow to 0, infinite heights, coordinates outside the packing range, and pairs
+     around the match cap; (E2) the census pairs of every listed deck: zero disagreements; (E3) vv --cli --deck-info
+     over experiment 13's 146 PDFs and the fixtures, before and after: identical lines.
+  Q4 the unit build green; lint green; the full verification green before the commit.
+Refuted (the fix rejected) if any disagreement is found (Q3), or if Q1/Q2 fail with the cap kept.
+
+==== H-PAIRWORK-FIX — E1's first run, and its NEGATIVE CONTROLS pre-registered (2026-10-18) ====
+E1 as written (test/vinary/slides/notes_signature_equivalence_test.cljs, the reference ns notes_reference.cljs, the
+fixed notes.cljs in wt-pairwork): unit build 863 tests, 44 385 assertions, 0 failures (unit-fix-2.log). 24 000
+generated pairs at the real caps (the reference's verdicts: true 6172, false 17 737, nil 91), 4 800 around small caps
+0…144 rebound with set! (nil reached at every cap above 0), and the three real-cap cases: zero disagreements.
+Deviations from the first draft of the test, both in the TEST, recorded: (1) its own coverage floor "each verdict
+> 500 times" failed on nil (91: nil needs a slide without text or a cap) — lowered to ≥ 50, the observed counts
+printed; (2) the real-cap "false" case first used scattered note runs, and the REFERENCE itself said true (64 slide
+runs on a 5-unit grid put each note run's matches into a few cells, so a copy covers): rebuilt as case C (a slide run
+of 1000 characters no note run repeats makes need unreachable). In neither did the fixed and the reference disagree.
+Added: a-cell-key-names-one-cell (13³ index triples at and beyond ±65535: distinct keys), because the generators never
+span 65 536 cells.
+NEGATIVE CONTROLS — each a one-line mutation of the fixed notes.cljs; E1 (the namespace's four tests) predicted to
+FAIL on each, at the named test:
+  mE1 lower-bound-dropped  lo := 0 (σ = 0 from underflow kept)                → generated pairs at the real caps
+  mE2 strict-scale         the upper search uses < bound, not ≤ (σ = 0.4 cut) → generated pairs at the real caps
+  mE3 dedup-off            no "last run is i" branch (a run counted per match) → generated pairs (dense repeats)
+  mE4 cap-off-by-one       (>= m cap) for (> m cap)                          → the real-cap test and the small caps
+  mE5 packing-overlap      b's digit 2^16 wide, a's 2^32 (digits overlap)     → a-cell-key-names-one-cell
+If any survives, E1 is not trusted until the test is extended to kill it.
+
+==== H-PAIRWORK-FIX — E1's NEGATIVE CONTROLS, RESULT (2026-10-18; mutants/summary.txt, mutants/unit-mE*.log) ====
+The fixed tree first (the control): E1 alone, 4 tests, 15 assertions, 0 failures (unit-e1-control.log).
+  mE1 lower-bound-dropped  KILLED — generated pairs at the real caps (and the small caps)        as predicted
+  mE2 strict-scale         KILLED — generated pairs at the real caps (and the small caps)        as predicted
+  mE3 dedup-off            KILLED — generated pairs at the real caps (and the small caps)        as predicted
+  mE4 cap-off-by-one       KILLED — the real-cap test and the small caps                          as predicted
+  mE5 packing-overlap      KILLED — a-cell-key-names-one-cell                                    as predicted
+Every negative control fails where it was predicted to: E1 detects each kind of non-equivalence it was built for.
+The fixed notes.cljs was restored from its saved copy (cmp-equal) and the test build recompiled.
+
+==== H-PAIRWORK-FIX — the census of real decks, and E2 (2026-10-18; census-all.{txt,json}) ====
+scripts/exp-note-signature-census.cjs --differential on the fixed tree (wt-pairwork), cores 4–7, over every ordered
+page pair s < j of: the local decks experiment 12's classifier finds (re-run 11:25–11:52 over 2469 PDFs outside
+~/.claude; 29 decks, of which 9 are this repository's own fixtures, dropped: 20 real decks — 12 slide exports, 8
+Beamer), experiment 13's 146 artifacts and the 9 fixtures. Counts only (paths stay in the scratch list).
+  local slide exports  12 files, 656 pages, 30 679 pairs: most runs on a page 443; visits max 15 400 (p99 124),
+                       matches max 372 (p99 0); no pair near either cap
+  local Beamer          8 files, 271 pages,  5 303 pairs: most runs 283; visits max 2 204 (p99 508), matches max 0
+  experiment 13 + fixtures: as before (≤ 15 runs, ≤ 10 visits, ≤ 7 matches)
+E2: on all 38 830 pairs the fixed signature returns the reference's verdict — zero disagreements (the reference's
+verdicts: true 246, false 38 548, nil 36; the real local decks' pairs are all false: none carries a text thumbnail).
+Margin: the real maximum of 372 matches is 1/176 of the cap 65 536; the 16× rule of Q2 would allow a cap as low as
+8 192 (≥ 16 × 372 = 5 952), should C need it.
+
+==== H-PAIRWORK-FIX — E3 RESULT, and the after-fix bench's conditions (2026-10-18) ====
+E3: vv --cli --deck-info (the :simple release CLI) over experiment 13's 146 PDFs and the 9 fixtures, with the build of
+2b78f18 (11:16, before the fix; e3-before.jsonl) and the build of the fixed tree (e3-after.jsonl): the two outputs are
+BYTE-IDENTICAL, 155 lines. Their decisions exercise every path that compares pages: scan 34, labels+probe 8,
+labels+probe+confirm 8, labels+confirm 15, confirm-failed 10, probe-undecided 4 (and labels-only 24, split 7, the rest
+not compared). Q3 (E1, E2, E3): HOLDS — no disagreement anywhere.
+The after-fix bench (Q1/Q2): the registered instrument, unchanged (scripts/bench-note-signature.cjs), on the fixed
+tree's dev test build and :simple cli build, core 3, both arms, started — like the pre-fix runs, at load ≈ 10 — only
+once the 1-minute load is below 12 (the user's f1r3node-rust test was loading the machine; it is not touched). It runs
+after the H-LOAD find-e2e re-run, never alongside it.
+
+==== H-PAIRWORK-FIX — CORRECTION to the description of mutant mE2 (2026-10-18, written while drafting docs/scientific/14) ====
+The registration described mE2 as "the upper search uses < bound, not ≤". The mutation applied (mutate.py, the line
+for mE2) is a different one-line change: the upper search's bound is max-thumbnail-scale − 1e-15 instead of
+max-thumbnail-scale, with ≤ kept (prefix-count's comparison is shared with the lower search, so changing it to < would
+also have changed lo). The doubles near 0.4 are about 5.6e-17 apart, so the mutant drops the matches with
+σ ∈ (0.4 − 1e-15, 0.4] — σ = 0.4 itself and the few doubles just below it — where "< bound" would have dropped σ = 0.4
+alone. It is the registered kind of non-equivalence (the boundary σ = 0.4 cut), slightly wider. It was killed as
+predicted. Nothing above is edited; this note supersedes the earlier one-line description.
+
+==== H-PAIRWORK-FIX — the after-fix bench of design F, RESULT (2026-10-18, 12:00:44–12:00:50; quiet/fixed-{dev,release}.{txt,json}) ====
+The registered instrument, unchanged, on the fixed tree (wt-pairwork): dev = its test build, release = its :simple cli
+build; core 3, governor performance. DEVIATION: the waiter checked the load (< 12) only once, before the H-LOAD
+find-e2e run; when the bench began 3.7 min later the load was 13.00 (12.84 at its end) — above the registered 12, and
+above the pre-fix runs' ≈ 10. Recorded, not repeated: the bench ran on core 3, which nothing else was pinned to.
+Medians (min) in ms, release / dev:
+  A(512)   0.733 (0.618) / 1.127 (0.706)      before 41.8 / 47.7
+  A(1024)  1.440 (1.180) / 1.412 (1.378)      before 161.3 / 191.0
+  A(2048)  2.763 (2.737) / 2.792 (2.770)      before 643.5 / 754.8
+  A(4096)  5.350 (4.694) / 5.866 (5.536)      before 2576.5 / 2991.0
+  B        3.627 (3.599) / 4.195 (4.132)      before 23.6 / 35.3
+  C       48.555 (46.972) / 61.177 (59.760)   before 525.5 / 592.9
+  D        0.111 (0.107) / 0.126 (0.122)      before 0.152 / 0.185
+Every case returned its registered value (A false, B nil, C false, D true). (The instrument's "visits" and "ns each"
+columns divide by the old algorithm's visit count, a parameter of the case; for the fixed code they are not work done.)
+  Q1 A(4096) 5.35 ≤ 10, B 3.63 ≤ 10, D 0.111 ≤ 1 (release medians) — HOLDS. A now scales linearly: A(4096)/A(2048)
+     1.94, A(2048)/A(1024) 1.92 (was 4.00, 3.99).
+  Q2 C 48.6 ms ≤ 50 ms — HOLDS, narrowly (dev 61.2 does not); but C > 16 ms, so the registered rule applies: lower
+     max-signature-matches to the largest power of two whose C median ≤ 16 ms (the census allows ≥ 8 192).
+The rule is NOT applied to design F: the red-team review of F (Plan agent; its report is model output, not a
+measurement) returned at 11:58 with two findings against F-c that this bench cannot see, both to be measured here
+before anything is built on them:
+  R-FLOOD  F-c keys the cells of a js/Map by a packed NUMBER. V8 hashes numbers without a seed (strings with one), so
+           a PDF whose matches land in cells with colliding number hashes could make each pass quadratic — the report
+           claims 8 192 such keys take 1 179 ms in a bare js/Map against 4 ms for random ones. Bench C draws random
+           positions (mulberry32) and cannot show it.
+  R-FAR    a cell index outside ±65 535 falls back to the string key — today's per-match cost — so a pair whose
+           matches all lie far off the page (or whose page diagonal is tiny, tol = 1e-9) costs about what C cost
+           before the fix (the report: 547 ms).
+Both are attacks on the TIME of design F, not on its value (the report confirms F's exact equivalence line by line).
+They are registered as H-FLOOD and H-FAR below, measured on F (and on the reference) first; the redesign F′ is
+registered after them, before it is written.
+
+==== H-FLOOD, H-FAR — design F's time on crafted inputs — pre-registered 2026-10-18, before any of their runs ====
+Question. Can a pair of pages within the caps make design F's copy-covers? slow, through V8's hashing of the cell
+keys (R-FLOOD) or through the string fallback (R-FAR)? The red-team report's numbers are not used; these are measured.
+Instrument: scripts/bench-note-signature.cjs, extended (before its first run with them) by three cases of one shape —
+slide = 16 runs "x" at height 10, all at the origin (so t = note origin exactly, σ·0 = 0), plus the run of 1000 "z"
+that nothing matches (need = (16 + 1000)/2 = 508 is unreachable: every pass runs in full); note = 4096 runs "x", note
+run k placed so that its cell in every one of the eight grids is a chosen triple (a_k, b_k, c_k): height
+10·exp((a_k + ¾)·ln 1.02) and origin ((b_k + ¾)·tol, (c_k + ¾)·tol), so each quotient has fractional part ¾ and
+⌊q − 0⌋ = ⌊q − ½⌋. The 16 slide runs share each note run's cell: 65 536 matches in 4 096 cells; the instrument checks
+the cells by recomputing them, and the result (false), before any timing.
+  C-rand  the 4 096 triples drawn at random in range (a ∈ [−200, −47], b, c ∈ [−60 000, 60 000]; mulberry32(15)).
+  C-flood triples in range whose packed keys P (design F's cell-key) fall in ONE bucket of a 4 096-entry js/Map —
+          equal low 11 bits of V8's number hash, the instrument's model of it: V8's ComputeLongHash (Thomas Wang's
+          64-bit mix) of the double's bits, as V8 hashes a number outside the int32 range. Found by search over
+          random triples. Whether the model is V8's is part of what is tested: if it is wrong, C-flood is C-rand.
+  C-far   triples with b out of the packing range (b ∈ [100 000, 2 000 000]), so design F keys them by string.
+Arms: release (:simple cli bundle) — the deciding arm — and dev; core 3; started only when the 1-minute load is
+below 12, checked again before each arm. Builds: the reference (2b78f18, rebuilt in a worktree) and design F
+(wt-pairwork).
+Predictions:
+  H-FLOOD  F's C-flood median ≥ 10 × F's C-rand median (release); the reference's C-flood median ≤ 2 × its C-rand
+           (strings hash with a seed).
+  H-FAR    F's C-far median ≥ 5 × F's C-rand median (release).
+Consequences, decided now: if either holds, F-c is rejected for the hostile case and replaced by F′-c (registered
+next, written only after these runs). If both are refuted, F stays and the cap rule of Q2 is applied to F's C.
+Also probed, as context for F′ (no prediction): whether V8's js/Map with STRING keys — by-height groups the note page's
+runs by string with one — is slowed by strings that are array indices ("0", "2048", …), which V8 hashes from their
+numeric value; measured as the time to insert 4 096 such strings against 4 096 random strings.
+
+==== H-PAIRWORK-FIX′ — design F′, pre-registered 2026-10-18 BEFORE it is written ====
+F-a and F-b are kept unchanged. F-c is replaced by F′-c; nothing in the comparison then hashes a cell with a hash
+the PDF's author can predict:
+  F′-c  copy-covers? keeps its eight grids, its cell formula ⌊q − s⌋ on the same precomputed quotients, its
+        "last slide run" dedup and its order-free verdict. Its cells live in a hash table of its own, on typed
+        arrays: B buckets (the least power of two ≥ 2m, at least 16), chaining (a head per bucket, a next per cell),
+        a stamp per bucket so that each grid starts empty in O(1), and per cell its three indices, last slide run
+        and sum. The hash is drawn AT RANDOM ON EVERY CALL from a universal family: with p = 2^31 − 1 (prime),
+          in range (every index within ±65 535):  u = (α₀ d₀ + α₁ d₁ + α₂ d₂ + β) mod p,  dᵢ = indexᵢ + 65 536 < 2^17;
+          otherwise:  u = (Σ γⱼ eⱼ + δ) mod p over the twelve 16-bit halves eⱼ of the three indices' canonical bits
+          (−0 as +0; every NaN as one pattern);
+        bucket = u mod B; α, β, γ, δ uniform in [0, p) from crypto.getRandomValues. Every product is below 2^48 and
+        every sum below 2^53, so u is exact in doubles. For any two distinct cells, the chance that they share a
+        bucket is at most 1/B + 1/p, whatever the input — the input is fixed before the hash is drawn — so the
+        expected chain walked per match is at most 1 + m(1/B + 1/p) < 1.6. Cell equality is componentwise
+        SameValueZero, which is exactly when today's string keys are equal (Number::toString is injective on
+        doubles but for +0/−0, and NaN prints one way). The hash decides only where a cell is stored, never which
+        matches share a cell, so the verdict does not depend on the draw.
+  (by-height keeps the note page's string groups in a js/Map with string keys — V8's seeded string hash — unless the
+  probe above shows array-index strings defeat it; then F′ groups the strings in a table of its own, seeded the same
+  way over the strings' UTF-16 code units, and this registration is amended before that is written.)
+Predictions:
+  Q1′ release medians: A(4096) ≤ 10 ms, B ≤ 10 ms, D ≤ 1 ms.
+  Q2′ release medians of C, C-rand, C-flood and C-far each ≤ 16 ms at the cap 65 536. Otherwise the cap is lowered to
+      the largest power of two X ≥ 8 192 (the census's 16× rule: 16 × 372 = 5 952) for which C(X), C-rand(X),
+      C-flood(X) and C-far(X) — the same shapes with X matches — all have release medians ≤ 16 ms; if none, this
+      stops and is reported.
+  Q2″ no flood: F′'s C-flood median ≤ 1.5 × its C-rand median.
+  Q3′ equivalence, as for F: E1 (the four tests, plus generators for indices beyond ±65 535 and NaN indices — the
+      general hash path — and a sweep of one string's heights from 5e−324 to 1e300 against slide heights around
+      σ = 0.4), its negative controls (registered with the code, killed before E1 is trusted), E2 over the census
+      pairs, E3 over the 155 decks: zero disagreements anywhere.
+  Q4′ the unit build, lint and the full verification green before the commit.
+AMENDMENT to H-FLOOD/H-FAR before any run (2026-10-18): the scale index range [−200, −47] registered above admits
+a = −47, whose σ = 1.02^(−46.25) = 0.40017 exceeds max-thumbnail-scale, so those matches would not count. The range
+is a ∈ [−200, −48] (σ ≤ 1.02^(−47.25) = 0.3923). The instrument's own check (every match counted, m = 65 536) would
+have refused the case; nothing else changes.
+
+==== H-PAIRWORK-FIX′ — E1 for F′ and its NEGATIVE CONTROLS, pre-registered 2026-10-18 BEFORE F′ is written ====
+(Written while the H-FLOOD/H-FAR runner waits for the load to fall below 12; the deciding release arms of both builds
+are in, the dev arm of F and the string probe are not. Nothing here depends on them.)
+E1 for F′ — the namespace notes-signature-equivalence-test, with these changes, each made before F′'s first run:
+  kept unchanged  the three equivalence tests of F's E1 (24 000 generated pairs at the real caps, seed 20261018;
+                  4 800 pairs at caps 0…144, seed 14; the three real-cap cases).
+  replaced        a-cell-key-names-one-cell tests cell-key, which F′ removes (F′ has no packed key). DEVIATION from
+                  Q3′'s "the four tests": it is replaced by two tests of F′'s hash —
+                  (a) a cell's hash is a function of its SameValueZero class: −0 and +0 hash alike, and NaNs of three
+                      different bit patterns (built with a DataView: 0x7FF8000000000000, 0xFFF8000000000000 and
+                      0x7FF0000000000001) hash alike, on both paths, for fresh coefficients; every hash is an integer
+                      in [0, p); indices ±65 535 take the in-range formula and ±65 536 the general one;
+                  (b) the coefficients are fresh on every call: 17 integers in [0, p), and two draws differ.
+  added           (c) general-path pairs: 6 000 generated pairs (seed 65536) whose cells take the general hash —
+                      thumbnail copies offset by 65 536 … 10^7 cells, slides whose runs have a NaN origin (σ·NaN),
+                      runs at ±∞ (∞ − ∞ is a NaN), and offsets at ±0 — agree with the reference;
+                  (d) every cell collides: the generated pairs of the first test (4 000 of them, seed 20261018) and
+                      of (c) (2 000, seed 65536), with the coefficients redefined to all zeros (with-redefs), so that
+                      every cell of every grid shares bucket 0 — the chains carry the whole grouping; they agree;
+                  (e) the height sweep: one string's heights, 2 000 log-spaced values from 5e−324 to 1e300 plus +∞ and,
+                      for each slide height hs of the sweep, the doubles next to 0.4·hs: prefix-count equals a linear
+                      count of h/hs ≤ bound, for bounds 0 and max-thumbnail-scale;
+                  (f) two crafted pairs where the grouping of a NaN or a ±0 index decides the verdict (the reference
+                      true): three slide runs whose copies' b index is NaN⁺ (σ·NaN), NaN⁻ (∞ − ∞) — and a fourth that
+                      no copy carries — and three runs whose copies' c index is +0, −0 and a value in (0, 1).
+NEGATIVE CONTROLS — each a one-line mutation of F′'s notes.cljs; E1 predicted to FAIL on each, at the named test:
+  m′1 nan-equal-dropped    same-index? is (== x y): a NaN index never equals itself  → (c) and (f)
+  m′2 signed-zero-hashed   the general hash hashes −0 by its own bits                 → (a) (and (f) when it lands apart)
+  m′3 nan-bits-hashed      the general hash hashes a NaN by its own bits              → (a) (and (f) when it lands apart)
+  m′4 chain-cut            a new cell's next is −1: the bucket's older cells are lost → (d)
+  m′5 equality-partial     the walk compares the a and b indices, not c              → (d)
+  m′6 dedup-off            no "last slide run is i" branch                          → the generated pairs at the real caps
+  m′7 coefficients-once    the coefficients drawn once per process (a def)          → (b)
+  m′8 sweep-strict         prefix-count compares with <, not ≤                      → (e) and the generated pairs
+and mE1–mE4 of F (they mutate F-a and F-b, which F′ keeps): killed where they were before.
+If any survives, E1 is not trusted until the test is extended to kill it. A mutation that changes only WHERE a cell
+is stored (the hash's formula, the reduction mod p, the bucket count) cannot change a verdict — that is what (d)
+shows — so none is used as a control: the controls target the equality, the chains, the dedup, the sweep and the
+hash's being a function of the cell's class.
+Also registered (a replication, no new prediction for F′): the H-FLOOD shapes run under Electron's own V8
+(ELECTRON_RUN_AS_NODE=1, the app's electron binary), release bundle, for F and F′ — the renderer runs the comparison
+on that engine, not on node's. Predictions: F's C-flood ≥ 10 × its C-rand (as in node); F′'s C-flood ≤ 1.5 × its C-rand.
+
+==== H-FLOOD, H-FAR — RESULT (2026-10-18, 12:17:41–12:33:59; flood/{ref,F}-{release,dev}.{txt,json}, flood/summary.txt) ====
+As registered: core 3, governor performance; each arm started with the 1-minute load below 12 (11.71, 11.70, 11.93,
+10.49; it rose during some arms, to 15.12 at the end of the reference's release arm — the user's f1r3node-rust test,
+8 threads, and pgmcp's indexing, none pinned to core 3). The instrument's checks passed before any timing: 4 096 distinct
+cells in every shape, 65 536 matches each counted (σ ≤ 0.3923), the indices recomputed, C-flood's cells all in ONE
+bucket of the modelled 2 048-bucket table (8 253 387 random triples searched, 2.4 s), C-far's b beyond ±65 535; every
+case returned false. Medians in ms (p95):
+                 reference (2b78f18 code)                 design F
+                 release            dev                   release            dev
+  C              615.310 (736.320)  666.164 (814.671)      49.382 (71.555)    60.147 (68.992)
+  C-rand         487.695 (512.974)  534.202 (659.770)      30.041 (36.769)    42.036 (44.624)
+  C-flood        473.517 (521.999)  524.412 (623.831)    2330.927 (2359.181) 2271.273 (2275.331)
+  C-far          487.622 (545.743)  506.009 (623.178)     230.141 (268.599)  227.807 (231.390)
+  H-FLOOD  F's C-flood / C-rand = 77.6 (release; dev 54.0) ≥ 10 — HOLDS. The reference's = 0.971 (dev 0.982) ≤ 2 — HOLDS.
+           The instrument's model of V8's number hash (ComputeLongHash of the double's bits) is V8's: cells that the
+           model puts in one bucket cost F 2.33 s, cells it spreads cost 30 ms.
+  H-FAR    F's C-far / C-rand = 7.66 (release; dev 5.42) ≥ 5 — HOLDS: F's string fallback costs what the reference's
+           keys cost (230 ms against the reference's 488 ms; F still saves the visits).
+Consequence, as registered: F-c is REJECTED for the hostile case and replaced by F′-c. (The reference's C here, 615 ms,
+is 17 % above its 525.5 ms of 11:18 — the load was higher, ≈ 12–15 against ≈ 10; the predictions compare cases
+within one arm, so this does not bear on them.)
+The string probe (flood/probe-string-hash.txt; no prediction): 4 096 keys set and got in a fresh js/Map — index
+strings k·2048 median 0.224 ms (max 0.746), random index strings 0.150 ms, non-index strings 0.134 ms. Index strings
+with equal low bits do NOT pile into one bucket (that would cost tens of ms): by the registration, by-height KEEPS its
+js/Map with string keys.
+
+==== H-PAIRWORK-FIX′ — AMENDMENT before F′ is written (2026-10-18): the hash family ====
+Found while writing F′'s proofs, before any of F′'s code: the registered family u = (α·d + β) mod p is PAIRWISE
+independent only. That bounds the expected chain (the registered < 1.6) for every input, but the TAIL only by Markov's
+inequality — and the PDF's author controls the cells' structure exactly (an arithmetic progression of cells along one
+axis is a row of note runs), and with B a power of two the bucket is u's low bits, where such structure survives for
+the multipliers α with low bits zero. No bound beyond Markov is claimed for it, so it is replaced, before it is written,
+by SIMPLE TABULATION [Carter–Wegman 1979; Pătraşcu–Thorup 2012]:
+  F′-c (amended)  each of a cell's three indices is hashed by its CANONICAL 64 bits (−0 as +0, every NaN as
+                  0x7FF8000000000000), read as 8 bytes, through 8 tables of 256 random 32-bit words — 24 tables in
+                  all, one per (axis, byte) — and the cell's hash is the XOR of its 24 entries; bucket = the hash's low
+                  log₂B bits. The 24 × 256 words are drawn from crypto.getRandomValues on every call that has a match.
+                  Each match's six per-axis hashes (two shifts × three axes) are computed once, before the eight
+                  passes; a pass XORs three of them.
+  Why it is better: simple tabulation is 3-independent, so for two distinct cells the chance that they share a bucket
+  is EXACTLY 1/B (B divides 2^32) — the expected chain walked per lookup is at most 1 + (m − 1)/B < 1.5 — and it has
+  Chernoff-type concentration of the bucket loads [PT12, Theorem 1], which the linear family lacks. Its arithmetic is
+  32-bit integer XOR, so no floating-point exactness argument is needed. Every index takes one path, so a far or
+  infinite index costs what a near one costs (C-far ≈ C-rand is predicted below).
+  Unchanged: the table on typed arrays (B the least power of two ≥ 2m, at least 16; chaining; a stamp per bucket;
+  per cell its three indices, last slide run and sum), the equality (componentwise SameValueZero), the cell formula,
+  the dedup, the order-free verdict, by-height (kept, per the probe), F-a and F-b, and every prediction Q1′–Q4′.
+  Revised with it, in the E1 changes registered above: test (a) checks that an index's hash depends only on its
+  SameValueZero class (−0/+0; the three NaN patterns) and that distinct indices — 0, ±1, ±65 535, ±65 536, ±2^53,
+  ±1e300, ±∞ — hash through all 8 bytes (a change in any one byte changes the hash, for random tables); test (b)
+  checks that the 6 144 words are fresh on every call; m′7 becomes "tables drawn once per process". The controls m′1–m′8
+  otherwise stand: m′2 and m′3 now mutate the one canonicalization every index goes through.
+  Added prediction (no new test): Q2‴ F′'s C-far median ≤ 1.5 × its C-rand median (one path for every index).
+  Added to the Electron replication: the string probe under Electron's V8, no prediction.
+
+==== H-PAIRWORK-FIX′ — F′ written; E1's FUNCTIONAL CHECK (2026-10-18, 12:40–12:47; NOT the registered runs) ====
+F′ as amended (notes-fprime.cljs, saved; design F stays in notes-fixed.cljs): hash-tables (public, so that test (d) can
+redefine it without a private-var warning), index-hash, same-index?, copy-covers? on its own table; half-cell [0 0.5]
+now defines grid-shifts, and copy-covers? takes both shifts from it (the per-axis hashes and the passes' indices are
+computed by the same expression on the same doubles). E1 as registered (equivalence-test-fprime.cljs): test build
+0 warnings; E1 alone 10 tests, 2 108 assertions, 0 failures (fprime/unit-e1-1.log). Test 1's tally {true 6172,
+false 17737, nil 91} is F's: the same pairs. (c) 6 000 general pairs: true 3638, false 2339, nil 23; (d) all-collide
+4 000 + 2 000: true 1013 / 1201, false 2971 / 796, nil 16 / 3.
+FINDING in the test (recorded, not a code defect): ClojureScript's reader runs on the JVM, where the literal -0 is the
+long 0, so extreme-coordinates' second entry `-0` compiled to (0) (the compiled test shows "[(0),(0),1.0E15,…]"): F's
+E1 never generated a −0 coordinate. Tests 1–3 are kept unchanged, as registered, with a comment saying so; the new
+tests build −0 at run time, (/ -1 js/Infinity), checked by (a) to be −0.
+PREMISE of test (f), checked (fprime/nan-bits.cjs, node v26.11.1 and Electron's node mode): js/NaN and σ·NaN are
+0x7FF8000000000000, ∞ − ∞ (and (∞ − σ·∞)/tol, and its floor after − 0.5) is 0xFFF8000000000000 — x86-64's default
+NaN — in interpreted and optimized code alike. So (f)'s NaN pair carries two NaN encodings into one cell's index.
+
+==== H-PAIRWORK-FIX′ — F′'s NEGATIVE CONTROLS, RESULT (2026-10-18, 12:49–12:57; fprime/mutants/summary.txt, unit-*.log) ====
+mutate-fprime.py applies each registered mutation (exactly once) to the saved F′; each is compiled into the test build
+and run against E1 alone (cores 24–31); F′ is then restored (cmp-equal) and recompiled. The control, E1 on the restored
+F′: 10 tests, 2 108 assertions, 0 failures (fprime/unit-e1-control.log). Every mutant FAILS, at least where predicted:
+  m′1 nan-equal-dropped   (f) NaN pair, (c), (d)                                   predicted (c), (f)   KILLED
+  m′2 signed-zero-hashed  (a), (f) zero pair, (c)                                  predicted (a)        KILLED
+  m′3 nan-bits-hashed     (a), (f) NaN pair                                        predicted (a)        KILLED
+  m′4 chain-cut           (d), and with random tables too: 1, 2, (c)               predicted (d)        KILLED
+  m′5 equality-partial    (d), 1, 2, (c)                                           predicted (d)        KILLED
+  m′6 dedup-off (= mE3)   1, 2, (c), (d)                                           predicted 1          KILLED
+  m′7 tables-once         (b) only                                                 predicted (b)        KILLED
+  m′8 sweep-strict        (e), 1, 2, (c), (d)                                      predicted (e), 1     KILLED
+  mE1 lower-bound-dropped 1, 2, (c), (d)                                           as for F             KILLED
+  mE2 strict-scale        1, 2, (c), (d)                                           as for F             KILLED
+  mE4 cap-off-by-one      2, 3                                                     as for F             KILLED
+(1, 2, 3 = the three equivalence tests kept from F's E1.) Every negative control fails where it was predicted to:
+E1 detects each kind of non-equivalence it was built for, and it is trusted for F′. m′7 shows that only (b) guards the
+draw on every call: a fixed table changes no verdict — what it would change is the flood resistance, which the bench's
+crafted shapes cannot attack (they target V8's hash, not tables drawn at random).
+
+==== H-PAIRWORK-FIX′ — the unit build, E2 and E3 on F′ (2026-10-18, 12:58–13:03) ====
+Unit build (F′, test build 0 warnings): 870 tests, 46 483 assertions, 0 failures (fprime/unit-all.log).
+E2 (fprime/census-fprime.{txt,json}): scripts/exp-note-signature-census.cjs --differential, cores 12–19, the same list
+(175 files: 20 local real decks, experiment 13's 146 artifacts, the 9 fixtures; paths in the scratch list only): on
+all 38 830 pairs F′ returns the reference's verdict — zero disagreements (the reference's verdicts as before: true 246,
+false 38 548, nil 36).
+E3 (fprime/e3-fprime.jsonl): vv --cli --deck-info with F′'s :simple release CLI (shadow-cljs release cli, 0 warnings),
+the 155 files of e3-files.txt, cores 12–19: BYTE-IDENTICAL to e3-before.jsonl (the build of 2b78f18); no stderr.
+Q3′ (E1 with its controls, E2, E3): HOLDS — no disagreement anywhere.
+
+==== H-PAIRWORK-FIX′ — F′'s bench: the functional check (NOT a result) and the runner (2026-10-18, before the run) ====
+The instrument on F′'s release bundle, --runs=0.2, core 3, load 6.21 (fprime/functional-check-release.txt): every
+shaped case's checks pass (4 096 cells; C-flood's 4 096 cells in one bucket of the modelled 2 048-bucket table, 8 253 387
+draws; C-far's indices beyond ±65 535), every case returns what it returned for the reference and F. Its medians, from
+2–6 runs each and NOT the registered measurement: A(4096) 7.5, B 4.3, D 0.24, C 34.4, C-rand 27.6, C-flood 27.4,
+C-far 27.2 ms. They are written down because they were seen before the registered run: the rules of Q1′–Q2‴ were fixed
+above, before F′ was written, and nothing about them changes. They do say that Q2′'s fallback will be needed, so the
+runner (fprime/bench/run.sh) runs, after the release and dev arms at 65 536, the registered fallback's shapes at every
+X ∈ {32 768, 16 384, 8 192} (release, C, C-rand, C-flood, C-far, --matches=X), each arm gated on the load like the
+others; the rule then takes the largest X whose four medians are all ≤ 16 ms. Then the Electron replication (F and F′,
+release, C-rand, C-flood, C-far) and the string probe under Electron, as registered.
+
+==== H-PAIRWORK-FIX′ — F′'s bench, RESULT (2026-10-18, 13:02:09–13:03:31; fprime/bench/{summary,environment}.txt,
+     fprime-{release,dev}.{txt,json}, fprime-release-m{32768,16384,8192}.{txt,json}, {F,fprime}-electron-release.{txt,json},
+     probe-string-hash-electron.txt) ====
+As registered: core 3 (SMT sibling 35 idle of pinned work), governor performance; every arm started with the 1-minute
+load below 12 (7.10 at the first, 8.21 at the last; nothing else pinned to core 3). node v26.11.1 (V8 14.6.202.34-node.37);
+Electron 42.5.0 in node mode (node 24.17.0, V8 14.8.178.33-electron.0). F′'s bundle sha256 648d937c…; F's f3871cd6…
+(the bundle of the H-FLOOD runs). Every case returned its registered value and every shaped case's checks passed
+(cells, σ, the modelled bucket for C-flood, C-far's indices out of range). Medians in ms (max; with 15 runs the
+nearest-rank p95 IS the max):
+  node, release, cap 65 536   A(4096) 5.463 (7.623)  B 3.958 (5.457)  D 0.133 (3.055)
+                              C 34.684 (74.369)  C-rand 28.625 (69.716)  C-flood 28.595 (70.786)  C-far 29.976 (68.475)
+  node, dev,     cap 65 536   A(4096) 5.592  B 4.208  D 0.144  C 37.873  C-rand 33.224  C-flood 34.426  C-far 34.553
+  node, release, X matches    X = 32 768: C 17.192  C-rand 12.747  C-flood 12.186  C-far 12.695
+                              X = 16 384: C  8.446  C-rand  6.700  C-flood  5.795  C-far  5.813  (max 18.107 / 32.225 / 7.037 / 26.736)
+                              X =  8 192: C  4.110  C-rand  3.464  C-flood  2.893  C-far  2.887
+  Electron, release           F : C-rand 31.316  C-flood 2695.591  C-far 175.835
+                              F′: C-rand 31.569  C-flood   31.281  C-far  31.104
+  Q1′  A(4096) 5.46 ≤ 10, B 3.96 ≤ 10, D 0.133 ≤ 1 — HOLDS.
+  Q2′  at 65 536 all four exceed 16 ms (C 34.7) — FAILS at the cap; by the registered rule the cap is lowered to the
+       largest power of two X ≥ 8 192 whose four medians are ≤ 16 ms: X = 32 768 fails (C 17.19), X = 16 384 passes
+       (C 8.45, the largest of the four) — max-signature-matches := 16 384. Margin over the real decks: 16 384 / 372 = 44.
+  Q2″  F′'s C-flood / C-rand = 0.999 (X = 32 768: 0.956; 16 384: 0.865; 8 192: 0.835) ≤ 1.5 — HOLDS.
+  Q2‴  F′'s C-far / C-rand = 1.047 (0.996; 0.868; 0.833) ≤ 1.5 — HOLDS.
+  Electron replication  F's C-flood / C-rand = 86.1 ≥ 10 — HOLDS (V8 14.8 hashes numbers as 14.6 does);
+                        F′'s = 0.991 ≤ 1.5 — HOLDS.
+The string probe under Electron's V8 (registered, no prediction): 4 096 keys set and got in a fresh js/Map —
+  index strings k·2048 ("0", "2048", …)   median 36.626 ms (min 36.490, max 37.089)
+  random index strings below 8 388 608    median  0.124 ms
+  non-index strings "x" + k·2048          median  0.122 ms
+— 295× (node v26: 0.224 / 0.150 / 0.134). In the renderer's engine, array-index strings with equal low bits DO pile
+into one bucket of a string-keyed js/Map. That is the contingency the F′ registration named: "by-height keeps the note
+page's string groups in a js/Map with string keys … unless the probe above shows array-index strings defeat it; then
+F′ groups the strings in a table of its own … and this registration is amended before that is written." The probe in
+node did not show it; the probe in the engine the GUI runs the comparison on does. F′ as built (its by-height on a
+js/Map) is therefore NOT accepted for the hostile case. Nothing is written until the amendment below is registered.
+The maxima (up to 2.4× the medians at 65 536, and at 16 384 up to 32 ms for C-rand) are single runs of 15; they are
+recorded, and §-threats of docs/scientific/14 discusses them (garbage collection of the typed arrays is the suspected
+cause; not measured).
+
+==== H-STRFLOOD — what keys pile up, EXPLORATORY (2026-10-18, after F′'s RESULT; strflood/probe-string-keys.cjs,
+     strflood/{node,electron}.txt; no prediction was made) ====
+4 096 keys of each pattern set and got in a fresh js/Map (fresh string objects each run), median of 15 runs, core 3:
+                                          node v26.11.1 (V8 14.6)   Electron 42.5.0 (V8 14.8)
+  index k·2048 (≤ 7 digits)                     0.658 ms                 38.198 ms
+  index k (consecutive)                         0.478                     0.609
+  index k·4096                                  0.482                    37.954
+  index k·2048 + 2^24 (8 digits)                0.573                    39.355
+  index k·65536 (up to 9 digits)                0.485                    55.796
+  integer k·2048 + 2^32 (not an index)          0.521                     0.479
+  "-" + k·2048, "0" + k·2048, k·2048 + ".5", "x" + k·2048   0.43–0.49     0.36–0.56
+In Electron's V8 every canonical array-index string (a decimal integer ≤ 2^32 − 2, no sign, no leading zero) is
+bucketed by its value's low bits; nothing else tried is. In node's V8 nothing tried is. The cause, as the Node.js
+project describes it ("Developing a minimally HashDoS resistant, yet quickly reversible integer hash for V8",
+nodejs.org/blog/vulnerability/march-2026-hashdos, last updated 2026-03-24; CVE-2026-21717): V8 hashes an array-index
+string as (length << 24) | value, unseeded; the seeded replacement was merged into V8 behind the build flag
+v8_enable_seeded_array_index_hash (with v8_use_default_hasher_secret = false), shipped in Node.js v20–v25 in the March
+2026 security release, and "For Chrome, where DoS attacks are not applicable, this will be disabled." Electron builds
+Chromium's V8. (The 8- and 9-digit rows show the deterministic bucketing reaches past 24-bit values too; how V8 hashes
+those was not looked up.) Not tested here: whether Electron's ordinary string hash (rapidhash, CVE-2025-27209 for
+Node.js 24.0's default secret) can also be made to collide.
+Census of the page text (strflood/census-text.{txt,json}; scripts/exp-note-signature-census.cjs extended to count, per
+page, the UTF-16 code units of its runs' strings — runs as the code builds them — and the longest run): the real local
+decks at most 1 569 code units on a page (p99 1 319; Beamer 1 489), longest run 176; experiment 13 and the fixtures
+at most 126.
+
+==== H-PAIRWORK-FIX″ — design F″, pre-registered 2026-10-18 BEFORE it is written (amends F′, as F′ registered) ====
+Trigger. F′'s by-height groups the note page's runs in a js/Map keyed by their strings. In the GUI's engine a PDF can
+choose strings that share one bucket (above), so one comparison can cost O(r²) string comparisons: the probe's 4 096
+keys took 36.6 ms for one set and one get each; by-height makes about five such operations per run. F′ registered
+the remedy: "F′ groups the strings in a table of its own, seeded the same way over the strings' UTF-16 code units".
+DEVIATION from that remedy, decided now and before any code: F″ groups them by SORTING instead, with no hash at all.
+  Why. (1) A seeded hash of variable-length strings needs per-code-unit modular arithmetic for its collision bound
+  (a polynomial over a prime field; its bound per pair, length/p, grows with the strings), done in JavaScript doubles
+  — about 10–25 ns per code unit — and redone on every comparison, since the seeds are per call; native string
+  comparison costs about 1 ns per code unit. (2) A sort is deterministic: its bound holds for every input, with no
+  probability and no seed. (3) Sorted stably by height, each string's runs come out in exactly the order F′'s groups
+  have, so F″ builds, entry for entry, the arrays F′ builds — F″'s equivalence reduces to F′'s.
+Design F″ (F-a, F-b and F′-c's copy-covers? unchanged; by-height and the caps change):
+  F″-s  by-height takes the note page's upright runs whose :str is a string, and sorts their indices with a stable
+        bottom-up MERGE SORT by (string in UTF-16 code-unit order, cljs.core/compare; then height, <=). A group is a
+        maximal block of equal strings in that order (=), so it is an index range [start, end) of the sorted arrays
+        hs, xs, ys (heights and origins). A slide run finds its string's group by binary search over the groups'
+        strings (compare). prefix-count takes the range: (prefix-count heights from to hs bound), the first index in
+        [from, to) whose h/hs exceeds bound — Lemma 1 on a sub-array. kept[2i], kept[2i+1] become absolute indices,
+        so the build pass reads hs, xs, ys directly (no second lookup). Runs whose :str is not a string are left out:
+        a slide run is matched only when it has a glyph (glyphs is 0 for a non-string), so no lookup is ever made for
+        a non-string key, and none of their groups was ever read.
+        Cost, for every input: at most n⌈log₂ n⌉ comparisons in the sort; a comparison of x and y reads at most
+        3(1 + min(|x|, |y|)) code units (compare is ===, then > and <), charged to the run the merge outputs, so a
+        pass costs O(n + T) and the sort O((n + T) log n); the groups' scan O(n + T); a lookup O((1 + |s|) log G).
+        So by-height and the lookups cost O((r_j + T_j + r_s + T_s) log r_j) — T the pages' code units.
+  F″-t  a cap on the TEXT: max-signature-chars, the sum over a page's runs of its string's length in UTF-16 code units
+        (0 for a non-string). A page over it is not compared: nil, like a page over max-signature-runs. Without it
+        T — and with T every string operation — is unbounded within the run cap. Its value by the rule of Q6 below.
+  F″-m  max-signature-matches := 16 384, by Q2′'s registered rule (F′'s RESULT above).
+Equivalence claimed. With R the reference (it reads the namespace's run and match caps, so lowering the match cap
+changes both): F″(s, j) = R(s, j) whenever neither page exceeds max-signature-chars, and F″(s, j) = nil when one does.
+Proof obligations for docs/scientific/14: the merge sort returns the stable sorted permutation; the groups are the
+strings' classes under = in sorted order; the binary search finds a slide string's group exactly when it exists; each
+group lists its string's runs by ascending height, ties in page order — F′'s order (Array.prototype.sort is stable,
+ES2019) — so mi, qls, qtx, qty are F′'s arrays, element for element, and Theorem 9 gives F″ = R.
+E1 for F″ (notes-signature-equivalence-test; changes made before F″'s first run):
+  kept     tests 1 and 2; test 3 with notes/max-signature-matches bound to 65 536 (its registered cap) for its duration;
+           (a), (b), (c), (d), (f) unchanged.
+  adapted  (e): prefix-count over [0, n) as before, plus every [from, to) of a 9-height window slid along the sweep.
+  added    (g) adversarial string families, 6 000 pairs (seed 2048): array-index strings k·2048, strings that differ
+               only in their last code unit after a long common prefix, strings that are prefixes of each other, lone
+               surrogates and code units near 0xD800–0xDFFF and 0xFFFF, "" and white-space strings, and non-string
+               :str values (nil, numbers) on either page — F″ equals R;
+           (h) the text cap: a slide or a note page of exactly max-signature-chars code units is compared (equals R);
+               one code unit more, on either page, gives nil; a non-string :str counts 0; a rotated run counts;
+           (i) the merge sort equals Array.prototype.sort (stable) by the same key on 2 000 random inputs (duplicates,
+               adversarial strings, ±∞ heights): a stable sort by a total preorder has one result;
+           (j) test 3's three cases rebuilt at the real cap (64 slide runs × cap/64 note runs), at the cap's value.
+NEGATIVE CONTROLS — one-line mutations of F″'s notes.cljs; E1 predicted to FAIL on each, at the named tests:
+  m″1 lookup-first-unit   the binary search compares only the first code units        → (g), 1
+  m″2 sort-string-only    the sort's order ignores the heights                        → (g), 1
+  m″3 group-end-short     a group ends one run early                                  → (g), 1
+  m″4 text-cap-strict     (< chars cap) for (<= chars cap)                            → (h)
+  m″5 text-cap-upright    the text counted over upright runs only                     → (h)
+  m″6 text-cap-slide      the note page's text not checked                            → (h)
+  m″7 merge-pass-short    the sort stops one pass early                               → (i), 1
+and m′1–m′8, mE1, mE2, mE4 re-applied to F″ (their lines adapted where by-height's changed): killed where they were.
+Instrument (scripts/bench-note-signature.cjs, extended before any registered run of F″):
+  · C, rand, flood and far default to the BUNDLE's match cap (16 384 for F″); --cap=X rebinds the cap at run time
+    (to time the old shapes at 65 536); --matches=X must not exceed the cap in force.
+  · S-index: both pages 4 096 upright runs, the strings String(k·2048), slide at height 10 on a grid, note at height
+    10 (σ = 1: no match) — the grouping and the lookups alone; S-rand: the same with String(k·2048 + u_k), u_k in
+    [1, 2047] at random (mulberry32(18)): distinct, the same lengths, random low bits. Result false.
+  · L-prefix(T), L-equal(T), T = --chars (code units per page; the run-time text cap raised to T when below it):
+    both pages 4 096 upright runs of ℓ = T/4 096 code units at height 10 (σ = 1) — L-prefix: distinct strings, a
+    common prefix of ℓ − 2 and two code units for k; L-equal: one string repeated. Result false.
+Arms: release bundles in node v26.11.1 AND in Electron 42.5.0's node mode; dev (test build) in node; core 3; each arm
+started with the 1-minute load below 12. F′'s release bundle (sha256 648d937c…) is kept for Q5's F′ arm.
+Predictions:
+  Q1″  F″ release medians, each engine: A(4096) ≤ 10 ms, B ≤ 10 ms, D ≤ 1 ms.
+  Q2⁗  F″ release medians, each engine, at the cap 16 384: C, C-rand, C-flood, C-far ≤ 16 ms; C-flood ≤ 1.5 × C-rand;
+       C-far ≤ 1.5 × C-rand.
+  Q5   string flood: F″'s S-index ≤ 1.5 × its S-rand, and ≤ 16 ms, in each engine. F′'s S-index ≥ 10 × its S-rand in
+       Electron (the probe, through the code), and ≤ 2 × in node.
+  Q6   the text cap: L-prefix(T) and L-equal(T) for T ∈ {2^15, 2^16, 2^17, 2^18, 2^19, 2^20}, release, each engine;
+       max-signature-chars := the largest T whose four medians (two shapes × two engines) are all ≤ 16 ms; T ≥ 2^15
+       is required (≥ 16 × 1 569 = 25 104), otherwise this stops and is reported. Predicted: the rule picks T ≥ 2^17.
+  Q3″  equivalence: E1 as above with its controls killed; E2 over the census pairs: zero disagreements; E3 over the 155
+       files: byte-identical to e3-before.jsonl.
+  Q4″  the unit build, lint and the full verification green before the commit.
+
+==== H-PAIRWORK-FIX″ — F″ written; E1's FUNCTIONAL CHECK and the bench's (2026-10-18, 13:25–13:36; NOT the registered runs) ====
+F″ as registered (notes.cljs in wt-pairwork; F′ saved as notes-fprime-before-fsec.cljs, cmp-equal to notes-fprime.cljs):
+page-chars, sorted-runs (the merge sort), by-height → #js [strings starts hs xs ys], group-of, prefix-count over
+[from, to); max-signature-chars 32 768 = 2^15, the least value Q6 allows, until Q6's runs decide it (the bench raises
+the cap at run time for its L shapes, so the value built in does not bear on them); max-signature-matches 16 384.
+E1 as registered, three details of the writing recorded: (1) test 3 keeps its cases (now built by cap-cases) and is
+RENAMED the-fixed-signature-equals-the-reference-at-a-match-cap-of-65536, since it binds that cap — (j) took the old
+name, at the real cap; (2) (e)'s ranges [from, from + 9) are checked for every 50th slide height of the sweep (40 of
+them), every range of each; (3) a first compile failed on a docstring's unescaped quotes (fixed; nothing ran on it).
+Test build 0 warnings; E1 alone: 14 tests, 2 126 assertions, 0 failures (fsec/unit-e1-2.log); tests 1–3 and (c), (d)
+tally as for F′ (the same pairs); (g) 6 000 pairs: true 3327, false 2661, nil 12. The whole unit build: 874 tests,
+46 501 assertions, 0 failures (fsec/unit-all-1.log). Release cli: 0 warnings.
+The bench, extended as registered, run for function only (--runs=0.2, core 3, load 8.99; fsec/functional-check-*.txt):
+every case returned its value, the cap rebinding works in the :simple bundle (--cap=65536: C false at 65 536 matches),
+the S strings are distinct array indices with their low 11 bits zero (S-index) or random (S-rand), the L pages hold
+exactly T code units. Seen, NOT the measurement: F″ S-index 8.67 / S-rand 8.31 ms, L-prefix(2^15) 8.13, L-equal 5.57,
+C 8.38, B 5.24; F′ S-index / S-rand 15.07 / 5.67 ms in node and 82.45 / 6.68 in Electron.
+A CPU profile of F″ on the S shapes (fsec/prof/S-release-self.txt, descriptive): the comparison's time is spread over
+the ClojureScript idioms the reference and F′ share — glyphs' clojure.string/replace (12 %), keyword look-ups (9 %),
+nth and vector destructuring (11 %), run-height (7 %) — and the new sort and search: cljs.core/compare with its
+protocol check, group-of, sorted-runs and its comparator, about 30 %. The implementation stays as registered
+(cljs.core/compare): the predictions bound the outcome, not the constant factors, and none of them is near failing.
+Then the registered runs: fsec/bench/run.sh, unchanged after this entry.
+
+==== H-PAIRWORK-FIX″ — F″'s bench, RESULT (2026-10-18, 13:34:18–13:34:41; fsec/bench/{summary,environment}.txt and
+     one .txt/.json per arm) ====
+As registered: core 3, governor performance, every arm started below load 12 (5.73 … 6.31). F″'s release bundle
+sha256 9afaeb05…, test build 97bd8794…, notes.cljs 6c259e70…; F′'s bundle 648d937c…; the bench e159291b… in both roots.
+Every case returned its registered value; every instrument check passed. Release medians in ms (node / Electron):
+  A(4096) 6.092 / 5.265   B 4.856 / 4.248   D 0.166 / 0.167
+  at the cap 16 384:  C 8.322 / 8.738   C-rand 5.828 / 6.797   C-flood 5.803 / 6.822   C-far 5.871 / 6.867
+  S-index 8.335 / 7.744   S-rand 8.192 / 7.777
+  L-prefix(T), L-equal(T):          node              Electron
+     T = 2^15                   7.902   6.247      6.559   5.498
+         2^16                   8.025   6.424      7.745   5.392
+         2^17                   8.031   6.244      6.975   5.453
+         2^18                   8.520   6.692      7.034   5.576
+         2^19                   8.666   6.742      7.597   5.768
+         2^20                   9.254   7.014      9.093   5.981
+  dev (node): A(4096) 6.343, B 4.971, D 0.171, C 8.481, C-rand 7.221, C-flood 7.293, C-far 7.236, S-index 9.028, S-rand 9.050
+  F′, S-index / S-rand: node 7.245 / 8.067; Electron 80.621 / 4.674
+  descriptive (no prediction): F″ at --cap=65536, node: C 38.032, C-rand 30.936, C-flood 29.488, C-far 31.709
+  Q1″  each engine: A(4096) ≤ 10, B ≤ 10, D ≤ 1 — HOLDS.
+  Q2⁗  each engine, all four ≤ 16; C-flood / C-rand 0.996 / 1.004 ≤ 1.5; C-far / C-rand 1.007 / 1.010 ≤ 1.5 — HOLDS.
+  Q5   F″'s S-index / S-rand 1.017 / 0.996 ≤ 1.5, and ≤ 16 ms — HOLDS. F′'s: Electron 17.25 ≥ 10 — HOLDS; node 0.898
+       ≤ 2 — HOLDS (the functional check's 2.66 was 3 runs; the registered 15 do not show it).
+  Q6   all twelve medians ≤ 16 ms, at every T: the rule as registered picks T = 2^20 = 1 048 576; predicted T ≥ 2^17 —
+       HOLDS.
+NOT YET ADOPTED — see the amendment that follows: every string of Q6's two shapes is one-byte (code units ≤ 0xFF).
+
+==== H-TEXT2 — an AMENDMENT to Q6, registered 2026-10-18 AFTER Q6's result and BEFORE its value is adopted ====
+Why. V8 compares two flat strings of the same width with its fastest routine; a one-byte string against a two-byte
+one, it compares unit by unit. Q6's shapes are all one-byte, so they time the fast routine only, and the cap bounds
+every page a PDF can make. The rule is therefore applied to two more shapes, and to all four together. Written after
+seeing Q6's numbers; it can only lower the cap, never raise it.
+  L-wide(T)   as L-prefix, every code unit two-byte: a common prefix of ℓ − 2 units U+043F, and two units
+              U+0410 + (k >> 6), U+0410 + (k & 63).
+  L-mixed(T)  a common one-byte prefix of ℓ − 2 units "p", then U+0041 + (k >> 6), then for even k U+0041 + (k >> 1 & 31)
+              and for odd k U+0100 + (k >> 1 & 31): half the strings are two-byte, and a comparison of a one-byte with a
+              two-byte one reads the prefix with mixed widths.
+  The instrument checks that the strings are distinct, and that L-wide's are all, and L-mixed's half, wider than one
+  byte (a unit above 0xFF); same pages, heights and runs as Q6's shapes.
+Rule (replaces Q6's): max-signature-chars := the largest T ∈ {2^15, …, 2^20} at which all EIGHT medians — L-prefix,
+L-equal, L-wide, L-mixed × node, Electron, release — are ≤ 16 ms; T ≥ 2^15 required, otherwise this stops and is
+reported. Prediction: L-mixed binds, and the rule picks T = 2^17.
+Arms: core 3, each started below load 12; the four shapes at every T in both engines (Q6's two shapes are re-run with
+the new two, in the same processes, so the eight medians of one T come from the same arms).
+
+==== H-TEXT2 — RESULT (2026-10-18, 13:37:11–13:37:28; fsec/text2/{summary,environment}.txt and one .txt/.json per arm) ====
+As registered: core 3, governor performance, every arm started below load 12 (6.47 … 7.06). F″'s release bundle
+sha256 9afaeb05…, the bench 77d0a6e1…; node v26.11.1 and Electron 42.5.0's node mode (v24.17.0). Every shape returned
+false; every instrument check passed (distinct strings; L-wide's 4 096 and L-mixed's 2 048 strings wider than one byte;
+exactly T code units a page, with the run-time text cap raised to T). Release medians in ms:
+                 node                                Electron
+     T      prefix  equal   wide    mixed       prefix  equal   wide    mixed      largest
+   2^15     8.079   6.083   7.970   9.477      11.152   5.452   6.685   7.997      11.152 (Electron prefix)
+   2^16     8.240   6.414   8.452   9.863       6.550   5.425   7.733   7.596       9.863 (node mixed)
+   2^17     8.129   6.407   8.844  11.110       7.156   5.769   7.835   9.138      11.110 (node mixed)
+   2^18     8.296   6.522   8.248  10.187       6.876   5.407   8.931   9.508      10.187 (node mixed)
+   2^19     8.552   6.409  10.115  12.152       7.315   5.518  11.670  11.271      12.152 (node mixed)
+   2^20     9.109   6.992  12.194  14.536       8.887   5.790  15.840  14.889      15.840 (Electron wide)
+Rule: all eight medians are ≤ 16 ms at every T, so the largest T of the range is the rule's: max-signature-chars :=
+2^20 = 1 048 576. Prediction "L-mixed binds, and the rule picks T = 2^17" — FAILS on both parts: no shape reaches
+16 ms in the range, so the rule picks the range's top, 2^20; and at 2^20 the largest median is L-wide's in Electron
+(15.840), not L-mixed's (14.889 Electron, 14.536 node). L-mixed has the largest median in node at every T; in
+Electron L-wide overtakes it at 2^19 and 2^20. Descriptive: from 2^15 to 2^20 L-wide grows 1.53× (node) and 2.37×
+(Electron), L-mixed 1.53× and 1.86×, L-prefix 1.13× and 0.80×, L-equal stays flat; so the H-TEXT2 shapes are the
+ones whose cost grows with the text, as the amendment supposed, though the mechanism (V8's compare routines) is not
+measured here. At 2^20 the margin is 1.0 % (15.840 against 16): the rule does not ask for a replication, and none is
+run; it is a threat to the value's validity. The p95s reach 16 ms at several T (largest: 44.135, Electron L-prefix at
+2^15; 24.048, Electron L-mixed at 2^20), unattributed (GC suspected, not measured); the rule is on medians.
+ADOPTED by H-TEXT2's rule: max-signature-chars = 1 048 576, subject to the amendment that follows, which can only
+lower it.
+
+==== H-COMBINED — the caps TOGETHER: one page at all three, registered 2026-10-18 BEFORE its instrument is written
+     or run ====
+Why. Every rule so far sized one cap against a shape that loads that cap alone: A/B the runs, C/rand/flood/far the
+matches (with little text), S the grouping, L the text (with no match). The budget all of them serve is ONE
+comparison ≤ 16 ms, and a hostile page can load the three at once: 4 096 runs, T code units, M matches. From the
+measured medians, the cost looks additive: L(T) for the runs, the sort and the look-ups, plus C(M) minus C's own
+base (17 + M/16 runs of one-letter text) for the matches and copy-covers?'s eight passes. At the adopted caps that is
+about 15.8 + 6.8 ≈ 23 ms in Electron: over the budget. So the budget is applied to the combined page, and the two
+caps that bound it, max-signature-chars and max-signature-matches, are chosen together. Neither can rise: T ≤ 2^20
+(H-TEXT2), M ≤ 16 384 (Q2′). The run cap stays 4 096 (Q1″ measured it; no real page is within 9× of it, but it is
+not traded here).
+Shape X(kind, T, M), kind ∈ {prefix, equal, wide, mixed}, T = --chars, M = --matches (a multiple of 16): L(kind)'s
+pages at T — both pages 4 096 upright runs of ℓ = T / 4 096 code units at height 10 on L's grid — with C's match block
+put in: slide runs 0 … 15 become the string Xs at height 10, origin (20 i, 20 i), and note runs 0 … M/16 − 1 become Xs
+at height 1 (σ = 0.1), at origins drawn by mulberry32(14) over the page, as C's. Xs is the kind's prefix of ℓ − 2
+units followed by two units no other string of the kind uses ("@@" after L-prefix's, L-mixed's and L-equal's
+one-byte prefixes; U+040F U+040F after L-wide's two-byte one), so it sorts among the others and every comparison with
+it reads the prefix. Each page still holds 4 096 runs and exactly T code units; the pairs of equal strings with
+0 < σ ≤ 0.4 are exactly 16 · M/16 = M, so the build pass and copy-covers? run (m = M ≤ the cap); 16 · ℓ characters
+are matched against Γ ≈ T glyphs, so no copy covers Γ / 2 and all eight passes run in full: result false. The
+instrument checks the run counts, the text, the matched pairs (counted in the script, independently of the code) and
+the result. Each shape: 3 warm-ups, 15 timed runs, median, as the others.
+Arms: T ∈ {2^15, 2^16, 2^17, 2^18, 2^19, 2^20} × M ∈ {4 096, 8 192, 16 384}: 18 points, each in node and in
+Electron's node mode, F″'s release bundle, core 3, each arm started below load 12; the four kinds in one process per
+arm, so the eight medians of a point come from two processes.
+Rule (sets both caps; replaces H-TEXT2's value and Q2′'s, never upward): P := the points (T, M) at which all eight
+medians — X-prefix, X-equal, X-wide, X-mixed × node, Electron — are ≤ 16 ms. If P is empty, this stops and is reported.
+Otherwise (T, M) := the point of P that maximizes min(T / 1 569, M / 372), the smaller of the two caps' headrooms over
+the largest measured on real pages (1 569 code units, 372 matches); ties go to the larger T, then the larger M; and
+max-signature-chars := T, max-signature-matches := M. Why that objective: a cap close to real pages is the one an
+unseen real deck may reach and lose its evidence at, so the closer of the two is pushed as far out as the budget lets.
+Predictions (from the additive estimate, with C(8 192) ≈ 4.1 ms from F′'s bench and C's base ≈ 0.7 ms at 528 runs):
+  no point with M = 16 384 is in P (X ≈ L(T) + 6.8 ms > 16 at every T, in at least one engine);
+  the rule picks (T, M) = (2^19, 8 192) (the estimate puts X(2^19, 8 192) at about 15.6 ms, 3 % under the budget).
+The constants' docstrings will state the combined page's measured median at the caps adopted.
+
+==== H-COMBINED — the instrument written; its FUNCTIONAL CHECK (2026-10-18; NOT the registered runs) ====
+scripts/bench-note-signature.cjs extended as registered (backup bench-before-combined.cjs, sha256 77d0a6e1…; now
+df52a76b…): caseL's strings factored into lStrings (unchanged), caseX, group X, the run-time text cap raised for X
+as for L. Run for function only (--runs=0.2, core 3, load 5.92; fsec/combined/functional-check.txt) at (2^15, 16 384),
+(2^20, 4 096) and (2^20, 16 384): every page held 4 096 runs and exactly T code units, the script counted exactly M
+pairs at a thumbnail's scale, Xs is none of L's strings, and every shape returned false. Seen, NOT the measurement
+(3 runs each): at (2^15, 16 384) prefix 21.64, equal 13.10, wide 14.45, mixed 15.11 ms; at (2^20, 4 096) 13.40, 8.64,
+12.86, 15.86; at (2^20, 16 384) 21.88, 13.20, 17.87, 19.92. Then the registered runs: fsec/combined/run.sh, unchanged
+after this entry.
+
+==== H-COMBINED — RESULT (2026-10-18, 13:47:21–13:48:28; fsec/combined/{summary,environment}.txt and one .txt/.json per arm) ====
+As registered: 36 arms, core 3, governor performance, every arm started below load 12 (5.49 … 6.80). F″'s release
+bundle sha256 9afaeb05…, the bench df52a76b…; node v26.11.1 and Electron 42.5.0's node mode (v24.17.0). Every shape
+returned false at every point; every instrument check passed (4 096 runs and exactly T code units a page, exactly M
+pairs at a thumbnail's scale). The largest of each point's eight release medians, in ms (the shape that has it):
+             M = 4 096                  M = 8 192                  M = 16 384
+   2^15    10.046 node mixed        12.003 node mixed          16.164 node mixed      out
+   2^16    10.110 node mixed        11.894 node mixed          15.799 Electron mixed
+   2^17    10.371 node mixed        14.137 Electron mixed      16.142 Electron mixed  out
+   2^18    12.055 node mixed        13.005 node mixed          16.903 Electron mixed  out
+   2^19    12.991 Electron mixed    14.960 Electron mixed      19.440 Electron mixed  out
+   2^20    17.341 Electron wide out 19.443 Electron wide out   22.614 Electron mixed  out
+  the eight at (2^16, 16 384): node prefix 15.270, equal 12.344, wide 13.704, mixed 15.119; Electron prefix 14.847,
+  equal 13.943, wide 15.158, mixed 15.799.
+P = the 11 points not marked out. min(T / 1 569, M / 372) over P: (2^16, 16 384) 41.77; every M = 8 192 point from 2^16
+up 22.02; (2^15, 8 192) 20.88; the M = 4 096 points 11.01. The rule's point: (T, M) = (2^16, 16 384), uniquely.
+ADOPTED: max-signature-chars := 65 536 (lowered from H-TEXT2's 1 048 576, as the rule allows), max-signature-matches
+:= 16 384 (unchanged). The run cap stays 4 096.
+Predictions — both FAIL: (1) "no point with M = 16 384 is in P": (2^16, 16 384) is, by 0.201 ms; (2) "the rule picks
+(2^19, 8 192)": it picks (2^16, 16 384). The additive estimate was right in scale and wrong in detail: it gave
+X(2^15, 16 384) ≈ 16.3 for node mixed (measured 16.164) but X(2^16, 16 384) ≈ 16.7 (measured 15.119); its error is
+about ±1.5 ms.
+Read with care (threats, not edits): X's cost cannot fall as T grows — the same runs and matches, with more text in
+each run — yet at M = 16 384 the binding median goes 16.164 (out), 15.799 (in), 16.142 (out) from 2^15 to 2^17. So
+those differences are within run-to-run noise, and at M = 16 384 and T ≤ 2^17 the combined worst case is 16 ms give or
+take about half a millisecond: the adopted point meets the budget at a 1.3 % margin, at the measurement's noise floor.
+It is adopted because the registered rule picks it; the docstrings and docs/scientific/14 state the worst case as
+"about 16 ms" with this caveat, not as a margin. X-mixed binds at 16 of the 18 points, X-wide at 2^20 with M = 4 096
+and 8 192. The maxima (15 runs, so p95 = max) reach 37.5 ms (Electron X-prefix at (2^17, 16 384)) — single runs,
+unattributed (GC suspected, not measured), below the 50 ms long-task threshold.
+CORRECTION to the entry above (written minutes later, from all 36 JSON files rather than the M = 16 384 rows of
+T ≤ 2^17 alone): the largest single run is 37.860 ms, node X-prefix at (2^19, 16 384), not 37.5 ms at (2^17, 16 384);
+still below the long-task threshold. Nothing else in the entry changes.
+
+==== H-PAIRWORK-FIX″ — the final F″ (the adopted caps); its NEGATIVE CONTROLS, unit build, E2 and E3, RESULT
+     (2026-10-18, 13:52–14:20; fsec/mutants/summary.txt and unit-*.log, fsec/unit-e1-final.log, fsec/unit-all-final.log,
+     fsec/census-fsec.{txt,json}, fsec/e3-fsec.jsonl) ====
+F″ with max-signature-chars 65 536 (H-COMBINED) and three docstrings corrected (max-signature-runs: the measured worst
+case, on the calling thread; max-content-pages: F10, the worker extracts the text, the comparisons run on the caller);
+saved as notes-fsec.cljs (sha256 9e19b3d3…). Test build and :simple cli 0 warnings (cli 3e2fded7…).
+E1 alone: 14 tests, 2 126 assertions, 0 failures; the tallies as before (test 1 {true 6172, false 17737, nil 91};
+(c) {3638, 2339, 23}; (g) {3327, 2661, 12}).
+NEGATIVE CONTROLS (mutants-fsec.sh, mutate-fsec.py on notes-fsec.cljs, each compiled into the test build and run
+against E1 alone, cores 24–31). Every mutant FAILS, at least where predicted (1, 2, 3 = tests 1–3; (j) the real cap):
+  m″1 lookup-first-unit   (g), 1, 2, (c), (d)                                    predicted (g), 1      KILLED
+  m″2 sort-string-only    (g), (i), 1, 2, (c), (d)                               predicted (g), 1      KILLED
+  m″3 group-end-short     (g), 1, 2, 3, (j), (c), (d), (f) NaN, (f) zero          predicted (g), 1      KILLED
+  m″4 text-cap-strict     (h)                                                    predicted (h)         KILLED
+  m″5 text-cap-upright    (h)                                                    predicted (h)         KILLED
+  m″6 text-cap-slide      (h)                                                    predicted (h)         KILLED
+  m″7 merge-pass-short    (i), 1, 2, (c), (d), (g)                               predicted (i), 1      KILLED
+  m′1 nan-equal-dropped   (f) NaN, (c), (d)                                      predicted (c), (f)    KILLED
+  m′2 signed-zero-hashed  (a), (f) zero, (c)                                     predicted (a)         KILLED
+  m′3 nan-bits-hashed     (a), (f) NaN                                           predicted (a)         KILLED
+  m′4 chain-cut           (d), 1, 2, (c), (g)                                    predicted (d)         KILLED
+  m′5 equality-partial    (d), 1, 2, (c)                                         predicted (d)         KILLED
+  m′6 dedup-off           1, 2, (c), (d)                                         predicted 1           KILLED
+  m′7 tables-once         (b)                                                    predicted (b)         KILLED
+  m′8 sweep-strict        (e), 1, 2, (c), (d), (g)                               predicted (e), 1      KILLED
+  mE1 lower-bound-dropped 1, 2, (c), (d)                                         as before             KILLED
+  mE2 strict-scale        1, 2, (c), (d), (g)                                    as before             KILLED
+  mE4 cap-off-by-one      2, 3, (j)                                              as before             KILLED
+F″ restored (cmp-equal to notes-fsec.cljs) and recompiled; the control, E1 on it: 14 tests, 2 126 assertions, 0
+failures. E1 is trusted for F″.
+Unit build (all namespaces): 874 tests, 46 501 assertions, 0 failures.
+E2 (census --differential, cores 12–19, the same 175 files): 38 830 pairs, the reference's verdicts true 246, false
+38 548, nil 36; pairs where F″ differs: 0 in every group. No real page reaches a cap: most runs 443, most code units
+1 569, most matches 372.
+E3 (vv --cli --deck-info, F″'s :simple cli, the 155 files, cores 12–19): BYTE-IDENTICAL to e3-before.jsonl; no stderr.
+Q3″ (E1 with its controls, E2, E3): HOLDS. Q4″: the unit build green here; lint and the full verification are run on
+the commit's tree.
+
+==== CORRECTIONS, found while writing docs/scientific/14 §8 (2026-10-18; nothing above is edited) ====
+(1) The E3 RESULT entry says "(and labels-only 24, split 7, the rest not compared)". That is imprecise: "the rest"
+    holds the 31 decisions with reason no-note-pages, and a scan or a probe that finds no note page has compared
+    pages (only the label automaton's :none has not). docs/scientific/14 §3.4 recounts the 155 decisions of
+    e3-before.jsonl with a column "pages compared?": yes in 34 + 8 + 8 + 15 + 10 + 4 files, in some of the 31, and no
+    in the 24 labels-only, the 7 split and 14 others (invalid 5, undecidable 4, labels-not-integers 4, not-beamer 1).
+    No verdict changes: E3 is byte-identical either way.
+(2) The H-STRFLOOD entry's table omits one pattern the probe ran: "random index below 2^23". Its 4 096 keys were not
+    all distinct, so the probe skipped the pattern, as it was written to (strflood/node.txt and strflood/electron.txt:
+    "keys not distinct, skipped"). That pattern has no number; nothing in the entry rests on it.
+
+==== CORRECTION, found while assembling docs/scientific/data/14 (2026-10-18; nothing above is edited) ====
+(3) The entry "H-PAIRWORK-FIX″ — F″ written; E1's FUNCTIONAL CHECK and the bench's" says of F″'s E1: "(3) a first
+    compile failed on a docstring's unescaped quotes (fixed; nothing ran on it)". The failed compile wrote no build,
+    but the command that ran it ran E1 next regardless (the two steps were joined by ";", not "&&"), on the test build
+    already in the worktree: F′'s, compiled at 12:51:47 when F′'s negative controls restored it
+    (fprime/mutants/compile-restored.log; no test build was compiled between that one and this). That run is
+    fsec/unit-e1-1.log (13:28:16): 10 tests, 2 108 assertions, 0 failures — F′'s E1 on F′'s code, not a run of F″.
+    No result rests on it: F″'s E1 is fsec/unit-e1-2.log, after the fix, and the final F″'s fsec/unit-e1-final.log.
+(4) The entry "H-PAIRWORK-FIX″ — the final F″" says "F″ with max-signature-chars 65 536 (H-COMBINED) and three
+    docstrings corrected", and names two. The diff between F″ as benched (notes.cljs 6c259e70…) and the final F″
+    (9e19b3d3…), docs/scientific/data/14/designs/Fsec-benched-to-Fsec.diff, changes two docstrings, max-signature-runs's
+    and max-content-pages's, and the value of max-signature-chars, and nothing else.

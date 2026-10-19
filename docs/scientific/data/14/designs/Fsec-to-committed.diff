@@ -1,0 +1,119 @@
+--- a/src/vinary/slides/notes.cljs
++++ b/src/vinary/slides/notes.cljs
+@@ -79,14 +79,17 @@
+   "Decide a deck's note pages from its integer page labels `L` (integer-labels) by the automaton of ADR-0048 §2.1.
+    Returns, by :status:
+      :none        the only valid parse has no note page (not interleaved)
+-     :invalid     no parse is valid (a label drops, as a restarted frame counter makes it): shown as it is
++     :invalid     no parse is valid: shown as it is. A label that drops, as a restarted frame counter makes it, usually
++                  leaves none, but not always: 1 2 3 4 5 1 2 is :proven (docs/theory/12 §2.4.1, restartable?)
+      :proven      exactly one parse is valid and it has note pages: {:note-pages #{…}}
+      :ambiguous   L0 ≤ 1 and several parses are valid. They differ only in the deck's PLAIN RUN, pages 1 … :run-end,
+                   where candidate a reads pages a … :run-end as note pages: {:candidates [a…] ascending, :run-end,
+                   :base #{…} (the note pages every parse shares, after the run), :fallback? (whether the parse with no
+                   note page in the run is valid: its note pages are :base)}. The probe chooses.
+-     :undecidable several valid parses that the probe cannot tell apart (L0 ≥ 2, a frame counter set by hand): shown
+-                  as it is."
++     :undecidable several parses are valid and L0 ≥ 2 (a frame counter set by hand before the first frame): shown as
++                  it is, even when they differ only by distinct first note pages in the first gap, the case the probe
++                  decides. With L0 ≤ 1 several valid parses are always :ambiguous (docs/theory/12 §2.3, Theorem 12),
++                  and the first test for :undecidable, two gaps with a choice, never holds (§2.2, Proposition 8)."
+   [L]
+   (let [L (vec L)
+         n (count L)]
+@@ -133,8 +136,11 @@
+    label at most one more than the one before it? Then a parse with note pages is not proven by the labels alone: the
+    plain run 1 2 … m of a deck without notes, followed by an appendix that restarts at 1 (appendixnumberbeamer), reads
+    as one slide and m − 1 note pages, a parse the rules admit and nothing in the labels refutes (docs/theory/12 §2.4).
+-   Any note page after a slide outside the plain run makes its label jump by two or more, so a real notes deck almost
+-   never reads so; the note pages of one that does are confirmed by their content (ADR-0048 §2.5)."
++   Any note page after a slide outside the plain run makes its label jump by two or more, so with L0 ≤ 1 a proven parse
++   reads so exactly when its note pages are one run directly after the plain run (docs/theory/12 §2.4.5,
++   Proposition 16). Of the n-page decks whose counter never restarts, the 2^(n−2) − 1 forms with L0 = 1, note pages
++   1 … m, page m + 1 an overlay of frame 1 and only slides after it are proven so (Corollary 17); their note pages are
++   confirmed by their content (ADR-0048 §2.5)."
+   [L]
+   (every? (fn [i] (<= (nth L i) (inc (nth L (dec i))))) (range 1 (count L))))
+ 
+@@ -263,20 +269,20 @@
+ 
+ (defn- copy-covers?
+   "Does one COPY among the matches cover at least `need` characters of the slide (`glyph-of`, an Int32Array: the
+-   characters of slide run i)? Match k is slide run (aget mi k), with the cell quotients (aget qls k) = ln σ / ln(1 + scale-tolerance),
+-   (aget qtx k) = tx / tol and (aget qty k) = ty / tol. A copy is the matches in one cell of a grid over (ln σ, tx, ty)
+-   whose cells are ln(1 + scale-tolerance) wide in ln σ and `tol` wide in each offset, or of one of the seven grids
+-   shifted from it by half a cell: every copy found agrees within the tolerances, and every set of matches that agrees
+-   within half of them falls into one cell of some grid (docs/theory/12 §3). A slide run counts once per copy, however
+-   many runs of the note page repeat its string: the matches come grouped by slide run, in order, so a cell has
+-   counted run i already exactly when the last run it counted is i. The verdict does not depend on the matches' order,
+-   since a cell's sum only grows.
++   characters of slide run i)? Match k is slide run (aget mi k), with the cell quotients
++   (aget qls k) = ln σ / ln(1 + scale-tolerance), (aget qtx k) = tx / tol and (aget qty k) = ty / tol. A copy is the
++   matches in one cell of a grid over (ln σ, tx, ty) whose cells are ln(1 + scale-tolerance) wide in ln σ and `tol`
++   wide in each offset, or of one of the seven grids shifted from it by half a cell: every copy found agrees within
++   the tolerances, and every set of matches that agrees within half of them falls into one cell of some grid
++   (docs/theory/12 §3). A slide run counts once per copy, however many runs of the note page repeat its string: the
++   matches come grouped by slide run, in order, so a cell has counted run i already exactly when the last run it
++   counted is i. The verdict does not depend on the matches' order, since a cell's sum only grows.
+    The cells of a grid live in a hash table of this function's own, on typed arrays: B buckets (the least power of two
+    ≥ 2m, at least 16) chained through `nexts`, and per cell its three indices, the last slide run counted and the sum.
+    A bucket's `stamps` entry names the grid (1–8) that last wrote its head, so each grid starts with an empty table at
+    no cost. A cell's hash is SIMPLE TABULATION over its indices' canonical bytes, with tables drawn at random on every
+    call (hash-tables): two distinct cells share a bucket with probability exactly 1/B whatever the PDF, so a lookup
+-   walks under 1.5 cells on average (docs/scientific/14 §9). The hash only decides where a cell is kept; `same-index?`
++   walks under 1.5 cells on average (docs/scientific/14 §5.3). The hash only decides where a cell is kept; `same-index?`
+    decides which matches share a cell, so the verdict does not depend on the tables drawn. Each match's six per-axis
+    hashes (two shifts × three axes) are computed once; a pass XORs three of them. 8 passes, each O(m) expected,
+    stopping at the first copy that covers enough."
+@@ -302,7 +308,8 @@
+             mask   (dec nb)
+             heads  (js/Int32Array. nb)        ; per bucket: its newest cell, when its stamp is this grid's
+             stamps (js/Int32Array. nb)        ; per bucket: the grid (1–8) that last wrote its head; 0 = none
+-            nexts  (js/Int32Array. m)         ; per cell (numbered in the order first seen): the next cell of its bucket, −1 at the end
++            nexts  (js/Int32Array. m)         ; per cell, numbered in the order first seen: the next cell of its
++                                              ; bucket, −1 at the end
+             ca     (js/Float64Array. m)       ; …its three indices
+             cb     (js/Float64Array. m)
+             cc     (js/Float64Array. m)
+@@ -568,17 +575,19 @@
+   (or (true? sig) (boolean dated?)))
+ 
+ (def max-content-pages
+-  "The background reads the text of at most this many pages for one deck (ADR-0048 §8.9). A deck whose decision needs
+-   more is shown as it is, :reason :too-many-pages: a scan of a longer deck, or a confirmation of more pages, is refused
+-   before any page is read, and a probe walk stops when it would read more. Real decks are well below it. The bound
+-   keeps a hostile PDF from occupying pdf.js's worker, which extracts each page's text, for minutes; the comparisons
+-   of those pages run on the thread that calls them, each bounded by max-signature-runs, max-signature-chars and
+-   max-signature-matches."
++  "The background makes at most this many page-text reads for one deck (ADR-0048 §8.9). A deck whose decision needs
++   more is shown as it is, :reason :too-many-pages: the scan of a longer deck, and the confirmation of a proven parse
++   with more distinct pages (confirm-page-count), are refused before any page is read; any other work stops at the
++   read that would exceed it, a confirmation that reads a slide's text again included (docs/theory/12 §4.5). Real
++   decks are well below it. The bound keeps a hostile PDF from occupying pdf.js's worker, which extracts each page's
++   text, for minutes; the comparisons of those pages run on the thread that calls them, each bounded by
++   max-signature-runs, max-signature-chars and max-signature-matches."
+   2000)
+ 
+ (defn confirm-page-count
+   "How many distinct pages CONFIRM reads for note pages `note-pages` of an n-page deck: each note page and each slide
+-   that has notes."
++   that has notes. Its reads can number more: the reader keeps the last four pages, so a slide with five or more note
++   pages can be read again (docs/theory/12 §5)."
+   [n note-pages]
+   (count (into #{} cat (confirm-pairs n note-pages))))
+ 
+@@ -950,9 +959,11 @@
+   (into #{0x1b} (vals pdfdoc-inverse)))
+ 
+ (defn pdfdoc-bytes
+-  "PDFDOC⁻¹ (ADR-0048 §4): the bytes that pdf.js's decoding of a literal string without a byte-order mark
+-   (stringToPDFString, PDFDocEncoding) turned into `s`, as a Uint8Array; nil when a character of `s` is one that no
+-   byte decodes to. No two bytes decode to the same character, so the bytes are unique when they exist."
++  "PDFDOC⁻¹ (ADR-0048 §4): the bytes other than 0x1B that pdf.js's PDFDocEncoding table (stringToPDFString) decodes
++   to `s`, as a Uint8Array; nil when a character of `s` is one that no byte decodes to. No two such bytes decode to
++   the same character, so the bytes are unique when they exist. They are the bytes pdf.js read only when it decoded a
++   literal string through that table whole and with no escape: no byte 0x1B, and no byte-order mark, or one its
++   TextDecoder rejected on a string that is not UTF-16 of odd length (docs/theory/12 §6.1–§6.3)."
+   [s]
+   (let [n   (count s)
+         out (js/Uint8Array. n)]

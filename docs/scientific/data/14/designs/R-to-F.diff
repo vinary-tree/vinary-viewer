@@ -1,0 +1,222 @@
+--- a/src/vinary/slides/notes.cljs
++++ b/src/vinary/slides/notes.cljs
+@@ -213,38 +213,106 @@
+   ;; the eight grids, shifted by half a cell along any of the three axes
+   (vec (for [a [0 0.5] b [0 0.5] c [0 0.5]] [a b c])))
+ 
++(def ^:private pack-limit
++  ;; a cell index within ±pack-limit packs, with the other two, into one exact double (cell-key)
++  65535)
++
++(defn- cell-key
++  "The js/Map key of the cell (a, b, c) of one grid. One double when every index lies within ±pack-limit:
++   (a + 2^16)·2^34 + (b + 2^16)·2^17 + (c + 2^16) — three base-2^17 digits, below 2^51, so exact and different for
++   every triple; −0 packs as 0, as `str` prints both \"0\". Otherwise the string \"a,b,c\" (an index that is huge, ±∞ or
++   NaN, from extreme coordinates). A number is never the same js/Map key as a string, so distinct cells never share a
++   key."
++  [a b c]
++  (if (and (<= (- pack-limit) a pack-limit) (<= (- pack-limit) b pack-limit) (<= (- pack-limit) c pack-limit))
++    (+ (* (+ a 65536) 17179869184) (* (+ b 65536) 131072) (+ c 65536))
++    (str a "," b "," c)))
++
+ (defn- copy-covers?
+-  "Does one COPY among `matches` [{:i :ls :tx :ty}…] cover at least `need` characters of the slide (`glyph-of`: the
+-   characters of slide run i)? A copy is the matches in one cell of a grid over (ln σ, tx, ty) whose cells are
+-   ln(1 + scale-tolerance) wide in ln σ and `tol` wide in each offset, or of one of the seven grids shifted from it by
+-   half a cell: every copy found agrees within the tolerances, and every set of matches that agrees within half of
+-   them falls into one cell of some grid (docs/theory/12 §3). A slide run counts once per copy, however many runs of
+-   the note page repeat its string. Linear in the matches: 8 passes over hash maps, stopping at the first copy that
+-   covers enough."
+-  [glyph-of matches tol need]
+-  (let [m (count matches)]
++  "Does one COPY among the matches cover at least `need` characters of the slide (`glyph-of`, an Int32Array: the
++   characters of slide run i)? Match k is slide run (aget mi k), with the cell quotients (aget qls k) = ln σ / ln(1 + scale-tolerance),
++   (aget qtx k) = tx / tol and (aget qty k) = ty / tol. A copy is the matches in one cell of a grid over (ln σ, tx, ty)
++   whose cells are ln(1 + scale-tolerance) wide in ln σ and `tol` wide in each offset, or of one of the seven grids
++   shifted from it by half a cell: every copy found agrees within the tolerances, and every set of matches that agrees
++   within half of them falls into one cell of some grid (docs/theory/12 §3). A slide run counts once per copy, however
++   many runs of the note page repeat its string: the matches come grouped by slide run, in order, so a cell has
++   counted run i already exactly when the last run it counted is i. 8 passes over the matches, each O(1) per match
++   (one js/Map lookup), stopping at the first copy that covers enough; the verdict does not depend on the matches'
++   order, since a cell's sum only grows."
++  [^js glyph-of ^js mi ^js qls ^js qtx ^js qty need]
++  (let [m    (.-length mi)
++        last (js/Int32Array. m)      ; per cell (numbered in the order first seen): the last slide run counted
++        sums (js/Float64Array. m)]   ; …and the characters of its distinct slide runs
+     (loop [g 0]
+       (if (= g (count grid-shifts))
+         false
+         (let [[s0 s1 s2] (nth grid-shifts g)
+-              seen (js/Map.)
+-              sums (js/Map.)
+-              hit? (loop [k 0]
+-                     (if (= k m)
+-                       false
+-                       (let [{:keys [i ls tx ty]} (nth matches k)
+-                             cell (str (js/Math.floor (- (/ ls log-scale-cell) s0)) ","
+-                                       (js/Math.floor (- (/ tx tol) s1)) ","
+-                                       (js/Math.floor (- (/ ty tol) s2)))
+-                             ids  (or (.get seen cell) (let [ids (js/Set.)] (.set seen cell ids) ids))]
+-                         (if (.has ids i)
+-                           (recur (inc k))
+-                           (let [sum (+ (or (.get sums cell) 0) (nth glyph-of i))]
+-                             (.add ids i)
+-                             (.set sums cell sum)
+-                             (if (>= sum need) true (recur (inc k))))))))]
++              cells (js/Map.)
++              hit?  (loop [k 0, n 0]
++                      (if (== k m)
++                        false
++                        (let [key  (cell-key (js/Math.floor (- (aget qls k) s0))
++                                             (js/Math.floor (- (aget qtx k) s1))
++                                             (js/Math.floor (- (aget qty k) s2)))
++                              i    (aget mi k)
++                              cell (.get cells key)]
++                          (cond
++                            (undefined? cell)
++                            (let [sum (aget glyph-of i)]
++                              (.set cells key n)
++                              (aset last n i)
++                              (aset sums n sum)
++                              (if (>= sum need) true (recur (inc k) (inc n))))
++
++                            (== i (aget last cell))
++                            (recur (inc k) n)
++
++                            :else
++                            (let [sum (+ (aget sums cell) (aget glyph-of i))]
++                              (aset last cell i)
++                              (aset sums cell sum)
++                              (if (>= sum need) true (recur (inc k) n)))))))]
+           (if hit? true (recur (inc g))))))))
+ 
++(defn- by-height
++  "The note page's upright runs, grouped by string: a js/Map from each string to #js [heights xs ys], three
++   Float64Arrays holding its runs' run-height and origin in ascending order of height."
++  [note]
++  (let [groups (js/Map.)]
++    (doseq [r note]
++      (when (upright? r)
++        (if-let [rs (.get groups (:str r))] (.push rs r) (.set groups (:str r) #js [r]))))
++    (let [out (js/Map.)]
++      (.forEach groups
++                (fn [^js rs s]
++                  (let [n      (.-length rs)
++                        h      (js/Float64Array. n)
++                        _      (dotimes [k n] (aset h k (run-height (aget rs k))))
++                        order  (let [o (js/Array. n)] (dotimes [k n] (aset o k k)) o)
++                        ;; heights are never NaN (upright?), but may be +∞, so compare, never subtract
++                        _      (.sort order (fn [a b] (let [x (aget h a) y (aget h b)] (cond (< x y) -1 (> x y) 1 :else 0))))
++                        hs     (js/Float64Array. n)
++                        xs     (js/Float64Array. n)
++                        ys     (js/Float64Array. n)]
++                    (dotimes [k n]
++                      (let [j (aget order k)
++                            [_ _ _ _ x y] (:t (aget rs j))]
++                        (aset hs k (aget h j))
++                        (aset xs k x)
++                        (aset ys k y)))
++                    (.set out s #js [hs xs ys]))))
++      out)))
++
++(defn- prefix-count
++  "How many of the ascending `heights` give h / hs ≤ bound. A prefix: h ↦ h / hs never decreases (IEEE division is
++   monotone; NaN, from ∞/∞, comes only last and is ≤ nothing)."
++  [^js heights hs bound]
++  (loop [lo 0, hi (.-length heights)]
++    (if (< lo hi)
++      (let [mid (unsigned-bit-shift-right (+ lo hi) 1)]
++        (if (<= (/ (aget heights mid) hs) bound) (recur (inc mid) hi) (recur lo mid)))
++      lo)))
++
+ (defn note-page-signature?
+   "SIG (ADR-0048 §2.2): does page `note` (its runs) annotate slide page `slide` (its runs)? `diag` is the note page's
+    diagonal in page units. true when the note page holds a SCALED COPY of the slide: upright runs that repeat the
+@@ -252,7 +320,11 @@
+    origin, covering at least half of the slide's characters; false otherwise. When the slide has no upright text, the
+    default template's date decides: true when the note page has a rotated date, false when it has none, and nil (no
+    evidence) when it has no text at all. nil also when a page exceeds max-signature-runs or the pairs exceed
+-   max-signature-matches."
++   max-signature-matches.
++   The MATCHES of a slide run are the note page's upright runs of its string with σ = h / hs in
++   (0, max-thumbnail-scale]. Sorted by height, they are one index range (two binary searches, prefix-count), so the
++   pairs that cannot match are never visited; they are counted before one is built, and built into arrays of exactly
++   that size (docs/theory/12 §3.7, docs/scientific/14)."
+   [slide note diag]
+   (when (and (<= (count slide) max-signature-runs) (<= (count note) max-signature-runs))
+     (let [s-runs   (into [] (filter #(and (upright? %) (pos? (glyphs %)))) slide)
+@@ -260,28 +332,52 @@
+           total    (reduce + 0 glyph-of)]
+       (if (zero? total)
+         (when (some #(pos? (glyphs %)) note) (rotated-date? note))
+-        (let [by-str  (group-by :str (filter upright? note))
+-              tol     (max 1e-9 (* offset-tolerance diag))
+-              matches (loop [i 0, acc (transient [])]
+-                        (cond
+-                          (> (count acc) max-signature-matches) nil
+-                          (= i (count s-runs))                  (persistent! acc)
+-                          :else
+-                          (let [r  (nth s-runs i)
+-                                hs (run-height r)
+-                                [_ _ _ _ xs ys] (:t r)]
+-                            (recur (inc i)
+-                                   (reduce (fn [acc k]
+-                                             (let [sigma (/ (run-height k) hs)
+-                                                   [_ _ _ _ xk yk] (:t k)]
+-                                               (if (and (pos? sigma) (<= sigma max-thumbnail-scale))
+-                                                 (conj! acc {:i i :ls (js/Math.log sigma)
+-                                                             :tx (- xk (* sigma xs)) :ty (- yk (* sigma ys))})
+-                                                 acc)))
+-                                           acc
+-                                           (get by-str (:str r)))))))]
+-          (when matches
+-            (copy-covers? glyph-of matches tol (/ total 2))))))))
++        (let [groups (by-height note)
++              tol    (max 1e-9 (* offset-tolerance diag))
++              n      (count s-runs)
++              kept   (js/Int32Array. (* 2 n))   ; slide run i keeps its string's runs [kept[2i], kept[2i+1])
++              m      (loop [i 0, m 0]
++                       (cond
++                         (> m max-signature-matches) nil
++                         (= i n)                     m
++                         :else
++                         (let [r (nth s-runs i)]
++                           (if-let [^js g (.get groups (:str r))]
++                             (let [hs (run-height r)
++                                   lo (prefix-count (aget g 0) hs 0)
++                                   hi (prefix-count (aget g 0) hs max-thumbnail-scale)]
++                               (aset kept (* 2 i) lo)
++                               (aset kept (inc (* 2 i)) hi)
++                               (recur (inc i) (+ m (- hi lo))))
++                             (recur (inc i) m)))))]
++          (when m
++            (let [mi  (js/Int32Array. m)
++                  qls (js/Float64Array. m)
++                  qtx (js/Float64Array. m)
++                  qty (js/Float64Array. m)]
++              (loop [i 0, at 0]
++                (when (< i n)
++                  (let [lo (aget kept (* 2 i))
++                        hi (aget kept (inc (* 2 i)))]
++                    (if (< lo hi)
++                      (let [r  (nth s-runs i)
++                            hs (run-height r)
++                            [_ _ _ _ sx sy] (:t r)
++                            ^js g (.get groups (:str r))
++                            gh (aget g 0)
++                            gx (aget g 1)
++                            gy (aget g 2)]
++                        (dotimes [d (- hi lo)]
++                          (let [k     (+ lo d)
++                                sigma (/ (aget gh k) hs)
++                                j     (+ at d)]
++                            (aset mi j i)
++                            (aset qls j (/ (js/Math.log sigma) log-scale-cell))
++                            (aset qtx j (/ (- (aget gx k) (* sigma sx)) tol))
++                            (aset qty j (/ (- (aget gy k) (* sigma sy)) tol))))
++                        (recur (inc i) (+ at (- hi lo))))
++                      (recur (inc i) at)))))
++              (copy-covers? (js/Int32Array.from (into-array glyph-of)) mi qls qtx qty (/ total 2)))))))))
+ 
+ ;; ---- 2.3 the probe, 2.4 the scan, 2.5 the confirmation --------------------------------------------------------------
+ 

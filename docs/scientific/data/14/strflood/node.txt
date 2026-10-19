@@ -1,0 +1,12 @@
+engine: node 26.11.1, v8 14.6.202.34-node.37
+index k·2048 (≤ 7 digits)             : median 0.658 ms (min 0.451); first keys 0, 2048, 4096
+index k (consecutive)                 : median 0.478 ms (min 0.465); first keys 0, 1, 2
+index k·4096                          : median 0.482 ms (min 0.471); first keys 0, 4096, 8192
+index k·2048 + 2^24 (8 digits)        : median 0.573 ms (min 0.456); first keys 16777216, 16779264, 16781312
+index k·65536 (up to 9 digits)        : median 0.485 ms (min 0.476); first keys 0, 65536, 131072
+integer k·2048 + 2^32 (not index)     : median 0.521 ms (min 0.513); first keys 4294967296, 4294969344, 4294971392
+"-" + k·2048                          : median 0.488 ms (min 0.479); first keys -0, -2048, -4096
+"0" + k·2048 (leading zero)           : median 0.470 ms (min 0.460); first keys 00, 02048, 04096
+k·2048 + ".5"                         : median 0.454 ms (min 0.441); first keys 0.5, 2048.5, 4096.5
+"x" + k·2048                          : median 0.432 ms (min 0.421); first keys x0, x2048, x4096
+random index below 2^23: keys not distinct, skipped

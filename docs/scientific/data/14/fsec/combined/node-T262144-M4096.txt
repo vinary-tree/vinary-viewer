@@ -1,0 +1,15 @@
+bundle       : release (dist/cli/vv-cli.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 3618730's current affinity list: 3; governor performance
+load average : 6.22 6.67 7.09
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 16384, max-thumbnail-scale 0.4
+text cap     : max-signature-chars 262144 (raised from the bundle's 32768 for the L shapes)
+shaped cases : C, rand, flood and far with 4096 matches (256 note runs); L with 262144 code units a page; X with both
+X-prefix : 4096 runs of 64 code units a page, 4096 matches (cap in force 16384; text cap in force 262144)
+X-prefix : median 9.799 ms, p95 17.384 ms, min 9.465 ms, max 17.384 ms; 15 runs; 4096 visits (2392.4 ns each at the median); result false
+X-equal  : 4096 runs of 64 code units a page, 4096 matches (cap in force 16384; text cap in force 262144)
+X-equal  : median 7.105 ms, p95 15.428 ms, min 6.868 ms, max 15.428 ms; 15 runs; 4096 visits (1734.7 ns each at the median); result false
+X-wide   : 4096 runs of 64 code units a page, 4096 matches (cap in force 16384; text cap in force 262144)
+X-wide   : median 10.193 ms, p95 14.297 ms, min 10.118 ms, max 14.297 ms; 15 runs; 4096 visits (2488.6 ns each at the median); result false
+X-mixed  : 4096 runs of 64 code units a page, 4096 matches (cap in force 16384; text cap in force 262144)
+X-mixed  : median 12.055 ms, p95 17.640 ms, min 11.858 ms, max 17.640 ms; 15 runs; 4096 visits (2943.1 ns each at the median); result false
+scaling      : A(4096)/A(2048) n/a, A(2048)/A(1024) n/a, A(1024)/A(512) n/a

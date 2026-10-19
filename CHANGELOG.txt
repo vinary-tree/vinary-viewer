@@ -593,6 +593,17 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A crafted PDF can no longer freeze a window for seconds while the viewer
+      looks for Beamer's note pages. One comparison of two pages' text could
+      take 2.58 s, and a deck makes up to 2 003 of them; the fix's first two
+      designs could themselves be slowed by keys chosen to collide in V8's hash
+      tables. The comparison now sorts and searches, and keeps its cells in a
+      table hashed with tables drawn at random on every call: the slowest
+      crafted pages take about 16 ms. A page with more than 65 536 characters
+      (UTF-16 code units) of text, or a pair of pages with more than 16 384
+      candidate matches, is no longer compared; no real deck measured comes
+      near either bound, and every other decision is unchanged
+      (docs/scientific/14).
     - In a slide show, two Escapes pressed together now take two steps: with a
       slide number half-typed, the first forgets the number and the second ends
       the show. Each Escape used to take its step by sending it on as another

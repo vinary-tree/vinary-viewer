@@ -1,0 +1,90 @@
+npm notice run vinary-viewer@0.3.0-dev npx
+npm notice run 'shadow-cljs' compile test
+shadow-cljs - config: <scratch>/wt-pairwork/shadow-cljs.edn
+shadow-cljs - starting via "clojure"
+[:test] Compiling ...
+[1;31m------ ERROR -------------------------------------------------------------------[0m
+ File: <scratch>/wt-pairwork/test/vinary/slides/notes_signature_equivalence_test.cljs:148:1
+--------------------------------------------------------------------------------
+[2m 145 |         (is (every? #(pos? (get-in % [:tally nil])) (rest results)) "every small cap is reached"))[0m
+[2m 146 |       (finally (set! notes/max-signature-matches cap)))))[0m
+[2m 147 | [0m
+[1m 148 | (defn- cap-cases[0m
+-------^------------------------------------------------------------------------
+Syntax error macroexpanding cljs.core/defn-.
+Call to cljs.core/defn- did not conform to spec.
+-- Spec failed --------------------
+
+  (... ... x ... ... ... ... ... ... ...)
+           ^
+
+should satisfy
+
+  vector?
+
+or
+
+  (fn
+   [%]
+   (or (nil? %) (sequential? %)))
+
+-- Relevant specs -------
+
+:shadow.cljs.devtools.cljs-specs/param-list:
+  (clojure.spec.alpha/and
+   clojure.core/vector?
+   (clojure.spec.alpha/cat
+    :params
+    (clojure.spec.alpha/* :shadow.cljs.devtools.cljs-specs/binding-form)
+    :var-params
+    (clojure.spec.alpha/?
+     (clojure.spec.alpha/cat
+      :ampersand
+      #{'&}
+      :var-form
+      :shadow.cljs.devtools.cljs-specs/binding-form))))
+:shadow.cljs.devtools.cljs-specs/params+body:
+  (clojure.spec.alpha/cat
+   :params
+   :shadow.cljs.devtools.cljs-specs/param-list
+   :body
+   (clojure.spec.alpha/alt
+    :prepost+body
+    (clojure.spec.alpha/cat
+     :prepost
+     clojure.core/map?
+     :body
+     (clojure.spec.alpha/+ clojure.core/any?))
+    :body
+    (clojure.spec.alpha/* clojure.core/any?)))
+:shadow.cljs.devtools.cljs-specs/defn-args:
+  (clojure.spec.alpha/cat
+   :fn-name
+   clojure.core/simple-symbol?
+   :docstring
+   (clojure.spec.alpha/? clojure.core/string?)
+   :meta
+   (clojure.spec.alpha/? clojure.core/map?)
+   :fn-tail
+   (clojure.spec.alpha/alt
+    :arity-1
+    :shadow.cljs.devtools.cljs-specs/params+body
+    :arity-n
+    (clojure.spec.alpha/cat
+     :bodies
+     (clojure.spec.alpha/+
+      (clojure.spec.alpha/spec
+       :shadow.cljs.devtools.cljs-specs/params+body))
+     :attr-map
+     (clojure.spec.alpha/? clojure.core/map?))))
+
+-------------------------
+Detected 1 error
+
+--------------------------------------------------------------------------------
+[2m 149 |   "Three pairs at a match cap of `cap` (a multiple of 64): 64 slide runs "x" × cap/64 note runs "x" at σ = 0.1 is[0m
+[2m 150 |    exactly cap matches — not more than the cap, so the copy decides (the note runs sit where a copy of the slide would,[0m
+[2m 151 |    so it covers): true; one more matched pair (a "y") is cap + 1: nil; the same matches against a slide that also[0m
+[2m 152 |    holds 1000 characters no note run repeats need 532 characters, of 64 to be had, so no copy covers (docs/scientific/14's[0m
+--------------------------------------------------------------------------------
+

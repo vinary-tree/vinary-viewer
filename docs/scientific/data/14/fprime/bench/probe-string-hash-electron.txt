@@ -1,0 +1,3 @@
+index strings k·2048 ("0", "2048", …)           : median 36.626 ms, min 36.490 ms, max 37.089 ms
+index strings, random values below 8 388 608    : median 0.124 ms, min 0.115 ms, max 0.241 ms
+non-index strings "x" + k·2048                  : median 0.122 ms, min 0.116 ms, max 0.197 ms

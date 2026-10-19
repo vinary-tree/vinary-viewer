@@ -27,7 +27,7 @@ Concretely, the project validates five classes of property, each with its own in
 | 2 | **Bounded memory** | Does a stream's working set stay `$`O(1)`$` in document length? | [02 — Bounded-memory streaming validation](02-bounded-memory-streaming-validation.md) |
 | 3 | **Algebraic law** | Do the parser's weights actually form a semiring? | [03 — Semiring algebraic laws](03-semiring-algebraic-laws.md) |
 | 4 | **Security invariance** | Is per-block sanitization identical to whole-document sanitization? | [04 — Sanitizer context-freedom](04-sanitizer-context-freedom.md) |
-| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md), [12 — Slide-deck detection & flip latency](12-slide-deck-detection-and-flip-latency.md), [13 — Speaker-note detection](13-speaker-note-detection.md) |
+| 5 | **Empirical regression** | Did a defect appear, and is the fix effective? | [05 — MathJax ink-loss experiment](05-mathjax-inkloss-experiment.md), [06 — Corpora & classifier experiments](06-corpora-and-classifier-experiments.md), [08 — Daemon window-lifetime crash](08-daemon-window-lifetime-experiment.md), [09 — In-page find & scroll ownership](09-in-page-find-and-scroll-experiments.md), [10 — Text-input latency](10-input-latency-experiments.md), [11 — Remote read & reload safety](11-remote-read-and-reload-safety-experiments.md), [12 — Slide-deck detection & flip latency](12-slide-deck-detection-and-flip-latency.md), [13 — Speaker-note detection](13-speaker-note-detection.md), [14 — The cost of one note-page comparison](14-note-signature-cost.md) |
 
 Runtime performance benchmarking is a **documented, deliberate gap** — the project ships no `perf`/`hyperfine`
 harness today. [07 — Measurement methodology](07-measurement-methodology.md) writes down the methodology that
@@ -160,6 +160,15 @@ that applied it (08–12).
   was hidden, every deck that hid pages hid all its note pages, and all 470 decision fields matched; the 28 decks
   shown as they are were all predicted. Two refinements (fall back to the scan; let the probe walk past a
   thumbnail) are left to a later registered experiment.
+
+- **[14 — The cost of one note-page comparison.](14-note-signature-cost.md)** The note-page signature of ADR-0048
+  §2.2, timed against hostile pages in nine pre-registered steps. Under the caps as they were, one comparison of two
+  crafted pages held the renderer thread for 2.58 s. The fix went through three designs. The first keyed its cells by
+  numbers, which V8 hashes without a seed, and a crafted page cost it 77.6 times its control. The second kept its
+  cells in a table of its own, but grouped strings in a `js/Map`, which Electron's V8 floods through array-index
+  strings. The third sorts, searches and hashes by simple tabulation with tables drawn at random per call. Every
+  crafted case now has a median of at most about 16 ms. Its verdicts are proved identical to the old code's on every
+  pair within the new caps, and checked three ways.
 
 ---
 

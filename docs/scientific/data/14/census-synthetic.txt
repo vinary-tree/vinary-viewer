@@ -1,0 +1,16 @@
+caps: max-thumbnail-scale 0.4, max-signature-runs 4096, max-signature-matches 65536
+corpus13:lualatex: 27 files (0 unreadable), 171 pages, 511 pairs (144 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:pdflatex: 23 files (0 unreadable), 141 pages, 413 pairs (118 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:xelatex: 27 files (0 unreadable), 171 pages, 511 pairs (144 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+corpus13:xelatex2: 69 files (0 unreadable), 423 pages, 1239 pairs (354 adjacent); most runs on a page 15; pairs past the run cap 0, past the match cap 0
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 7, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 7
+fixtures: 9 files (0 unreadable), 53 pages, 174 pairs (44 adjacent); most runs on a page 12; pairs past the run cap 0, past the match cap 0
+  visits  : max 10, p99 6, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 10
+  matches : max 2, p99 2, median 0; pairs over 256/1024/4096/16384/65536: 0/0/0/0/0; adjacent max 2

@@ -1,0 +1,74 @@
+--- a/scripts/exp-note-signature-census.cjs
++++ b/scripts/exp-note-signature-census.cjs
+@@ -13,7 +13,9 @@
+ //   visits  = Σ over the slide's upright runs with a glyph: the note page's upright runs of the same string
+ //   matches = the visits whose σ is in (0, max-thumbnail-scale]
+ // The comparison gives up (nil) when matches exceed max-signature-matches, or when either page has more than
+-// max-signature-runs runs; the census counts the pairs where that happens.
++// max-signature-runs runs; the census counts the pairs where that happens. Per PAGE it also counts the text's size in
++// UTF-16 code units — the sum of the lengths of all its runs' strings, and the longest run — the measure a cap on a
++// page's text would bound.
+ // --differential also calls, on every pair, both the namespace's note-page-signature? and the reference
+ // implementation of the test build (vinary.slides.notes-reference, the code before H-PAIRWORK-FIX), with the note
+ // page's own diagonal, and counts their verdicts and every pair on which they differ (check E2 of docs/scientific/14).
+@@ -72,7 +74,10 @@
+ 
+ function pageModel(items, diag) {
+   const runs = [];
++  let chars = 0;                          // the page's text, in UTF-16 code units: every run's string
++  let longest = 0;
+   for (const it of items) {
++    if (typeof it.str === 'string') { chars += it.str.length; longest = Math.max(longest, it.str.length); }
+     if (typeof it.str === 'string' && Array.isArray(it.transform) && it.transform.length === 6) {
+       runs.push(asRun(it.str, it.transform.slice()));
+     }
+@@ -89,7 +94,8 @@
+     hs.push(h);
+   }
+   for (const hs of byStr.values()) hs.sort((a, b) => a - b);
+-  return { runs: runs.length, slide, byStr, diag, page: DIFFERENTIAL ? cljs.PersistentVector.fromArray(runs, true) : null };
++  return { runs: runs.length, chars, longest, slide, byStr, diag,
++    page: DIFFERENTIAL ? cljs.PersistentVector.fromArray(runs, true) : null };
+ }
+ 
+ // how many of the ascending heights `hs` give σ = h / hSlide in (0, MAX_SCALE]: σ is monotone in h, so a prefix
+@@ -118,7 +124,7 @@
+ // ---- the census ----------------------------------------------------------------------------------------------------
+ 
+ const THRESHOLDS = [256, 1024, 4096, 16384, 65536];
+-const newGroup = () => ({ files: 0, unreadable: 0, pages: 0, pairs: 0, adjacent: 0, maxRuns: 0,
++const newGroup = () => ({ files: 0, unreadable: 0, pages: 0, pairs: 0, adjacent: 0, maxRuns: 0, pageChars: [], maxLongest: 0,
+   runCapPairs: 0, matchCapPairs: 0, visits: [], matches: [], adjVisits: [], adjMatches: [],
+   verdicts: { true: 0, false: 0, null: 0 }, disagreements: 0 });
+ 
+@@ -156,7 +162,11 @@
+       continue;
+     }
+     g.pages += pages.length;
+-    for (const pg of pages) g.maxRuns = Math.max(g.maxRuns, pg.runs);
++    for (const pg of pages) {
++      g.maxRuns = Math.max(g.maxRuns, pg.runs);
++      g.pageChars.push(pg.chars);
++      g.maxLongest = Math.max(g.maxLongest, pg.longest);
++    }
+     for (let j = 1; j < pages.length; j++) {
+       for (let s = 0; s < j; s++) {
+         g.pairs++;
+@@ -183,6 +193,8 @@
+     const row = {
+       files: g.files, unreadable: g.unreadable, pages: g.pages, pairs: g.pairs, adjacentPairs: g.adjacent,
+       maxRunsPerPage: g.maxRuns, runCapPairs: g.runCapPairs, matchCapPairs: g.matchCapPairs,
++      pageChars: { max: quantile(g.pageChars, 1), p99: quantile(g.pageChars, 0.99), median: quantile(g.pageChars, 0.5),
++        longestRun: g.maxLongest },
+       visits: { max: quantile(g.visits, 1), p99: quantile(g.visits, 0.99), median: quantile(g.visits, 0.5), over: over(g.visits) },
+       matches: { max: quantile(g.matches, 1), p99: quantile(g.matches, 0.99), median: quantile(g.matches, 0.5), over: over(g.matches) },
+       adjacent: { visitsMax: quantile(g.adjVisits, 1), matchesMax: quantile(g.adjMatches, 1) },
+@@ -192,6 +204,8 @@
+     console.log(`${name}: ${row.files} files (${row.unreadable} unreadable), ${row.pages} pages, ${row.pairs} pairs ` +
+       `(${row.adjacentPairs} adjacent); most runs on a page ${row.maxRunsPerPage}; pairs past the run cap ` +
+       `${row.runCapPairs}, past the match cap ${row.matchCapPairs}`);
++    console.log(`  text    : code units per page max ${row.pageChars.max}, p99 ${row.pageChars.p99}, median ` +
++      `${row.pageChars.median}; longest run ${row.pageChars.longestRun}`);
+     console.log(`  visits  : max ${row.visits.max}, p99 ${row.visits.p99}, median ${row.visits.median}; pairs over ` +
+       `${THRESHOLDS.join('/')}: ${row.visits.over.join('/')}; adjacent max ${row.adjacent.visitsMax}`);
+     console.log(`  matches : max ${row.matches.max}, p99 ${row.matches.p99}, median ${row.matches.median}; pairs over ` +

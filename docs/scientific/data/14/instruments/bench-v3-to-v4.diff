@@ -1,0 +1,41 @@
+--- a/scripts/bench-note-signature.cjs
++++ b/scripts/bench-note-signature.cjs
+@@ -38,6 +38,9 @@
+ // bundle's max-signature-chars, or 32 768 when it has none; the cap is raised to T for the run when below it).
+ //   L-prefix distinct strings with a common prefix of ℓ − 2 code units: every comparison reads the prefix.
+ //   L-equal  one string, repeated: every comparison reads all of it.
++//   L-wide   as L-prefix with every code unit two-byte (U+043F …, U+0410 …).
++//   L-mixed  as L-prefix with half the strings two-byte (a last unit at U+0100 …): a one-byte string against a
++//            two-byte one is compared unit by unit (docs/scientific/14, H-TEXT2).
+ // Each case runs its warm-ups, then its timed runs; median, p95 (nearest rank), min and max in milliseconds.
+ // VV_BENCH_JSON=<path> writes every sample.
+ 
+@@ -276,10 +279,17 @@
+   const len = CHARS / n;
+   const strs = new Array(n);
+   const prefix = 'p'.repeat(len - 2);
++  const widePrefix = '\u043f'.repeat(len - 2);
+   for (let k = 0; k < n; k++) {
+-    strs[k] = kind === 'equal' ? 'e'.repeat(len) : prefix + String.fromCharCode(0x41 + (k >> 6), 0x41 + (k & 63));
++    strs[k] = kind === 'equal' ? 'e'.repeat(len)
++      : kind === 'wide' ? widePrefix + String.fromCharCode(0x0410 + (k >> 6), 0x0410 + (k & 63))
++      : kind === 'mixed' ? prefix + String.fromCharCode(0x41 + (k >> 6), ((k & 1) ? 0x0100 : 0x41) + ((k >> 1) & 31))
++      : prefix + String.fromCharCode(0x41 + (k >> 6), 0x41 + (k & 63));
+   }
+-  if (kind === 'prefix' && new Set(strs).size !== n) throw new Error('L-prefix: the strings are not distinct');
++  if (kind !== 'equal' && new Set(strs).size !== n) throw new Error(`L-${kind}: the strings are not distinct`);
++  const wide = strs.filter((x) => [...x].some((c) => c.charCodeAt(0) > 0xff)).length;
++  const wantWide = { prefix: 0, equal: 0, wide: n, mixed: n / 2 }[kind];
++  if (wide !== wantWide) throw new Error(`L-${kind}: ${wide} strings wider than one byte, not ${wantWide}`);
+   const units = checkText(`L-${kind}`, strs);
+   console.log(`L-${kind.padEnd(6)} : ${n} runs of ${len} code units, ${units} a page (text cap in force ${TEXT_CAP})`);
+   return { slide: stringsPage(strs), note: stringsPage(strs), want: false, visits: kind === 'equal' ? n * n : n };
+@@ -293,7 +303,7 @@
+   { name: 'D', group: 'D', build: caseD, warm: 50, runs: 500 },
+   ...['rand', 'flood', 'far'].map((kind) => ({ name: kind, group: kind, build: caseShaped(kind), warm: 3, runs: 15 })),
+   ...['index', 'rand'].map((kind) => ({ name: `S-${kind}`, group: 'S', build: caseS(kind), warm: 3, runs: 15 })),
+-  ...['prefix', 'equal'].map((kind) => ({ name: `L-${kind}`, group: 'L', build: caseL(kind), warm: 3, runs: 15 })),
++  ...['prefix', 'equal', 'wide', 'mixed'].map((kind) => ({ name: `L-${kind}`, group: 'L', build: caseL(kind), warm: 3, runs: 15 })),
+ ].filter((c) => ONLY.includes(c.group));
+ 
+ // ---- timing --------------------------------------------------------------------------------------------------------

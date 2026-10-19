@@ -245,10 +245,16 @@ height, at positions $`\sigma \cdot (x, y) + (t_x, t_y)`$, for one scale $`\sigm
   ([theory/12](../theory/12-speaker-notes-detection.md) §3.3–§3.4). Half a cell is the limit: a set that spreads more
   on some axis can be split by all eight grids. A slide run counts once per copy, however many
   runs of the note page repeat its string. The signature is true when some copy covers at least half of the
-  characters of $`s`$'s upright text. Eight passes over hash maps make it linear in the number of matches.
-- **Bounds.** A page with more than 4 096 runs, or a pair whose equal strings pair up more than 65 536 times, is not
-  compared: the signature is `nil`, no evidence. No slide comes near either bound. They keep a hostile PDF from making
-  the background comparison slow (§8.9).
+  characters of $`s`$'s upright text. The note page's runs are sorted by string and then height, so a slide run's
+  matches are one range that binary searches find, and they are counted before any is built. The cells of the eight
+  grids live in a hash table of the comparison's own, hashed by simple tabulation with tables drawn at random on every
+  call ([experiment 14](../scientific/14-note-signature-cost.md) §4.4).
+- **Bounds.** A page with more than 4 096 runs, or whose runs' strings hold more than 65 536 UTF-16 code units, is not
+  compared, and neither is a pair with more than 16 384 matches (runs of equal strings with $`\sigma \le 0.4`$; other
+  pairs do not count): the signature is `nil`, no evidence. No slide comes near the bounds: the most measured on a
+  real page are 443 runs, 1 569 code units and 372 matches (experiment 14 §3.2). Together they bound one comparison.
+  Every crafted case of experiment 14 takes a median of at most about 16 ms in the release build, where the
+  comparison before it took up to 2.58 s (§8.9).
 - **An empty slide.** When $`s`$ has no text, its thumbnail has none either, and the default template's date decides.
   The signature is true when $`j`$ has a run rotated by $`\pm 90°`$ that reads as a date `YYYY-MM-DD`, false when it
   has none, and `nil` (no evidence) when $`j`$ has no text at all.
@@ -878,8 +884,12 @@ unread above it, through a non-blocking open of a regular file only (so a FIFO a
 `fstat` on the handle it then reads. The background notes work makes at most 2 000 page-text reads per deck
 (`notes/max-content-pages`): the scan of a deck of more pages, and the confirmation of a proven parse with more
 distinct pages, are refused before any page is read, and any other work that would read more stops part-way with
-`:too-many-pages` (§2.5). Each signature compares at most 4 096 runs per page and 65 536 matches (§2.2), so a hostile PDF
-cannot occupy pdf.js's worker for long. [The threat model](../security/threat-model.md) records the new boundary.
+`:too-many-pages` (§2.5). That budget bounds what pdf.js's worker spends extracting text. Each signature runs on the
+thread that calls it, the renderer's in the GUI, and its caps bound it there: 4 096 runs and 65 536 code units per
+page, and 16 384 matches per pair (§2.2). It groups the strings by sorting and keeps its cells in a table hashed with
+tables drawn at random on every call, so a hostile PDF has no keys to flood. The slowest crafted pages take about
+16 ms ([experiment 14](../scientific/14-note-signature-cost.md)). [The threat model](../security/threat-model.md)
+records the new boundary.
 
 ---
 
@@ -1001,7 +1011,7 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 | Rule | Evidence |
 |---|---|
 | The generated decks the tests use | `test/pdf-gen-smoke.mjs`: `pdf-gen.js`'s note pages, labels, annotations and pdfpc XMP against real Beamer and pdfpc output (`test/fixtures/beamer-*.pdf`), with four negative controls |
-| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; the proofs of [theory/12](../theory/12-speaker-notes-detection.md) and their machine checks against `notes.cljs` itself (§7.1); and [experiment 13](../scientific/13-speaker-note-detection.md), a corpus of 94 small Beamer decks of real TeX output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) whose expected decisions were written and hashed before the detector first ran on it: no slide was hidden in any of the 94, every deck that hid pages hid all of its note pages (54 of 54), and all 470 decision fields were the registered ones |
+| The automaton, the signature, the probe, the scan, the confirmation, pdfpc settings, text notes and REPAIR (on `beamer-pdfpc-pdftex.pdf`) | unit: `vinary.slides.notes-test`; the proofs of [theory/12](../theory/12-speaker-notes-detection.md) and their machine checks against `notes.cljs` itself (§7.1); and [experiment 13](../scientific/13-speaker-note-detection.md), a corpus of 94 small Beamer decks of real TeX output (pdfLaTeX, LuaLaTeX, XeLaTeX after one and two passes, and one XeLaTeX pass over an edited deck) whose expected decisions were written and hashed before the detector first ran on it: no slide was hidden in any of the 94, every deck that hid pages hid all of its note pages (54 of 54), and all 470 decision fields were the registered ones; and [experiment 14](../scientific/14-note-signature-cost.md), the signature's cost (at most about 16 ms at the median on every crafted page, in node's V8 and Electron's) and its equivalence to the code it replaced: a proof, a property test with 18 of 18 negative controls killed (`vinary.slides.notes-signature-equivalence-test`), 38 830 page pairs and the CLI's decisions for 155 decks, all without a disagreement |
 | Navigation over shown pages, `[:show p]`, snap, `resolve-goto` | unit: `vinary.slides.deck-test` (extended) |
 | The shared pipeline and its CLI fields | `test/cli-smoke.js` `--deck-info` on generated and LuaLaTeX/XeLaTeX fixtures, the pdfpc deck and its sidecar, a sidecar over the cap and a legacy sidecar |
 | N7, the sidecar read: its name, the 4 MiB cap, a FIFO, an unreadable file, a directory, over SFTP | `test/content-service-smoke.js` `testPdfpcSidecar`; five mutants, each killed — a blocking open, the cap off by one, the dot looked for in the whole path, no remote sidecar, a remote read past the cap |
@@ -1024,6 +1034,9 @@ cannot occupy pdf.js's worker for long. [The threat model](../security/threat-mo
 - [Experiment 13 — Speaker-note detection on real TeX output](../scientific/13-speaker-note-detection.md): §2's
   detector on 94 small Beamer decks from pdfLaTeX, LuaLaTeX and XeLaTeX, against expectations registered before it
   ran
+- [Experiment 14 — The cost of one note-page comparison](../scientific/14-note-signature-cost.md): §2.2's signature
+  timed against hostile pages, the floods that ruled out two designs, and the proof that the committed one returns
+  what the code before it returned
 - [ADR-0045](0045-slide-deck-presentation.md), [ADR-0046](0046-reload-safe-pipelined-remote-reads.md),
   [ADR-0047](0047-persisted-state-stores.md), [ADR-0009](0009-mediator-ipc-over-point-to-point.md),
   [ADR-0010](0010-bounded-content-retention-and-render-metadata.md)

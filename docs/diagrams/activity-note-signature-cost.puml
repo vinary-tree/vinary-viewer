@@ -1,0 +1,107 @@
+@startuml activity-note-signature-cost
+'' PlantUML over Mermaid because the experiment is a chain whose ORDER is part of its validity: every registration is
+'' written into the ledger before the run it judges, and each result either confirms a design or opens the question
+'' the next registration answers. Activity swimlanes show who owns each step (the ledger, the instruments, the designs
+'' under test), the `if` steps show which outcome led where, the formulas render as LaTeX, and the SVG renders
+'' byte-reproducibly (README §4).
+'' Lanes and fills, from the shared palette: tan = the append-only ledger, fixed before the runs it judges (the files
+'' on disk of docs/scientific/data/14); slate = the Node instruments (the benchmark under taskset, the census, E1 and
+'' E3); orange = the designs under test, the "model orange" of the pure vinary.slides.* libraries; red = a refutation
+'' or a rejection; green = held, or adopted.
+!include _vv-theme.iuml
+!pragma useVerticalIf on
+
+title H-PAIRWORK and its fix: nine registrations, each written before the run it judges (scientific/14 §2)
+
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+start
+:**1 · H-PAIRWORK**: is one comparison within the caps
+below the long-task threshold of 50 ms? A(n), B, C, D,
+predictions P1–P5, and what each outcome means;  <<FS_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:the benchmark on R, core 3, dev and release;  <<MAIN_TINT>>
+:**K1, K2 refuted**: up to 2.58 s per comparison, A(4096)
+(<latex>4096^2</latex> visits, no match); K3 corrected (the caller's thread);  <<ERROR_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**2 · design F** registered before it is written: visit only
+what can match (F-a), count first (F-b), pack the cells (F-c).
+Q1–Q4, and the cap rule if C > 16 ms;  <<FS_TINT>>
+|#F5EAE0|the designs under test (vinary.slides.notes)|
+:F written; E1 with five negative controls, all killed;  <<IR_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:E2: 38 830 census pairs, E3: 155 decks — no disagreement.
+The bench: A(4096) 5.35 ms, C 48.6 ms (≤ 50, > 16);  <<MAIN_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**3 · H-FLOOD, H-FAR**: a design review attacks F's time.
+Can crafted cells share one bucket of V8's number hash?
+Can far cells fall back to string keys?;  <<FS_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:flood <latex>77.6\times</latex> its random control (2.33 s); far <latex>7.66\times</latex>;  <<MAIN_TINT>>
+:**F rejected** for the hostile case;  <<ERROR_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**4 · design F′**: its own table, hashed at random per call,
+amended BEFORE it is written: simple tabulation, not a
+linear family (3-independent; Chernoff-type loads);  <<FS_TINT>>
+|#F5EAE0|the designs under test (vinary.slides.notes)|
+:F′ written; E1 extended, 11 controls killed; E2, E3 identical;  <<IR_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:at the match cap 65 536, C 34.7 ms > 16: the rule lowers
+the cap to **16 384** (C 8.45 ms). No flood, no far. In Electron,
+the string probe: array-index keys that share their low bits
+cost <latex>295\times</latex> random ones in a js/Map;  <<MAIN_TINT>>
+:**F′ not accepted**: its by-height groups strings in a js/Map;  <<ERROR_TINT>>
+:**5 · H-STRFLOOD**, exploratory: in Electron's V8 every canonical
+array-index string is bucketed by its value; in node's, none tried;  <<MAIN_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**6 · design F″**, a deviation decided before code: group the
+strings by a stable merge sort, no hash, and cap the text.
+Q1″, Q2⁗, Q5, Q6 (the text cap by a rule), E1 (g)–(j);  <<FS_TINT>>
+|#F5EAE0|the designs under test (vinary.slides.notes)|
+:F″ written: sorted-runs, group-of, prefix-count on a range,
+page-chars, max-signature-chars;  <<IR_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:every crafted shape ≤ 16 ms in both engines, S-index ≈ S-rand.
+Q6's rule picks <latex>T = 2^{20}</latex> — held, not yet adopted;  <<MARKDOWN_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**7 · H-TEXT2**, written after Q6's result (it can only lower
+the cap): two-byte and mixed-width strings join the rule;  <<FS_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:the prediction **fails**: nothing reaches 16 ms, so the rule
+again picks <latex>2^{20}</latex>, and L-wide binds in Electron;  <<ERROR_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**8 · H-COMBINED**: one page at all three caps at once:
+a rule picks the text and match caps together, by the
+smaller headroom <latex>\min(T / 1569,\ M / 372)</latex>;  <<FS_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:both predictions **fail**; the rule picks <latex>(2^{16},\ 16\,384)</latex>,
+the binding median 15.799 ms, a margin of 1.3 %;  <<ERROR_TINT>>
+|#F5EAE0|the designs under test (vinary.slides.notes)|
+:the final F″: max-signature-chars 65 536,
+max-signature-matches 16 384, the run cap 4 096;  <<IR_TINT>>
+|#EEEBE8|the ledger (PREREGISTRATION.txt)|
+:**9 · the final F″**: every control fails where predicted,
+E2 and E3 find nothing;  <<FS_TINT>>
+|#E4E8F1|the instruments (scripts/bench-note-signature.cjs, the census, E1, E3)|
+:E1: 18 of 18 negative controls killed, 2 126 assertions.
+E2: 0 of 38 830 pairs differ; E3: byte-identical, 155 decks;  <<MAIN_TINT>>
+if (any disagreement, or a control that survives?) then (yes)
+  :the fix is rejected, and reported;  <<ERROR_TINT>>
+  stop
+else (no)
+  :**F″ adopted**: the same verdict as R on every pair within
+  the text cap; every crafted worst case about 16 ms or less;  <<MARKDOWN_TINT>>
+endif
+|#F5EAE0|the designs under test (vinary.slides.notes)|
+:committed: notes.cljs compiles token-identical to the verified F″;  <<IR_TINT>>
+stop
+
+legend right
+  |= Colour |= Swimlane / concept |
+  |<#9F8766>&#160;&#160;&#160;&#160;| the ledger: each registration, written before the run it judges |
+  |<#3A5BA0>&#160;&#160;&#160;&#160;| the instruments: the pinned benchmark, the census (E2), E1 and E3 |
+  |<#E67E22>&#160;&#160;&#160;&#160;| the designs under test: vinary.slides.notes as R, F, F′ and F″ |
+  |<#E0211D>&#160;&#160;&#160;&#160;| a refutation, a failed prediction, or a rejected design |
+  |<#67B11D>&#160;&#160;&#160;&#160;| held, or adopted |
+  The runs of 2026-10-18, on one machine (scientific/14 §3.5).
+endlegend
+@enduml

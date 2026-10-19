@@ -1,0 +1,8 @@
+bundle       : dev (dist/test/test.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 879422's current affinity list: 3; governor performance
+load average : 12.78 10.04 10.45
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 65536, max-thumbnail-scale 0.4
+B        : median 59.696 ms, p95 62.469 ms, min 49.033 ms, max 62.469 ms; 3 runs; 69632 visits (857.3 ns each at the median); result null
+C        : median 582.797 ms, p95 630.759 ms, min 582.797 ms, max 630.759 ms; 2 runs; 65536 visits (8892.8 ns each at the median); result false
+D        : median 0.200 ms, p95 2.441 ms, min 0.188 ms, max 3.594 ms; 50 runs; 60 visits (3328.8 ns each at the median); result true
+scaling      : A(4096)/A(2048) n/a, A(2048)/A(1024) n/a, A(1024)/A(512) n/a

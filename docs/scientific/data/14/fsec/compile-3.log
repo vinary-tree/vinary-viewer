@@ -1,0 +1,6 @@
+npm notice run vinary-viewer@0.3.0-dev npx
+npm notice run 'shadow-cljs' compile test
+shadow-cljs - config: <scratch>/wt-pairwork/shadow-cljs.edn
+shadow-cljs - starting via "clojure"
+[:test] Compiling ...
+[:test] Build completed. (520 files, 2 compiled, 0 warnings, 3.50s)

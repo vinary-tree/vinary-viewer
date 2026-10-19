@@ -1,0 +1,6 @@
+bundle       : release (dist/cli/vv-cli.js)
+node         : v26.11.1; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 881354's current affinity list: 3; governor performance
+load average : 11.07 10.09 10.45
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 65536, max-thumbnail-scale 0.4
+D        : median 0.187 ms, p95 1.578 ms, min 0.180 ms, max 1.578 ms; 10 runs; 60 visits (3119.1 ns each at the median); result true
+scaling      : A(4096)/A(2048) n/a, A(2048)/A(1024) n/a, A(1024)/A(512) n/a

@@ -1,6 +1,9 @@
 'use strict';
-// docs/theory/12 §3 and §4.5. (1) The shifted grids of `copy-covers?`, with its cell formula verbatim:
+// docs/theory/12 §3 and §4.5. (1) The shifted grids of `copy-covers?`, with its cell formula. note-page-signature?
+// stores each match's quotients ls / w, tx / tol and ty / tol, and copy-covers? floors each one less its shift, so
 //   cell = (floor(ls / w - s0), floor(tx / tol - s1), floor(ty / tol - s2)),  w = ln(1 + 0.02),  s ∈ {0, 0.5}³
+// in the same doubles (docs/scientific/14 Lemma 6). The string key below stands for `same-index?`: two cells' keys
+// are equal exactly when their three indices are SameValueZero (docs/scientific/14 Lemma 7). It checks
 // soundness (two matches in one cell agree within a cell width per axis), completeness (a set whose per-axis spread
 // is below half a cell lies in one cell of some grid) and tightness (just above half a cell, all eight grids can
 // split a set). (2) The page reader of vinary.slides.evidence (`runs-reader`, a 4-page cache evicting the OLDEST

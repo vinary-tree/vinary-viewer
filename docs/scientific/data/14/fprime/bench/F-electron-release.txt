@@ -1,0 +1,12 @@
+bundle       : release (dist/cli/vv-cli.js)
+node         : v24.17.0; cpu AMD Ryzen Threadripper PRO 5975WX 32-Cores; affinity pid 2487445's current affinity list: 3; governor performance
+load average : 7.03 7.12 8.39
+page         : 362.835 × 272.126 (diag 453.544); max-signature-runs 4096, max-signature-matches 65536, max-thumbnail-scale 0.4
+shaped cases : C, rand, flood and far with 65536 matches (4096 note runs)
+rand     : 4096 cells in 0.0 s (4096 draws; bucket mask 2047)
+rand     : median 31.316 ms, p95 38.123 ms, min 30.394 ms, max 38.123 ms; 15 runs; 65536 visits (477.8 ns each at the median); result false
+flood    : 4096 cells in 1.7 s (8253387 draws; bucket mask 2047)
+flood    : median 2695.591 ms, p95 2715.087 ms, min 2691.883 ms, max 2715.087 ms; 15 runs; 65536 visits (41131.5 ns each at the median); result false
+far      : 4096 cells in 0.0 s (4096 draws; bucket mask 2047)
+far      : median 175.835 ms, p95 205.032 ms, min 173.979 ms, max 205.032 ms; 15 runs; 65536 visits (2683.0 ns each at the median); result false
+scaling      : A(4096)/A(2048) n/a, A(2048)/A(1024) n/a, A(1024)/A(512) n/a
