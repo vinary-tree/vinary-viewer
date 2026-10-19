@@ -46,13 +46,18 @@
             ;; w (Reflo-w), not r: r is Reset Zoom's, and two visible items must never share an access key
             {:label "Reflow Text"       :access-key "w" :event [:pdf/reflow-toggle] :pdf-only true}
             ;; slide shows (ADR-0045) — ONE flipping layout item (realize-item turns it into "View as Document",
-            ;; key m, while the slides layout shows), then the show itself and, in the slides layout, the overview
+            ;; key m, while the slides layout shows), then the show itself and, in the slides layout, the overview.
+            ;; While a show runs, End Slide Show takes the Start items' place, with Start Slide Show's key: only a
+            ;; linked show's presenter window shows the menu bar then (ADR-0048 §8.1), and it ends the show from any
+            ;; document
             {:label "View as Slide Show" :dyn-label :slides-layout-toggle :access-key "l"
              :event [:pdf/layout-toggle] :pdf-only true}
             {:label "Start Slide Show"         :access-key "h" :accel "F5"
-             :event [:slides/present {:from :first}] :pdf-only true}
+             :event [:slides/present {:from :first}] :pdf-only true :hide-presenting true}
             {:label "Start from Current Slide" :access-key "u" :accel "Shift+F5"
-             :event [:slides/present {:from :current}] :pdf-only true}
+             :event [:slides/present {:from :current}] :pdf-only true :hide-presenting true}
+            {:label "End Slide Show"           :access-key "h" :accel "Esc"
+             :event [:slides/stop] :presenting-only true}
             ;; two linked windows (ADR-0048 §8): the audience window opens, the speaker notes stay in this one
             {:label "Present in New Window"    :access-key "p" :accel "Shift+S"
              :event [:slides/present-linked] :pdf-only true :tooltip "Speaker notes stay in this window"}
@@ -153,12 +158,16 @@
   (let [db @rfdb/app-db]
     {:pdf?  (= :pdf (zoom/context db))
      :slides? (slides/slides-view? db)
+     :presenting? (slides/presenting? db)
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
 (defn- item-visible? [ctx item]
   (cond
     (not (map? item)) true                     ; :sep — kept here, tidied by clean-seps
+    ;; a running slide show: End Slide Show while one runs, whatever is shown; the Start items only while none does
+    (:presenting-only item) (boolean (:presenting? ctx))
+    (and (:hide-presenting item) (:presenting? ctx)) false
     (:pdf-only item)  (:pdf? ctx)
     ;; a PDF in the continuous document layout (Fit has no meaning in the slides layout)
     (:pdf-doc-only item) (and (:pdf? ctx) (not (:slides? ctx)))
@@ -198,7 +207,7 @@
 (defn- effective-menus [ctx] (mapv #(filter-items ctx %) menus))
 
 (defn realized-menu
-  "PURE (tests): the menu labelled `label` as it shows for menu context `ctx` ({:pdf? :slides? :diff?
+  "PURE (tests): the menu labelled `label` as it shows for menu context `ctx` ({:pdf? :slides? :presenting? :diff?
    :diff-all-collapsed?}) — conditional items filtered, dynamic labels realized."
   [ctx label]
   (some (fn [m] (when (= (:label m) label) (filter-items ctx m))) menus))
@@ -365,10 +374,11 @@
 
 (defn- handle-keydown! [^js e]
   (let [db @rfdb/app-db]
-    ;; no access keys while capturing a key binding, nor during a slide show — the menubar is hidden then, and
-    ;; Alt+letter must not open an invisible menu (ADR-0045)
+    ;; no access keys while capturing a key binding, nor while a slide show hides the chrome — the menubar is hidden
+    ;; then, and Alt+letter must not open an invisible menu (ADR-0045). A linked show's presenter window keeps its
+    ;; menubar, and its access keys (slides/chromeless?, ADR-0048 §8.1)
     (when-not (or (get-in db [:ui :kbedit :capture])
-                  (get-in db [:ui :presentation :active?]))
+                  (slides/chromeless? db))
       (cond
         (= "Alt" (.-key e))
         (rf/dispatch [:access-keys/set true])
@@ -479,6 +489,7 @@
         ;; the reactive render-side twin of menu-ctx-now (the keyboard path reads app-db directly)
         ctx {:pdf?  @(rf/subscribe [:view/pdf-active?])
              :slides? @(rf/subscribe [:slides/view?])
+             :presenting? @(rf/subscribe [:slides/presenting?])
              :diff? @(rf/subscribe [:view/diff-active?])
              :diff-all-collapsed? @(rf/subscribe [:diff/all-collapsed?])}
         root (cond-> [:div.vv-menubar {:role "menubar"}]

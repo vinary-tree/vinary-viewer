@@ -21,9 +21,18 @@
   (nav/pdf-layout db))
 
 (defn presenting?
-  "Is a fullscreen slide show running in this window?"
+  "Is a slide show running in this window — a one-window show, or either side of a linked one? Whether the window
+   hides its chrome for it is chromeless?."
   [db]
   (boolean (get-in db [:ui :presentation :active?])))
+
+(defn chromeless?
+  "Does this window hide its chrome for a running slide show (.vv-root.vv-presenting)? Every show does but a linked
+   show's presenter window (ADR-0048 §8.1): a one-window show and a linked show's audience window show only the slide,
+   while the presenter window — the show runs in the other window — keeps its menus, tabs, sidebar and bars, from
+   Shift+S until the show ends."
+  [db]
+  (and (presenting? db) (not= :presenter (get-in db [:ui :slides-link :role]))))
 
 (defn pdf-shown?
   "Is the active tab showing a PDF (directly, or as the PDF facet of a collocated group)?"

@@ -147,7 +147,11 @@
    :mode/insert  {:id :mode/insert :title "Insert mode" :category "Mode" :dispatch [:input/set-mode :insert]}
    :mode/visual  {:id :mode/visual :title "Visual mode" :category "Mode" :dispatch [:input/set-mode :visual]}
    :mode/ex      {:id :mode/ex :title "Command line" :category "Mode" :dispatch [:palette/open {:source :command :prefix ":"}]}
-   :input/escape {:id :input/escape :title "Escape / cancel" :category "Mode" :dispatch [:input/escape]}})
+   ;; the keyboard's Escape says whether the keyboard was on the document (the resolver's :on-document?): in the chrome
+   ;; of a linked show's presenter window it leaves the show alone (vinary.input.events/escape-fx). The palette's
+   ;; context carries no :on-document?, so its Escape counts as one on the document
+   :input/escape {:id :input/escape :title "Escape / cancel" :category "Mode"
+                  :handler (fn [ctx] [:input/escape (select-keys ctx [:on-document?])])}})
 
 (defn allowed?
   "Does command id's :when predicate pass for ctx? (no :when ⇒ always)."

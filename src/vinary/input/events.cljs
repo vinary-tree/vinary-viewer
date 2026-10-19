@@ -55,23 +55,31 @@
    (palette-close-fx, events/find-close-fx, events/slides-overview-close-fx, …) — never dispatched: a dispatched step
    is queued BEHIND the keys already waiting, so of two Escapes that arrive together (a burst, or keys queued while
    the renderer was busy — none is dropped, ADR-0033) both saw the same state and took the same step, and the show
-   never ended (H-ESC, docs/scientific/12 §8.8)."
-  [db]
-  (let [palette? (get-in db [:ui :palette :open?])
-        find?    (get-in db [:ui :find :visible?])
-        mode     (get-in db [:ui :input :mode])]
-    (cond
-      palette?                (palette-close-fx db)
-      find?                   (events/find-close-fx db)
-      (slides/overview? db)   (events/slides-overview-close-fx db)
-      (slides/digits db)      (events/slides-digits-clear-fx db)
-      (slides/blank db)       {:db (slides/clear-blank db)}
-      (slides/presenting? db) (events/slides-stop-fx db {})
-      (not= mode :normal)     {:db (assoc-in db [:ui :input :mode] :normal)}
-      :else                   {:db (-> db (assoc-in [:ui :input :sequence] [])
-                                       (assoc-in [:ui :input :count] nil))})))
+   never ended (H-ESC, docs/scientific/12 §8.8).
 
-(rf/reg-event-fx :input/escape (fn [{:keys [db]} _] (escape-fx db)))
+   `:on-document?` false — the keyboard's Escape, from a text field or the chrome (the resolver's context) — skips
+   the slide show's steps in a linked show's presenter window, which keeps its chrome (slides/chromeless?): Escape in
+   its URI bar, its tree's filter or its bars cancels that control, not the show, nor the audience's blank. A window
+   that hides its chrome has no chrome to be in, so there they are taken as before; and with no `:on-document?` (the
+   palette, a dispatch) Escape counts as one on the document."
+  ([db] (escape-fx db nil))
+  ([db {:keys [on-document?]}]
+   (let [palette? (get-in db [:ui :palette :open?])
+         find?    (get-in db [:ui :find :visible?])
+         mode     (get-in db [:ui :input :mode])
+         show?    (not (and (false? on-document?) (slides/presenting? db) (not (slides/chromeless? db))))]
+     (cond
+       palette?                              (palette-close-fx db)
+       find?                                 (events/find-close-fx db)
+       (and show? (slides/overview? db))     (events/slides-overview-close-fx db)
+       (and show? (slides/digits db))        (events/slides-digits-clear-fx db)
+       (and show? (slides/blank db))         {:db (slides/clear-blank db)}
+       (and show? (slides/presenting? db))   (events/slides-stop-fx db {})
+       (not= mode :normal)                   {:db (assoc-in db [:ui :input :mode] :normal)}
+       :else                                 {:db (-> db (assoc-in [:ui :input :sequence] [])
+                                                      (assoc-in [:ui :input :count] nil))}))))
+
+(rf/reg-event-fx :input/escape (fn [{:keys [db]} [_ opts]] (escape-fx db opts)))
 
 ;; ---- user keymap config from main (over the Mediator IPC) ----
 (rf/reg-event-fx

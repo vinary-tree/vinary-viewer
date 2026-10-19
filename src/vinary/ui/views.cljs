@@ -1932,9 +1932,11 @@
           [:span.vv-hint-rest (subs label (count typed))]])])))
 
 (defn root []
-  ;; .vv-presenting: a slide show is running in this window (ADR-0045) — CSS hides the app chrome and blacks out
-  ;; the background; nothing remounts, so the slides view (and its find / text layers) stays as it was
-  [:div {:class (str "vv-root" (when @(rf/subscribe [:slides/presenting?]) " vv-presenting"))}
+  ;; .vv-presenting: this window hides its chrome for a running slide show (ADR-0045) — CSS hides the app chrome and
+  ;; blacks out the background; nothing remounts, so the slides view (and its find / text layers) stays as it was. A
+  ;; linked show's presenter window keeps its chrome: the show runs in the other window (slides/chromeless?,
+  ;; ADR-0048 §8.1)
+  [:div {:class (str "vv-root" (when @(rf/subscribe [:slides/chromeless?]) " vv-presenting"))}
    [menubar/menubar]
    [:div.vv-app
     [sidebar/sidebar]

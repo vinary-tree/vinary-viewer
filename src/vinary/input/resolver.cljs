@@ -72,6 +72,10 @@
             ;; the slides key layer applies (keyboard-only: the palette's context never sets it, so the typed-number
             ;; commands never show up there)
             :slides-active? (slides-active? db in-input?)
+            ;; the keyboard is on the document — not in a text field, nor on the chrome a linked show's presenter
+            ;; window keeps (its URI bar, its tree, its bars): Escape there leaves the show alone (input-events/
+            ;; escape-fx). Keyboard-only, like :slides-active?: the palette's context never sets it
+            :on-document?  (and (focus-on-document?) (not in-input?))
             :find-visible? (get-in db [:ui :find :visible?])
             :palette-open? (get-in db [:ui :palette :open?])
             ;; a blocking modal dialog owns the keyboard while open, so the resolver must not fire background

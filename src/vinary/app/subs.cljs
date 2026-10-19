@@ -249,9 +249,12 @@
 (rf/reg-sub :slides/state (fn [db _] (get-in db [:ui :slides])))
 ;; the slide number being typed in the slides layout ("12"), or nil — the "Go to 12" chip
 (rf/reg-sub :slides/digits (fn [db _] (get-in db [:ui :slides :digits])))
-;; the running slide show ({:active? :tab-id :path :from :fullscreen?}) or nil — .vv-presenting, menus (ADR-0045)
+;; the running slide show ({:active? :tab-id :path :from :fullscreen?}) or nil — menus, palette (ADR-0045)
 (rf/reg-sub :slides/presentation (fn [db _] (get-in db [:ui :presentation])))
 (rf/reg-sub :slides/presenting? :<- [:slides/presentation] (fn [p _] (boolean (:active? p))))
+;; does this window hide its chrome for the show (.vv-root.vv-presenting)? every show but a linked show's presenter
+;; window (slides/chromeless?, ADR-0048 §8.1)
+(rf/reg-sub :slides/chromeless? (fn [db _] (slides/chromeless? db)))
 ;; the running show's blanked screen (:black / :white) or nil — the blank overlay
 (rf/reg-sub :slides/blank (fn [db _] (get-in db [:ui :slides :blank])))
 ;; a linked show's link at [:ui :slides-link] (ADR-0048 §8; vinary.app.slides-link), or nil

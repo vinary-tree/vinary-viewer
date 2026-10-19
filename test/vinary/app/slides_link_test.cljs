@@ -68,8 +68,9 @@
 ;; ---- the presenter opens a show -----------------------------------------------------------------------------------
 
 (deftest shift-s-asks-main-for-a-show
-  (testing "no link: a new opening link, and the request"
-    (is (= {:link {:phase :opening :role :presenter :path deck :fullscreen true}
+  (testing "no link: a new opening link, and the request — which carries the fullscreen preference for the audience
+            window; the presenter's link does not keep it (it never asks for its own fullscreen, ADR-0048 §8.1)"
+    (is (= {:link {:phase :opening :role :presenter :path deck}
             :open {:path deck :page 2 :blank nil :fullscreen true}}
            (link/request-open nil request))))
   (testing "the blank colour travels as a string, fullscreen as a boolean"
@@ -88,25 +89,25 @@
       (is (= {:link live} (link/request-open live request))))))
 
 (deftest the-presenter-goes-live-when-main-answers
-  (let [{:keys [link move fullscreen?]} (link/on-joined (opening) (joined) (mirror 2))]
-    (is (= {:phase :live :role :presenter :path deck :fullscreen true :session sid :seq 0 :own-seq 0
+  (let [{:keys [link move] :as r} (link/on-joined (opening) (joined) (mirror 2))]
+    (is (= {:phase :live :role :presenter :path deck :session sid :seq 0 :own-seq 0
             :known {:page 2 :blank nil} :out #{} :held nil :applying nil :next-mid 1 :display "separate"
             :peer :waiting}
            link)
         "known is the session's start position")
     (is (nil? move) "it has not moved since it asked: the interceptor sends nothing")
-    (is (true? fullscreen?) "its preference, and a separate display: its own fullscreen"))
+    (is (not (contains? r :fullscreen?)) "a separate display, and its preference: still no fullscreen of its own"))
   (testing "a key pressed while the link was being made is sent like any person's move"
     (let [{:keys [link move]} (link/on-joined (opening) (joined) (mirror 3 :black))]
       (is (= {:session sid :mid 1 :page 3 :blank "black"} move))
       (is (= {:page 3 :blank :black} (:known link)))
       (is (= #{1} (:out link)))
       (is (= 2 (:next-mid link)))))
-  (testing "a presenter never covers the only display"
-    (is (false? (:fullscreen? (link/on-joined (opening) (joined {:display "same"}) (mirror 2)))))
-    (is (false? (:fullscreen? (link/on-joined (opening) (joined {:display "manual"}) (mirror 2)))))
+  (testing "the presenter never asks for its own fullscreen, on any display (ADR-0048 §8.1): it keeps its chrome"
+    (doseq [display ["separate" "same" "manual"]]
+      (is (not (contains? (link/on-joined (opening) (joined {:display display}) (mirror 2)) :fullscreen?)) display))
     (let [no-pref (:link (link/request-open nil (assoc request :fullscreen false)))]
-      (is (false? (:fullscreen? (link/on-joined no-pref (joined) (mirror 2)))))))
+      (is (not (contains? (link/on-joined no-pref (joined) (mirror 2)) :fullscreen?)))))
   (testing "a joined for its own session again (Shift+S while linked) refreshes the display only"
     (is (= {:link (assoc (presenter) :display "manual")}
            (link/on-joined (presenter) (joined {:display "manual" :seq 4 :page 9}) (mirror 7)))))

@@ -1,14 +1,19 @@
 (ns vinary.app.slides-linked-test
   "A linked show, the window's side as the events carry it out (ADR-0048 §8): Shift+S opens it (the show from the
-   current slide without fullscreen, the presenter view, the request); main's messages (joined asks for fullscreen
-   only on a separate display, a push is shown by the :slides/command EFFECT with its blank colour, an end stops the
-   show or lets it go on); the audience window's join and start; the ONE outgoing interceptor (a report or a blank
-   change sends, :slides/link-state never does); Escape and unmount leave; Swap screens and the report that ends it;
-   the pane's line; and S in every preset. The protocol itself is vinary.app.slides-link-test's."
+   current slide without fullscreen, the presenter view, the request; a one-window show's fullscreen left); main's
+   messages (joined never makes the presenter ask for a fullscreen of its own, a push is shown by the :slides/command
+   EFFECT with its blank colour, an end stops the show or lets it go on); the presenter window keeps its chrome
+   (focusing it, leaving a fullscreen, Escape in it); the audience window's join and start; the ONE outgoing
+   interceptor (a report or a blank change sends, :slides/link-state never does); Escape and unmount leave; Swap
+   screens and the report that ends it; the pane's line; and S in every preset. The protocol itself is
+   vinary.app.slides-link-test's."
   (:require [cljs.test :refer [deftest is testing]]
+            [re-frame.core]
+            [vinary.app.commands :as commands]
             [vinary.app.events :as events]
             [vinary.app.slides :as slides]
             [vinary.app.slides-link :as link]
+            [vinary.input.events :as input-events]
             [vinary.input.keymap :as keymap]))
 
 (def ^:private talk "/d/talk.pdf")
@@ -28,7 +33,7 @@
 (def ^:private live
   "A live presenter link, in step with main at page 2."
   {:phase :live :role :presenter :session "show-1" :path talk :known {:page 2 :blank nil} :seq 0 :own-seq 0
-   :out #{} :held nil :applying nil :next-mid 1 :display "separate" :peer :live :fullscreen true})
+   :out #{} :held nil :applying nil :next-mid 1 :display "separate" :peer :live})
 
 (deftest shift-s-opens-a-linked-show
   (with-redefs [slides/pdf-shown? (constantly true)]
@@ -38,14 +43,23 @@
         (is (= {:active? true :tab-id 1 :path talk :from :current :fullscreen? false :notes-view-before false}
                (slides/presentation db)))
         (is (true? (get-in db [:ui :presenter-view?])))
-        (is (= {:phase :opening :role :presenter :path talk :fullscreen true} (get-in db [:ui :slides-link])))
+        (is (= {:phase :opening :role :presenter :path talk} (get-in db [:ui :slides-link])))
         (is (= [[:dom/focus :content] [:vv/presenter-open {:path talk :page 2 :blank nil :fullscreen true}]] fx)
-            "no vv:set-fullscreen: the joined message decides")))
-    (testing "during a show the show goes on, and the request carries its blank colour"
+            "no vv:set-fullscreen: the presenter window stays windowed; the preference is the audience window's")
+        (is (false? (slides/chromeless? db)) "and it keeps its chrome")))
+    (testing "during a one-window show (F5): the show goes on, the request carries its blank colour, and the window
+              leaves the fullscreen its show holds — first, because on one display it would cover the audience window"
       (let [{:keys [db fx]} (events/slides-present-linked-fx (assoc-in (presenting-db) [:ui :slides :blank] :black))]
         (is (= :current (:from (slides/presentation db))) "the running show is kept")
-        (is (= [[:vv/presenter-open {:path talk :page 2 :blank "black" :fullscreen true}]] fx))))
-    (testing "again while presenting a live link: the request again (main raises the audience window)"
+        (is (false? (:fullscreen? (slides/presentation db))) "the show holds no fullscreen any more")
+        (is (= [[:vv/set-fullscreen {:on false}]
+                [:vv/presenter-open {:path talk :page 2 :blank "black" :fullscreen true}]]
+               fx))))
+    (testing "…and a one-window show that holds no fullscreen has none to leave"
+      (is (= [[:vv/presenter-open {:path talk :page 2 :blank nil :fullscreen true}]]
+             (:fx (events/slides-present-linked-fx (presenting-db false))))))
+    (testing "again while presenting a live link: the request again (main raises the audience window), and a
+              fullscreen that F entered stays"
       (is (= [[:vv/presenter-open {:path talk :page 2 :blank nil :fullscreen true}]]
              (:fx (events/slides-present-linked-fx (assoc-in (presenting-db) [:ui :slides-link] live))))))
     (testing "while the link is being opened: nothing is sent"
@@ -62,20 +76,15 @@
 
 (deftest main-says-joined
   (let [opening (assoc-in (presenting-db false) [:ui :slides-link]
-                          {:phase :opening :role :presenter :path talk :fullscreen true})]
-    (testing "on a separate display the presenter asks for its own fullscreen, and the show records it"
-      (let [{:keys [db fx]} (events/slides-link-state-fx opening joined)]
-        (is (link/live? (get-in db [:ui :slides-link])))
-        (is (true? (:fullscreen? (slides/presentation db))))
-        (is (= [[:vv/set-fullscreen {:on true}]
-                [:async/debounce {:key :slides/link-waiting :ms 10000 :dispatch [:slides/link-waited "show-1"]}]]
-               fx)
-            "and the 10 s wait for the audience window starts")))
-    (testing "on the only display, or where main cannot place windows, it never covers the screen"
-      (doseq [display ["same" "manual"]]
-        (is (not-any? #(= :vv/set-fullscreen (first %))
-                      (:fx (events/slides-link-state-fx opening (assoc joined :display display))))
-            display)))
+                          {:phase :opening :role :presenter :path talk})]
+    (testing "on any display the presenter stays windowed (ADR-0048 §8.1): it asks for no fullscreen of its own"
+      (doseq [display ["separate" "same" "manual"]]
+        (let [{:keys [db fx]} (events/slides-link-state-fx opening (assoc joined :display display))]
+          (is (link/live? (get-in db [:ui :slides-link])) display)
+          (is (false? (:fullscreen? (slides/presentation db))) display)
+          (is (= [[:async/debounce {:key :slides/link-waiting :ms 10000 :dispatch [:slides/link-waited "show-1"]}]]
+                 fx)
+              (str display ": only the 10 s wait for the audience window starts")))))
     (testing "a key pressed while the link was being made is sent as a move"
       (is (= [:vv/presenter-move {:session "show-1" :mid 1 :page 3 :blank nil}]
              (first (:fx (events/slides-link-state-fx (assoc-in opening [:ui :slides :page] 3) joined))))))
@@ -89,6 +98,59 @@
         (is (true? (get-in (:db (events/slides-link-waited-fx waiting "show-1")) [:ui :slides-link :waited?]))))
       (is (nil? (events/slides-link-waited-fx (assoc-in (presenting-db) [:ui :slides-link] live) "show-1"))
           "already live"))))
+
+(deftest the-presenter-window-keeps-its-chrome
+  ;; ADR-0048 §8.1 (amended): a linked show's presenter window keeps its menus, tabs, sidebar and bars, and stays
+  ;; windowed; only a one-window show and the audience window hide their chrome (.vv-root.vv-presenting)
+  (let [presenter (assoc-in (presenting-db) [:ui :slides-link] live)
+        audience  (assoc-in (presenting-db) [:ui :slides-link] (assoc live :role :audience))]
+    (testing "chromeless: a one-window show and the audience window; never the presenter window, in any phase"
+      (is (true? (slides/chromeless? (presenting-db))))
+      (is (true? (slides/chromeless? audience)))
+      (doseq [l [live {:phase :opening :role :presenter :path talk}
+                 {:phase :ended :role :presenter :path talk :reason "audience-left" :stop? false}]]
+        (is (false? (slides/chromeless? (assoc-in (presenting-db) [:ui :slides-link] l))) (pr-str (:phase l))))
+      (is (false? (slides/chromeless? shown-db)) "no show"))
+    (testing "focusing its URI bar, its tree or the focus toggle keeps the presenter's show"
+      (doseq [target [:uri :tree :toggle]]
+        (is (= {:fx [[:dom/focus target]]} (events/nav-focus-fx presenter target)) (name target))))
+    (testing "…while the audience window, which hides them, ends its show first"
+      (is (nil? (slides/presentation (:db (events/nav-focus-fx audience :uri))))))
+    (testing "F11 or the window manager leaving a fullscreen that F entered: the presenter's show goes on, windowed"
+      (let [{:keys [db fx]} (events/fullscreen-changed-fx (assoc-in presenter [:ui :fullscreen?] true)
+                                                          {:fullscreen false})]
+        (is (some? (slides/presentation db)))
+        (is (false? (:fullscreen? (slides/presentation db))) "and its end has no fullscreen to leave")
+        (is (nil? fx))))
+    (testing "…while a window that hides its chrome ends its show with its fullscreen"
+      (is (nil? (slides/presentation (:db (events/fullscreen-changed-fx (assoc-in audience [:ui :fullscreen?] true)
+                                                                       {:fullscreen false}))))))))
+
+(deftest escape-in-the-presenters-chrome-leaves-the-show-alone
+  (let [presenter (-> (presenting-db) (assoc-in [:ui :slides-link] live) (assoc-in [:ui :slides :blank] :black)
+                      (assoc-in [:ui :input :mode] :normal))
+        unblank   {:db (slides/clear-blank presenter)}]
+    (testing "from a text field or the chrome (:on-document? false): the audience's blank and the show stay"
+      (let [{:keys [db]} (input-events/escape-fx presenter {:on-document? false})]
+        (is (= :black (slides/blank db)))
+        (is (some? (slides/presentation db)))
+        (is (= (-> presenter (assoc-in [:ui :input :sequence] []) (assoc-in [:ui :input :count] nil)) db)
+            "only the pending key sequence is cleared")))
+    (testing "on the document, or with no word on it (the palette, a dispatch): the show's steps, as before"
+      (is (= unblank (input-events/escape-fx presenter {:on-document? true})))
+      (is (= unblank (input-events/escape-fx presenter {})))
+      (is (= unblank (input-events/escape-fx presenter))))
+    (testing "a window that hides its chrome has none to be in: there Escape takes the show's steps from anywhere"
+      (let [one-window (assoc-in (presenting-db) [:ui :slides :blank] :black)]
+        (is (= {:db (slides/clear-blank one-window)} (input-events/escape-fx one-window {:on-document? false})))))
+    (testing "the keyboard's Escape carries the resolver's :on-document?; the palette's context carries none"
+      (let [sent (atom [])]
+        (with-redefs [re-frame.core/dispatch (fn [ev] (swap! sent conj ev))]
+          (commands/run :input/escape {:on-document? false} nil {:now? true})
+          (commands/run :input/escape {:on-document? true} nil {:now? true})
+          (commands/run :input/escape {:in-input? true :tabs [1]}))
+        (is (= [[:input/escape {:on-document? false}] [:input/escape {:on-document? true}] [:input/escape {}]]
+               @sent))))))
 
 (deftest main-pushes-another-windows-move
   (let [{:keys [db fx]} (events/slides-link-state-fx (assoc-in (presenting-db) [:ui :slides-link] live)

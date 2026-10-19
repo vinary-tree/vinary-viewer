@@ -6,7 +6,8 @@
 // harness boots dist/main/main.js, so the real vinary.main.presenter claims a real window, the real
 // vinary.main.slides-link orders the moves, and each window's real slide engine shows them. It proves:
 //   1. Shift+S opens a second live, painting window that presents the deck, while the first shows the presenter
-//      view with the slide's notes — notes the audience window does not show;
+//      view with the slide's notes — notes the audience window does not show; the audience window hides its chrome,
+//      and the presenter window keeps its menus, tabs, URI bar and bottom bar, windowed;
 //   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience);
 //   3. a blank (b) in either window blanks the other, the presenter's badge says so, and Escape's first step —
 //      clearing the blank — clears it in both;
@@ -15,7 +16,10 @@
 //   6. Shift+S while linked raises the audience window instead of opening another, and Escape in the presenter
 //      window ends both and closes the audience window;
 //   7. a show blanked before Shift+S stays blanked in both windows: the audience window's show starts blanked before
-//      its engine's first report of the deck, and that report keeps the blank (R-blank, docs/theory/11 §7).
+//      its engine's first report of the deck, and that report keeps the blank (R-blank, docs/theory/11 §7); and the
+//      one-window show's fullscreen is left as the window becomes the presenter, which stays windowed;
+//   8. the presenter's chrome is its own: Ctrl+L focuses its URI bar without ending the show, and Escape there leaves
+//      the show and the audience's blank alone; Escape on the document then clears the blank, and again ends both.
 // Run twice by `npm run test:presenter-e2e`: with the warm pool (the default, VV_POOL=1 — the audience window is
 // the claimed pool window, joined at once) and with the runner's --env=VV_POOL=0 (every audience window is cold,
 // joined only once it has loaded — vinary.main.core claim-window!). Xvfb gives Chromium ONE display (RandR monitors set with
@@ -119,6 +123,11 @@ const state = (win) => evalIn(win, `(() => {
     swap: Boolean(document.querySelector('.vv-presenter-swap')),
     badge: text('.vv-slides-blank-badge'),
     noteOnScreen: document.body.innerText.includes(${JSON.stringify(NOTE_1)}),
+    // the window hides its chrome for the show (.vv-root.vv-presenting), and whether its chrome is on screen
+    chromeless: document.querySelector('.vv-root').classList.contains('vv-presenting'),
+    chrome: ['.vv-menubar', '.vv-tabs', '.vv-uribar', '.vv-bottombar']
+      .every((sel) => { const n = document.querySelector(sel); return Boolean(n) && n.getClientRects().length > 0; }),
+    focusInUri: Boolean(document.activeElement && document.activeElement.closest('.vv-uribar')),
   };
 })()`);
 
@@ -175,10 +184,15 @@ async function run() {
   assert.strictEqual(shown.display, 'same', 'one display: the audience window opens beside the presenter');
   assert.strictEqual(shown.notice, 'One display: share the audience window in a call.', 'the presenter is told how');
   assert.strictEqual(shown.swap, false, 'Swap screens is not offered on one display');
+  assert.strictEqual(shown.chromeless, false, 'the presenter window keeps its chrome');
+  assert.strictEqual(shown.chrome, true, 'its menu bar, tabs, URI bar and bottom bar are on screen');
+  assert.strictEqual(presenter.isFullScreen(), false, 'and it stays windowed');
   const seen = await state(audience);
   assert.strictEqual(seen.pane, false, 'the audience window has no presenter view');
   assert.strictEqual(seen.noteOnScreen, false, 'the audience window does not show the notes');
   assert.strictEqual(seen.presenterView, false, 'nor is its presenter view on');
+  assert.strictEqual(seen.chromeless, true, 'the audience window hides its chrome');
+  assert.strictEqual(seen.chrome, false, 'none of it is on screen');
   console.log(`[ok] ${MODE}: Shift+S opens a second live window presenting the deck; the notes stay in the first`);
 
   // 2. a flip in either window moves the other
@@ -243,10 +257,15 @@ async function run() {
   //    first presenting report must send nothing — before the fix it sent the page unblanked, and both windows
   //    unblanked
   await press(presenter, 'F5');
-  await until(() => state(presenter), (s) => s.presenting && s.enginePresenting, 'F5: a one-window show');
+  await until(async () => [await state(presenter), presenter.isFullScreen()],
+    ([s, full]) => s.presenting && s.enginePresenting && s.chromeless && full,
+    'F5: a one-window show, chromeless and fullscreen');
   await press(presenter, 'b');
   await until(() => state(presenter), (s) => s.blank === 'black', 'b: the one-window show goes black');
   const fourth = await openLinkedShow(presenter);
+  await until(async () => [await state(presenter), presenter.isFullScreen()],
+    ([s, full]) => !s.chromeless && s.chrome && !full,
+    'Shift+S: the window becomes the presenter, with its chrome back, and leaves the show\'s fullscreen');
   await until(() => state(fourth), (s) => s.enginePresenting, 'the audience window\'s engine presents');
   await sleep(500);
   const [blankP, blankA] = [await state(presenter), await state(fourth)];
@@ -260,7 +279,31 @@ async function run() {
   await press(presenter, 'Escape');
   await until(async () => fourth.isDestroyed() && !(await state(presenter)).presenting,
     Boolean, 'Escape again ends both, and the audience window closes');
-  console.log(`[ok] ${MODE}: a show blanked before Shift+S stays blanked in both windows`);
+  console.log(`[ok] ${MODE}: a show blanked before Shift+S stays blanked in both windows; the presenter stays windowed`);
+
+  // 8. the presenter's chrome is its own: focusing the URI bar keeps the show, and Escape there cancels the URI bar,
+  //    not the show and not the audience's blank
+  const fifth = await openLinkedShow(presenter);
+  await press(presenter, 'b');
+  await until(async () => [await state(presenter), await state(fifth)], ([p, a]) => p.blank === 'black' && a.blank === 'black',
+    'b in the presenter: both black');
+  await press(presenter, 'L', ['control']);
+  await until(() => state(presenter), (s) => s.focusInUri, 'Ctrl+L focuses the presenter\'s URI bar');
+  key(presenter, 'Escape');                               // in the URI bar: not on the document
+  await sleep(500);
+  assert.ok(!fifth.isDestroyed(), 'Ctrl+L and Escape in the URI bar leave the audience window open');
+  const [uriP, uriA] = [await state(presenter), await state(fifth)];
+  assert.ok(uriP.presenting && uriA.presenting && uriP.phase === 'live', 'Ctrl+L and Escape in the URI bar leave the show running');
+  assert.strictEqual(uriA.blank, 'black', 'the audience stays black');
+  assert.strictEqual(uriP.chromeless, false, 'and the presenter keeps its chrome');
+  await press(presenter, 'Escape');
+  await until(async () => [await state(presenter), await state(fifth)],
+    ([p, a]) => p.blank == null && a.blank == null && p.presenting && a.presenting,
+    'Escape on the document clears the blank in both');
+  await press(presenter, 'Escape');
+  await until(async () => fifth.isDestroyed() && !(await state(presenter)).presenting,
+    Boolean, 'Escape again ends both, and the audience window closes');
+  console.log(`[ok] ${MODE}: the presenter's URI bar and its Escape leave the show and the audience's blank alone`);
 }
 
 app.whenReady().then(() =>

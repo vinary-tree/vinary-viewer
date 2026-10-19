@@ -26,7 +26,8 @@
      :applying    the page of a push being shown, until the engine reports, or nil     :live
      :next-mid    the next move's mid: 1, 2, …                                         :joining :live
      :start       {:seq :pos}: where the audience's show starts                        :joining
-     :fullscreen  presenter: its :slides-fullscreen? preference; audience: the link's  all but :ended
+     :fullscreen  the audience: whether it goes fullscreen (the link's); the          :joining :live
+                  presenter never asks for its own (ADR-0048 §8.1)
      :display     presenter: \"separate\", \"same\" or \"manual\" (the joined message)     :live
      :peer        presenter: :waiting until the audience's deck shows, then :live       :live
      :swap        presenter: main's last answer to Swap screens                        :live
@@ -51,7 +52,7 @@
      :move  {session mid page blank}  send vv:presenter-move          :open  {path page blank fullscreen}  open
      :ready {session}                 send vv:presenter-ready         :leave {session reason}              leave
      :show  position                  run (show-effect position) and set the blank colour to its :blank
-     :fullscreen?  true               ask for this window's own fullscreen (vv:set-fullscreen)
+     :fullscreen?  true               the audience window asks for its own fullscreen (vv:set-fullscreen)
      :stop?        true               stop this window's slide show too")
 
 ;; ---- positions --------------------------------------------------------------------------------------------------
@@ -212,8 +213,9 @@
 
 (defn request-open
   "Shift+S, or View ▸ Present in New Window, in this window — showing deck `path` at `page` with app-db's `blank`
-   colour; `fullscreen` is the :slides-fullscreen? preference. → {:link} plus :open, the vv:presenter-open payload,
-   when the request is sent:
+   colour; `fullscreen` is the :slides-fullscreen? preference, which the request carries for the audience window
+   (main lets it go fullscreen only on a separate display); the presenter never asks for its own fullscreen, so the
+   link does not keep it. → {:link} plus :open, the vv:presenter-open payload, when the request is sent:
 
      no link, or an ended one     a new :opening link, and the request
      :opening                     unchanged, nothing sent: main has not answered yet, and a second request would be
@@ -226,7 +228,11 @@
     (case (:phase link)
       (:opening :joining) {:link link}
       :live               (if (= :presenter (:role link)) {:link link :open request} {:link link})
-      {:link {:phase :opening :role :presenter :path path :fullscreen (boolean fullscreen)}
+      ;; Disabled 2026-10-19 (ADR-0048 §8.1, amended): the opening link kept the presenter's preference for
+      ;; on-joined, which asked for the presenter's own fullscreen on a separate display. The presenter window now
+      ;; stays windowed — it keeps its chrome, and the show runs in the audience window — so nothing reads it.
+      ;; {:link {:phase :opening :role :presenter :path path :fullscreen (boolean fullscreen)}
+      {:link {:phase :opening :role :presenter :path path}
        :open request})))
 
 (defn leave
@@ -332,18 +338,22 @@
   "Main's joined message {session seq role page blank joined display} reaches this window, with `mirror` its
    [:ui :slides]. An :opening link goes live at the session's start position, which becomes :known, and the
    interceptor runs once — a key pressed while the link was being made is sent like any other person's move
-   (theory/11 §3.4); :fullscreen? asks for this window's own fullscreen when it prefers fullscreen and the audience
-   is on a separate display, so a presenter never covers the only display. A joined for this link's own session
-   again (Shift+S while linked) only refreshes :display. Any other joined — this window gave up the link before main
-   answered — is answered with :leave, so main closes the audience window it opened."
+   (theory/11 §3.4). The presenter never asks for its own fullscreen, on any display: it keeps its chrome and its
+   window, and the audience window, which main lets go fullscreen only on a separate display, shows the show
+   (ADR-0048 §8.1). A joined for this link's own session again (Shift+S while linked) only refreshes :display. Any
+   other joined — this window gave up the link before main answered — is answered with :leave, so main closes the
+   audience window it opened."
   [link msg mirror]
   (let [{id :session s :seq display :display} msg]
     (cond
       (= :opening (:phase link))
       (let [live (assoc link :phase :live :session id :seq s :own-seq 0 :known (wire-position msg) :out #{}
                         :held nil :applying nil :next-mid 1 :display display :peer :waiting)]
-        (assoc (or (outgoing live mirror) {:link live})
-               :fullscreen? (boolean (and (:fullscreen link) (= "separate" display)))))
+        ;; Disabled 2026-10-19 (ADR-0048 §8.1, amended): on a separate display the presenter used to ask for its own
+        ;; fullscreen here, covering its chrome; the presenter window now stays windowed (F still toggles it).
+        ;; (assoc (or (outgoing live mirror) {:link live})
+        ;;        :fullscreen? (boolean (and (:fullscreen link) (= "separate" display))))
+        (or (outgoing live mirror) {:link live}))
 
       (in-session? link msg)
       {:link (assoc link :display display)}

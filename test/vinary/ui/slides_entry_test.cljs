@@ -1,7 +1,8 @@
 (ns vinary.ui.slides-entry-test
   "Slide-show entry points (ADR-0045 §Entry points): the View menu's PDF section in every layout — which items show,
-   the flipping layout label and its access key, and that no two VISIBLE items ever share an access key (Reflow
-   moved r → w off Reset Zoom's r) — and the PDF content-pane context menu's slide items."
+   the flipping layout label and its access key, End Slide Show in place of the Start items while a show runs (the
+   menu bar a linked show's presenter window keeps, ADR-0048 §8.1), and that no two VISIBLE items ever share an
+   access key (Reflow moved r → w off Reset Zoom's r) — and the PDF content-pane context menu's slide items."
   (:require [cljs.test :refer [deftest is testing]]
             [vinary.ui.context-menu :as context-menu]
             [vinary.ui.menubar :as menubar]))
@@ -14,6 +15,8 @@
   {:no-pdf      {:pdf? false}
    :pdf-doc     {:pdf? true :slides? false}
    :pdf-slides  {:pdf? true :slides? true}
+   ;; a running show: only a linked show's presenter window shows its menu bar then (ADR-0048 §8.1)
+   :presenting  {:pdf? true :slides? true :presenting? true}
    :diff        {:diff? true}
    :diff-all    {:diff? true :diff-all-collapsed? true}})
 
@@ -41,6 +44,21 @@
   (testing "Reflow Text moved to w — r is Reset Zoom's"
     (is (= "w" (:access-key (by-label (view-items (:pdf-doc ctxs)) "Reflow Text"))))
     (is (= "r" (:access-key (by-label (view-items (:pdf-doc ctxs)) "Reset Zoom"))))))
+
+(deftest view-menu-while-a-show-runs
+  (testing "End Slide Show (Esc) takes the Start items' place, with Start Slide Show's key"
+    (let [items (view-items (:presenting ctxs))]
+      (is (= [:slides/stop] (:event (by-label items "End Slide Show"))))
+      (is (= "Esc" (:accel (by-label items "End Slide Show"))))
+      (is (= "h" (:access-key (by-label items "End Slide Show"))))
+      (is (nil? (by-label items "Start Slide Show")))
+      (is (nil? (by-label items "Start from Current Slide")))
+      (is (= [:slides/present-linked] (:event (by-label items "Present in New Window")))
+          "Present in New Window stays: Shift+S raises the audience window, or opens it again")))
+  (testing "no show: no End Slide Show, and the Start items"
+    (doseq [k [:no-pdf :pdf-doc :pdf-slides]]
+      (is (nil? (by-label (view-items (k ctxs)) "End Slide Show")) (name k)))
+    (is (some? (by-label (view-items (:pdf-slides ctxs)) "Start Slide Show")))))
 
 (deftest every-visible-view-item-has-a-unique-access-key-that-is-in-its-label
   (doseq [[nm ctx] ctxs]

@@ -2255,7 +2255,8 @@
 ;; A show is of the shown PDF in THIS window: [:ui :presentation] {:active? :tab-id :path :from :fullscreen?
 ;; :notes-view-before :hint?} — :hint? while the speaker-notes hint is shown (ADR-0048 P5). The engine sees :presenting? (and :present-from) through the :pdf/layout-request sub — it
 ;; forces the slides layout, drops the slide margin, applies :from, and turns on click-advance and the idle cursor.
-;; CSS hides the app chrome (.vv-root.vv-presenting); main makes the window fullscreen when the :slides-fullscreen?
+;; CSS hides the app chrome (.vv-root.vv-presenting) — except in a linked show's presenter window, which keeps it
+;; (slides/chromeless?); main makes the window fullscreen when the :slides-fullscreen?
 ;; preference allows, and only ever leaves a fullscreen it entered (vinary.main.fullscreen/decide). A single-window
 ;; show starts in the AUDIENCE view — its screen may be mirrored to a projector — and gives back the view the window
 ;; had (:notes-view-before) when it ends (ADR-0048 §6.1).
@@ -2354,9 +2355,11 @@
 
 (defn fullscreen-changed-fx
   "Effects of main reporting this window's fullscreen state {:fullscreen :owned :swap}. Records [:ui :fullscreen?];
-   when the window LEAVES a fullscreen the show asked for (F11, the window manager), the show ends with it. The one
-   report that ends a Swap screens (:swap true, ADR-0048 §8.7) never ends the show: a window that could not go
-   fullscreen again keeps presenting, windowed, and its show no longer holds a fullscreen to leave."
+   when the window LEAVES a fullscreen the show asked for (F11, the window manager), the show ends with it — except in
+   a linked show's presenter window, which keeps its chrome (slides/chromeless?): there the show runs in the other
+   window, so leaving a fullscreen that `F` entered only means the show no longer holds one to leave. The one report
+   that ends a Swap screens (:swap true, ADR-0048 §8.7) never ends the show: a window that could not go fullscreen
+   again keeps presenting, windowed, and its show no longer holds a fullscreen to leave."
   [db {:keys [fullscreen swap]}]
   (let [was? (get-in db [:ui :fullscreen?])
         db'  (assoc-in db [:ui :fullscreen?] (boolean fullscreen))
@@ -2364,7 +2367,9 @@
     (cond
       (and swap pres (not fullscreen))                     {:db (assoc-in db' [:ui :presentation :fullscreen?] false)}
       swap                                                 {:db db'}
-      (and pres (:fullscreen? pres) was? (not fullscreen)) (slides-stop-fx db' {:fullscreen-gone? true})
+      (and pres (:fullscreen? pres) was? (not fullscreen)) (if (slides/chromeless? db')
+                                                             (slides-stop-fx db' {:fullscreen-gone? true})
+                                                             {:db (assoc-in db' [:ui :presentation :fullscreen?] false)})
       :else                                                {:db db'})))
 
 ;; ---- the overview grid (ADR-0045 §Overview) -------------------------------------------------------------
@@ -2445,10 +2450,13 @@
 
 (defn slides-present-linked-fx
   "Effects of Shift+S, View ▸ Present in New Window (ADR-0048 §8.1): start the show from the current slide when none
-   runs — without fullscreen yet, which the joined message decides, and without the speaker-notes hint — show the
-   presenter view, and ask main for a linked show of the deck at its current page with its blank colour. Again while
-   this window presents a live link, the request goes again and main raises the audience window; while it is being
-   opened, nothing is sent (slides-link/request-open). nil unless a PDF is shown, and in an audience window."
+   runs — without fullscreen and without the speaker-notes hint — show the presenter view, and ask main for a linked
+   show of the deck at its current page with its blank colour; the request carries the :slides-fullscreen?
+   preference for the audience window. The window becomes the show's presenter, which keeps its chrome and stays
+   windowed (slides/chromeless?): a one-window show (F5) that holds a fullscreen leaves it first — on one display it
+   would cover the audience window. Again while this window presents a live link, the request goes again and main
+   raises the audience window; while it is being opened, nothing is sent (slides-link/request-open). nil unless a PDF
+   is shown, and in an audience window."
   [db]
   (when (and (slides/pdf-shown? db) (not (audience-member? db)))
     (let [path    (facet/active-content-path db)
@@ -2457,24 +2465,31 @@
                     (slides-present-fx db :current {:fullscreen? false :hint? false}))
           db1     (:db started)
           mirror  (get-in db1 [:ui :slides])
-          r       (slides-link/request-open (get-in db1 [:ui :slides-link])
+          before  (get-in db1 [:ui :slides-link])
+          r       (slides-link/request-open before
                                             {:path       path
                                              :page       (if (= path (:path mirror)) (or (:page mirror) 0) 0)
                                              :blank      (slides/blank db1)
-                                             :fullscreen (slides/fullscreen-preferred? db1)})]
-      {:db (-> db1
-               (assoc-in [:ui :slides-link] (:link r))
-               (assoc-in [:ui :presenter-view?] true)
-               slides/clear-notes-hint)
-       :fx (cond-> (into (vec (:fx started)) (link-sends r))
+                                             :fullscreen (slides/fullscreen-preferred? db1)})
+          ;; this key makes the window a presenter (a new link, not Shift+S again), and its show holds a fullscreen
+          leave?  (and (= :opening (:phase (:link r))) (not= :opening (:phase before))
+                       (true? (:fullscreen? (slides/presentation db1))))]
+      {:db (cond-> (-> db1
+                       (assoc-in [:ui :slides-link] (:link r))
+                       (assoc-in [:ui :presenter-view?] true)
+                       slides/clear-notes-hint)
+             leave? (assoc-in [:ui :presentation :fullscreen?] false))
+       :fx (cond-> (into (cond-> (vec (:fx started)) leave? (conj [:vv/set-fullscreen {:on false}]))
+                         (link-sends r))
              (slides/notes-hint? db1) (conj [:async/cancel notes-hint-key]))})))
 
 (defn slides-link-state-fx
   "Effects of main's vv:presenter-state message `msg` (ADR-0048 §8.3–§8.6): slides-link/on-state decides, and this
    carries it out. A push is shown with the :slides/command EFFECT — the event would un-blank (ADR-0045 §5) — and
-   its blank colour; whatever the link sends goes; :fullscreen? asks for this window's fullscreen, recorded on the
-   show so its end leaves it; :stop? stops this window's show; and the presenter's wait for its audience window is
-   timed. Never a move of its own: the interceptor skips this event, because following never sends.
+   its blank colour; whatever the link sends goes; :stop? stops this window's show; and the presenter's wait for its
+   audience window is timed. The presenter never asks for its own fullscreen (ADR-0048 §8.1, amended): it keeps its
+   chrome and stays windowed. Never a move of its own: the interceptor skips this event, because following never
+   sends.
 
    A position shown before the engine presents the show (slides/engine-presenting?) is also where the show starts
    ([:ui :presentation :from]): the engine applies :from once, as it starts presenting, after the effect has shown
@@ -2483,18 +2498,23 @@
    alone: changing it would only re-render the view."
   [db msg]
   (let [before   (get-in db [:ui :slides-link])
-        {l :link pos :show :keys [fullscreen? stop?] :as r}
+        ;; Disabled 2026-10-19 (ADR-0048 §8.1, amended), with its two uses below: main's joined made a presenter on a
+        ;; separate display ask for its own fullscreen (:fullscreen? from slides-link/on-joined), recorded on the
+        ;; show. The presenter window now stays windowed, and on-joined returns no :fullscreen?.
+        ;; {l :link pos :show :keys [fullscreen? stop?] :as r}
+        {l :link pos :show :keys [stop?] :as r}
         (slides-link/on-state before msg (get-in db [:ui :slides]))
-        full?    (and fullscreen? (slides/presenting? db))
+        ;; full?    (and fullscreen? (slides/presenting? db))
         start?   (and pos (slides/presenting? db) (not (slides/engine-presenting? db)))
         waiting  (fn [link] (= :waiting (:peer link)))
         db1      (cond-> (assoc-in db [:ui :slides-link] l)
                    pos    (with-blank (:blank pos))
                    start? (assoc-in [:ui :presentation :from] (:page pos))
-                   full?  (assoc-in [:ui :presentation :fullscreen?] true))
+                   ;; full?  (assoc-in [:ui :presentation :fullscreen?] true)
+                   )
         fx       (cond-> (link-sends r)
                    pos   (conj (slides-link/show-effect pos))
-                   full? (conj [:vv/set-fullscreen {:on true}])
+                   ;; full? (conj [:vv/set-fullscreen {:on true}])
                    (and (waiting l) (not (waiting before)))
                    (conj [:async/debounce {:key slides-link-waiting-key :ms slides-link-waiting-ms
                                            :dispatch [:slides/link-waited (:session l)]}])
@@ -2907,9 +2927,10 @@
 
 (defn nav-focus-fx
   "Effects of moving the keyboard focus to `target`. Focusing chrome that a slide show hides (the URI bar, the
-   sidebar's tree, the focus toggle) ends the show first, so the focus lands on something visible (ADR-0045)."
+   sidebar's tree, the focus toggle) ends the show first, so the focus lands on something visible (ADR-0045). A linked
+   show's presenter window hides no chrome (slides/chromeless?, ADR-0048 §8.1), so there the show goes on."
   [db target]
-  (if (and (slides/presenting? db) (#{:uri :tree :toggle} target))
+  (if (and (slides/chromeless? db) (#{:uri :tree :toggle} target))
     (let [{db' :db fx :fx} (slides-stop-fx db {})]
       {:db db' :fx (conj (vec fx) [:dom/focus target])})
     {:fx [[:dom/focus target]]}))
