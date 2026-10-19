@@ -165,7 +165,7 @@ Every document in the suite, with its pillar and one-line purpose.
 | [`theory/08-common-document-ir.md`](theory/08-common-document-ir.md) | theory | One tagged IR per format; semiring/WPDA/tree-transducer; single sanitizer; byte-parity |
 | [`theory/09-document-streaming-and-the-wpda.md`](theory/09-document-streaming-and-the-wpda.md) | theory | Document as a bounded-memory stream; WPDA log grammar; StreamParser; append sink |
 | [`theory/10-terminal-rendering-second-renderer.md`](theory/10-terminal-rendering-second-renderer.md) | theory | Terminal as a second renderer over the shared IR/streaming spine; ANSI back-end; kitty/sixel |
-| [`theory/11-linked-slide-show-protocol.md`](theory/11-linked-slide-show-protocol.md) | theory | Two linked slide-show windows: a fixed sequencer, acks and pushes, the held push; proofs for any delivery order; TLA+/TLC with seven negative controls |
+| [`theory/11-linked-slide-show-protocol.md`](theory/11-linked-slide-show-protocol.md) | theory | Two linked slide-show windows: a fixed sequencer, acks and pushes, the held push; a presenter that leaves its deck and comes back; proofs for any delivery order; TLA+/TLC with nine negative controls |
 | [`theory/12-speaker-notes-detection.md`](theory/12-speaker-notes-detection.md) | theory | Beamer note pages: the label automaton's gap decomposition, the restart guard's blind spot, shifted grids, the page budget, `PDFDOC⁻¹` and REPAIR; checked against `notes.cljs` itself |
 | [`architecture/01-overview.md`](architecture/01-overview.md) | architecture | System-level component map |
 | [`architecture/02-process-and-build-topology.md`](architecture/02-process-and-build-topology.md) | architecture | Two Electron processes; the two shadow-cljs builds |

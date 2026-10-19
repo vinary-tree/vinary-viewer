@@ -9,7 +9,7 @@
 (* (out), and a push that arrived while its own move was on the way        *)
 (* (held).                                                                 *)
 (*                                                                         *)
-(* The model follows the implementation's split of a window into three    *)
+(* The model follows the implementation's split of a window into three     *)
 (* parts, because the races live between them:                             *)
 (*   - the ENGINE (renderer.pdf): the page it shows. A key moves it at     *)
 (*     once; it REPORTS its page later (once per animation frame), and it  *)
@@ -25,8 +25,13 @@
 (* window learns its hidden pages once, at a moment of its own (Rehide):   *)
 (* before the show, or later, when a background scan or a refresh ends --  *)
 (* so for a while the two windows may disagree about which pages exist.    *)
-(* The switches named No.../AnnounceOnMount remove one rule each: they are *)
-(* the negative controls, and every one of them must break a property.     *)
+(* The presenter may leave its deck and come back while the show goes on   *)
+(* (Unmount, Remount: its tab shows another document, then the deck        *)
+(* again). While AWAY it has no engine: it keeps exchanging messages with  *)
+(* main, records where the show is, and opens there when it comes back.    *)
+(* The switches named No.../AnnounceOnMount/StaleRemount/AwayDrop remove   *)
+(* one rule each: they are the negative controls, and every one of them    *)
+(* must break a property.                                                  *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 
@@ -45,12 +50,15 @@ CONSTANTS
     NoApplying,            \* control: a blank sent while a push is being shown uses the stale mirror page
     NoStaleGuard,          \* control: show a push even when it is not newer than what I have seen
     NoMidGuard,            \* control: main accepts a move older than one it already accepted from that window
-    AnnounceOnMount        \* control: the audience announces its start page as a move when its deck mounts
+    AnnounceOnMount,       \* control: the audience announces its start page as a move when its deck mounts
+    MaxAway,               \* how many times the presenter leaves its deck (bounds the state space)
+    StaleRemount,          \* control: the presenter's engine reopens where it was when it went away
+    AwayDrop               \* control: a position shown while the presenter is away is forgotten
 
 ASSUME Presenter # Audience
 ASSUME NoBlank \in Blanks
 ASSUME 0 \in Pages /\ Pages \subseteq Nat
-ASSUME MaxUser \in Nat
+ASSUME MaxUser \in Nat /\ MaxAway \in Nat
 \* a snap lands on a page the window shows, and a page the window shows stays where it is
 ASSUME \A S \in {SnapPresenter, SnapAudience} : S \in [Pages -> Pages] /\ \A p \in Pages : S[S[p]] = S[p]
 
@@ -78,26 +86,27 @@ Remove(ch, i)   == [j \in 1..(Len(ch) - 1) |-> IF j < i THEN ch[j] ELSE ch[j + 1
 
 VARIABLES
     mseq, mpos, lastMid,          \* main: the session's seq and position; the highest mid accepted per window
-    phase, start,                 \* window: "joining" | "live"; the audience's start {seq, pos} while joining
+    phase, start,                 \* window: "joining" | "live" | "away"; the audience's start {seq, pos} while joining
     engine, pending, mirror,      \* window: the engine's page; a report is due; the last report's page
     blank, applying,              \* window: the blank colour; the page of a push being shown, until its report
     known, seq, ownSeq,           \* window: last exchanged position; newest seq seen; newest seq of my own move
     out, held, nextMid,           \* window: unacknowledged mids; the held push; the next mid
     snapped,                      \* window: it knows its hidden pages (Snap is in force)
     toMain, toWin,                \* channels, one per window and direction
-    users, pcause,                \* bound: things done so far; ghost: why the engine may differ from known
+    users, aways, pcause,         \* bounds: things done so far, times the presenter left its deck; ghost: why the
+                                  \*         engine may differ from known
     lastUserPos, echo, nonUser    \* ghosts: the last person-made move main accepted; a move sent without a cause;
                                   \*         how many accepted moves no person made (a snap's corrections)
 
 vars == << mseq, mpos, lastMid, phase, start, engine, pending, mirror, blank, applying, known, seq, ownSeq,
-           out, held, nextMid, snapped, toMain, toWin, users, pcause, lastUserPos, echo, nonUser >>
+           out, held, nextMid, snapped, toMain, toWin, users, aways, pcause, lastUserPos, echo, nonUser >>
 
 \* the page window w shows for page p: its hidden pages snap once it knows them
 Snap(w, p) == IF snapped[w] THEN SnapOf(w)[p] ELSE p
 
 TypeOK ==
     /\ mseq \in Nat /\ mpos \in Pos /\ lastMid \in [Win -> Nat]
-    /\ phase \in [Win -> {"joining", "live"}]
+    /\ phase \in [Win -> {"joining", "live", "away"}]
     /\ start \in [seq : Nat, pos : Pos]
     /\ engine \in [Win -> Pages] /\ pending \in [Win -> BOOLEAN]
     /\ mirror \in [Win -> Pages \cup {Nil}]
@@ -108,7 +117,7 @@ TypeOK ==
     /\ held \in [Win -> [seq : Nat, pos : Pos] \cup {Nil}]
     /\ nextMid \in [Win -> Nat]
     /\ snapped \in [Win -> BOOLEAN]
-    /\ users \in Nat /\ pcause \in [Win -> {"none", "user", "snap", "announce"}]
+    /\ users \in Nat /\ aways \in Nat /\ pcause \in [Win -> {"none", "user", "snap", "announce"}]
     /\ lastUserPos \in Pos /\ echo \in BOOLEAN /\ nonUser \in Nat
 
 Init ==
@@ -124,7 +133,7 @@ Init ==
     /\ out = [w \in Win |-> {}] /\ held = [w \in Win |-> Nil] /\ nextMid = [w \in Win |-> 1]
     /\ snapped = [w \in Win |-> FALSE]
     /\ toMain = [w \in Win |-> <<>>] /\ toWin = [w \in Win |-> <<>>]
-    /\ users = 0 /\ pcause = [w \in Win |-> "none"]
+    /\ users = 0 /\ aways = 0 /\ pcause = [w \in Win |-> "none"]
     /\ lastUserPos = P0 /\ echo = FALSE /\ nonUser = 0
 
 (***************************************************************************)
@@ -151,6 +160,15 @@ Apply(w, pos) ==
     /\ pending'  = [pending  EXCEPT ![w] = TRUE]
     /\ pcause'   = [pcause   EXCEPT ![w] = IF Snap(w, pos.page) # pos.page THEN "snap" ELSE "none"]
 
+(* <<show pos>> in window w (docs/theory/11 §3.3, §3.5): a live window applies it; a window away from its deck has
+   no engine, so it only records where the show is (known), to open there when it comes back. AwayDrop is the
+   rejected design that forgets it. *)
+Show(w, pos) ==
+    IF phase[w] = "away"
+    THEN /\ known' = IF AwayDrop THEN known ELSE [known EXCEPT ![w] = pos]
+         /\ UNCHANGED << blank, engine, applying, pending, pcause >>
+    ELSE Apply(w, pos)
+
 (* A person moves window w's engine to a page it shows (a key, a click, the overview, a link, find). *)
 UserPage(w, q) ==
     /\ phase[w] = "live" /\ users < MaxUser
@@ -160,7 +178,7 @@ UserPage(w, q) ==
     /\ pending' = [pending EXCEPT ![w] = TRUE]
     /\ pcause'  = [pcause  EXCEPT ![w] = "user"]
     /\ UNCHANGED << mseq, mpos, lastMid, phase, start, mirror, blank, applying, known, seq, ownSeq, out, held,
-                    nextMid, snapped, toMain, toWin, lastUserPos, echo, nonUser >>
+                    nextMid, snapped, toMain, toWin, aways, lastUserPos, echo, nonUser >>
 
 (* A person blanks or unblanks window w: the db changes at once and the interceptor runs in the same event.
    The page it sends is the page being shown for a push (applying) -- the mirror is stale until that report. *)
@@ -171,7 +189,7 @@ UserBlank(w, b) ==
        /\ blank'  = [blank EXCEPT ![w] = b]
        /\ Emit(w, [page |-> pg, blank |-> b], "user")
        /\ UNCHANGED << mseq, mpos, lastMid, phase, start, engine, pending, mirror, applying, seq, ownSeq, held,
-                       snapped, toWin, pcause, lastUserPos, nonUser >>
+                       snapped, toWin, aways, pcause, lastUserPos, nonUser >>
 
 (* The engine reports (:slides/changed): the mirror takes its page, a push being shown is done, and the
    interceptor runs. *)
@@ -183,7 +201,7 @@ Report(w) ==
     /\ pcause'   = [pcause   EXCEPT ![w] = "none"]
     /\ Emit(w, [page |-> engine[w], blank |-> blank[w]], pcause[w])
     /\ UNCHANGED << mseq, mpos, lastMid, phase, start, engine, blank, seq, ownSeq, held, snapped, toWin, users,
-                    lastUserPos, nonUser >>
+                    aways, lastUserPos, nonUser >>
 
 (* The audience's deck mounts: the show starts at the start position (the newest main told it). Its known is
    that position, so it sends nothing unless its engine snapped it; it says "ready" on a separate channel that
@@ -202,7 +220,7 @@ Mount(w) ==
                                            ELSE IF Snap(w, start.pos.page) # start.pos.page THEN "snap"
                                            ELSE "none"]
     /\ UNCHANGED << mseq, mpos, lastMid, start, mirror, ownSeq, out, held, nextMid, snapped, toMain, toWin, users,
-                    lastUserPos, echo, nonUser >>
+                    aways, lastUserPos, echo, nonUser >>
 
 (* Window w learns which pages it hides -- its deck model is built, a background scan of a deck without page
    labels ends, or a refresh changes the pages -- and its engine snaps the page it shows, once. A page that
@@ -216,7 +234,7 @@ Rehide(w) ==
             /\ pcause'  = [pcause  EXCEPT ![w] = IF @ = "user" THEN "user" ELSE "snap"]
        ELSE UNCHANGED << engine, pending, pcause >>
     /\ UNCHANGED << mseq, mpos, lastMid, phase, start, mirror, blank, applying, known, seq, ownSeq, out, held,
-                    nextMid, toMain, toWin, users, lastUserPos, echo, nonUser >>
+                    nextMid, toMain, toWin, users, aways, lastUserPos, echo, nonUser >>
 
 (* Main receives a move from w: a newer mid is accepted (seq + 1, ack to w, push to the other window); an older
    one -- only possible when the channel reorders -- is acknowledged as not accepted and changes nothing. *)
@@ -234,10 +252,11 @@ MainRecv(w, i) ==
           ELSE /\ toWin' = [toWin EXCEPT ![w] = Append(@, Ack(0, m.mid, FALSE))]
                /\ UNCHANGED << mseq, mpos, lastMid, lastUserPos, nonUser >>
        /\ UNCHANGED << phase, start, engine, pending, mirror, blank, applying, known, seq, ownSeq, out, held,
-                       nextMid, snapped, users, pcause, echo >>
+                       nextMid, snapped, users, aways, pcause, echo >>
 
 (* A push reaches w. One not newer than what w has seen is dropped (ADR-0046's guard). While joining it only
-   moves the start. While w's own move is on the way it is held; otherwise it is shown. *)
+   moves the start. While w's own move is on the way it is held; otherwise it is shown -- or, while w is away, recorded
+   (Show). *)
 RecvPush(w, m) ==
     IF ~NoStaleGuard /\ m.seq <= seq[w]
     THEN UNCHANGED << phase, start, engine, pending, mirror, blank, applying, known, seq, ownSeq, out, held,
@@ -248,15 +267,15 @@ RecvPush(w, m) ==
                  /\ UNCHANGED << phase, engine, pending, mirror, blank, applying, known, ownSeq, out, held, nextMid,
                                  toMain, pcause, echo >>
             ELSE IF out[w] = {} \/ NoHold
-                 THEN /\ Apply(w, m.pos)
+                 THEN /\ Show(w, m.pos)
                       /\ UNCHANGED << phase, start, mirror, ownSeq, out, held, nextMid, toMain, echo >>
                  ELSE /\ held' = [held EXCEPT ![w] = [seq |-> m.seq, pos |-> m.pos]]
                       /\ UNCHANGED << phase, start, engine, pending, mirror, blank, applying, known, ownSeq, out,
                                       nextMid, toMain, pcause, echo >>
 
 (* An ack reaches w: its mid is no longer on the way, whatever its seq. When nothing of w's is on the way any
-   more, a held push is shown only if it is newer than w's own last accepted move -- otherwise w's move, which main
-   ordered after it, is main's state. *)
+   more, a held push is shown (Show) only if it is newer than w's own last accepted move -- otherwise w's move, which
+   main ordered after it, is main's state. *)
 RecvAck(w, m) ==
     LET out1 == out[w] \ {m.mid}
         own1 == IF m.accepted THEN Max(ownSeq[w], m.seq) ELSE ownSeq[w]
@@ -267,15 +286,46 @@ RecvAck(w, m) ==
        /\ seq'    = [seq    EXCEPT ![w] = seq1]
        /\ held'   = [held   EXCEPT ![w] = IF out1 = {} THEN Nil ELSE @]
        /\ IF show
-          THEN Apply(w, held[w].pos)
+          THEN Show(w, held[w].pos)
           ELSE UNCHANGED << known, blank, engine, applying, pending, pcause >>
        /\ UNCHANGED << phase, start, mirror, nextMid, toMain, echo >>
+
+(* The presenter's deck view unmounts while the show runs -- its tab shows another document -- and the show goes on
+   in the audience window: the presenter is AWAY (docs/theory/11 §3.5). Its engine is gone, so a report that was due
+   is dropped, with the mirror and a push being shown; what it exchanges with main (known, seq, out, held) stays. One
+   step: the code runs the unmount's event synchronously, inside the view's own unmount. *)
+Unmount(w) ==
+    /\ w = Presenter /\ phase[w] = "live" /\ aways < MaxAway
+    /\ aways'    = aways + 1
+    /\ phase'    = [phase    EXCEPT ![w] = "away"]
+    /\ pending'  = [pending  EXCEPT ![w] = FALSE]
+    /\ mirror'   = [mirror   EXCEPT ![w] = Nil]
+    /\ applying' = [applying EXCEPT ![w] = Nil]
+    /\ pcause'   = [pcause   EXCEPT ![w] = "none"]
+    /\ UNCHANGED << mseq, mpos, lastMid, start, engine, blank, known, seq, ownSeq, out, held, nextMid, snapped,
+                    toMain, toWin, users, lastUserPos, echo, nonUser >>
+
+(* The presenter's deck mounts again -- its tab shows the deck again -- and the show resumes AT known: the engine
+   opens on known's page (snapped, if the window hides it) with known's blank colour, and known's page is being shown
+   until the engine reports. Nothing is sent: the report sends a correction only if the engine snapped the page.
+   StaleRemount is the rejected design: the engine reopens where it was when the window went away. *)
+Remount(w) ==
+    LET pg == IF StaleRemount THEN Snap(w, engine[w]) ELSE Snap(w, known[w].page)
+    IN /\ phase[w] = "away"
+       /\ phase'    = [phase    EXCEPT ![w] = "live"]
+       /\ engine'   = [engine   EXCEPT ![w] = pg]
+       /\ blank'    = [blank    EXCEPT ![w] = known[w].blank]
+       /\ applying' = [applying EXCEPT ![w] = known[w].page]
+       /\ pending'  = [pending  EXCEPT ![w] = TRUE]
+       /\ pcause'   = [pcause   EXCEPT ![w] = IF ~StaleRemount /\ pg # known[w].page THEN "snap" ELSE "none"]
+       /\ UNCHANGED << mseq, mpos, lastMid, start, mirror, known, seq, ownSeq, out, held, nextMid, snapped,
+                       toMain, toWin, users, aways, lastUserPos, echo, nonUser >>
 
 WinRecv(w, i) ==
     LET m == toWin[w][i]
     IN /\ toWin' = [toWin EXCEPT ![w] = Remove(@, i)]
        /\ IF m.type = "push" THEN RecvPush(w, m) ELSE RecvAck(w, m)
-       /\ UNCHANGED << mseq, mpos, lastMid, snapped, users, lastUserPos, nonUser >>
+       /\ UNCHANGED << mseq, mpos, lastMid, snapped, users, aways, lastUserPos, nonUser >>
 
 Protocol(w) ==
     \/ Report(w)
@@ -286,21 +336,25 @@ Protocol(w) ==
 People(w) ==
     \/ \E q \in Pages  : UserPage(w, q)
     \/ \E b \in Blanks : UserBlank(w, b)
+    \/ Unmount(w)
+    \/ Remount(w)
 
 Next == \E w \in Win : Protocol(w) \/ People(w) \/ Rehide(w)
 
-\* every protocol step is taken when it stays possible; the people, and the windows' learning of their hidden
-\* pages, need not happen at all
+\* every protocol step is taken when it stays possible; the people -- including the presenter leaving its deck and
+\* coming back -- and the windows' learning of their hidden pages, need not happen at all
 Spec == Init /\ [][Next]_vars /\ \A w \in Win : WF_vars(Protocol(w))
 
 -----------------------------------------------------------------------------
-\* nothing is on the way, nothing is due, both decks are showing
+\* nothing is on the way, nothing is due, both windows have joined (the presenter may be away from its deck)
 Quiescent ==
-    \A w \in Win : /\ phase[w] = "live" /\ toMain[w] = <<>> /\ toWin[w] = <<>>
+    \A w \in Win : /\ phase[w] \in {"live", "away"} /\ toMain[w] = <<>> /\ toWin[w] = <<>>
                    /\ out[w] = {} /\ ~pending[w]
 
-\* P1 -- convergence: when it is quiet, both windows show main's position, and that is what each last exchanged
-Converged == \A w \in Win : [page |-> engine[w], blank |-> blank[w]] = mpos /\ known[w] = mpos
+\* P1 -- convergence: when it is quiet, each window last exchanged main's position, and each window showing the deck
+\* shows it (a window away from its deck shows it when it comes back: Remount opens at known)
+Converged == \A w \in Win : /\ known[w] = mpos
+                            /\ phase[w] = "live" => [page |-> engine[w], blank |-> blank[w]] = mpos
 Convergence == Quiescent => Converged
 
 \* P2 -- no echo: a window sends a move only for something a person did, or to correct a page its engine snapped
@@ -318,11 +372,12 @@ Settles == <>[]Quiescent
 
 \* P6 -- snapping settles: every accepted move that no person made corrects a snapped page, and there are at most
 \* MaxPage of them for each thing that can start a chain of corrections (one of the people's actions, the
-\* audience's mount, either window's Rehide), because each correction lands on a lower page than the move it
-\* corrects (docs/theory/11 §5.6). It needs every snap to move DOWN; the control neg-upsnap shows it.
-BoundedCorrections == nonUser <= (MaxUser + 3) * MaxPage
+\* audience's mount, either window's Rehide, each of the presenter's returns to its deck), because each correction
+\* lands on a lower page than the move it corrects (docs/theory/11 §5.6). It needs every snap to move DOWN; the
+\* control neg-upsnap shows it.
+BoundedCorrections == nonUser <= (MaxUser + 3 + MaxAway) * MaxPage
 
 \* a state constraint for neg-upsnap only: an upward snap never settles, so its state space is infinite; the
 \* bound is above every seq a downward model reaches (MaxUser person moves and the corrections of P6) plus two
-SeqBound == mseq <= MaxUser + (MaxUser + 3) * MaxPage + 2
+SeqBound == mseq <= MaxUser + (MaxUser + 3 + MaxAway) * MaxPage + 2
 =============================================================================

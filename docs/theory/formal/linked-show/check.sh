@@ -24,6 +24,9 @@ expect=(
   "reorder ok"
   "snap-fifo ok"
   "snap-reorder ok"
+  "away-fifo ok"
+  "away-reorder ok"
+  "away-snap-fifo ok"
   "neg-nohold Convergence"
   "neg-noheldcheck Convergence"
   "neg-noapplying NoEcho"
@@ -31,6 +34,8 @@ expect=(
   "neg-nomidguard Convergence"
   "neg-announce NoUndo"
   "neg-upsnap BoundedCorrections"
+  "neg-staleremount NoEcho"
+  "neg-awaydrop Convergence"
 )
 if [ "$deep" = 1 ]; then expect+=("fifo-deep ok" "reorder-deep ok"); fi
 
