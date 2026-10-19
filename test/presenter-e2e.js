@@ -8,7 +8,8 @@
 //   1. Shift+S opens a second live, painting window that presents the deck, while the first shows the presenter
 //      console with the slide's notes — notes the audience window does not show: the notes over the whole content
 //      area, a small next slide beside them, and no current slide; the audience window hides its chrome, and the
-//      presenter window keeps its menus, tabs, URI bar and bottom bar, windowed;
+//      presenter window keeps its menus, tabs, URI bar and bottom bar, windowed; neither shows the speaker-notes hint,
+//      which is the single-window show's (no linked show spends it, checked again after step 6);
 //   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience), and a
 //      click on the console — its notes scrolling or not — leaves the keyboard with the show;
 //   3. a blank (b) in either window blanks the other, the console's strip says so (no blank screen covers the notes),
@@ -150,6 +151,10 @@ const state = (win) => evalIn(win, `(() => {
     chrome: ['.vv-menubar', '.vv-tabs', '.vv-uribar', '.vv-bottombar']
       .every((sel) => { const n = document.querySelector(sel); return Boolean(n) && n.getClientRects().length > 0; }),
     focusInUri: Boolean(document.activeElement && document.activeElement.closest('.vv-uribar')),
+    // the speaker-notes hint: showing in this window (app-db's flag, or its chip), and spent on this installation —
+    // the setting every window receives once one has shown it (ADR-0047), so a chip gone after its 6 s still counts
+    hint: Boolean((ui.presentation || {})['hint?']) || Boolean(document.querySelector('.vv-slides-notes-hint')),
+    hinted: (ui.settings || {})['slides-notes-hinted?'] === true,
   };
 })()`);
 
@@ -229,6 +234,12 @@ async function run() {
   assert.strictEqual(seen.presenterView, false, 'nor is its presenter view on');
   assert.strictEqual(seen.chromeless, true, 'the audience window hides its chrome');
   assert.strictEqual(seen.chrome, false, 'none of it is on screen');
+  //    the speaker-notes hint is the single-window show's (ADR-0048 §6.1): never on the audience's screen — the
+  //    projector's — though its engine's report of a page with a text note asks for it again (H-HINT); nor in the
+  //    console, which shows the notes
+  assert.strictEqual(seen.hint, false, 'the audience window shows no speaker-notes hint');
+  assert.strictEqual(seen.hinted, false, '…and spent none: no window has shown it');
+  assert.strictEqual((await state(presenter)).hint, false, 'nor does the presenter console');
   console.log(`[ok] ${MODE}: Shift+S opens a second live window presenting the deck; the notes stay in the first`);
 
   // 2. a flip in either window moves the other
@@ -318,6 +329,9 @@ async function run() {
   await press(presenter, 'Escape');
   await until(async () => third.isDestroyed() && !(await state(presenter)).presenting,
     Boolean, 'Escape in the presenter: the show ends in both and the audience window closes');
+  //    three linked shows, three audience windows, flips and blanks: none spent the once-only speaker-notes hint, which
+  //    is the single-window show's — step 7's F5 is the first to show it (H-HINT)
+  assert.strictEqual((await state(presenter)).hinted, false, 'no linked show has shown the speaker-notes hint');
   console.log(`[ok] ${MODE}: Shift+S while linked raises the audience window; Escape in the presenter ends both`);
 
   // 7. a show blanked before Shift+S stays blanked in both windows (R-blank): the audience window joins at the

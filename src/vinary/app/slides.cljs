@@ -242,11 +242,15 @@
 
 (defn notes-hint-due?
   "Should the speaker-notes hint show now (ADR-0048 P5)? A show runs in this window in the audience view, the deck has
-   notes (deck-has-notes?), and the hint is neither showing nor already shown on this installation. Re-asked whenever
-   one of those can change: the show starts, the deck's notes settle, a rendered page turns out to carry a text note."
+   notes (deck-has-notes?), and the hint is neither showing nor already shown on this installation — and this is not a
+   linked show's audience window, whose screen is the projector's (ADR-0048 §6.1: never shown there). Re-asked
+   whenever one of those can change: the show starts, the deck's notes settle, a rendered page turns out to carry a
+   text note — so the audience window's start, which asks for no hint, is not enough: a text note on its first
+   rendered page asked again."
   [db]
   (and (presenting? db)
        (not (presenter-view? db))
+       (not= :audience (get-in db [:ui :slides-link :role]))
        (not (notes-hint? db))
        (not (notes-hinted? db))
        (deck-has-notes? db)))

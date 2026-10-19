@@ -83,7 +83,11 @@
           "not when the presenter view already shows the notes")
       (is (false? (slides/notes-hint-due? (assoc-in due [:ui :presentation :hint?] true))) "not while it shows")
       (is (false? (slides/notes-hint-due? (assoc-in due [:ui :settings :slides-notes-hinted?] true)))
-          "once per installation: not after it was shown"))
+          "once per installation: not after it was shown")
+      (doseq [phase [:joining :live :ended]]
+        (is (false? (slides/notes-hint-due? (assoc-in due [:ui :slides-link] {:phase phase :role :audience :path talk})))
+            (str "never in a linked show's audience window, whose screen is the projector's (" (name phase) ") — "
+                 "its start asks for no hint, and a text note on a rendered page must not ask again"))))
     (with-redefs [slides/deck-has-notes? (constantly false)]
       (is (false? (slides/notes-hint-due? due)) "not for a deck without notes")))
   (testing "a deck has notes: its notes summary says so, or the engine found a text note on a rendered page"
