@@ -2150,11 +2150,13 @@
   "Effects of the mounted engine's position report `m` {:path :layout :page :pages :frame :frames :overlay :overlays
    :label :doc-gen :text-notes?} — one per animation frame at most; it feeds the slide counter, the
    presenter view, menus and tests. The UI-owned keys (slides/ui-keys: a typed slide number, …) survive the reports
-   of the same deck in the slides layout; a different document or the document layout starts without them. A report
-   whose :text-notes? turned true (the engine found a text note on a page it rendered) may make the speaker-notes hint
-   due."
+   of the same deck in the slides layout; a different document or the document layout starts without them — except
+   the running show's blank colour, which every report of the show's deck keeps (slides/merge-report, R-blank). A
+   report whose :text-notes? turned true (the engine found a text note on a page it rendered) may make the
+   speaker-notes hint due."
   [db m]
-  (let [db' (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m))]
+  (let [db' (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m
+                                                            (:path (slides/presentation db))))]
     (if (and (:text-notes? m) (not (get-in db [:ui :slides :text-notes?])))
       (with-notes-hint db {:db db'})
       {:db db'})))
@@ -2472,16 +2474,24 @@
    carries it out. A push is shown with the :slides/command EFFECT — the event would un-blank (ADR-0045 §5) — and
    its blank colour; whatever the link sends goes; :fullscreen? asks for this window's fullscreen, recorded on the
    show so its end leaves it; :stop? stops this window's show; and the presenter's wait for its audience window is
-   timed. Never a move of its own: the interceptor skips this event, because following never sends."
+   timed. Never a move of its own: the interceptor skips this event, because following never sends.
+
+   A position shown before the engine presents the show (slides/engine-presenting?) is also where the show starts
+   ([:ui :presentation :from]): the engine applies :from once, as it starts presenting, after the effect has shown
+   the page — an older :from would open the show at the old page, and the first presenting report would send that
+   page back, undoing the other window's move (R-from, theory/11 §7). Once the engine presents, :from is left
+   alone: changing it would only re-render the view."
   [db msg]
   (let [before   (get-in db [:ui :slides-link])
         {l :link pos :show :keys [fullscreen? stop?] :as r}
         (slides-link/on-state before msg (get-in db [:ui :slides]))
         full?    (and fullscreen? (slides/presenting? db))
+        start?   (and pos (slides/presenting? db) (not (slides/engine-presenting? db)))
         waiting  (fn [link] (= :waiting (:peer link)))
         db1      (cond-> (assoc-in db [:ui :slides-link] l)
-                   pos   (with-blank (:blank pos))
-                   full? (assoc-in [:ui :presentation :fullscreen?] true))
+                   pos    (with-blank (:blank pos))
+                   start? (assoc-in [:ui :presentation :from] (:page pos))
+                   full?  (assoc-in [:ui :presentation :fullscreen?] true))
         fx       (cond-> (link-sends r)
                    pos   (conj (slides-link/show-effect pos))
                    full? (conj [:vv/set-fullscreen {:on true}])

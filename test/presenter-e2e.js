@@ -13,7 +13,9 @@
 //   4. Escape in the audience window ends the show in BOTH windows, and main closes the audience window;
 //   5. closing the audience window by hand leaves the presenter presenting, with the notice that says so;
 //   6. Shift+S while linked raises the audience window instead of opening another, and Escape in the presenter
-//      window ends both and closes the audience window.
+//      window ends both and closes the audience window;
+//   7. a show blanked before Shift+S stays blanked in both windows: the audience window's show starts blanked before
+//      its engine's first report of the deck, and that report keeps the blank (R-blank, docs/theory/11 §7).
 // Run twice by `npm run test:presenter-e2e`: with the warm pool (the default, VV_POOL=1 — the audience window is
 // the claimed pool window, joined at once) and with the runner's --env=VV_POOL=0 (every audience window is cold,
 // joined only once it has loaded — vinary.main.core claim-window!). Xvfb gives Chromium ONE display (RandR monitors set with
@@ -106,6 +108,7 @@ const state = (win) => evalIn(win, `(() => {
   const text = (sel) => { const n = document.querySelector(sel); return n ? n.textContent.trim() : null; };
   return {
     presenting: Boolean((ui.presentation || {})['active?']),
+    enginePresenting: slides['presenting?'] === true,
     page: slides.page == null ? null : slides.page,
     blank: slides.blank == null ? null : slides.blank,
     presenterView: ui['presenter-view?'] === true,
@@ -234,6 +237,30 @@ async function run() {
   await until(async () => third.isDestroyed() && !(await state(presenter)).presenting,
     Boolean, 'Escape in the presenter: the show ends in both and the audience window closes');
   console.log(`[ok] ${MODE}: Shift+S while linked raises the audience window; Escape in the presenter ends both`);
+
+  // 7. a show blanked before Shift+S stays blanked in both windows (R-blank): the audience window joins at the
+  //    session's position, black; its show starts blanked before its engine's first report of the deck, and the
+  //    first presenting report must send nothing — before the fix it sent the page unblanked, and both windows
+  //    unblanked
+  await press(presenter, 'F5');
+  await until(() => state(presenter), (s) => s.presenting && s.enginePresenting, 'F5: a one-window show');
+  await press(presenter, 'b');
+  await until(() => state(presenter), (s) => s.blank === 'black', 'b: the one-window show goes black');
+  const fourth = await openLinkedShow(presenter);
+  await until(() => state(fourth), (s) => s.enginePresenting, 'the audience window\'s engine presents');
+  await sleep(500);
+  const [blankP, blankA] = [await state(presenter), await state(fourth)];
+  assert.strictEqual(blankA.blank, 'black', 'the audience window starts black and stays black once its engine presents');
+  assert.strictEqual(blankP.blank, 'black', 'and the presenter stays black: no move unblanked it');
+  assert.strictEqual(blankP.badge, 'Audience: black', 'the presenter\'s badge says so');
+  await press(presenter, 'Escape');
+  await until(async () => [await state(presenter), await state(fourth)],
+    ([p, a]) => p.blank == null && a.blank == null && p.presenting && a.presenting,
+    'Escape\'s first step clears the blank in both');
+  await press(presenter, 'Escape');
+  await until(async () => fourth.isDestroyed() && !(await state(presenter)).presenting,
+    Boolean, 'Escape again ends both, and the audience window closes');
+  console.log(`[ok] ${MODE}: a show blanked before Shift+S stays blanked in both windows`);
 }
 
 app.whenReady().then(() =>

@@ -37,8 +37,9 @@
     (ds/doc-attr (ds/snapshot) p :doc/deck)))
 
 (defn presentation
-  "The running slide show {:active? :tab-id :path :from :fullscreen?}, or nil. :from is where it started
-   (:first, :current or a page index); :fullscreen? whether it asked main for fullscreen."
+  "The running slide show {:active? :tab-id :path :from :fullscreen?}, or nil. :from is where it starts (:first,
+   :current or a page index): the engine applies it once, as it starts presenting, and a linked show's push shown
+   before then moves it (engine-presenting?); :fullscreen? whether it asked main for fullscreen."
   [db]
   (get-in db [:ui :presentation]))
 
@@ -113,13 +114,30 @@
   [:digits :blank :overview?])
 
 (defn merge-report
-  "The new [:ui :slides] for the engine's position report `m` over the current `cur`: the report, plus `cur`'s
-   UI-owned keys when it is the same document still in the slides layout — a different document, or the document
-   layout, starts without them."
-  [cur m]
-  (if (and (= (:path cur) (:path m)) (= :slides (:layout m)))
-    (merge m (select-keys cur ui-keys))
-    m))
+  "The new [:ui :slides] for the engine's position report `m` over the current `cur`, while a show of `show-path`
+   runs (nil: none): the report, plus `cur`'s UI-owned keys when it is the same document still in the slides layout —
+   a different document, or the document layout, starts without them — and, for a report of the show's deck, the
+   show's blank colour in any case.
+
+   The blank colour is the show's, not the mirror's: blanking needs a show, and a show starts and ends unblanked, so
+   while one runs the mirror's :blank is that show's. A linked show can set it before the engine's first report of the
+   deck — an audience window joining a blanked show has no mirror yet, and its first reports may be of the document
+   layout (a PDF that is no deck, before its engine presents) — and that report must not drop it: the engine's first
+   presenting report would then send the page unblanked, and unblank both windows (R-blank, theory/11 §7)."
+  ([cur m] (merge-report cur m nil))
+  ([cur m show-path]
+   (cond
+     (and (= (:path cur) (:path m)) (= :slides (:layout m)))     (merge m (select-keys cur ui-keys))
+     (and (some? show-path) (= show-path (:path m)) (:blank cur)) (assoc m :blank (:blank cur))
+     :else                                                        m)))
+
+(defn engine-presenting?
+  "Has the engine applied the running show's start — is its last position report a presenting one of the show's
+   deck? Until it has, [:ui :presentation :from] is where the engine will open the show: it applies :from once, as
+   it starts presenting (renderer.pdf/apply-present-from!)."
+  [db]
+  (let [m (get-in db [:ui :slides])]
+    (boolean (and (true? (:presenting? m)) (some? (:path m)) (= (:path m) (:path (presentation db)))))))
 
 (defn digits
   "The slide number being typed (a non-empty string of digits), or nil."

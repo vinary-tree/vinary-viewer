@@ -191,6 +191,66 @@
         (is (nil? (events/slides-link-deck-fx joining "/d/other.pdf")))
         (is (nil? (events/slides-link-deck-fx shown-db talk)))))))
 
+(def ^:private fresh-db
+  "A window showing `talk` whose engine has not reported yet — no [:ui :slides] mirror: an audience window as its deck
+   mounts (the engine queues :pdf/deck-detected at mount; its first report waits for an animation frame)."
+  (update shown-db :ui dissoc :slides))
+
+(defn- engine-starts
+  "The engine's first presenting report after app-db `db` started a show: it opens the show at [:ui :presentation
+   :from] (renderer.pdf/apply-present-from!; :current keeps the page it shows, `page`)."
+  [db page]
+  (let [from (:from (slides/presentation db))]
+    {:path talk :layout :slides :page (if (integer? from) from page) :presenting? true}))
+
+(defn- report-out
+  "The effects the engine's report `report` has in app-db `db`: :slides/changed's handler, then the interceptor."
+  [db report]
+  (events/slides-link-out-after (ctx [:slides/changed report] db (:db (events/slides-changed-fx db report)))))
+
+(deftest a-linked-shows-start-follows-pushes-until-its-engine-presents
+  ;; R-from (theory/11 §7): the engine applies [:ui :presentation :from] once, when it starts presenting; a push shown
+  ;; before that must move :from with it, or the engine opens the show at the old start and the window's first
+  ;; presenting report sends that page back: an echo that undoes the other window's move
+  (with-redefs [slides/pdf-shown? (constantly true)]
+    (testing "an audience window: a push between its deck mounting and its engine presenting"
+      (let [joining (:db (events/slides-link-join-fx fresh-db {:link audience-link :path talk}))
+            started (:db (events/slides-link-deck-fx joining talk))
+            {:keys [db fx]} (events/slides-link-state-fx started {:session "show-1" :seq 1 :page 6 :blank nil})]
+        (is (= [[:slides/command [:show 6]]] fx))
+        (is (= 6 (:from (slides/presentation db))) "the show starts at the push, not at the link's page 3")
+        (is (nil? (get-in (report-out db (engine-starts db 3)) [:effects :fx]))
+            "the engine's first presenting report sends nothing: no echo")))
+    (testing "a presenter: a push between main's joined and its engine presenting"
+      (let [opened (:db (events/slides-present-linked-fx shown-db))
+            live   (:db (events/slides-link-state-fx opened joined))
+            {:keys [db]} (events/slides-link-state-fx live {:session "show-1" :seq 1 :page 6 :blank nil})]
+        (is (= 6 (:from (slides/presentation db))) "the show no longer starts at the slide it showed (:current)")
+        (is (nil? (get-in (report-out db (engine-starts db 2)) [:effects :fx])) "no echo")))
+    (testing "once the engine presents the show, a push leaves :from alone: the engine applied it as it started"
+      (let [{:keys [db]} (events/slides-link-state-fx (assoc-in (presenting-db) [:ui :slides-link] live)
+                                                      {:session "show-1" :seq 4 :page 7 :blank nil})]
+        (is (= :current (:from (slides/presentation db))))))))
+
+(deftest a-linked-shows-blank-survives-its-engines-first-reports
+  ;; R-blank (theory/11 §7): the show's start sets the blank colour before the engine's first report of the deck, and
+  ;; the mirror must keep it, or the window's first presenting report sends the page unblanked and both windows unblank
+  (with-redefs [slides/pdf-shown? (constantly true)]
+    (let [joining (:db (events/slides-link-join-fx fresh-db {:link (assoc audience-link :blank "black") :path talk}))
+          started (:db (events/slides-link-deck-fx joining talk))
+          pre     {:path talk :layout :slides :page 3 :presenting? false}
+          db1     (:db (events/slides-changed-fx started pre))]
+      (is (= :black (slides/blank started)) "the audience window's show starts blanked")
+      (is (= :black (slides/blank db1)) "the engine's first report, before it presents, keeps the blank colour")
+      (is (nil? (get-in (report-out db1 (engine-starts db1 3)) [:effects :fx]))
+          "its first presenting report sends nothing: no move unblanks the other window")
+      (is (= :black (slides/blank (:db (events/slides-changed-fx db1 (engine-starts db1 3))))))
+      (is (= :black (slides/blank (:db (events/slides-changed-fx started {:path talk :layout :document :page 0
+                                                                          :presenting? false}))))
+          "a PDF that is no deck reports the document layout until its engine presents: kept too")
+      (is (nil? (slides/blank (:db (events/slides-changed-fx started {:path "/d/other.pdf" :layout :slides :page 0}))))
+          "another document's report does not take the show's blank colour"))))
+
 (deftest swap-screens
   (testing "the request, from a presenter whose audience window is on a separate display"
     (is (= [[:vv/presenter-swap {:session "show-1"}]]

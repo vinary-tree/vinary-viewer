@@ -131,6 +131,24 @@
         "leaving the slides layout forgets it")
     (is (= {:path "/d/a.pdf" :layout :slides} (slides/merge-report nil {:path "/d/a.pdf" :layout :slides})))))
 
+(deftest the-running-shows-blank-survives-its-decks-reports
+  ;; R-blank (theory/11 §7): a linked show's start sets its blank colour before the engine's first report of the deck —
+  ;; an audience window joining a blanked show has no mirror yet — and that report must not drop it
+  (let [started {:blank :black}
+        talk    "/d/talk.pdf"]
+    (is (= :black (:blank (slides/merge-report started {:path talk :layout :slides :page 3} talk)))
+        "the show's deck's first report keeps the show's blank colour")
+    (is (= :black (:blank (slides/merge-report started {:path talk :layout :document :page 0} talk)))
+        "in either layout: a PDF that is no deck reports the document layout until its engine presents")
+    (is (= 3 (:page (slides/merge-report started {:path talk :layout :slides :page 3} talk))) "the report is the mirror")
+    (is (nil? (:blank (slides/merge-report started {:path talk :layout :slides :page 3})))
+        "without a running show, a mirror of no document keeps nothing")
+    (is (nil? (:blank (slides/merge-report started {:path "/d/other.pdf" :layout :slides :page 0} talk)))
+        "another document's report never takes the show's blank colour")
+    (is (= {:path talk :layout :slides :page 3 :blank :black}
+           (slides/merge-report {:digits "1" :overview? true :blank :black} {:path talk :layout :slides :page 3} talk))
+        "only the blank colour: the other UI-owned keys belong to a deck the mirror already showed")))
+
 (deftest escape-cancels-slide-input-before-switching-mode
   (let [typed (assoc-in slides-db [:ui :slides :digits] "3")
         typed-insert (assoc-in typed [:ui :input :mode] :insert)
