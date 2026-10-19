@@ -75,6 +75,7 @@ slide keys is added on top.
 | Delete the last typed digit | Backspace | the same | the same |
 | Overview grid | Tab, `o` | the same | the same |
 | Start a show from the first / the current slide | F5 / Shift+F5 | the same | the same |
+| Present in New Window: the notes here, the slides in a second window | `S` (Shift+s) | the same | the same |
 | During a show: black / white screen | `b` `.` / `w` `,` | the same | the same |
 | Speaker notes: the presenter view on / off | `s` | the same | the same |
 | During a show: this window's fullscreen on / off | `F` (Shift+f) | the same | the same |
@@ -95,7 +96,8 @@ slide keys is added on top.
   on the document — not in a text field, the sidebar, the address bar, or an open menu, dialog or prompt. The layer
   sits below the current mode, so in Vim's normal mode Space stays the leader (use →, `j` or PgDn there; Space flips
   in insert mode). It is identical in every set and can be overridden like a mode, under `:keymaps {:slides {…}}` in
-  `keybindings.edn` ([feature 15](15-custom-keybindings.md)). F5 and Shift+F5 work in any mode.
+  `keybindings.edn` ([feature 15](15-custom-keybindings.md)). F5, Shift+F5 and `S` work in any mode, wherever the
+  keyboard is, as the View menu's items do.
 
 ### Presenting
 
@@ -204,8 +206,38 @@ right 42 %:
 Every slide key still works, and flips stay instant. `s` again goes back to the audience view. A show that starts in
 the audience view gives the choice back when it ends. The first time a deck with notes is presented, a hint names `s`
 for a few seconds, once per installation. pdfpc notes are Markdown, as in pdfpc, unless the deck turns Markdown off;
-they pass through the same sanitizer as a Markdown document. Any other note is plain text. Presenting in one window
-and showing the notes in another (ADR-0048 §7–§8) is not available yet.
+they pass through the same sanitizer as a Markdown document. Any other note is plain text.
+
+### Notes in one window, slides in another
+
+**Present in New Window** (`S`, that is Shift+s; **View ▸ Present in New Window**; the palette) keeps the speaker notes
+in the window you are in and shows the slides in a second window, the **audience window**
+([ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8). It is offered for every PDF,
+notes or not: the counter and the next slide help without them.
+
+1. **Start.** Press `S` in the window that shows the deck. That window starts the show from the slide you are on and
+   switches to the presenter view (the counter, the notes, the next slide). The audience window opens with the
+   slides, without taking the focus:
+   - with a second display, it opens there; with Preferences ▸ Slides ▸ *Present full screen* on, both windows go
+     fullscreen, each on its own display;
+   - with one display, it opens beside the first, windowed: share it in a video call;
+   - on Wayland, the compositor places it: move it to the other screen and press `F` in it.
+
+   The presenter view's status strip says which of these happened, and says *Waiting for the audience window…* until
+   the audience window's slides show.
+2. **Either window drives.** A flip, a typed number, an overview pick, a link, a click or a blank (`b`, `w`) in either
+   window is shown at once in the other. While the notes are shown, a blank leaves your screen as it is and shows a
+   badge, *Audience: black* or *Audience: white*, over your slide.
+3. **Swap screens.** When the audience window went to the wrong display, press **Swap screens** in the status strip
+   (or *Swap the presenter and audience screens* in the palette): each window moves to the other's display and keeps
+   its fullscreen. It is offered only when the two windows were placed on separate displays.
+4. **End.** Escape, or *End Slide Show*, in either window ends the show in both and closes the audience window. Closing
+   the audience window yourself ends only the link: your window keeps presenting, and `S` opens a new audience window.
+   `S` while linked brings the audience window to the front instead of opening another. A window takes part in one
+   linked show at a time.
+
+SSH prompts for the audience window (a host key, a password) appear in your window, never on the projector, and the
+audience window's size and position are never saved.
 
 ### Preferences
 

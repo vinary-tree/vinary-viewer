@@ -65,6 +65,7 @@
     "test:tree-e2e": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs electron --no-sandbox test/tree-e2e.js",
     "test:watch-e2e": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs electron --no-sandbox test/watch-e2e.js",
     "test:fullscreen-e2e": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs electron --no-sandbox test/fullscreen-e2e.js",
+    "test:presenter-e2e": "shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs electron --no-sandbox test/presenter-e2e.js && node scripts/run-electron-headless.mjs --env=VV_POOL=0 electron --no-sandbox test/presenter-e2e.js",
     "test:remote-daemon-events-e2e": "shadow-cljs compile main renderer && node test/remote-daemon-events-e2e-runner.js",
     "test:remote-pdf-e2e": "shadow-cljs compile main renderer && node test/remote-pdf-e2e-runner.js",
     "test:find-e2e": "npm run find-wasm:sync && shadow-cljs compile main renderer && node scripts/run-electron-headless.mjs --width=1400 --height=1000 electron --no-sandbox test/find-e2e.js",

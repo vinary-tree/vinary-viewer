@@ -375,6 +375,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-slides-blank { position: absolute; inset: 0; z-index: 7; cursor: none; }
 .vv-slides-blank[data-blank="black"] { background: #000; }
 .vv-slides-blank[data-blank="white"] { background: #fff; }
+/* blanking in the presenter view of a linked show (ADR-0048 §8.2): the audience's screen is blank, and this one says
+   so over the slide, in the colour the audience sees */
+.vv-slides-blank-badge { position: absolute; top: 12px; left: 12px; z-index: 9; padding: 4px 12px; border-radius: 12px;
+  font-size: 13px; pointer-events: none; background: #000; color: #fff; border: 1px solid #666; }
+.vv-slides-blank-badge[data-blank="white"] { background: #fff; color: #000; border-color: #999; }
 /* the slide OVERVIEW grid (ADR-0045 §Overview): a focused overlay over the slides layout (a sibling of .vv-content,
    z 8 — over the blank screen, under the chip and the find bar) with its own scroller; one tile per frame */
 .vv-slides-overview { position: absolute; inset: 0; z-index: 8; overflow-y: auto; outline: none;
@@ -419,6 +424,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
   background: var(--vv-bg2); color: var(--vv-fg); border-left: 1px solid var(--vv-border); }
 .vv-root.vv-presenting .vv-presenter-pane { background: #111; color: #ddd; border-left-color: #000; }
 .vv-presenter-strip { flex: 0 0 auto; font-size: 18px; font-variant-numeric: tabular-nums; }
+/* a linked show's line in the strip (ADR-0048 §8.6, §8.7): what the link needs the presenter to know, and Swap screens
+   while the audience window is on a separate display */
+.vv-presenter-link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-size: 13px;
+  font-variant-numeric: normal; }
+.vv-presenter-link-notice[data-tone="warning"] { color: var(--vv-head1); }
+.vv-presenter-swap { font: inherit; padding: 2px 10px; border-radius: 4px; cursor: pointer; background: transparent;
+  color: var(--vv-fg); border: 1px solid var(--vv-border); }
+.vv-root.vv-presenting .vv-presenter-link-notice { color: #ddd; }
+.vv-root.vv-presenting .vv-presenter-link-notice[data-tone="warning"] { color: #f5c26b; }
+.vv-root.vv-presenting .vv-presenter-swap { color: #ddd; border-color: #444; }
 .vv-presenter-overlay { color: var(--vv-meta); }
 .vv-presenter-heading { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--vv-meta); }

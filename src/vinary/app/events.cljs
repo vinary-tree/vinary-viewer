@@ -22,6 +22,7 @@
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
             [vinary.app.slides :as slides]
+            [vinary.app.slides-link :as slides-link]
             [vinary.slides.deck :as deck]
             [vinary.renderer.pdf-layout :as pdf-layout]
             [vinary.app.fx]
@@ -2069,16 +2070,24 @@
       [[:db/add eid :doc/deck summary]]
       [])))
 
+(declare slides-link-deck-fx)
+
 (rf/reg-event-fx
  :pdf/deck-detected
  (fn [{:keys [db]} [_ path _stamp summary]]
-   (let [tx (deck-tx (ds/snapshot) path summary)]
-     (when (seq tx)
-       ;; notes that a running show learns of only now (the background scan settled them) may make the speaker-notes
-       ;; hint due: asked once the transaction has landed, by the event it queues (ADR-0048 P5)
-       {:fx (cond-> [[:ds/transact tx]]
-              (and (slides/presenting? db) (get-in summary [:notes :has-notes?]))
-              (conj [:dispatch [:slides/notes-hint-check]]))}))))
+   (let [tx     (deck-tx (ds/snapshot) path summary)
+         ;; notes that a running show learns of only now (the background scan settled them) may make the speaker-notes
+         ;; hint due: asked once the transaction has landed, by the event it queues (ADR-0048 P5)
+         deck   (when (seq tx)
+                  (cond-> [[:ds/transact tx]]
+                    (and (slides/presenting? db) (get-in summary [:notes :has-notes?]))
+                    (conj [:dispatch [:slides/notes-hint-check]])))
+         ;; an audience window joining a linked show starts it once its deck has mounted (ADR-0048 §8.6)
+         joined (slides-link-deck-fx db path)]
+     (cond
+       joined (update joined :fx #(into (vec deck) %))
+       deck   {:fx deck}
+       :else  nil))))
 
 ;; ---- slides layout (ADR-0045) -------------------------------------------------------------------------------
 ;; The engine owns the slide show (vinary.renderer.pdf); app-db holds the document view's explicit layout choice
@@ -2156,11 +2165,12 @@
 
 (defn slides-unmounted-fx
   "Effects of the pdf-view unmounting `path` (a tab switch, navigation, Reflow): drop its position mirror, and
-   end a slide show of that document — the show is of a VIEW, and the view is gone."
+   end a slide show of that document — the show is of a VIEW, and the view is gone. A linked show is left as
+   \"unmounted\" (ADR-0048 §8.6)."
   [db path]
   (let [db' (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)]
     (if (= path (:path (slides/presentation db')))
-      (slides-stop-fx db' {})
+      (slides-stop-fx db' {:reason "unmounted"})
       {:db db'})))
 
 (rf/reg-event-fx :slides/unmounted (fn [{:keys [db]} [_ path]] (slides-unmounted-fx db path)))
@@ -2247,52 +2257,69 @@
 ;; preference allows, and only ever leaves a fullscreen it entered (vinary.main.fullscreen/decide). A single-window
 ;; show starts in the AUDIENCE view — its screen may be mirrored to a projector — and gives back the view the window
 ;; had (:notes-view-before) when it ends (ADR-0048 §6.1).
+(def slides-link-waiting-key
+  "The scheduler key of a presenter's 10 s wait for its audience window (ADR-0048 §8.6)."
+  :slides/link-waiting)
+
+(def slides-link-waiting-ms
+  "How long a presenter waits for its audience window's deck before its pane adds where to look."
+  10000)
+
 (defn slides-present-fx
   "Effects of starting the slide show of the shown PDF from `from` (:first — the default, :current, or a page
    index). A no-op unless a PDF is shown. While a show is already running, :first goes back to the first slide (F5
    again), an index goes there, and :current does nothing. A new show starts in the audience view, with the
-   speaker-notes hint when it is due (with-notes-hint)."
-  [db from]
-  (let [from (or from :first)]
-    (cond
-      (not (slides/pdf-shown? db)) nil
+   speaker-notes hint when it is due (with-notes-hint).
 
-      (slides/presenting? db)
-      (cond (= :first from)   {:fx [[:dispatch [:slides/command :first]]]}
-            (integer? from)   {:fx [[:dispatch [:slides/command [:goto from]]]]}
-            :else             nil)
+   `opts` are a linked show's (ADR-0048 §8): :fullscreen? — ask for fullscreen or not, instead of the
+   :slides-fullscreen? preference (a presenter waits for the joined message; an audience window does what its link
+   says); :hint? false — no speaker-notes hint (an audience window's screen is the projector's)."
+  ([db from] (slides-present-fx db from {}))
+  ([db from {:keys [fullscreen? hint?] :or {hint? true}}]
+   (let [from (or from :first)]
+     (cond
+       (not (slides/pdf-shown? db)) nil
 
-      :else
-      (let [fs? (slides/fullscreen-preferred? db)]
-        (with-notes-hint
-          db
-          {:db (-> db
-                   (assoc-in [:ui :presentation] {:active?           true
-                                                  :tab-id            (nav/active-id db)
-                                                  :path              (facet/active-content-path db)
-                                                  :from              from
-                                                  :fullscreen?       fs?
-                                                  :notes-view-before (slides/presenter-view? db)})
-                   (update :ui dissoc :presenter-view?)
-                   slides/clear-digits
-                   slides/clear-blank)
-           :fx (cond-> [[:dom/focus :content]]
-                 fs? (conj [:vv/set-fullscreen {:on true}]))})))))
+       (slides/presenting? db)
+       (cond (= :first from)   {:fx [[:dispatch [:slides/command :first]]]}
+             (integer? from)   {:fx [[:dispatch [:slides/command [:goto from]]]]}
+             :else             nil)
+
+       :else
+       (let [fs? (if (some? fullscreen?) (boolean fullscreen?) (slides/fullscreen-preferred? db))]
+         ((if hint? with-notes-hint (fn [_ fx] fx))
+           db
+           {:db (-> db
+                    (assoc-in [:ui :presentation] {:active?           true
+                                                   :tab-id            (nav/active-id db)
+                                                   :path              (facet/active-content-path db)
+                                                   :from              from
+                                                   :fullscreen?       fs?
+                                                   :notes-view-before (slides/presenter-view? db)})
+                    (update :ui dissoc :presenter-view?)
+                    slides/clear-digits
+                    slides/clear-blank)
+            :fx (cond-> [[:dom/focus :content]]
+                  fs? (conj [:vv/set-fullscreen {:on true}]))}))))))
 
 (defn slides-stop-fx
   "Effects of ending the slide show: forget it, any blanking and the speaker-notes hint, give the window back the
    view it had before the show (the presenter view or the audience view — :notes-view-before), and leave the
    fullscreen it asked for (main ignores that when the window was fullscreen before the show). `:fullscreen-gone?` —
-   the window already left fullscreen, so there is nothing to leave. nil when no show is running."
-  [db {:keys [fullscreen-gone?]}]
+   the window already left fullscreen, so there is nothing to leave. A linked show is left too, for `:reason`
+   (\"stopped\", the default, or \"unmounted\" — ADR-0048 §8.6), and the link forgotten; a link that already ended
+   sends nothing. nil when no show is running."
+  [db {:keys [fullscreen-gone? reason]}]
   (when-let [pres (slides/presentation db)]
-    {:db (-> db
-             (update :ui dissoc :presentation)
-             (cond-> (:notes-view-before pres)       (assoc-in [:ui :presenter-view?] true)
-                     (not (:notes-view-before pres)) (update :ui dissoc :presenter-view?))
-             slides/clear-blank)
-     :fx (cond-> (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])
-           (:hint? pres) (conj [:async/cancel notes-hint-key]))}))
+    (let [{:keys [leave]} (slides-link/leave (get-in db [:ui :slides-link]) (or reason "stopped"))]
+      {:db (-> db
+               (update :ui dissoc :presentation :slides-link)
+               (cond-> (:notes-view-before pres)       (assoc-in [:ui :presenter-view?] true)
+                       (not (:notes-view-before pres)) (update :ui dissoc :presenter-view?))
+               slides/clear-blank)
+       :fx (cond-> (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])
+             (:hint? pres) (conj [:async/cancel notes-hint-key])
+             leave         (conj [:vv/presenter-leave leave] [:async/cancel slides-link-waiting-key]))})))
 
 (defn slides-presenter-view-fx
   "Effects of `s` (ADR-0048 P1): toggle this window between the audience view and the presenter view — the current
@@ -2324,15 +2351,19 @@
     {:fx [[:dispatch [:slides/command (if shift? :prev :next)]]]}))
 
 (defn fullscreen-changed-fx
-  "Effects of main reporting this window's fullscreen state {:fullscreen :owned}. Records [:ui :fullscreen?];
-   when the window LEAVES a fullscreen the show asked for (F11, the window manager), the show ends with it."
-  [db {:keys [fullscreen]}]
+  "Effects of main reporting this window's fullscreen state {:fullscreen :owned :swap}. Records [:ui :fullscreen?];
+   when the window LEAVES a fullscreen the show asked for (F11, the window manager), the show ends with it. The one
+   report that ends a Swap screens (:swap true, ADR-0048 §8.7) never ends the show: a window that could not go
+   fullscreen again keeps presenting, windowed, and its show no longer holds a fullscreen to leave."
+  [db {:keys [fullscreen swap]}]
   (let [was? (get-in db [:ui :fullscreen?])
         db'  (assoc-in db [:ui :fullscreen?] (boolean fullscreen))
         pres (slides/presentation db')]
-    (if (and pres (:fullscreen? pres) was? (not fullscreen))
-      (slides-stop-fx db' {:fullscreen-gone? true})
-      {:db db'})))
+    (cond
+      (and swap pres (not fullscreen))                     {:db (assoc-in db' [:ui :presentation :fullscreen?] false)}
+      swap                                                 {:db db'}
+      (and pres (:fullscreen? pres) was? (not fullscreen)) (slides-stop-fx db' {:fullscreen-gone? true})
+      :else                                                {:db db'})))
 
 ;; ---- the overview grid (ADR-0045 §Overview) -------------------------------------------------------------
 (defn slides-overview-close-fx
@@ -2383,6 +2414,163 @@
 (rf/reg-event-fx :slides/click        (fn [{:keys [db]} [_ {:keys [shift?]}]] (slides-click-fx db shift?)))
 (rf/reg-event-fx :view/fullscreen-changed
                  (fn [{:keys [db]} [_ p]] (fullscreen-changed-fx db (js->clj p :keywordize-keys true))))
+
+;; ---- a linked show: two windows, either drives (ADR-0048 §8) ------------------------------------------------
+;; The link lives at [:ui :slides-link]. vinary.app.slides-link decides (pure: the protocol of theory/11) and these
+;; events carry it out. Outgoing moves leave through ONE global interceptor, slides-link-out; main's messages arrive
+;; as :slides/link-state. Main owns the session, its seq and the position (vinary.main.presenter); each window owns
+;; how it renders: its layout, its view, its fullscreen.
+
+(defn- link-sends
+  "The IPC effects of a vinary.app.slides-link result: the request it opens, the move, ready or leave it sends."
+  [{:keys [open move ready leave]}]
+  (cond-> []
+    open  (conj [:vv/presenter-open open])
+    move  (conj [:vv/presenter-move move])
+    ready (conj [:vv/presenter-ready ready])
+    leave (conj [:vv/presenter-leave leave])))
+
+(defn- with-blank
+  "db showing blank colour `b`: :black, :white, or nil for no blanking."
+  [db b]
+  (if b (assoc-in db [:ui :slides :blank] b) (slides/clear-blank db)))
+
+(defn- audience-member?
+  "Is this window a linked show's audience window (joining, or live)?"
+  [db]
+  (let [l (get-in db [:ui :slides-link])]
+    (and (= :audience (:role l)) (contains? #{:joining :live} (:phase l)))))
+
+(defn slides-present-linked-fx
+  "Effects of Shift+S, View ▸ Present in New Window (ADR-0048 §8.1): start the show from the current slide when none
+   runs — without fullscreen yet, which the joined message decides, and without the speaker-notes hint — show the
+   presenter view, and ask main for a linked show of the deck at its current page with its blank colour. Again while
+   this window presents a live link, the request goes again and main raises the audience window; while it is being
+   opened, nothing is sent (slides-link/request-open). nil unless a PDF is shown, and in an audience window."
+  [db]
+  (when (and (slides/pdf-shown? db) (not (audience-member? db)))
+    (let [path    (facet/active-content-path db)
+          started (if (slides/presenting? db)
+                    {:db db}
+                    (slides-present-fx db :current {:fullscreen? false :hint? false}))
+          db1     (:db started)
+          mirror  (get-in db1 [:ui :slides])
+          r       (slides-link/request-open (get-in db1 [:ui :slides-link])
+                                            {:path       path
+                                             :page       (if (= path (:path mirror)) (or (:page mirror) 0) 0)
+                                             :blank      (slides/blank db1)
+                                             :fullscreen (slides/fullscreen-preferred? db1)})]
+      {:db (-> db1
+               (assoc-in [:ui :slides-link] (:link r))
+               (assoc-in [:ui :presenter-view?] true)
+               slides/clear-notes-hint)
+       :fx (cond-> (into (vec (:fx started)) (link-sends r))
+             (slides/notes-hint? db1) (conj [:async/cancel notes-hint-key]))})))
+
+(defn slides-link-state-fx
+  "Effects of main's vv:presenter-state message `msg` (ADR-0048 §8.3–§8.6): slides-link/on-state decides, and this
+   carries it out. A push is shown with the :slides/command EFFECT — the event would un-blank (ADR-0045 §5) — and
+   its blank colour; whatever the link sends goes; :fullscreen? asks for this window's fullscreen, recorded on the
+   show so its end leaves it; :stop? stops this window's show; and the presenter's wait for its audience window is
+   timed. Never a move of its own: the interceptor skips this event, because following never sends."
+  [db msg]
+  (let [before   (get-in db [:ui :slides-link])
+        {l :link pos :show :keys [fullscreen? stop?] :as r}
+        (slides-link/on-state before msg (get-in db [:ui :slides]))
+        full?    (and fullscreen? (slides/presenting? db))
+        waiting  (fn [link] (= :waiting (:peer link)))
+        db1      (cond-> (assoc-in db [:ui :slides-link] l)
+                   pos   (with-blank (:blank pos))
+                   full? (assoc-in [:ui :presentation :fullscreen?] true))
+        fx       (cond-> (link-sends r)
+                   pos   (conj (slides-link/show-effect pos))
+                   full? (conj [:vv/set-fullscreen {:on true}])
+                   (and (waiting l) (not (waiting before)))
+                   (conj [:async/debounce {:key slides-link-waiting-key :ms slides-link-waiting-ms
+                                           :dispatch [:slides/link-waited (:session l)]}])
+                   (and (waiting before) (not (waiting l)))
+                   (conj [:async/cancel slides-link-waiting-key]))]
+    (if-let [stopped (when stop? (slides-stop-fx db1 {}))]
+      (update stopped :fx #(into fx %))
+      {:db db1 :fx fx})))
+
+(defn slides-link-waited-fx
+  "Effects of the presenter's wait for its audience window running out (10 s): the pane says where to look. Only for
+   the session `session` still waiting."
+  [db session]
+  (let [l (get-in db [:ui :slides-link])]
+    (when (and (= session (:session l)) (= :waiting (:peer l)))
+      {:db (assoc-in db [:ui :slides-link :waited?] true)})))
+
+(defn slides-link-join-fx
+  "Effects of this window being opened for a linked show — vv:open-files carried `link`, for deck `path`: it becomes
+   the show's :joining audience window (slides-link/link-join), whose show starts when the deck mounts
+   (slides-link-deck-fx). Applied by :files/opened in its own db."
+  [db {:keys [link path]}]
+  {:db (assoc-in db [:ui :slides-link] (slides-link/link-join link path))})
+
+(defn slides-link-deck-fx
+  "Effects of deck `path` mounting in an audience window that joins a show of it (ADR-0048 §8.6): the show starts at
+   the link's :start, in the audience view, with its blank colour and without the speaker-notes hint (this screen is
+   the projector's); the window asks for its own fullscreen when the link says so, and tells main it is ready —
+   which moves nothing. nil unless this window joins a show of `path` and shows that deck."
+  [db path]
+  (let [l (get-in db [:ui :slides-link])]
+    (when (and (= :joining (:phase l)) (= path (:path l))
+               (slides/pdf-shown? db) (= path (facet/active-content-path db)))
+      (let [{l' :link pos :show :keys [fullscreen?] :as r} (slides-link/deck-mounted l path)
+            db1     (assoc-in db [:ui :slides-link] l')
+            started (if (slides/presenting? db1)
+                      {:db db1 :fx [(slides-link/show-effect pos)]}
+                      (slides-present-fx db1 (:page pos) {:fullscreen? fullscreen? :hint? false}))]
+        (-> started
+            (update :db with-blank (:blank pos))
+            (update :fx #(into (vec %) (link-sends r))))))))
+
+(defn slides-swap-screens-fx
+  "Effects of Swap screens (ADR-0048 §8.7): ask main to exchange the two windows' displays. nil unless this window's
+   link is live with its windows on separate displays (slides-link/swap-offered?)."
+  [db]
+  (let [l (get-in db [:ui :slides-link])]
+    (when (slides-link/swap-offered? l)
+      {:db (update-in db [:ui :slides-link] dissoc :swap)
+       :fx [[:vv/presenter-swap {:session (:session l)}]]})))
+
+(defn slides-link-out-after
+  "slides-link-out's :after, on a re-frame context (ADR-0048 §8.5). After every event but :slides/link-state that is
+   the engine's report (:slides/changed) or changes the blank colour, the pure link decides whether this window sends
+   a move — slides-link/reported first for a report, then slides-link/outgoing on the [:ui :slides] mirror — and the
+   move joins the event's effects. Any other event, or a window without a link, passes untouched."
+  [ctx]
+  (let [[id report] (get-in ctx [:coeffects :event])
+        before      (get-in ctx [:coeffects :db])
+        after       (get-in ctx [:effects :db] before)
+        l           (get-in after [:ui :slides-link])]
+    (if (or (nil? l)
+            (= :slides/link-state id)
+            (not (or (= :slides/changed id)
+                     (not= (get-in before [:ui :slides :blank]) (get-in after [:ui :slides :blank])))))
+      ctx
+      (let [l1 (if (= :slides/changed id) (slides-link/reported l report) l)
+            r  (slides-link/outgoing l1 (get-in after [:ui :slides]))
+            l2 (if r (:link r) l1)]
+        (if (= l2 l)
+          ctx
+          (cond-> (assoc-in ctx [:effects :db] (assoc-in after [:ui :slides-link] l2))
+            r (update-in [:effects :fx] (fnil conj []) [:vv/presenter-move (:move r)])))))))
+
+(def slides-link-out
+  "The ONE funnel of a linked show's outgoing moves: every page change and every blank change, including any a future
+   event adds. An interceptor per event would let a new event that blanks silently desync the windows."
+  (rf/->interceptor :id :slides-link-out :after slides-link-out-after))
+
+(rf/reg-global-interceptor slides-link-out)
+
+(rf/reg-event-fx :slides/present-linked (fn [{:keys [db]} _] (slides-present-linked-fx db)))
+(rf/reg-event-fx :slides/link-state
+                 (fn [{:keys [db]} [_ msg]] (slides-link-state-fx db msg)))
+(rf/reg-event-fx :slides/link-waited (fn [{:keys [db]} [_ session]] (slides-link-waited-fx db session)))
+(rf/reg-event-fx :slides/swap-screens (fn [{:keys [db]} _] (slides-swap-screens-fx db)))
 
 ;; ---- live-refresh notes (ADR-0045 / ADR-0046) ------------------------------------------------------------
 ;; A refresh that cannot be DISPLAYED never blanks a document that already rendered: the view keeps the last
@@ -2464,12 +2652,19 @@
     :fx [[:devtools/re-frame-10x false]]}))
 
 ;; the Open dialog returns chosen paths; the pending mode decides current-tab vs new-tab handling.
+(declare slides-link-join-fx)
+
 (rf/reg-event-fx
  :files/opened
- (fn [{:keys [db]} [_ {:keys [paths focus-first]}]]
+ (fn [{:keys [db]} [_ {:keys [paths focus-first link]}]]
+   ;; `link`: this window is a linked show's audience window, opened for the deck `paths` names (ADR-0048 §8.6). It
+   ;; joins in THIS event's db, never in an event of its own: main's next push may already be queued right behind
+   ;; this one, and would find no link
    (let [mode (get-in db [:ui :open-dialog-mode])
-         fx   (files-opened-fx mode paths focus-first)]
-     (cond-> {:db (assoc-in db [:ui :open-dialog-mode] :current)}
+         fx   (files-opened-fx mode paths focus-first)
+         db'  (cond-> (assoc-in db [:ui :open-dialog-mode] :current)
+                (and (map? link) (seq paths)) (-> (slides-link-join-fx {:link link :path (first paths)}) :db))]
+     (cond-> {:db db'}
        (seq fx) (assoc :fx fx)))))
 
 ;; ---- Preferences / settings (theme persists via :theme/set; fonts via :settings/set) ----

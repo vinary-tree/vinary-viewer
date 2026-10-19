@@ -725,9 +725,15 @@
 ;; ---- slides layout: current slide, navigation, listeners (ADR-0045) ------------------------------------
 (defn- report!
   "Tell app-db where the slide show stands — [:ui :slides] via :slides/changed: the deck position of the current
-   page plus the layout, and whether a page rendered in the slides layout carries a text note (:text-notes?, the
-   speaker-notes hint's test, ADR-0048 P5) — coalesced to one dispatch per animation frame however many scroll events
-   arrive."
+   page plus the layout, whether a page rendered in the slides layout carries a text note (:text-notes?, the
+   speaker-notes hint's test, ADR-0048 P5), and whether this view presents a show (:presenting? — true once it
+   applied the show's start, so a linked show never sends a window's pre-show position) — coalesced to one report
+   per animation frame however many scroll events arrive.
+
+   The report is processed AT ONCE (dispatch-sync), in the frame that read it. A linked show's window must see the
+   report before any push queued behind it is shown: a report read before a push but processed after it would end
+   that push's showing and send the old page back — an echo (ADR-0048 §8.4; slides-link/reported). A frame callback
+   runs outside any event, so the synchronous dispatch is never nested."
   [state]
   (when-not (:report-raf @state)
     (swap! state assoc :report-raf
@@ -735,10 +741,11 @@
             (fn [_]
               (swap! state assoc :report-raf nil)
               (when-not (:destroyed? @state)
-                (let [{:keys [deck path layout current doc-gen text-notes?]} @state]
-                  (rf/dispatch [:slides/changed (assoc (deck/position deck (or current 0))
-                                                       :path path :layout layout :doc-gen (or doc-gen 0)
-                                                       :text-notes? (boolean text-notes?))]))))))))
+                (let [{:keys [deck path layout current doc-gen text-notes? presenting?]} @state]
+                  (rf/dispatch-sync [:slides/changed (assoc (deck/position deck (or current 0))
+                                                            :path path :layout layout :doc-gen (or doc-gen 0)
+                                                            :text-notes? (boolean text-notes?)
+                                                            :presenting? (boolean presenting?))]))))))))
 
 (defn- read-text-notes!
   "Read page `idx`'s text notes (vinary.slides.evidence/text-notes) once per version of the document, when the slides

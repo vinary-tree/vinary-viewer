@@ -160,6 +160,11 @@ Preferences font field — and a window claimed from the pool shows the current 
 | `vv:zoom-request` | `requestZoom()` | none | `vinary.main.shell` | Boot pull: main answers on `vv:zoom-changed` with this window's real (Chromium-restored) zoom factor, so `[:ui :window-zoom]` is right before the first zoom action. |
 | `vv:set-fullscreen` | `setFullscreen(on)` | `{on}` | `vinary.main.fullscreen` | Slide show ([ADR-0045](../design-decisions/0045-slide-deck-presentation.md)): make the **sender's** window fullscreen, or leave it; main only ever leaves a fullscreen it entered. |
 | `vv:fullscreen-request` | `requestFullscreenState()` | none | `vinary.main.fullscreen` | Boot pull: main answers on `vv:fullscreen-changed` with this window's state. |
+| `vv:presenter-open` | `presenterOpen(p)` | `{path, page, blank, fullscreen}` | `vinary.main.presenter` | *Present in New Window* ([ADR-0048 §8](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)): ask for a linked show of a deck this window shows. Accepted only from an app window's own main frame, focused, in no other show, retaining `path`; main claims the audience window and answers on `vv:presenter-state` (joined, or refused). |
+| `vv:presenter-move` | `presenterMove(p)` | `{session, mid, page, blank}` | `vinary.main.presenter` | A member's local change, sent by the `slides-link-out` interceptor; main orders it (`seq`), acks the sender and pushes it to the other member. |
+| `vv:presenter-ready` | `presenterReady(p)` | `{session}` | `vinary.main.presenter` | The audience window's deck is showing; main tells the presenter `{peer: "live"}`. Moves nothing. |
+| `vv:presenter-leave` | `presenterLeave(p)` | `{session, reason}` | `vinary.main.presenter` | The member's show stopped (`"stopped"`) or its view unmounted (`"unmounted"`); main tells the other member and closes the audience window. |
+| `vv:presenter-swap` | `presenterSwap(p)` | `{session}` | `vinary.main.presenter` | Swap screens: from a focused member of a live show on separate displays; main moves each window to the other's display, keeping each one's fullscreen. |
 
 > **Retired PDF shims.** `pdfShow` / `pdfHide` / `pdfBounds` (channels `vv:pdf-show`,
 > `vv:pdf-hide`, `vv:pdf-bounds`) remain exposed by the preload as **no-ops with no
@@ -185,7 +190,7 @@ Every `on*` API returns an unsubscribe function.
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc headings]` |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | id or nil | `[:web/active-heading id]` |
 | `vv:history-nav` | `onHistoryNav(cb)` | direction | history event |
-| `vv:open-files` | `onOpenFiles(cb)` | `{paths}` | `[:files/opened payload]` |
+| `vv:open-files` | `onOpenFiles(cb)` | `{paths, link?}` | `[:files/opened payload]` — `link` only for a linked show's audience window (ADR-0048 §8.6): `:files/opened` joins the show in the same update that opens the deck |
 | `vv:settings` | `onSettings(cb)` | EDN string | `[:settings/received text]` — on request, and on a change to the live and warm-pool windows except its writer (§2.5) |
 | `vv:ssh-prompt` | `onSshPrompt(cb)` | `{promptId, kind, host, user, attempt, keyPath?, prompt?}` (non-secret request) | `[:ssh/prompt req]` |
 | `vv:ssh-error` | `onSshError(cb)` | `{connKey, host, kind, message}` | `[:ssh/error info]` |
@@ -195,7 +200,8 @@ Every `on*` API returns an unsubscribe function.
 | `vv:ext-config` | `onExtConfig(cb)` | EDN string | `[:ext-config/received text]` — persisted ad-block + extension prefs; same delivery as `vv:settings` |
 | `vv:app-info` | `onAppInfo(cb)` | app metadata | `[:app-info/received info]` |
 | `vv:zoom-changed` | `onZoomChanged(cb)` | `{context, factor}` | `[:view/zoom-changed …]` — the resolved app-window (`"window"`) or web-view (`"web"`) zoom factor |
-| `vv:fullscreen-changed` | `onFullscreenChanged(cb)` | `{fullscreen, owned}` | `[:view/fullscreen-changed …]` — this window entered or left fullscreen; leaving one a slide show asked for ends the show (ADR-0045) |
+| `vv:fullscreen-changed` | `onFullscreenChanged(cb)` | `{fullscreen, owned, swap?}` | `[:view/fullscreen-changed …]` — this window entered or left fullscreen; leaving one a slide show asked for ends the show (ADR-0045). `swap: true` marks the one report that ends Swap screens (ADR-0048 §8.7): a window that did not get its fullscreen back keeps presenting, windowed |
+| `vv:presenter-state` | `onPresenterState(cb)` | joined, push, ack, peer, swapped, ended or refused (ADR-0048 §8.3) | `[:slides/link-state msg]` — sent to the members of a linked show only, never to a standby window |
 
 ---
 

@@ -4,7 +4,8 @@
    the right 42 %, showing
 
      · a status strip: \"Slide 7 / 12 · overlay 2 / 3\" — frames counted up to pdfpc's end slide
-       (vinary.slides.presenter/counter and overlay-counter; the timer and the pace are deferred, §6.5);
+       (vinary.slides.presenter/counter and overlay-counter; the timer and the pace are deferred, §6.5) — and, in a
+       linked show, its line: the link's notice and Swap screens (§8.6, §8.7);
      · the notes of the current page: its notes REGIONS — a split deck's notes half, an interleaved deck's note pages —
        each in a box of its own (vinary.renderer.pdf-region) with a text layer over it, so they stay selectable and a
        screen reader reads them; then its TEXT notes — the annotation note, then a sidecar note that differs
@@ -124,6 +125,28 @@
                                            :dangerouslySetInnerHTML (r/unsafe-html (note-html memo text))}]
     [:div.vv-presenter-note.vv-presenter-note-plain {:dir dir :data-from (name from)} text]))
 
+;; ---- a linked show's line --------------------------------------------------------------------------------------
+
+(defn- link-status
+  "A linked show's line in the status strip (ADR-0048 §8.6, §8.7): what the link needs the presenter to know
+   (slides-link/notice — opening, waiting, a swap's answer, how the audience window was placed, an end this window
+   presents through), and Swap screens while the audience window is on a separate display. The button never takes
+   the focus, like the rest of the pane: the slide keys keep working after a click."
+  []
+  (let [notice @(rf/subscribe [:slides/link-notice])
+        swap?  @(rf/subscribe [:slides/swap-offered?])]
+    (when (or notice swap?)
+      [:div.vv-presenter-link
+       (when notice
+         [:span.vv-presenter-link-notice {:role "status" :data-tone (name (:tone notice))} (:text notice)])
+       (when swap?
+         [:button.vv-presenter-swap {:type          "button"
+                                     :tab-index     -1
+                                     :title         "Move each window to the other's display"
+                                     :on-mouse-down #(.preventDefault %)
+                                     :on-click      #(rf/dispatch [:slides/swap-screens])}
+          "Swap screens"])])))
+
 ;; ---- the pane ---------------------------------------------------------------------------------------------------
 
 (defn- reads-for
@@ -170,7 +193,8 @@
                                          :class (when invert? "vv-pdf-invert")}
                [:div.vv-presenter-strip
                 [:span.vv-presenter-counter counter]
-                (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])]
+                (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])
+                [link-status]]
                [:section.vv-presenter-notes {:aria-label "Speaker notes" :on-click on-notes-click}
                 [:h2.vv-presenter-heading "Notes"]
                 (for [[i {rp :page rect :rect}] (map-indexed vector regions)]

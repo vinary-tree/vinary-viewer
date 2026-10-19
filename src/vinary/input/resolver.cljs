@@ -14,6 +14,7 @@
             [vinary.app.commands :as commands]
             [vinary.app.overlay :as overlay]
             [vinary.app.slides :as slides]
+            [vinary.app.slides-link :as slides-link]
             [vinary.input.keys :as keys]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.text-edit :as text-edit]
@@ -67,6 +68,7 @@
             :pdf-view?     (slides/pdf-shown? db)
             :slides-view?  (slides/slides-view? db)
             :presenting?   (slides/presenting? db)
+            :swap-offered? (slides-link/swap-offered? (get-in db [:ui :slides-link]))
             ;; the slides key layer applies (keyboard-only: the palette's context never sets it, so the typed-number
             ;; commands never show up there)
             :slides-active? (slides-active? db in-input?)

@@ -18,6 +18,7 @@
             [vinary.main.recent :as recent]
             [vinary.main.window :as window]
             [vinary.main.fullscreen :as fullscreen]
+            [vinary.main.presenter :as presenter]
             [vinary.main.windows :as windows]
             [vinary.main.paths :as paths]
             [vinary.main.shell :as shell]
@@ -99,12 +100,14 @@
 
 (defn- open-files!
   "Send `args` (canonical doc uris) to an already-loaded window's renderer, each in its own tab (first focused).
-   Reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx). No-op if empty."
-  [^js win args]
-  (when-let [paths (seq args)]
-    (profile/mark! "open-sent")
-    (.send (.-webContents win) "vv:open-files"
-           (clj->js {:paths (vec paths) :focus-first true}))))
+   Reuses the renderer's multi-file pipeline (vv:open-files → :files/opened → files-opened-fx). No-op if empty.
+   `link` is a linked slide show's `link` field, for its audience window (ADR-0048 §8.3); nil otherwise."
+  ([^js win args] (open-files! win args nil))
+  ([^js win args link]
+   (when-let [paths (seq args)]
+     (profile/mark! "open-sent")
+     (.send (.-webContents win) "vv:open-files"
+            (clj->js (cond-> {:paths (vec paths) :focus-first true} link (assoc :link link)))))))
 
 (declare forget-instance!)
 
@@ -151,6 +154,7 @@
     (window/remember! win)                 ; reapply maximized state + persist bounds on resize/move/close
     (fullscreen/init!)                     ; slide-show fullscreen IPC (once per process; routed to the sender)
     (fullscreen/wire! win)                 ; report this window's fullscreen enter/leave to its renderer
+    (presenter/wire! win)                  ; a linked slide show learns when this window closes, reloads, crashes
     (.once wc "did-finish-load"
            (fn []
              (profile/mark! "did-finish-load")
@@ -213,22 +217,54 @@
 (defn- claim-window!
   "Open `args` in a pre-warmed pool window — instant, no bundle eval — else cold-create one. Refills the pool
    afterward so the next open is warm too. Returns the window it opened (so `open-window!` can bind the
-   launch's instance-id to it)."
-  [args]
-  (set-dock-visible! true)   ; a window is about to appear — restore the Dock icon (no-op off macOS / if already shown)
-  (if-let [^js win (peek @pool)]
-    (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
-        (set! (.-vvHeadlessActive win) true)
-        (windows/remove-standby! win)
-        (windows/add! win)                          ; it is now a real, tracked, on-screen window
-        (profile/mark! "claim")
-        (open-files! win args)
-        (when-not headless? (.show win) (.focus win))
-        (refill-pool!)
-        win)
-    (let [win (create-window! args)]
-      (refill-pool!)
-      win)))
+   launch's instance-id to it).
+
+   `opts` claim a linked slide show's audience window (ADR-0048 §8.8; vinary.main.presenter); nil for every other
+   open:
+     :on-claim         (fn [win] link) — called with the window before anything is sent to it: the `link` field of
+                       its vv:open-files, or nil to abandon the window (the caller has closed it)
+     :show             :inactive — shown without taking the focus (showInactive), after it is placed
+     :ephemeral?       never saved to window.edn (win.vvEphemeral, read when window/remember! saves)
+     :bounds           where to place it, un-maximized first (a pool window may have been maximized by
+                       window/remember!); nil leaves it where it opens
+     :refill-delay-ms  defer the pool's refill, so a new window does not boot during the show's first transitions
+   Without a pool window the window is wired hidden; once it has loaded, :on-claim runs and it is placed and shown."
+  ([args] (claim-window! args nil))
+  ([args {:keys [on-claim show ephemeral? bounds refill-delay-ms]}]
+   (set-dock-visible! true)   ; a window is about to appear — restore the Dock icon (no-op off macOS / if already shown)
+   (let [deliver! (fn [^js win link]
+                    (open-files! win args link)
+                    (when bounds
+                      (when (.isMaximized win) (.unmaximize win))
+                      (.setBounds win (clj->js bounds)))
+                    (when-not headless?
+                      (if (= :inactive show)
+                        (.showInactive win)
+                        (do (.show win) (.focus win)))))
+         refill!  (fn [] (if refill-delay-ms (js/setTimeout refill-pool! refill-delay-ms) (refill-pool!)))]
+     (if-let [^js win (peek @pool)]
+       (do (swap! pool (fn [ps] (vec (butlast ps))))   ; pop the claimed window out of the pool
+           (set! (.-vvHeadlessActive win) true)
+           (when ephemeral? (set! (.-vvEphemeral win) true))
+           (windows/remove-standby! win)
+           (windows/add! win)                          ; it is now a real, tracked, on-screen window
+           (profile/mark! "claim")
+           (if on-claim
+             (when-let [link (on-claim win)] (deliver! win link))
+             (deliver! win nil))
+           (refill!)
+           win)
+       ;; cold: the window joins its show (on-claim) only once it has loaded, so no message for the show can reach
+       ;; it before the renderer listens, and none can precede its vv:open-files
+       (let [win (if on-claim
+                   (let [win (wire-window! false (fn [^js win] (when-let [link (on-claim win)] (deliver! win link))))]
+                     (set! (.-vvHeadlessActive win) true)
+                     (when ephemeral? (set! (.-vvEphemeral win) true))
+                     (windows/add! win)
+                     win)
+                   (create-window! args))]
+         (refill!)
+         win)))))
 
 ;; ── the window-open authority ─────────────────────────────────────────────────────────────────────────────
 ;; Every window-open trigger — the initial command-line launch, a `vv <file>` over the daemon socket, an
@@ -250,35 +286,40 @@
 
 (defn- open-window!
   "The ONLY caller of claim-window!. `source` classifies the trigger; `id` is the launch's instance-id (nil for
-   OS-originated signals that carry no launch identity); `specs` are resolved open specs
+   OS-originated signals that carry no launch identity); `opts` are claim-window!'s, for :presenter — a linked
+   slide show's audience window, claimed by vinary.main.presenter for a deck its presenter window already holds
+   (so no type override needs registering); `specs` are resolved open specs
    ({:uri :kind? :language? :delimiter? :stdin? :cwd?} — startup/doc-specs · socket-specs; nil/empty =
    New-Tab). At most one window per instance-id: a duplicate signal for an id whose window is still alive
    surfaces that window instead of opening another. Each spec's type override / stdin facts are registered
    in the doc-overrides registry BEFORE the window opens, so the renderer's ordinary `vv:open` round-trip
    finds them on the very first send (`vv:open-files` itself still carries only the uris — the renderer
    pipeline is unchanged)."
-  [source id specs]
-  (case source
-    ;; NON-authoritative signals — never open a window on their own identity:
-    ;;   :activate — a macOS dock reactivation, NOT a `vv` invocation (so no instance-id). Reopen a window only
-    ;;     for a NORMAL app run with none left open (the canonical macOS pattern); NEVER on the resident daemon,
-    ;;     which must stay windowless until a real open. Without the `not daemon?` guard an activate arriving
-    ;;     before a socket open (both id-less/authoritative) could stack a stray empty window on the real one.
-    :activate          (when (and (empty? (windows/all)) (not daemon?)) (claim-window! nil))
-    :daemon-bootstrap  nil                                                 ; a --daemon sibling that lost the lock
-    ;; authoritative user launch/open (:initial | :socket | :second-instance)
-    (if-let [^js win (and id (get @served id))]
-      (when-not (.isDestroyed win)
-        (when-not headless? (.show win) (.focus win)))                     ; a duplicate signal → surface it
-      (do
-        ;; registration precedes claim-window! (which sends vv:open-files): a duplicate signal re-registers
-        ;; nothing because the `served` branch above short-circuits it.
-        (doseq [s specs] (doc-overrides/register! (:uri s) (dissoc s :uri)))
-        (let [^js win (claim-window! (seq (mapv :uri specs)))]
-          (when (and id win)
-            (set! (.-vvInstance win) id)      ; the window holds its own instance-id
-            (swap! served assoc id win))
-          win)))))
+  ([source id specs] (open-window! source id specs nil))
+  ([source id specs opts]
+   (case source
+     ;; a linked slide show's audience window (vinary.main.presenter): no launch identity, so never deduplicated
+     :presenter         (claim-window! (seq (mapv :uri specs)) opts)
+     ;; NON-authoritative signals — never open a window on their own identity:
+     ;;   :activate — a macOS dock reactivation, NOT a `vv` invocation (so no instance-id). Reopen a window only
+     ;;     for a NORMAL app run with none left open (the canonical macOS pattern); NEVER on the resident daemon,
+     ;;     which must stay windowless until a real open. Without the `not daemon?` guard an activate arriving
+     ;;     before a socket open (both id-less/authoritative) could stack a stray empty window on the real one.
+     :activate          (when (and (empty? (windows/all)) (not daemon?)) (claim-window! nil))
+     :daemon-bootstrap  nil                                                 ; a --daemon sibling that lost the lock
+     ;; authoritative user launch/open (:initial | :socket | :second-instance)
+     (if-let [^js win (and id (get @served id))]
+       (when-not (.isDestroyed win)
+         (when-not headless? (.show win) (.focus win)))                     ; a duplicate signal → surface it
+       (do
+         ;; registration precedes claim-window! (which sends vv:open-files): a duplicate signal re-registers
+         ;; nothing because the `served` branch above short-circuits it.
+         (doseq [s specs] (doc-overrides/register! (:uri s) (dissoc s :uri)))
+         (let [^js win (claim-window! (seq (mapv :uri specs)))]
+           (when (and id win)
+             (set! (.-vvInstance win) id)      ; the window holds its own instance-id
+             (swap! served assoc id win))
+           win))))))
 
 (declare app-version)
 
@@ -445,6 +486,11 @@
                                    (mapv (fn [u] {:uri u}) (startup/doc-uris argv resolver))))
                  (open-window! :second-instance (startup/instance-id argv) (:specs result))))))))
   (-> (.whenReady app) (.then (fn [] (profile/mark! "ready") (.setApplicationMenu (.-Menu electron) nil)
+                                ;; linked slide shows (ADR-0048 §8): the vv:presenter-* channels, and the claim
+                                ;; of an audience window, which open-window! carries out like every other open
+                                (presenter/init! {:claim! (fn [{:keys [path] :as opts}]
+                                                            (open-window! :presenter nil [{:uri path}]
+                                                                          (dissoc opts :path)))})
                                 ;; macOS dock icon (unpackaged run — no .app bundle carries it; Linux/Win use the window :icon)
                                 (when (= "darwin" js/process.platform)
                                   (some-> (.-dock app) (.setIcon (.createFromPath nativeImage (dock-icon)))))

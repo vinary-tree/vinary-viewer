@@ -1024,6 +1024,12 @@
 (defn- retained-by? [^js wc path]
   (contains? (retention/paths-for @window-owners (owner-id wc)) path))
 
+(defn window-retains?
+  "Does window `wc` retain `path` (its last vv:retained-files set)? A linked slide show opens only a deck its
+   presenter window already holds (ADR-0048 §8.9)."
+  [^js wc path]
+  (retained-by? wc path))
+
 (defn- send-open-content! [path]
   ;; the single choke point for every watcher/poller-driven re-send (local file watch, asset watch, remote
   ;; poll, File Type re-type): ONE fanned-out read, delivered to every window retaining the path (destroyed ones

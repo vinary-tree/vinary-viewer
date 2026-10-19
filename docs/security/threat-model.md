@@ -369,6 +369,39 @@ denial of service through algorithmic complexity [Crosby and Wallach], not a los
 flooded the same way. ClojureScript's string hash, for one, is an unseeded polynomial, so `"Aa"` and `"BB"` collide
 (scientific/14 §9.3). An audit of the rest of the code for such tables is proposed, not done.
 
+### A linked slide show's windows (ADR-0048 §8.9)
+
+*Present in New Window* gives a renderer three capabilities it did not have: it can make main open **one more
+window** (the audience window), it can **move another window's slide** and blank colour, and it can make main
+**move two windows between displays** (Swap screens). Main's shell, `vinary.main.presenter`, checks every request
+before the pure session model `vinary.main.slides-link` sees it, and the model checks the rest:
+
+- **Who may ask.** Only an app window's own renderer: the IPC sender must be the `webContents` of an app
+  `BrowserWindow` and the message must come from its main frame (`own-sender`: the sender's window's own
+  `webContents` id equals the sender's, and `senderFrame.parent` is null). A web view, an embedded view or a subframe
+  is never a member of a show, so a web page cannot open a window, move a slide or swap screens.
+- **Opening a window.** The asking window must be focused (a stand-in for a user gesture), in no other show, with no
+  claim in flight, and it must already retain the deck's path (`service/window-retains?`). So the new window shows
+  a document the presenter already holds, read through the same content service: no new path is reachable. Each
+  window opens at most one audience window. It is ephemeral (never saved to `window.edn`), and main closes it when
+  the show ends. A refused request is answered `refused` with its reason.
+- **Moving a slide.** A move is accepted only from a member of the session it names, and delivered only to that
+  session's other member. Every payload is validated: a page is an integer in $`[0, 10^6)`$, a blank colour is
+  null, `"black"` or `"white"`, a move id is a positive integer, and a session id is a non-empty string. Session ids
+  (`"show-<n>"`) are not secrets, because the sender's identity, not the id, is what main trusts.
+- **Swapping screens.** Accepted only from a focused member of a live show whose audience window main placed on
+  another display, one swap at a time, and it moves only that session's two windows. If they are no longer on
+  separate displays, nothing moves (`same-display`). Each keeps its own fullscreen and its owner, so main still
+  never leaves a fullscreen the user made (ADR-0045).
+- **Prompts stay off the projector.** An audience window's SSH host-key dialogs, secret prompts and SSH toasts go
+  to its presenter window (`vinary.main.windows/prompt-window`). A passphrase prompt is never drawn on the screen
+  the audience sees.
+
+**Residual.** The focus check stands in for a user gesture: a focused renderer could open a show without a key
+press. The cost is bounded at one window, which shows a document the renderer already holds, and the presenter sees
+it and can close it. On a native Wayland session main cannot place windows, so the audience window opens where the
+compositor puts it (`display: "manual"`).
+
 ---
 
 ## 5. Rendered-markdown XSS

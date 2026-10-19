@@ -7,7 +7,8 @@
             [re-frame.db :as rfdb]
             [re-frame.events]
             [vinary.app.nav :as nav]
-            [vinary.app.slides :as slides]))
+            [vinary.app.slides :as slides]
+            [vinary.app.slides-link :as slides-link]))
 
 ;; predicate registry: ctx -> bool. The resolver assembles ctx from subs so predicates stay pure.
 (def predicates
@@ -25,7 +26,9 @@
    ;; keyboard-only and never offered by the palette
    :slides-active? (fn [ctx] (boolean (:slides-active? ctx)))
    ;; a slide show is running in this window
-   :presenting?    (fn [ctx] (boolean (:presenting? ctx)))})
+   :presenting?    (fn [ctx] (boolean (:presenting? ctx)))
+   ;; this window presents a live linked show on separate displays: Swap screens is offered (ADR-0048 §8.7)
+   :swap-offered?  (fn [ctx] (boolean (:swap-offered? ctx)))})
 
 ;; id -> command spec
 (def registry
@@ -125,9 +128,13 @@
    ;; the overview grid of frames (Tab / o): see the whole deck and jump anywhere; Go to slide… opens it
    :slides/overview        {:id :slides/overview :title "Slide overview" :category "Slides" :dispatch [:slides/overview] :when :slides-view?}
    :slides/goto            {:id :slides/goto :title "Go to slide…" :category "Slides" :dispatch [:slides/overview {:open? true}] :when :slides-view?}
-   ;; the presenter view (ADR-0048 §6, `s`): the current slide beside the speaker notes, the next slide and the counter
+   ;; during a show, this window's fullscreen on / off (ADR-0048 §7, `F`)
    :slides/fullscreen      {:id :slides/fullscreen :title "Fullscreen (this window)" :category "Slides" :dispatch [:slides/fullscreen-toggle] :when :presenting?}
+   ;; the presenter view (ADR-0048 §6, `s`): the current slide beside the speaker notes, the next slide and the counter
    :slides/presenter-view  {:id :slides/presenter-view :title "Speaker notes (presenter view)" :category "Slides" :dispatch [:slides/presenter-view] :when :slides-view?}
+   ;; two linked windows, either drives the show (ADR-0048 §8, `S`): the audience window opens; the notes stay here
+   :slides/present-linked  {:id :slides/present-linked :title "Present in New Window" :category "Slides" :dispatch [:slides/present-linked] :when :pdf-view? :tooltip "Speaker notes stay in this window"}
+   :slides/swap-screens    {:id :slides/swap-screens :title "Swap the presenter and audience screens" :category "Slides" :dispatch [:slides/swap-screens] :when :swap-offered?}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :passwords/open {:id :passwords/open :title "Passwords" :category "Web" :dispatch [:passwords/open]}
@@ -217,4 +224,5 @@
            :pdf-view?     (slides/pdf-shown? db)
            :slides-view?  (slides/slides-view? db)
            :presenting?   (slides/presenting? db)
+           :swap-offered? (slides-link/swap-offered? (get-in db [:ui :slides-link]))
            :in-input?     true)))

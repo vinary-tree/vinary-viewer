@@ -165,8 +165,8 @@ such as the runners and `daemon-smoke`, may set `process.exitCode`: Node honours
 **Hermetic real-app harnesses.** A harness that boots the real main process inherits three ways out of its
 sandbox. All three are closed in every such harness by [`test/fixtures/hermetic-env.js`](../../test/fixtures/hermetic-env.js),
 called before `dist/main/main.js` is required. The harnesses are `find-e2e`, `tree-e2e`, `watch-e2e`,
-`fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e`, `bench-input-latency`, `bench-slide-flip` and the
-cold-start profiler; `daemon-smoke` writes the same config file.
+`fullscreen-e2e`, `presenter-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e`, `bench-input-latency`,
+`bench-slide-flip` and the cold-start profiler; `daemon-smoke` writes the same config file.
 
 | Way out | Risk | Closed by |
 |---|---|---|
@@ -188,7 +188,7 @@ listing runner (`repo-tree` / the synthetic walk) chain never executes in them. 
 verifiable only in pieces.
 
 [`tree-e2e.js`](../../test/tree-e2e.js) was the first harness to close that gap, and the one described here.
-`find-e2e`, `watch-e2e`, `fullscreen-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e` and the
+`find-e2e`, `watch-e2e`, `fullscreen-e2e`, `presenter-e2e`, `remote-daemon-events-e2e`, `remote-pdf-e2e` and the
 `bench-input-latency` / `bench-slide-flip` benchmarks boot the real main the same way, under the hermetic
 environment of §3.4. It `require`s the **real compiled main**
 (`dist/main/main.js`) from inside an Electron process — the only way it can be required, since it
@@ -245,6 +245,17 @@ npm run test:tree-e2e     # compile main+renderer, then run the real app through
 > against `go-to-page!` without its snap: the animation-frame record saw `[2]`, and the end-of-frame record saw
 > `[3, 2]`, one painted frame on the blank slot
 > ([ADR-0048 Verification](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md#verification)).
+
+> **Two windows, one display.** [`presenter-e2e.js`](../../test/presenter-e2e.js) drives a linked slide show
+> (ADR-0048 §8) across two real app windows: the claimed audience window is picked as the *second* live window
+> (`isLiveWindow`), and both must paint (`assertPainting`) before anything is read from them. `npm run
+> test:presenter-e2e` runs it twice, because main claims that window in two ways: from the warm pool (the default; the
+> harness asserts the audience window IS the pool window that was ready) and cold, with the runner's
+> `--env=VV_POOL=0` (a new window, joined only once it has loaded). No display server the harnesses can run gives
+> Chromium a second display: Xvfb reports one, both with RandR monitors added by `xrandr --setmonitor` and with two
+> screens joined by Xinerama (probed 2026-10-19). So the harness covers the one-display show (`display: "same"`), and
+> Swap screens' choreography is unit-tested on fake windows (`vinary.main.fullscreen-test`), its plan by
+> `vinary.main.displays-test`.
 
 > **Note on `test/test-sidebar.js`.** This is the legacy v0.1.0 vmd-patch sidebar
 > harness. It is parse-checked by [`test/lint.js`](../../test/lint.js) but is not

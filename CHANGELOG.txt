@@ -50,6 +50,21 @@ Added
       off, and the show keeps running either way: for one display, on
       Wayland, or with Preferences > Slides > Present full screen off. Only a
       fullscreen the app entered is ever left.
+    - Present in New Window (Shift+S; the View menu, after Start from Current
+      Slide; the palette) puts a deck's speaker notes in one window and its
+      slides in another (ADR-0048 §8). The window you are in starts the show
+      from its current slide and shows the speaker notes; a second window, the
+      audience window, opens with the slides without taking the focus -- on
+      another display, fullscreen, when there is one (on Wayland, move it there
+      and press Shift+F in it). Either window drives: a flip, a typed number,
+      an overview pick, a link or a blank (b / w) in one is shown at once in
+      the other, and Escape in either ends the show in both and closes the
+      audience window. Closing the audience window leaves the notes window
+      presenting; Shift+S opens it again. With two displays, Swap screens (in
+      the notes pane and the palette) moves each window to the other's display,
+      keeping each one's fullscreen. While the notes are shown, a blank shows an
+      "Audience: black" badge instead of blacking them, and SSH prompts for the
+      audience window appear in the notes window, never on the projector.
     - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
       viewer does or does not treat it as a slide deck: the evidence it reads
       (Creator / Producer, page mode, page sizes, how many page labels) and the

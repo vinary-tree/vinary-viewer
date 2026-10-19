@@ -104,6 +104,70 @@
   [link msg]
   (and (contains? #{:joining :live} (:phase link)) (= (:session msg) (:session link))))
 
+;; ---- what the presenter's pane shows ---------------------------------------------------------------------------
+
+(defn swap-offered?
+  "Is Swap screens offered in this window (ADR-0048 §8.7)? Its link is live, it is the presenter, and the joined
+   message said the audience window was placed on a separate display (\"same\" has no other display; \"manual\" —
+   native Wayland — cannot place windows)."
+  [link]
+  (boolean (and (live? link) (= :presenter (:role link)) (= "separate" (:display link)))))
+
+(def ^:private ended-texts
+  "What the pane says when a link ends and this window keeps presenting, by the end's reason — main's ended
+   message, or main's refusal of the request."
+  {"audience-left"   "The audience window closed. Shift+S opens it again."
+   "display-removed" "The audience window's display was removed. Shift+S opens it again."
+   "no-window"       "No audience window could be opened."
+   "busy"            "This window is already in a linked show."
+   "not-focused"     "No audience window opened: this window was not focused. Press Shift+S again."
+   "not-retained"    "No audience window opened: this window no longer holds the deck."
+   "invalid"         "No audience window opened: the request was not valid."})
+
+(defn- lost-text [lost]
+  (let [lost (set lost)]
+    (cond
+      (and (lost "audience") (lost "presenter")) "Neither window could go fullscreen again; press Shift+F in each."
+      (lost "audience")                          "The audience window could not go fullscreen again; press Shift+F in it."
+      (lost "presenter")                         "This window could not go fullscreen again; press Shift+F."
+      :else                                      nil)))
+
+(defn notice
+  "The line the presenter's pane shows about `link`, {:tone :info|:warning :text}, or nil for none (ADR-0048 §8.6,
+   §8.7). In order: opening; waiting for the audience window (and, after 10 s — :waited? — where to look); main's
+   last answer to Swap screens; how the audience window was placed when that needs the presenter (\"manual\": move it
+   by hand; \"same\": the window to share in a call); an end this window keeps presenting through. Only for the
+   presenter: the audience window's screen is the projector's."
+  [link]
+  (when (= :presenter (:role link))
+    (let [{:keys [phase peer waited? swap display reason]} link]
+      (case phase
+        :opening {:tone :info :text "Opening the audience window…"}
+        :ended   (when-let [t (get ended-texts reason)] {:tone :warning :text t})
+        :live    (cond
+                   (= :waiting peer)
+                   {:tone :info
+                    :text (if waited?
+                            "Waiting for the audience window… It may be behind another window, or on another screen."
+                            "Waiting for the audience window…")}
+
+                   (and swap (not (:swapped swap)))
+                   {:tone :warning :text (if (= "busy" (:why swap))
+                                           "The screens are already being swapped."
+                                           "Both windows are on one display.")}
+
+                   (and swap (seq (:lost swap)))
+                   {:tone :warning :text (lost-text (:lost swap))}
+
+                   (= "manual" display)
+                   {:tone :info :text "Move the audience window to the other screen, then press Shift+F in it."}
+
+                   (= "same" display)
+                   {:tone :info :text "One display: share the audience window in a call."}
+
+                   :else nil)
+        nil))))
+
 ;; ---- what the window sends --------------------------------------------------------------------------------------
 
 (defn outgoing

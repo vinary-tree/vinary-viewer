@@ -44,11 +44,15 @@
 
 (defn blank-overlay
   "The black / white screen of a running show (keys b . / w ,): covers the slides beneath (z 7 — under the chip,
-   the refresh note and the find bar); a click, any navigation key or Escape ends it."
+   the refresh note and the find bar); a click, any navigation key or Escape ends it. In the presenter view of a
+   linked show the audience's screen is the blank one: this window shows a badge over the slide instead, and keeps
+   its notes in view (ADR-0048 §8.2)."
   []
   (when-let [b @(rf/subscribe [:slides/blank])]
-    [:div.vv-slides-blank {:data-blank (name b) :aria-hidden true
-                           :on-click #(rf/dispatch [:slides/unblank])}]))
+    (if @(rf/subscribe [:slides/audience-blank])
+      [:div.vv-slides-blank-badge {:data-blank (name b) :role "status"} (str "Audience: " (name b))]
+      [:div.vv-slides-blank {:data-blank (name b) :aria-hidden true
+                             :on-click #(rf/dispatch [:slides/unblank])}])))
 
 (defn hud
   "Every slide-show indicator for the shown document."

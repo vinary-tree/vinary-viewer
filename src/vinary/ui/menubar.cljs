@@ -53,6 +53,9 @@
              :event [:slides/present {:from :first}] :pdf-only true}
             {:label "Start from Current Slide" :access-key "u" :accel "Shift+F5"
              :event [:slides/present {:from :current}] :pdf-only true}
+            ;; two linked windows (ADR-0048 §8): the audience window opens, the speaker notes stay in this one
+            {:label "Present in New Window"    :access-key "p" :accel "Shift+S"
+             :event [:slides/present-linked] :pdf-only true :tooltip "Speaker notes stay in this window"}
             {:label "Slide Overview"           :access-key "e" :accel "Tab"
              :event [:slides/overview {:open? true}] :slides-only true}
             ;; diff-only (ADR-0037): ONE toggling item — realize-item flips its label to "Expand All
@@ -438,11 +441,12 @@
     :else
     ^{:key i}
     [:div
-     (merge {:class          (menu-item-class "vv-menu-item" (= focus i))
-             :role           "menuitem"
-             :on-click       #(act! (:event item))
-             :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
-                                  (rf/dispatch [:menu/submenu nil]))}
+     (merge (cond-> {:class          (menu-item-class "vv-menu-item" (= focus i))
+                     :role           "menuitem"
+                     :on-click       #(act! (:event item))
+                     :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
+                                          (rf/dispatch [:menu/submenu nil]))}
+              (:tooltip item) (assoc :title (:tooltip item)))
             (access/access-attrs (:access-key item)))
      [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
      (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))

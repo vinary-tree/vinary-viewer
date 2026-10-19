@@ -135,3 +135,25 @@
     (is (nil? (displays/swap-plan {:presenter presenter} [laptop projector])) "one window")
     (is (nil? (displays/swap-plan {:presenter presenter :audience {:bounds (:bounds projector)}} []))
         "no displays")))
+
+(deftest where-the-audience-window-of-a-new-show-goes
+  (let [presenter (rect 100 100 1280 860)]
+    (is (= {:display "separate" :target 2 :bounds (rect 1920 0 1280 720)}
+           (displays/audience-plan [laptop projector] presenter true))
+        "the other display, at the presenter window's size clamped to that display's work area")
+    (is (= {:display "same" :target nil :bounds nil} (displays/audience-plan [laptop] presenter true))
+        "one display: the window opens where it would, beside the presenter")
+    (is (= {:display "manual" :target nil :bounds nil} (displays/audience-plan [laptop projector] presenter false))
+        "native Wayland: main places nothing")))
+
+(deftest removing-the-audience-windows-display
+  (let [on-projector (rect 1920 0 1280 720)]
+    (is (true? (displays/on-removed-display? projector [laptop] on-projector 2))
+        "the display main placed it on, and still under it")
+    (is (true? (displays/on-removed-display? projector [laptop] (:bounds laptop) 2))
+        "the system already moved it over the presenter's display: the placed display decides")
+    (is (true? (displays/on-removed-display? projector [laptop] on-projector nil))
+        "placed by nobody (one display, or Wayland) but moved there by hand: its bounds decide")
+    (is (false? (displays/on-removed-display? monitor [laptop projector] on-projector 2))
+        "another display went away")
+    (is (false? (displays/on-removed-display? nil [laptop] on-projector 2)) "no display")))

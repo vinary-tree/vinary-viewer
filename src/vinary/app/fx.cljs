@@ -261,6 +261,17 @@
            (fn [{:keys [on]}]
              (when-let [^js vv (.-vv js/window)]
                (when (.-setFullscreen vv) (.setFullscreen vv (boolean on))))))
+;; a linked slide show (ADR-0048 §8.3): this window's requests to main, which owns the session; payloads are plain data
+(rf/reg-fx :vv/presenter-open
+           (fn [req] (when-let [^js vv (.-vv js/window)] (when (.-presenterOpen vv) (.presenterOpen vv (clj->js req))))))
+(rf/reg-fx :vv/presenter-move
+           (fn [move] (when-let [^js vv (.-vv js/window)] (when (.-presenterMove vv) (.presenterMove vv (clj->js move))))))
+(rf/reg-fx :vv/presenter-ready
+           (fn [req] (when-let [^js vv (.-vv js/window)] (when (.-presenterReady vv) (.presenterReady vv (clj->js req))))))
+(rf/reg-fx :vv/presenter-leave
+           (fn [req] (when-let [^js vv (.-vv js/window)] (when (.-presenterLeave vv) (.presenterLeave vv (clj->js req))))))
+(rf/reg-fx :vv/presenter-swap
+           (fn [req] (when-let [^js vv (.-vv js/window)] (when (.-presenterSwap vv) (.presenterSwap vv (clj->js req))))))
 (rf/reg-fx :render-cache/invalidate
            (fn [{:keys [path stamp]}] (warm-cache/invalidate-path! path stamp)))
 (rf/reg-fx :render-cache/retain-only (fn [paths] (warm-cache/retain-only! paths)))

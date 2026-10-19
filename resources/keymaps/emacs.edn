@@ -40,6 +40,7 @@
    ;; slide show (ADR-0045): F5 presents the shown PDF from the first slide, Shift+F5 from the current one
    "f5" :slides/present
    "S-f5" :slides/present-current
+   "S"    :slides/present-linked   ; Present in New Window: the notes stay in this window (ADR-0048 §8)
    "escape" :input/escape
    ;; font-size / zoom (whole-app, like a browser) — bind both C-= and C-+ so it works with/without Shift
    "C-0" :view/zoom-reset

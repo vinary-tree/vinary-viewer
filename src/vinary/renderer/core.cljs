@@ -151,7 +151,10 @@
     ;; for; a boot pull seeds [:ui :fullscreen?] (a window restored fullscreen), like requestZoom
     (when (.-onFullscreenChanged vv)
       (.onFullscreenChanged vv (fn [p] (rf/dispatch [:view/fullscreen-changed p])))
-      (when (.-requestFullscreenState vv) (.requestFullscreenState vv)))))
+      (when (.-requestFullscreenState vv) (.requestFullscreenState vv)))
+    ;; a linked slide show's messages from main (ADR-0048 §8.3): joined, push, ack, peer, swapped, ended, refused
+    (when (.-onPresenterState vv)
+      (.onPresenterState vv (fn [p] (rf/dispatch [:slides/link-state (js->clj p :keywordize-keys true)]))))))
 
 (defn keybindings!
   "Install the keymap resolver: vim/emacs/default keymaps + the command registry + modal/chord

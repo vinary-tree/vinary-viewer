@@ -27,15 +27,15 @@ A -[IPC_BORDER]> M : **vv:presenter-open** {path, page: 2, blank: null, fullscre
 deactivate A
 activate M
 M -> M : the sender is an app window's own webContents,\nit is focused, it retains `path`, it is in no session →\nbegin: session "show-1", seq 0, page 2
-M -> B : claim a warm-pool window: mark it ephemeral (window.edn\nis never written for it), un-maximize, place it on the other\ndisplay, showInactive() — window A keeps the focus
-M -[IPC_BORDER]> B : **vv:open-files** {paths: [path], link: {session: "show-1", seq: 0,\nrole: "audience", page: 2, blank: null, fullscreen: true}}
+M -> B : claim a warm-pool window (with none ready, a new window, claimed only\nonce it has loaded): mark it ephemeral (window.edn is never written for it),\nmake it the session's audience member, un-maximize, place it on the other\ndisplay, showInactive() — window A keeps the focus
 M -[IPC_BORDER]> A : **vv:presenter-state** {session: "show-1", seq: 0, role: "presenter",\npage: 2, joined: true, display: "separate"}
+M -[IPC_BORDER]> B : **vv:open-files** {paths: [path], link: {session: "show-1", seq: 0,\nrole: "audience", page: 2, blank: null, fullscreen: true}}
 deactivate M
 activate A
 A -> A : phase :live, known = the start (page 2); the interceptor runs once —\nA has not moved, so nothing is sent; peer :waiting ("Waiting for the\naudience window…"); a separate display and :slides-fullscreen? →\nvv:set-fullscreen {on: true} for window A itself
 deactivate A
 activate B
-B -> B : :files/opened with `link` → [:slides/link-join]: phase :joining,\n:start {seq 0, page 2}; the deck opens in a tab
+B -> B : :files/opened with `link` joins in the same update that opens\nthe deck in a tab: phase :joining, :start {seq 0, page 2}
 B -> B : the deck mounts (:pdf/deck-detected) → the show starts at page 2\nin the audience view; phase :live, known = the start (page 2, seq 0);\nvv:set-fullscreen {on: true} for window B itself
 B -> V : slide 3, fullscreen on the projector
 B -> B : the engine's first report {page 2, presenting? true} equals known →\nnothing is sent: B never announces its page as a move (a move would be\nordered after any step A took while B loaded — and undo it)

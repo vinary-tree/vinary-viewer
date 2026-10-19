@@ -47,7 +47,8 @@
           [:div.vv-palette-list
            (for [[i {:keys [item]}] (map-indexed vector items)]
              ^{:key i}
-             [:div.vv-palette-item {:class    (when (= i sel) "vv-palette-selected")
-                                    :on-click #(run-item! item)}
+             [:div.vv-palette-item (cond-> {:class    (when (= i sel) "vv-palette-selected")
+                                            :on-click #(run-item! item)}
+                                     (:tooltip item) (assoc :title (:tooltip item)))
               [:span.vv-palette-label (:label item)]
               (when (:category item) [:span.vv-palette-cat (:category item)])])]]]))))

@@ -89,6 +89,12 @@ contextBridge.exposeInMainWorld('vv', {
   // slide shows (ADR-0045): window-level fullscreen of THIS window only; main leaves only a fullscreen it entered
   setFullscreen: (on) => ipcRenderer.send('vv:set-fullscreen', { on: Boolean(on) }),
   requestFullscreenState: () => ipcRenderer.send('vv:fullscreen-request'),   // boot pull, like requestZoom
+  // linked slide shows (ADR-0048 §8): main owns the session, its seq and the position; each window renders
+  presenterOpen: (req) => ipcRenderer.send('vv:presenter-open', req),       // {path, page, blank, fullscreen}
+  presenterMove: (move) => ipcRenderer.send('vv:presenter-move', move),     // {session, mid, page, blank}
+  presenterReady: (req) => ipcRenderer.send('vv:presenter-ready', req),     // {session}
+  presenterLeave: (req) => ipcRenderer.send('vv:presenter-leave', req),     // {session, reason}
+  presenterSwap: (req) => ipcRenderer.send('vv:presenter-swap', req),       // {session}
   httpZoom: (dir) => ipcRenderer.send('vv:http-zoom', dir),
   httpZoomSet: (f) => ipcRenderer.send('vv:http-zoom-set', f),
 
@@ -200,6 +206,7 @@ contextBridge.exposeInMainWorld('vv', {
   onConnections: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:connections', h); return () => ipcRenderer.removeListener('vv:connections', h); },
   onZoomChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:zoom-changed', h); return () => ipcRenderer.removeListener('vv:zoom-changed', h); },
   onFullscreenChanged: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:fullscreen-changed', h); return () => ipcRenderer.removeListener('vv:fullscreen-changed', h); },
+  onPresenterState: (cb) => { const h = (_e, p) => cb(p); ipcRenderer.on('vv:presenter-state', h); return () => ipcRenderer.removeListener('vv:presenter-state', h); },
   onAppInfo: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:app-info', h);

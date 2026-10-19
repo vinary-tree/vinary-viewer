@@ -54,6 +54,7 @@
    ;; slide show (ADR-0045): F5 presents the shown PDF from the first slide, Shift+F5 from the current one
    "f5"   :slides/present
    "S-f5" :slides/present-current
+   "S"    :slides/present-linked   ; Present in New Window: the notes stay in this window (ADR-0048 §8)
    ;; Alt+arrow navigation is keymap-independent (here in :all, not :normal, so vim's normal
    ;; mode does not consume them): ←/→ history, ↑ parent dir, ↓ open highlighted target.
    "M-left"  :history/back

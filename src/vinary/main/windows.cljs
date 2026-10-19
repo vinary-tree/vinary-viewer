@@ -74,6 +74,30 @@
   ^js []
   (live (some-> ^js (active) .-webContents)))
 
+(defonce ^:private prompt-redirect (atom nil))   ; (fn [win] → window or nil), installed by vinary.main.presenter
+
+(defn set-prompt-redirect!
+  "Install `f`, (fn [win] → a window or nil): where a prompt goes instead when `win` is the active window. A linked
+   slide show's audience window sends its prompts to its presenter window (ADR-0048 §8.8). The redirect lives
+   here, as a function, so this namespace stays a leaf. nil removes it."
+  [f]
+  (reset! prompt-redirect f))
+
+(defn prompt-window
+  "The window an SSH host-key dialog, secret prompt or status toast goes to: the active window (see `active`) —
+   unless the redirect names another live window for it, so nothing modal or secret appears on a projector. nil
+   when no window is on screen."
+  ^js []
+  (let [^js win    (active)
+        redirect   @prompt-redirect
+        ^js target (when (and win redirect) (redirect win))]
+    (if (some-> target .-webContents live) target win)))
+
+(defn prompt-wc
+  "The prompt window's LIVE webContents (see `prompt-window`), or nil when no window is on screen."
+  ^js []
+  (live (some-> ^js (prompt-window) .-webContents)))
+
 (defn send!
   "Send `channel` + `payload` to the ACTIVE window's renderer, or do nothing when no live window is on screen.
    Returns true when it was delivered. The targeted counterpart to `broadcast!`, for state that only means

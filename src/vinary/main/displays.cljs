@@ -111,6 +111,29 @@
     (nil? target)              "same"
     :else                      "separate"))
 
+(defn audience-plan
+  "Where a new linked show's audience window goes, given the displays, the presenter window's bounds and whether
+   main may place windows (`placement-supported?`): {:display arrangement :target id :bounds rect}. With placement
+   and another display, the window takes the presenter window's size, `placement`d on the audience-display, whose
+   id is :target. Otherwise :target and :bounds are nil, and the window opens where it would: beside the presenter
+   with one display (\"same\"), where the compositor puts it on native Wayland (\"manual\")."
+  [displays presenter-bounds placement-supported?]
+  (let [target (when placement-supported? (audience-display displays presenter-bounds))]
+    {:display (arrangement placement-supported? target)
+     :target  (:id target)
+     :bounds  (when target (placement target presenter-bounds))}))
+
+(defn on-removed-display?
+  "Was a window on display `removed` (the display a display-removed event names), so that removing it ends the show
+   (ADR-0048 §8.6)? Yes when `removed` is the display main placed the window on (`placed-id`; nil when main placed
+   nothing), or the display its bounds `rect` overlap most, counting `removed` among the `remaining` displays. The
+   first covers a fullscreen window the system has already moved onto another display — over the presenter, which
+   is what ending the show prevents; the second, a window the user moved there by hand."
+  [removed remaining rect placed-id]
+  (boolean (and removed
+                (or (= placed-id (:id removed))
+                    (= (:id removed) (:id (display-of (conj (vec remaining) removed) rect)))))))
+
 ;; ---- swap screens -----------------------------------------------------------------------------------------------
 
 (defn swap-plan

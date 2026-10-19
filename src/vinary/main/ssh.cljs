@@ -21,13 +21,15 @@
 ;; `.send` on a destroyed window throws "Object has been destroyed" (an uncaught main-process exception when it
 ;; comes from a timer). `windows/active-wc` filters destroyed windows internally and only ever touches on-screen
 ;; windows, so it cannot throw and always targets the window the user is actually looking at (mirrors passwords.cljs).
-(defn- app-wc ^js [] (windows/active-wc))
+;; `prompt-wc` is that window — except a linked slide show's audience window, whose prompts and toasts go to its
+;; presenter window instead, so a dialog or a password prompt never appears on the projector (ADR-0048 §8.8).
+(defn- app-wc ^js [] (windows/prompt-wc))
 
 ;; Native, main-side, secretless yes/no — never *Sync (that would block main during the connect). Parent the
-;; dialog to the live active window (nil when none is on screen — dialog then renders parentless), never a
+;; dialog to the live prompt window (nil when none is on screen — dialog then renders parentless), never a
 ;; captured/destroyed window.
 (defn- prompt-host-key [info]
-  (let [^js win (windows/active)
+  (let [^js win (windows/prompt-window)
         m       (js->clj info :keywordize-keys true)
         detail  (str "Host: " (:host m) (when (:port m) (str ":" (:port m)))
                      "\nKey type: " (:keyType m)

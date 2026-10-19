@@ -15,6 +15,7 @@
             [vinary.search.config :as search-config]
             [vinary.app.zoom :as zoom]
             [vinary.app.slides :as slides]
+            [vinary.app.slides-link :as slides-link]
             [vinary.slides.deck :as deck]
             [vinary.input.keymaps-registry :as registry]))
 
@@ -133,13 +134,13 @@
  ::palette-ctx
  :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
  :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
- :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?]
- (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting?] _]
+ :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?] :<- [:slides/swap-offered?]
+ (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting? swap?] _]
    {:tabs tabs :active-tab active-tab :active-path active-path
     :can-back? back? :can-forward? fwd?
     :find-visible? (:visible? find)
     ;; gate the PDF / Slides commands (ADR-0045); :slides-active? is deliberately absent — keyboard-only
-    :pdf-view? pdf? :slides-view? slides? :presenting? presenting?
+    :pdf-view? pdf? :slides-view? slides? :presenting? presenting? :swap-offered? swap?
     ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being
     ;; free must not be offered
     :in-input? true}))
@@ -253,6 +254,16 @@
 (rf/reg-sub :slides/presenting? :<- [:slides/presentation] (fn [p _] (boolean (:active? p))))
 ;; the running show's blanked screen (:black / :white) or nil — the blank overlay
 (rf/reg-sub :slides/blank (fn [db _] (get-in db [:ui :slides :blank])))
+;; a linked show's link at [:ui :slides-link] (ADR-0048 §8; vinary.app.slides-link), or nil
+(rf/reg-sub :slides/link (fn [db _] (get-in db [:ui :slides-link])))
+;; the presenter pane's line about the link, {:tone :text} or nil (slides-link/notice)
+(rf/reg-sub :slides/link-notice :<- [:slides/link] (fn [l _] (slides-link/notice l)))
+;; is Swap screens offered in this window (a live link, its presenter, on separate displays)?
+(rf/reg-sub :slides/swap-offered? :<- [:slides/link] (fn [l _] (slides-link/swap-offered? l)))
+;; blanking in the presenter view of a live link shows a badge, not a blank screen (ADR-0048 §8.2): the colour, or nil
+(rf/reg-sub :slides/audience-blank
+            :<- [:slides/blank] :<- [:slides/link] :<- [:slides/presenter-shown?]
+            (fn [[b l shown?] _] (when (and b shown? (slides-link/live? l) (= :presenter (:role l))) b)))
 ;; the overview grid (ADR-0045 §Overview): open?, the mounted view's document generation (a live refresh bumps
 ;; it — the grid re-borrows the document), which page a frame's tile shows, and the dark-invert flag it mirrors
 (rf/reg-sub :slides/overview?      (fn [db _] (boolean (get-in db [:ui :slides :overview?]))))

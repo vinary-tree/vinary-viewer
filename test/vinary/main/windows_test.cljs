@@ -88,3 +88,24 @@
       (is (false? (windows/send! "vv:adblock-status" "x")) "destroyed window → not delivered, no throw")
       (is (= [] @sent) "nothing was ever sent to a destroyed webContents")
       (windows/remove! dead))))
+
+(deftest prompts-follow-the-redirect-to-a-live-window
+  (testing "prompt-window is the active window unless the redirect names another live one (ADR-0048 §8.8)"
+    (let [sent      (atom [])
+          presenter (fake-window sent false)
+          audience  (fake-window sent false)
+          closed    (fake-window sent true)]
+      (windows/add! presenter)
+      (windows/add! audience)                  ; registered last: the active window when nothing is focused
+      (is (identical? audience (windows/prompt-window)) "no redirect: the active window")
+      (windows/set-prompt-redirect! (fn [w] (when (identical? w audience) presenter)))
+      (is (identical? presenter (windows/prompt-window)) "the audience window's prompts go to its presenter")
+      (is (identical? (.-webContents presenter) (windows/prompt-wc)) "…and so does the secret prompt's send")
+      (windows/set-prompt-redirect! (fn [_] closed))
+      (is (identical? audience (windows/prompt-window)) "a redirect to a closed window is ignored")
+      (windows/set-prompt-redirect! (fn [_] nil))
+      (is (identical? audience (windows/prompt-window)) "nil from the redirect: the active window")
+      (windows/set-prompt-redirect! nil)
+      (windows/remove! presenter)
+      (windows/remove! audience)
+      (is (nil? (windows/prompt-window)) "no window on screen: nil"))))

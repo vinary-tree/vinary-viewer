@@ -52,6 +52,7 @@
   (case source
     :file  (file-candidates projects query match-opts)
     :theme (rank-items themes query match-opts)
-    (rank-items (mapv (fn [c] {:label (:title c) :command (:id c) :category (:category c) :kind :command})
+    (rank-items (mapv (fn [c] (cond-> {:label (:title c) :command (:id c) :category (:category c) :kind :command}
+                                          (:tooltip c) (assoc :tooltip (:tooltip c))))
                       visible-commands)
                 query match-opts)))

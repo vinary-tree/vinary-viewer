@@ -769,15 +769,19 @@ theory/11 §5.6).
 `slides-link/outgoing`, which sends when the link is live, the mirror says the engine is presenting (`:presenting?`, a
 field the report gains: true only once the engine itself applied the show's start, so a window's pre-show reports never
 go out), the layout is `:slides`, the mirror's path is the link's, and the position differs from `known`. This one
-funnel catches every page change and every blank change, including any a future event adds. Rejected: an interceptor
+funnel catches every page change and every blank change, including any a future event adds. The engine's report is
+processed **at once** (`dispatch-sync`, from the animation frame that read the position — a frame callback runs
+outside any event, so the dispatch is never nested): a report read before a push but processed after it would end
+that push's showing (`applying`) and send the old page back, an echo. Rejected: an interceptor
 per event (a new event that blanks would silently desync) and a Reagent `track!` (side effects in reactions).
 
 **Incoming** is `:slides/link-state`: a push or a released held state runs `show`; a joining window updates `:start`.
 
 #### 8.6 Joining, leaving, and the rest of the lifecycle (L4, L5)
 
-B receives `vv:open-files` with `link`: `:files/opened` dispatches `[:slides/link-join link]` (phase `:joining`), and
-the deck opens in a tab. When B's deck mounts (`:pdf/deck-detected` for that path, a deck or not — F5 presents any
+B receives `vv:open-files` with `link`: `:files/opened` joins the show (phase `:joining`, `slides-link/link-join`)
+in the same app-db update that opens the deck in a tab. A join dispatched as an event of its own would be queued
+behind a push main sent right after the open, and the push would find no link. When B's deck mounts (`:pdf/deck-detected` for that path, a deck or not — F5 presents any
 PDF), B starts the show at `:start` in the audience view, with `known = start`, asks for its own fullscreen when the
 link says so, and sends `vv:presenter-ready`; main tells A `{peer: "live"}`, and A's pane drops its *Waiting for the
 audience window…* notice (after 10 s it adds a hint to look at that window). Pushes that arrive while B is joining only
@@ -793,7 +797,21 @@ move `:start`.
 | a display is added, or its metrics change | each window's DPR watcher | nothing in main; link again to use a new display |
 | a live refresh | ADR-0046 fan-out — one read, the same `seq` to both windows | each window replaces its document in place and keeps its page; a clamped page is reported, differs from `known`, and the windows converge |
 | the warm pool | — | standby windows never receive `vv:presenter-state` (members only) |
-| no window could be claimed | the claim fails | the presenter gets `ended {stop: false, reason: "no-window"}` |
+| no window could be claimed, or a cold audience window closed or crashed before it loaded | the claim throws, or the window's `closed` / `render-process-gone` while it is still *unclaimed* (§8.8) | the presenter gets `ended {stop: false, reason: "no-window"}`; a crashed window still open is closed |
+
+The presenter's pane carries one line about the link (`slides-link/notice`; the audience window shows none — its
+screen is the projector's). The first that applies is shown:
+
+| When | The line |
+|---|---|
+| the request is on its way | *Opening the audience window…* |
+| the audience's deck is not showing yet | *Waiting for the audience window…* — after 10 s, *… It may be behind another window, or on another screen.* |
+| Swap screens moved nothing | *The screens are already being swapped.* (`busy`) or *Both windows are on one display.* (`same-display`) |
+| a window did not get its fullscreen back after a swap | §8.7 |
+| `display: "manual"` | *Move the audience window to the other screen, then press Shift+F in it.* |
+| `display: "same"` | *One display: share the audience window in a call.* |
+| the link ended and this window keeps presenting | `audience-left`: *The audience window closed. Shift+S opens it again.* · `display-removed`: *The audience window's display was removed. Shift+S opens it again.* · `no-window`: *No audience window could be opened.* |
+| main refused the request | `busy`: *This window is already in a linked show.* · `not-focused`: *No audience window opened: this window was not focused. Press Shift+S again.* · `not-retained`: *No audience window opened: this window no longer holds the deck.* · `invalid`: *No audience window opened: the request was not valid.* |
 
 #### 8.7 Displays, placement, fullscreen, and swapping screens (L1, L9)
 
@@ -805,7 +823,8 @@ un-maximizes the claimed window (a pool window may have been maximized by `windo
 target display, and shows it inactive. The link's `fullscreen` is the presenter's `:slides-fullscreen?` preference
 **and** a separate display **and** placement supported; B then asks for its own fullscreen with the existing
 `vv:set-fullscreen`, owned by `decide`. A asks for its own fullscreen when the joined message says `display:
-"separate"`, so a presenter never covers the only display: with one display, B is the window to share in a call. On
+"separate"`, so a presenter never covers the only display: with one display, B is the window to share in a call, and
+A's pane says so (*One display: share the audience window in a call.*). On
 Wayland, B opens where the compositor puts it (`display: "manual"`), and A's pane says: *Move the audience window to
 the other screen, then press Shift+F in it.* After B goes fullscreen, main re-focuses A (best effort — window managers
 differ; correctness never depends on the focus, since either window drives).
@@ -839,7 +858,8 @@ entered: the user's own fullscreen survives the end of the show. The renderer ne
 window could not enter fullscreen again (a window manager refused it), the final report says `fullscreen: false`.
 With `swap: true`, `fullscreen-changed-fx` then keeps the show running windowed, and sets the presentation's
 `:fullscreen?` to false, instead of ending it. The presenter's pane says *The audience window could not go fullscreen
-again; press Shift+F in it* (or names the presenter window when that is the one).
+again; press Shift+F in it.*, *This window could not go fullscreen again; press Shift+F.* when it is the presenter's,
+or *Neither window could go fullscreen again; press Shift+F in each.*
 
 Main then re-focuses the window the swap came from (best effort) and answers `swapped: true`, with `lost` naming any
 window that did not get its fullscreen back. Nothing in the session changes: roles, positions and the `seq` are
@@ -854,9 +874,15 @@ windows that remain are unmarked, and their state is reported.
   windows are wired before anyone knows their role — is never saved. The fullscreen rule (`persistable-bounds`) is
   unchanged.
 - **The warm pool.** `open-window!` gains the source `:presenter` and stays the only caller of `claim-window!`, which
-  takes `{:show :inactive :bounds :link :ephemeral?}` and defers the pool's refill about 5 s, so a new window does not
-  boot during the first transitions. The cold path wires the window hidden, places it when it has loaded, then shows it
-  inactive. A pool window is current because it was a standby window (ADR-0047).
+  takes `{:on-claim :show :ephemeral? :bounds :refill-delay-ms}`. `:on-claim` is called with the window before
+  anything is sent to it: the shell makes the window the session's audience member (`slides-link/claimed`) and
+  returns the `link` its `vv:open-files` carries — or nil when the show ended meanwhile, and the window is closed.
+  `:show :inactive` shows it without the focus, `:bounds` places it (un-maximized first), and `:refill-delay-ms`
+  (5 s) defers the pool's refill, so a new window does not boot during the first transitions. The cold path wires
+  the window hidden and calls `:on-claim` only once it has loaded — so no message of the show reaches it before its
+  renderer listens, and none precedes its `vv:open-files` — then places it and shows it inactive. Until then the
+  window is *unclaimed*: if it closes or crashes first, the claim fails (`no-window`). A pool window is current
+  because it was a standby window (ADR-0047).
 - **Remote decks.** B's open of an `ssh://` path A already retains costs one more pipelined read (ADR-0046 measured
   32 MiB at 50 ms RTT in about 1 s); afterwards every change is one read fanned out to both. Pushes wait in `:start`
   until B's deck mounts.
@@ -1020,8 +1046,12 @@ records the new boundary.
 | §3 in the engine: note pages marked and never drawn in the Slides layout, flips over them, the next slide kept rendered, typed numbers, the overview, find, a show started from a note page, `:off`, one XeLaTeX pass settled by the scan, the sidecar's hidden page | the `npm run test:electron` NOTE PAGES block, on the real LuaLaTeX, XeLaTeX and pdfpc fixtures. Seven mutants, each killed at the check named before its run: the note pages not hidden, note pages rasterized, no keep-set, no background settle, the sidecar dropped by the view, the note-page CSS removed, and no snap in `go-to-page!`. The last one paints the first frame of a show started from a note page on that page's blank slot, and `snap!`, at the end of the scroll, repairs it one frame later. Only a record taken at the end of each frame (a `ResizeObserver` callback, after layout, before paint) sees that frame: the show starts inside Reagent's own animation-frame callback (its `flushSync` commit), so an end-state check and a record taken in an animation-frame callback both missed it — both were tried first ([test strategy §3.5](../engineering/03-test-strategy.md#35-the-harnesses-that-run-the-real-main-process)). A double mutant, with no snap anywhere, is killed too |
 | The presenter view, the pane, instant flips while it is shown, find | `npm run test:electron` blocks |
 | The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages; seven negative controls); unit tests of both pure models (`vinary.main.slides-link-test`, 20 tests; `vinary.app.slides-link-test`, 27); and `vinary.app.slides-link-sim-test`, a seeded randomized simulation that drives the real pure code of both windows and main: 2 200 runs over seven configurations (FIFO and reordering channels, windows snapping pages, deeper runs, random ones), each step checking P2, P4 and P6 and each quiescent state P1 and P3, with seven negative controls that each break the property their rule protects |
-| Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (8 tests: the display holding most of a window, the audience display, centred placement in the work area, the sessions that let main place windows, what the presenter is told, swapping screens, nothing to swap) |
-| The real main: link, both directions, crossing moves, blanking, lifecycle, swap, window.edn | `test/presenter-e2e.js`, with two displays faked over one wide virtual screen (to be written) |
+| Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (10 tests: the display holding most of a window, the audience display, centred placement in the work area, the sessions that let main place windows, what the presenter is told, swapping screens, nothing to swap, where the audience window of a new show goes, and which removed display ends a show) |
+| The window side of a linked show: Shift+S, the joined message, the other window's moves, the end, the one outgoing interceptor, leaving, the audience joining and starting, Swap screens, the pane's line, `S` in every preset | unit: `vinary.app.slides-linked-test` (10 tests), over the real event handlers and the interceptor |
+| The real main: Shift+S opens a second window that paints and presents the deck while the notes stay in the first; a flip in either window moves the other; a blank in either is the other's, and Escape's first step clears it in both; Escape in either window ends both, and main closes the audience window; the audience window closed by hand leaves the presenter presenting, told why; Shift+S while linked opens nothing new | `npm run test:presenter-e2e` (`test/presenter-e2e.js`), twice: with the warm pool (the audience window is the pool window that was ready) and with `VV_POOL=0` (a cold window, joined once it has loaded). Xvfb gives Chromium one display, so the show is the one-display one (`display: "same"`) |
+| Swap screens in the shell: leave, move, enter again, then one report per window with its fullscreen and owner back; a window the window manager will not make fullscreen again; a window closed part-way | unit: `vinary.main.fullscreen-test`, on fake windows — no display server the tests can run gives Chromium two displays (Xvfb reports one, with RandR monitors added by `xrandr --setmonitor` and with two screens joined by Xinerama; probed 2026-10-19). A mutant without `wire!`'s swapping guard fails both tests |
+| SSH prompts of an audience window go to its presenter | unit: `vinary.main.windows-test` `prompts-follow-the-redirect-to-a-live-window` |
+| window.edn: per-window saves, an audience window never saved | unit: `vinary.main.window-test` (`a-second-window-does-not-cancel-the-first-windows-save`, `an-ephemeral-window-is-never-saved-and-close-flushes`, `persistable-bounds-skips-an-ephemeral-window`) |
 | The hint: when it shows, once per installation | unit (the pure trigger) and an `npm run test:electron` block (to be written) |
 
 ## References

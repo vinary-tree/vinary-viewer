@@ -26,7 +26,9 @@
    (low cost; may help other software-compositor modes) but are NOT the band fix."
   ["disable-gpu-sandbox" "disable-partial-raster" "ui-disable-partial-swap"])
 
-(defn- wayland-session?
+(defn wayland-session?
+  "Is this a Wayland session, by its environment {:XDG_SESSION_TYPE :WAYLAND_DISPLAY}? Also where a linked slide
+   show learns that main may not place its windows (vinary.main.displays/placement-supported?, ADR-0048 §8.7)."
   [{:keys [XDG_SESSION_TYPE WAYLAND_DISPLAY]}]
   (boolean (or (= "wayland" XDG_SESSION_TYPE)
                (and WAYLAND_DISPLAY (not= "" WAYLAND_DISPLAY)))))
