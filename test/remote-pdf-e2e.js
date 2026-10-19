@@ -8,7 +8,8 @@
 //     reaches the windows through the authenticated event channel: a Beamer deck open in THREE windows is read once
 //     per change and fanned out (H4), never moves backwards under a delayed read, keeps its last complete version
 //     through a torn write and a refused read, and keeps its slide through a connection dropped mid-read while
-//     presenting;
+//     presenting. Presented in two linked windows (Shift+S, ADR-0048 §8.8), the audience window's open costs at most
+//     one more read, either window drives, and a change on the server is still one read, shown in both on one slide;
 //   • `quiet` host — no daemon and no poller, so NOTHING announces a change there: a Back/Forward step is the only
 //     thing that can notice one. That isolates the conditional re-open (S6): an unchanged document costs one stat and
 //     no read; a changed one is read again. And the view position survives Back/Forward, a tab switch and a tab close
@@ -77,6 +78,11 @@ function key(win, keyCode, modifiers = []) {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
 }
+// a key at the document, as a user's: the content area holds the focus first (an audience window opens unfocused)
+async function press(win, keyCode, modifiers = []) {
+  await evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+  key(win, keyCode, modifiers);
+}
 const slides = (win) => evalIn(win, `(() => { const s = (window.__vvdb().ui || {}).slides || {};
   return { count: s.pages, page: s.page, layout: s.layout }; })()`);
 const pdfPages = (win) => evalIn(win, `document.querySelectorAll('.vv-content .vv-pdf-doc .vv-pdf-page').length`);
@@ -88,6 +94,11 @@ const scrollTop = (win) => evalIn(win, `document.querySelector('.vv-content')?.s
 const setScroll = (win, y) => evalIn(win, `(() => { const c = document.querySelector('.vv-content'); c.scrollTop = ${y};
   return c.scrollTop; })()`);
 const tabCount = (win) => evalIn(win, `((window.__vvdb().ui || {}).tabs || []).length`);
+// a window's side of a linked show ([:ui :slides-link]), or null when it is in none
+const linkOf = (win) => evalIn(win, `(() => { const l = (window.__vvdb().ui || {})['slides-link'] || null;
+  return l ? { role: l.role, phase: l.phase, peer: l.peer } : null; })()`);
+const bothOn = (a, b, page, label) => until(async () => [(await slides(a)).page, (await slides(b)).page],
+  ([pa, pb]) => pa === page && pb === page, `${label}: both windows on slide ${page}`);
 
 // every vv:content each window receives for a path: its read number and, for a PDF, its byte length
 async function recordContent(win, p) {
@@ -159,6 +170,64 @@ async function run() {
     assert.ok(last.every((n) => Number.isInteger(n) && n === last[0]), `all three windows applied the same read (${last})`);
     console.log(`[ok] A: a remote Beamer deck opens as slides in 3 windows; one change = ${moved.readBytes} bytes, ${moved.opens} open(s) (S = ${v2.length})`);
 
+    // ── H. the remote deck presented in two linked windows (Shift+S, ADR-0048 §8.8) ──────────────────────────────
+    // Run here, while the deck host's change events are known to flow (arm A), and ended before arm B, so B–G see the
+    // same three windows. The audience window is a cold window (VV_POOL=0), which joins the show once it has loaded.
+    await evalIn(first, `window.__vvslides('goto', 0); true`);
+    await until(() => slides(first), (s) => s.page === 0, 'window 1 on slide 0');
+    const before = new Set(liveWindows().map((w) => w.id));
+    deckSrv.resetStats();
+    await press(first, 'S', ['shift']);                 // Present in New Window
+    const audience = await until(async () => liveWindows().find((w) => !before.has(w.id) && !w.webContents.isLoading()),
+      Boolean, 'Shift+S: the audience window', 30000);
+    await until(() => evalIn(audience, 'typeof window.__vvdb'), (v) => v === 'function', "the audience window's test hooks");
+    await until(async () => [await presenting(audience), await linkOf(audience)],
+      ([p, l]) => p && l && l.role === 'audience' && l.phase === 'live', 'the audience window presents the remote deck', 30000);
+    await until(() => linkOf(first), (l) => l && l.role === 'presenter' && l.phase === 'live' && l.peer === 'live',
+      'window 1 presents, linked to the audience window', 30000);
+    assert.strictEqual((await slides(audience)).count, 3, 'the audience window shows v2');
+    await bothOn(first, audience, 0, "the show starts on window 1's slide");
+    await sleep(500);                                  // a second read, if one were coming, would have landed
+    const joined = deckSrv.stats.byPath[deckKey] || { readBytes: 0, opens: 0 };
+    assert.ok(joined.readBytes <= v2.length + 1088 && joined.opens <= 1,
+      `the audience window's open cost ${joined.readBytes} bytes, ${joined.opens} OPEN(s) (≤ one read of S = ${v2.length} and its tail)`);
+
+    await press(first, 'Space');
+    await bothOn(first, audience, 1, 'Space in window 1');
+    await press(audience, 'Space');
+    await bothOn(first, audience, 2, 'Space in the audience window');
+    await press(audience, 'Space', ['shift']);
+    await bothOn(first, audience, 1, 'Shift+Space in the audience window');
+
+    await recordContent(audience, deckUri);
+    const vH = version([1, 1, 1, 1, 1, 1, 1, 1]);      // 8 slides
+    deckSrv.resetStats();
+    fs.writeFileSync(DECK, vH);
+    for (const win of [first, second, third, audience]) {
+      await until(() => slides(win), (s) => s.count === 8, `window ${win.id}: the 8-slide version arrives`, 20000);
+    }
+    await bothOn(first, audience, 1, 'after the change on the server');
+    await sleep(500);
+    const linkedChange = deckSrv.stats.byPath[deckKey];
+    assert.ok(linkedChange && linkedChange.readBytes <= 2 * vH.length + 2 * 1088 && linkedChange.opens <= 2,
+      `one change cost ${linkedChange && linkedChange.readBytes} bytes, ${linkedChange && linkedChange.opens} OPEN(s), for a ${vH.length}-byte deck in 4 windows (≤ 2·S + 2 tails, ≤ 2 OPENs — H4)`);
+    const [readFirst, readAudience] = await Promise.all([first, audience].map(async (w) => {
+      const list = await received(w, deckUri);
+      return list.length ? list[list.length - 1].seq : null;
+    }));
+    assert.ok(Number.isInteger(readFirst) && readFirst === readAudience,
+      `both windows of the show applied the same read (${readFirst}, ${readAudience})`);
+    const live = await Promise.all([first, audience].map(linkOf));
+    assert.deepStrictEqual(live.map((l) => l && l.phase), ['live', 'live'], 'the show goes on through the change');
+
+    await press(first, 'Escape');
+    await until(async () => audience.isDestroyed(), Boolean, 'Escape in window 1 closes the audience window');
+    await until(() => presenting(first), (p) => p === false, 'Escape in window 1 ends its show');
+    const left = await linkOf(first);
+    assert.ok(!left || left.role == null, `window 1 leaves the link (${JSON.stringify(left)})`);
+    console.log(`[ok] H: a linked show of the remote deck — the audience window's open cost ${joined.readBytes} bytes; ` +
+      `flips from either window; a change cost ${linkedChange.readBytes} bytes (S = ${vH.length}) and showed in both on slide 1; Escape ended both`);
+
     // ── B. a delayed read never moves a window backwards ─────────────────────────────────────────────────────
     deckSrv.setDelay((req) => (req.op === 'READ' && req.path === deckKey ? 1200 : 0));
     fs.writeFileSync(DECK, version([1, 1, 1, 1]));    // v3: 4 slides …
@@ -209,7 +278,8 @@ async function run() {
 
     // ── E. a connection dropped mid-read while presenting keeps the slide; Retry shows the new version there ───
     await evalIn(first, `window.__vvslides('goto', 2); true`);
-    const atSlide = await until(() => slides(first), (s) => Number.isInteger(s.page) && s.page > 0, 'window 1 leaves slide 0');
+    // the exact page asked for: arm H leaves window 1 on slide 1, so "past slide 0" would hold before the goto lands
+    const atSlide = await until(() => slides(first), (s) => s.page === 2, 'window 1 on slide 2');
     key(first, 'F5', ['shift']);                      // present from the current slide
     await until(() => presenting(first), Boolean, 'window 1 presents');
     const reads = [];
@@ -293,7 +363,7 @@ async function run() {
     assert.ok(Math.abs(revealed - y3) <= 2, `closing the tab in front restores the remote document's position (${revealed} ≈ ${y3})`);
     console.log(`[ok] G: a remote document's position survives a tab switch (${switched}) and a tab close (${revealed})`);
 
-    console.log('[ok] remote-pdf-e2e: slide decks over SFTP — fan-out, ordering, torn and refused reads, a drop while presenting, conditional re-open, positions');
+    console.log('[ok] remote-pdf-e2e: slide decks over SFTP — fan-out, a linked show, ordering, torn and refused reads, a drop while presenting, conditional re-open, positions');
   } catch (error) {
     failed = error;
     console.error(error && error.stack || error);

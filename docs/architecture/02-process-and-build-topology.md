@@ -195,7 +195,7 @@ The `~26` scripts fall into build, asset-sync, launch, and test groups. Each app
 | | `test:electron:x11` / `test:electron:wayland` | Explicit Linux compositor gates: private Xvfb / private Weston headless. |
 | | `test:extensions` / `test:extensions:sandbox` | Extension-runtime smokes. |
 | | `test:remote-daemon-events-e2e` | Real Electron + SSH2 proof of authenticated remote content/tree watches through the cross-platform headless runner. |
-| | `test:remote-pdf-e2e` | Real Electron + SSH2 proof that remote slide decks refresh correctly: read-once fan-out, ordering, torn/refused reads, drops while presenting, conditional re-open, positions. |
+| | `test:remote-pdf-e2e` | Real Electron + SSH2 proof that remote slide decks refresh correctly: read-once fan-out, a linked two-window show, ordering, torn/refused reads, drops while presenting, conditional re-open, positions. |
 
 ### 4.2 Runtime dependencies (`dependencies`)
 

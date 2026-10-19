@@ -152,6 +152,8 @@ SSH2 servers:
   change is read once and fanned out to all three, at most 2·S + two tail probes (H4). A delayed read never moves a
   window backwards. A half-written deck and a refused read both keep the last version behind their notes. A
   connection dropped mid-read while presenting keeps the slide, and Retry reconnects to show the new version there.
+  Presented in two linked windows (Shift+S, ADR-0048 §8.8), the audience window's open costs at most one more read,
+  a flip in either window moves both, and a change is still one read, shown in both on the same slide.
 - **The quiet host,** with no daemon and no poller, so only a Back/Forward step can notice a change. Back to an
   unchanged remote document costs one stat and no read; a changed one is read again. The view position survives
   Back/Forward, a tab switch and a tab close.
