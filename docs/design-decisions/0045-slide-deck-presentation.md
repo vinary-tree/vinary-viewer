@@ -26,6 +26,8 @@ deck is remote (`vv sftp://host/talk.pdf`) and refreshed live by the [ADR-0035](
 target daemon while the author edits or presents. On 2026-10-16 the user decided that a detected deck opens in a
 Slides layout inside its tab (changeable in Preferences), that a slide **overview grid** is in scope, and that a
 presenter console on a second display and slide navigation in `vv --tui` are deferred (filed as feature requests).
+The presenter console was later decided by [ADR-0048](0048-speaker-notes-and-linked-presenter-windows.md): speaker
+notes, a presenter view, and two linked windows driven from either one.
 The remote half — one verified read per change, ordered and fanned out — is
 [ADR-0046](0046-reload-safe-pipelined-remote-reads.md); this ADR is the slide show.
 
@@ -781,7 +783,9 @@ document" in **View**. Reflow Text's access key moved from `r` to `w`, so that n
 - A failed refresh no longer shows an error page: the last good version stays behind a note. That is the point, but
   it is a visible behaviour change.
 - The presenter console and the terminal slide mode remain deferred feature requests; both can reuse
-  `vinary.slides.*` unchanged.
+  `vinary.slides.*` unchanged. (The presenter console has since been decided and built by
+  [ADR-0048](0048-speaker-notes-and-linked-presenter-windows.md), which reuses `vinary.slides.*` as foreseen; the
+  terminal slide mode is still deferred.)
 
 ## Alternatives considered
 

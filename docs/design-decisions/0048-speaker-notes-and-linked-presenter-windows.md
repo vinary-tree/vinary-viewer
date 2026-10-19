@@ -1,7 +1,9 @@
 # 0048 — Speaker notes during a slide show, and two linked windows driven from either one
 
-- **Status:** Proposed. Amends [ADR-0045](0045-slide-deck-presentation.md) (§5 *Presenting*, §9 *Two-screen decks*
-  and its Consequences). Builds on [ADR-0046](0046-reload-safe-pipelined-remote-reads.md) (the `seq` guard),
+- **Status:** Accepted (2026-10-19), implemented in full; the timer, the pace, the wall clock and slide transitions
+  were moved out of it (the scope change below). Amends [ADR-0045](0045-slide-deck-presentation.md) (§5
+  *Presenting*, §9 *Two-screen decks* and its Consequences). Builds on
+  [ADR-0046](0046-reload-safe-pipelined-remote-reads.md) (the `seq` guard),
   [ADR-0047](0047-persisted-state-stores.md) (a window never receives its own write back; standby windows),
   [ADR-0009](0009-mediator-ipc-over-point-to-point.md) (every cross-process message goes through main) and
   [ADR-0010](0010-bounded-content-retention-and-render-metadata.md) (lean DataScript entities).
@@ -1052,7 +1054,7 @@ records the new boundary.
 | Swap screens in the shell: leave, move, enter again, then one report per window with its fullscreen and owner back; a window the window manager will not make fullscreen again; a window closed part-way | unit: `vinary.main.fullscreen-test`, on fake windows — no display server the tests can run gives Chromium two displays (Xvfb reports one, with RandR monitors added by `xrandr --setmonitor` and with two screens joined by Xinerama; probed 2026-10-19). A mutant without `wire!`'s swapping guard fails both tests |
 | SSH prompts of an audience window go to its presenter | unit: `vinary.main.windows-test` `prompts-follow-the-redirect-to-a-live-window` |
 | window.edn: per-window saves, an audience window never saved | unit: `vinary.main.window-test` (`a-second-window-does-not-cancel-the-first-windows-save`, `an-ephemeral-window-is-never-saved-and-close-flushes`, `persistable-bounds-skips-an-ephemeral-window`) |
-| The hint: when it shows, once per installation | unit (the pure trigger) and an `npm run test:electron` block (to be written) |
+| The hint: when it shows, once per installation | unit: `vinary.app.slides-presenter-test` (`the-notes-hint-is-due`, `the-notes-hint-shows-once`, `the-notes-hint-goes`); and the `npm run test:electron` PRESENTER VIEW block, step 2: the first show of a deck with notes names `s` in a `role="status"` hint, `settings.edn` remembers it, the next key dismisses it and still does its work, no frame of a second show has it, and its own timeout and a typed digit dismiss it too |
 
 ## References
 
