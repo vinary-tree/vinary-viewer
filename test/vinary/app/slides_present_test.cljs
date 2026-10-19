@@ -126,6 +126,23 @@
         "no mode side effect while a slide step was cancelled")
     (is (= :normal (get-in (:db step4) [:ui :input :mode])) "4. only then the mode switch")))
 
+(deftest shift-f-toggles-this-windows-fullscreen
+  (testing "outside a show F does nothing"
+    (is (nil? (events/slides-fullscreen-toggle-fx shown-db))))
+  (testing "a windowed show: F asks for fullscreen and records it, so the show's end leaves it"
+    (let [{:keys [db fx]} (events/slides-fullscreen-toggle-fx (presenting-db false))]
+      (is (= [[:vv/set-fullscreen {:on true}]] fx))
+      (is (true? (:fullscreen? (slides/presentation db))))))
+  (testing "a fullscreen show: F leaves fullscreen, and the show keeps running"
+    (let [{:keys [db fx]} (events/slides-fullscreen-toggle-fx (assoc-in (presenting-db true) [:ui :fullscreen?] true))]
+      (is (= [[:vv/set-fullscreen {:on false}]] fx))
+      (is (false? (:fullscreen? (slides/presentation db))))
+      (is (= {:db (assoc-in db [:ui :fullscreen?] false)} (events/fullscreen-changed-fx db {:fullscreen false}))
+          "main's report that the window left fullscreen does not end the show")))
+  (testing "F is bound in the slides layer of every preset"
+    (doseq [preset [:default :vim :emacs]]
+      (is (= :slides/fullscreen (get-in (keymap/preset preset) [:modes :slides "F"])) (str preset " F")))))
+
 (deftest f5-keys-in-every-preset
   (doseq [preset [:default :vim :emacs]]
     (let [all (get-in (keymap/preset preset) [:modes :all])]

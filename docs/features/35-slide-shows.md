@@ -77,6 +77,7 @@ slide keys is added on top.
 | Start a show from the first / the current slide | F5 / Shift+F5 | the same | the same |
 | During a show: black / white screen | `b` `.` / `w` `,` | the same | the same |
 | Speaker notes: the presenter view on / off | `s` | the same | the same |
+| During a show: this window's fullscreen on / off | `F` (Shift+f) | the same | the same |
 | Cancel, one step at a time | Escape, Ctrl+G | Escape | Escape, `C-g` |
 
 - **The mouse and touch.** The mouse wheel and a trackpad flip slides one at a time: one notch of a mouse wheel is
@@ -89,7 +90,7 @@ slide keys is added on top.
   any slide step or 2.5 s of quiet forgets it.
 - **Escape unwinds one step at a time**, after the palette and the find bar: the overview, a typed number, a blanked
   screen, then the show itself.
-- **When the slide keys apply.** Space, Shift+Space, Backspace, Enter, the Shift+arrows, `b` `.` `w` `,`, `s`, Tab,
+- **When the slide keys apply.** Space, Shift+Space, Backspace, Enter, the Shift+arrows, `b` `.` `w` `,`, `s`, `F`, Tab,
   `o` and the digits form a `:slides` layer that is active only while a PDF shows in the Slides layout **and** the keyboard is
   on the document — not in a text field, the sidebar, the address bar, or an open menu, dialog or prompt. The layer
   sits below the current mode, so in Vim's normal mode Space stays the leader (use →, `j` or PgDn there; Space flips

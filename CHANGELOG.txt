@@ -46,6 +46,10 @@ Added
       reader's sticky notes as plain text. Every slide key still works and flips
       stay instant; s again goes back. The first show of a deck with notes
       names the key in a hint, once per installation.
+    - F (Shift+f) during a slide show turns this window's fullscreen on or
+      off, and the show keeps running either way: for one display, on
+      Wayland, or with Preferences > Slides > Present full screen off. Only a
+      fullscreen the app entered is ever left.
     - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
       viewer does or does not treat it as a slide deck: the evidence it reads
       (Creator / Producer, page mode, page sizes, how many page labels) and the

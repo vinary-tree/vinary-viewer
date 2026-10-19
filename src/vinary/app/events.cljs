@@ -2364,6 +2364,18 @@
 (rf/reg-event-fx :slides/overview-pick  (fn [{:keys [db]} [_ page]] (slides-overview-pick-fx db page)))
 
 (rf/reg-event-fx :slides/present      (fn [{:keys [db]} [_ opts]] (slides-present-fx db (:from opts))))
+(defn slides-fullscreen-toggle-fx
+  "Effects of `F` (Shift+f, ADR-0048 §7): toggle this window's fullscreen during a show, through vv:set-fullscreen,
+   so main's `decide` still leaves only a fullscreen it entered. The show records the request (:fullscreen?): leaving
+   by `F` keeps the show running (fullscreen-changed-fx ends it only when a fullscreen it asked for goes), and the
+   show's end leaves a fullscreen `F` entered. nil outside a show."
+  [db]
+  (when (slides/presenting? db)
+    (let [on? (not (get-in db [:ui :fullscreen?]))]
+      {:db (assoc-in db [:ui :presentation :fullscreen?] on?)
+       :fx [[:vv/set-fullscreen {:on on?}]]})))
+
+(rf/reg-event-fx :slides/fullscreen-toggle (fn [{:keys [db]} _] (slides-fullscreen-toggle-fx db)))
 (rf/reg-event-fx :slides/stop         (fn [{:keys [db]} _] (slides-stop-fx db {})))
 (rf/reg-event-fx :slides/black        (fn [{:keys [db]} _] (slides-blank-fx db :black)))
 (rf/reg-event-fx :slides/white        (fn [{:keys [db]} _] (slides-blank-fx db :white)))
