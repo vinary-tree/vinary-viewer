@@ -1,5 +1,5 @@
 'use strict';
-// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Six checks:
+// vinary-viewer lint (run by `npm run lint`, and by `npm test`). Seven checks:
 //   1. every JS source parses (node --check)
 //   2. app.css / style.css braces balance
 //   3. every --vv-* variable referenced by a stylesheet is defined by EVERY theme of that surface
@@ -11,6 +11,8 @@
 //   5. every relative link and image in the Markdown docs names a file that exists
 //   6. every :dangerouslySetInnerHTML under src/vinary passes its HTML through reagent.core/unsafe-html (Reagent 1.3.0
 //      and later silently drop any other value)
+//   7. no regex literal under src/vinary uses an inline flag group — (?i:…), (?-i:…), or (?i) past the start — which
+//      Closure's regex check rejects in a release build (or V8 at load); a leading (?i) is the RegExp's i flag
 // Exits non-zero on any failure, so it gates CI / `npm test`.
 const fs = require('fs');
 const path = require('path');
@@ -271,29 +273,47 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
 //    commit message in the Commits tab, from the day it landed (docs/engineering/04 §1.5). Every
 //    `:dangerouslySetInnerHTML` in CODE under src/vinary — strings, regex literals and line comments are skipped, so
 //    a docstring may name it — must be followed by an `unsafe-html` call.
-{
-  const cljFiles = walkFiles(path.join(root, 'src', 'vinary'), ['.cljs', '.cljc']);
-  const dropped = [];
-  let sites = 0;
-  for (const f of cljFiles) {
-    const src = fs.readFileSync(f, 'utf8');
-    // blank strings, regex literals (#"…" — the same lexing) and line comments, keeping every newline so a match's
-    // offset still gives its line
-    let code = '';
-    for (let i = 0, inStr = false, inCom = false; i < src.length; i++) {
-      const c = src[i];
-      if (inCom) { inCom = c !== '\n'; code += inCom ? ' ' : '\n'; continue; }
-      if (inStr) {
-        if (c === '\\') { code += src[i + 1] === '\n' ? ' \n' : '  '; i++; continue; }
-        if (c === '"') inStr = false;
-        code += c === '\n' ? '\n' : ' ';
+// ClojureScript source, lexed once for checks 6 and 7: `code` is the file with every string, regex literal (#"…") and
+// line comment blanked to spaces, every newline kept so an offset still gives its line; `regexes` holds each regex
+// literal's body with the offset of its opening quote. A character literal (\" \; \# …) is copied as it is, so it
+// opens nothing — and a `"` opens a regex only after a `#` that is code, not the end of a `\#`.
+const lexClj = (src) => {
+  let code = '';
+  const regexes = [];
+  let re = null;                                  // the regex literal being read: {offset, text}
+  for (let i = 0, inStr = false, inCom = false, hash = false; i < src.length; i++) {
+    const c = src[i];
+    if (inCom) { inCom = c !== '\n'; code += inCom ? ' ' : '\n'; continue; }
+    if (inStr) {
+      if (c === '\\') {
+        if (re) re.text += src.slice(i, i + 2);
+        code += src[i + 1] === '\n' ? ' \n' : '  ';
+        i++;
         continue;
       }
-      if (c === '\\') { code += src.slice(i, i + 2); i++; continue; }   // a character literal: \" \; \a …
-      if (c === '"') { inStr = true; code += ' '; continue; }
-      if (c === ';') { inCom = true; code += ' '; continue; }
-      code += c;
+      if (c === '"') { inStr = false; if (re) { regexes.push(re); re = null; } }
+      else if (re) re.text += c;
+      code += c === '\n' ? '\n' : ' ';
+      continue;
     }
+    if (c === '\\') { code += src.slice(i, i + 2); i++; hash = false; continue; }   // a character literal
+    if (c === '"') { inStr = true; if (hash) re = { offset: i, text: '' }; hash = false; code += ' '; continue; }
+    if (c === ';') { inCom = true; hash = false; code += ' '; continue; }
+    hash = c === '#';
+    code += c;
+  }
+  return { code, regexes };
+};
+const cljFiles = walkFiles(path.join(root, 'src', 'vinary'), ['.cljs', '.cljc']);
+const lexed = cljFiles.map((f) => {
+  const src = fs.readFileSync(f, 'utf8');
+  return { f, src, ...lexClj(src) };
+});
+
+{
+  const dropped = [];
+  let sites = 0;
+  for (const { f, code } of lexed) {
     for (const m of code.matchAll(/:dangerouslySetInnerHTML(?![\w-])\s*(\S*)/g)) {
       sites += 1;
       if (!/^\((?:r|reagent\.core)\/unsafe-html(?![\w-])/.test(m[1])) {
@@ -304,6 +324,37 @@ const show = (ids) => ids.slice(0, 40).join(', ') + (ids.length > 40 ? ` … (+$
   log(dropped.length === 0,
     `${sites} :dangerouslySetInnerHTML site(s) under src/vinary pass their HTML through reagent.core/unsafe-html`
     + (dropped.length ? ` — Reagent DROPS these silently: ${show(dropped)}` : ''));
+}
+
+// 7. ClojureScript turns a regex literal's LEADING (?flags) into the RegExp's flags (#"(?i)^x" → /^x/i) and passes the
+//    rest through. An inline modifier group — (?i:…), (?-i:…), TC39's RegExp Modifiers — V8 accepts, but Closure's regex
+//    check, which only a release build runs, does not ("Malformed Regular Expression: Malformed parenthetical"), so
+//    it surfaced only as a release-build warning (slides_presenter.cljs, `external?`). A (?i) past the start is no
+//    JavaScript at all. Every flag group in a regex literal under src/vinary must be the leading (?flags), with flags
+//    JavaScript knows (i m s u); (?: (?= (?! (?<= (?<! and (?<name> are not flag groups. Escapes and [classes] are
+//    skipped.
+{
+  const bad = [];
+  let literals = 0;
+  for (const { f, src, regexes } of lexed) {
+    for (const { offset, text } of regexes) {
+      literals += 1;
+      for (let i = 0, inClass = false; i < text.length; i++) {
+        const c = text[i];
+        if (c === '\\') { i++; continue; }
+        if (inClass) { inClass = c !== ']'; continue; }
+        if (c === '[') { inClass = true; continue; }
+        if (c !== '(' || text[i + 1] !== '?') continue;
+        const m = /^\(\?([A-Za-z]*)(?:-([A-Za-z]*))?([:)])/.exec(text.slice(i));
+        if (!m || (m[1] === '' && m[2] === undefined)) continue;       // (?: and the lookarounds
+        if (i === 0 && m[3] === ')' && m[2] === undefined && /^[imsu]+$/.test(m[1])) continue;   // the leading flags
+        bad.push(`${path.relative(root, f)}:${src.slice(0, offset).split('\n').length} ${m[0]}`);
+      }
+    }
+  }
+  log(bad.length === 0,
+    `${literals} regex literals under src/vinary use no inline flag group`
+    + (bad.length ? ` — a release build rejects these (write a leading (?i) instead): ${show(bad)}` : ''));
 }
 
 console.log(fail ? `\n${fail} lint failure(s).` : '\nlint OK.');

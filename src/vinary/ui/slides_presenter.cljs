@@ -103,7 +103,12 @@
         (swap! memo assoc text html)
         html)))
 
-(defn- external? [href] (boolean (and (string? href) (re-find #"^(?i:https?|mailto):" href))))
+(defn external?
+  "Whether a note link's `href` opens outside the app: http, https or mailto, in any case. The case-blind match is a
+   leading (?i), which ClojureScript makes the RegExp's i flag; an inline (?i:…) group (TC39's RegExp Modifiers) is
+   one Closure's regex check rejects (\"Malformed parenthetical\"), so a release build warned (lint check 7)."
+  [href]
+  (boolean (and (string? href) (re-find #"(?i)^(?:https?|mailto):" href))))
 
 (defn- on-notes-click
   "A click in the notes: a link opens outside the app when it is http, https or mailto (any other — a fragment, a

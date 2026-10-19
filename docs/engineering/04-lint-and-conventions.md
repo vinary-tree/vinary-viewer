@@ -11,10 +11,10 @@ the-filesystem discipline that is half compiler-enforced and half review-enforce
 
 ---
 
-## 1. `test/lint.js` — the six checks
+## 1. `test/lint.js` — the seven checks
 
 `test/lint.js` is a small CommonJS script (`'use strict'`) with **no
-dependencies** beyond Node built-ins. It performs six checks and exits non-zero
+dependencies** beyond Node built-ins. It performs seven checks and exits non-zero
 on any failure. Run it with:
 
 ```bash
@@ -221,6 +221,74 @@ paragraph that holds the text, not for the text directly inside a `<p>`: a first
 form of the check that matched `<p …>a body</p>` failed on the fixed tree for that
 reason alone.
 
+Checks 6 and 7 share one lexer, `lexClj`. It returns the blanked `code` above and,
+for check 7, every regex literal's body with the offset of its opening quote. A `"`
+opens a regex only right after a `#` that is code, so the `#` of a `\#` character
+literal opens nothing.
+
+### 1.6 Check 7 — no inline flag group in a regex literal
+
+**What ClojureScript does with a flag group.** A regex literal compiles to a
+JavaScript regex literal. ClojureScript 1.12.42, the app's version (`deps.edn`), moves
+a **leading** `(?flags)` into the literal's flags and copies the rest verbatim
+(`cljs/compiler.cljc`, `emit-constant*`) [CLJS-EMIT]:
+
+```clojure
+(let [[_ flags pattern] (re-find #"^(?:\(\?([idmsux]*)\))?(.*)" (str x))]
+  (emits \/ (.replaceAll (re-matcher #"/" pattern) "\\\\/") \/ flags))
+```
+
+So `#"(?i)^https?://"` becomes `/^https?:\/\//i`. An inline modifier group, such as
+`(?i:…)` or `(?-i:…)`, reaches JavaScript as it is. That syntax comes from TC39's
+RegExp Modifiers proposal, now at Stage 4 [TC39-MOD]. V8 accepts it, but Closure
+Compiler's regex check does not. A `(?i)` anywhere but the start is not JavaScript at
+all.
+
+**What it cost.** The presenter view's note links used
+`#"^(?i:https?|mailto):"` (`vinary.ui.slides-presenter/external?`). Links worked,
+because Electron's V8 parses the group. But every `shadow-cljs release` printed:
+
+```text
+File: …/src/vinary/ui/slides_presenter.cljs:106:53
+Malformed Regular Expression: Malformed parenthetical: (?i:https?|mailto):
+```
+
+Only the release build runs that check; `shadow-cljs compile` does not. So the
+warning never appeared in development builds, and the user found it. The released
+bundle carried the group as written, `/^(?i:https?|mailto):/`. The same bundle shows
+a leading `(?i)` compiled to the `i` flag: `/^https?:\/\//i`. The fix is
+`#"(?i)^(?:https?|mailto):"`, and `external?` is now public with a unit test
+(`test/vinary/ui/slides_presenter_test.cljs`).
+
+**The check.** Each regex literal under `src/vinary` is scanned for flag groups:
+
+```text
+for each regex literal r under src/vinary (from lexClj):
+    i ← 0
+    while i < |r|:
+        if r[i] = '\'  : skip r[i+1]                      ⟨an escape: \( \[ …⟩
+        elif inside a [class]: leave it at its ']'
+        elif r[i..] starts with "(?":
+            g ← r[i..] matched against  \(\?([A-Za-z]*)(?:-([A-Za-z]*))?([:)])
+            if g and not (g has no letters and no '-')   ⟨(?: and the lookarounds pass⟩
+               and not (i = 0 and g ends in ')' and has no '-' and its letters ⊆ {i, m, s, u}):
+                report  <file>:<line> g
+        i ← i + 1
+pass ⇔ nothing was reported
+```
+
+The flags allowed in the leading group are the ones JavaScript knows and the
+compiler moves (`i m s u`). The compiler would also move `d` and `x`, but `x` is no
+JavaScript flag, and nothing in the app uses `d`.
+
+**Negative control.** On the tree before the fix, the check reports exactly the site
+the release build named. After the fix it passes:
+
+| Tree | The check |
+|---|---|
+| before the fix (`75dabca`) | `✗ 219 regex literals under src/vinary use no inline flag group — a release build rejects these (write a leading (?i) instead): src/vinary/ui/slides_presenter.cljs:106 (?i:` |
+| after the fix | `✓ 219 regex literals under src/vinary use no inline flag group` |
+
 ---
 
 ## 2. The namespace ↔ file mapping rule
@@ -321,6 +389,13 @@ uphold the ports-and-adapters boundary the theory pillar describes
   `:dangerouslySetInnerHTML` values must be created using `reagent.core/unsafe-html`
   function which tags them using a type, that can't be used accidentally from Transit
   and EDN". <https://github.com/reagent-project/reagent/blob/v2.0.1/doc/Security.md>
+- **[CLJS-EMIT]** ClojureScript 1.12.42, `src/main/clojure/cljs/compiler.cljc`, the
+  `emit-constant*` method for `java.util.regex.Pattern` (lines 359–366 of the jar the
+  app builds with): a leading `(?[idmsux]*)` becomes the literal's flags.
+  <https://github.com/clojure/clojurescript/blob/r1.12.42/src/main/clojure/cljs/compiler.cljc>
+- **[TC39-MOD]** TC39, *RegExp Modifiers* (Stage 4; champion Ron Buckton): the
+  `(?flags-flags:subexpression)` group, which turns flags on or off within part of a
+  pattern. <https://github.com/tc39/proposal-regexp-modifiers>
 - `AGENTS.md` (repository root) — the coding-style and naming source.
 - [`reference/css-variables.md`](../reference/css-variables.md) — the `--vv-*`
   token catalogue Check 3 depends on.
