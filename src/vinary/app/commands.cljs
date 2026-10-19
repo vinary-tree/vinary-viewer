@@ -27,6 +27,8 @@
    :slides-active? (fn [ctx] (boolean (:slides-active? ctx)))
    ;; a slide show is running in this window
    :presenting?    (fn [ctx] (boolean (:presenting? ctx)))
+   ;; … and is shown here: its own view in front, its presenter not away (slides/show-here?, ADR-0048 §8.10)
+   :show-here?     (fn [ctx] (boolean (:show-here? ctx)))
    ;; this window presents a live linked show on separate displays: Swap screens is offered (ADR-0048 §8.7)
    :swap-offered?  (fn [ctx] (boolean (:swap-offered? ctx)))})
 
@@ -123,13 +125,13 @@
    :slides/present         {:id :slides/present :title "Start slide show" :category "Slides" :dispatch [:slides/present {:from :first}] :when :pdf-view?}
    :slides/present-current {:id :slides/present-current :title "Start slide show from the current slide" :category "Slides" :dispatch [:slides/present {:from :current}] :when :pdf-view?}
    :slides/stop            {:id :slides/stop :title "End slide show" :category "Slides" :dispatch [:slides/stop] :when :presenting?}
-   :slides/black           {:id :slides/black :title "Black screen (toggle)" :category "Slides" :dispatch [:slides/black] :when :presenting?}
-   :slides/white           {:id :slides/white :title "White screen (toggle)" :category "Slides" :dispatch [:slides/white] :when :presenting?}
+   :slides/black           {:id :slides/black :title "Black screen (toggle)" :category "Slides" :dispatch [:slides/black] :when :show-here?}
+   :slides/white           {:id :slides/white :title "White screen (toggle)" :category "Slides" :dispatch [:slides/white] :when :show-here?}
    ;; the overview grid of frames (Tab / o): see the whole deck and jump anywhere; Go to slide… opens it
    :slides/overview        {:id :slides/overview :title "Slide overview" :category "Slides" :dispatch [:slides/overview] :when :slides-view?}
    :slides/goto            {:id :slides/goto :title "Go to slide…" :category "Slides" :dispatch [:slides/overview {:open? true}] :when :slides-view?}
    ;; during a show, this window's fullscreen on / off (ADR-0048 §7, `F`)
-   :slides/fullscreen      {:id :slides/fullscreen :title "Fullscreen (this window)" :category "Slides" :dispatch [:slides/fullscreen-toggle] :when :presenting?}
+   :slides/fullscreen      {:id :slides/fullscreen :title "Fullscreen (this window)" :category "Slides" :dispatch [:slides/fullscreen-toggle] :when :show-here?}
    ;; the presenter view (ADR-0048 §6, `s`): the current slide beside the speaker notes, the next slide and the counter
    :slides/presenter-view  {:id :slides/presenter-view :title "Speaker notes (presenter view)" :category "Slides" :dispatch [:slides/presenter-view] :when :slides-view?}
    ;; two linked windows, either drives the show (ADR-0048 §8, `S`): the audience window opens; the notes stay here
@@ -228,5 +230,6 @@
            :pdf-view?     (slides/pdf-shown? db)
            :slides-view?  (slides/slides-view? db)
            :presenting?   (slides/presenting? db)
+           :show-here?    (slides/show-here? db)
            :swap-offered? (slides-link/swap-offered? (get-in db [:ui :slides-link]))
            :in-input?     true)))

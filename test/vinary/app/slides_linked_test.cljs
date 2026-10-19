@@ -5,8 +5,9 @@
    EFFECT with its blank colour, an end stops the show or lets it go on); the presenter window keeps its chrome
    (focusing it, leaving a fullscreen, Escape in it); its presenter view is the console, whose strip shows the
    audience's blank; the audience window's join and start; the ONE outgoing
-   interceptor (a report or a blank change sends, :slides/link-state never does); Escape and unmount leave; Swap
-   screens and the report that ends it; the pane's line; and S in every preset. The protocol itself is
+   interceptor (a report or a blank change sends, :slides/link-state never does); Escape and unmount leave; the
+   presenter leaving its deck — away — and coming back to the show's slide; Swap screens and the report that ends it;
+   the pane's line; and S in every preset. The protocol itself is
    vinary.app.slides-link-test's."
   (:require [cljs.test :refer [deftest is testing]]
             [re-frame.core]
@@ -44,7 +45,7 @@
         (is (= {:active? true :tab-id 1 :path talk :from :current :fullscreen? false :notes-view-before false}
                (slides/presentation db)))
         (is (true? (get-in db [:ui :presenter-view?])))
-        (is (= {:phase :opening :role :presenter :path talk} (get-in db [:ui :slides-link])))
+        (is (= {:phase :opening :role :presenter :path talk :known {:page 2 :blank nil}} (get-in db [:ui :slides-link])))
         (is (= [[:dom/focus :content] [:vv/presenter-open {:path talk :page 2 :blank nil :fullscreen true}]] fx)
             "no vv:set-fullscreen: the presenter window stays windowed; the preference is the audience window's")
         (is (false? (slides/chromeless? db)) "and it keeps its chrome")))
@@ -251,9 +252,101 @@
               [:vv/presenter-leave {:session "show-1" :reason "stopped"}]
               [:async/cancel :slides/link-waiting]]
              fx))))
-  (testing "the deck view unmounted: leave \"unmounted\""
-    (is (some #{[:vv/presenter-leave {:session "show-1" :reason "unmounted"}]}
-              (:fx (events/slides-unmounted-fx (assoc-in (presenting-db) [:ui :slides-link] live) talk))))))
+  ;; Disabled 2026-10-19 (ADR-0048 §8.10): a presenter's deck view unmounting while its tab is open no longer leaves the
+  ;; show — the presenter is away (away-and-back, below); the leave "unmounted" is for the views below.
+  ;; (testing "the deck view unmounted: leave \"unmounted\""
+  ;;   (is (some #{[:vv/presenter-leave {:session "show-1" :reason "unmounted"}]}
+  ;;             (:fx (events/slides-unmounted-fx (assoc-in (presenting-db) [:ui :slides-link] live) talk)))))
+  (testing "the audience window's deck view unmounted, or a presenter's whose tab is gone: leave \"unmounted\""
+    (doseq [db [(assoc-in (presenting-db) [:ui :slides-link] (assoc live :role :audience))
+                (-> (presenting-db) (assoc-in [:ui :slides-link] live) (assoc-in [:ui :tabs] []))]]
+      (is (some #{[:vv/presenter-leave {:session "show-1" :reason "unmounted"}]}
+                (:fx (events/slides-unmounted-fx db talk)))
+          (name (get-in db [:ui :slides-link :role]))))))
+
+(def ^:private paper "/d/paper.pdf")
+
+(defn- elsewhere
+  "`db` with a second tab, showing `paper`, in front of the show's tab (1)."
+  [db]
+  (-> db
+      (update-in [:ui :tabs] conj {:id 2 :uri paper :hist {:stack [{:uri paper :scroll 0 :facet nil}] :idx 0}})
+      (assoc-in [:ui :active-tab] 2)))
+
+(deftest away-and-back
+  ;; ADR-0048 §8.10, theory/11 §3.5: a linked show's presenter that leaves its deck — a tab switch, a navigation,
+  ;; Reflow — keeps the show running in the audience window, and comes back to the show's slide
+  (let [here (assoc-in (presenting-db false) [:ui :slides-link] live)
+        r    (events/slides-unmounted-fx (elsewhere here) talk)
+        away (:db r)]
+    (testing "the deck view unmounts while the show's tab is open: away — the show and the link stay, the mirror goes,
+              and nothing is sent"
+      (is (nil? (:fx r)))
+      (is (true? (link/away? (get-in away [:ui :slides-link]))))
+      (is (= (slides/presentation here) (slides/presentation away)))
+      (is (nil? (get-in away [:ui :slides])))
+      (is (false? (slides/show-view? away)) "another tab is in front")
+      (is (false? (slides/show-here? away))))
+    (testing "…while the link opens, too"
+      (let [opening (assoc-in (presenting-db false) [:ui :slides-link]
+                              {:phase :opening :role :presenter :path talk :known {:page 2 :blank nil}})]
+        (is (true? (link/away? (get-in (:db (events/slides-unmounted-fx opening talk)) [:ui :slides-link]))))))
+    (testing "away, the deck unmounting again — the same deck shown in another tab — changes nothing"
+      (is (= {:db away} (events/slides-unmounted-fx away talk))))
+    (testing "away, a push from the audience window is only recorded: no engine is told, and app-db's blank and the
+              show's start stay"
+      (let [{:keys [db fx]} (events/slides-link-state-fx away {:session "show-1" :seq 1 :page 5 :blank "black"})]
+        (is (= {:page 5 :blank :black} (get-in db [:ui :slides-link :known])))
+        (is (empty? fx))
+        (is (nil? (slides/blank db)))
+        (is (= :current (:from (slides/presentation db))))))
+    (testing "away, nothing of the show acts on the view in front — b w, F, F5 again, s, Shift+S — its engine does not
+              present, and no console shows"
+      (with-redefs [slides/pdf-shown? (constantly true) slides/slides-view? (constantly true)]
+        (is (nil? (events/slides-blank-fx away :black)))
+        (is (nil? (events/slides-fullscreen-toggle-fx away)))
+        (is (nil? (events/slides-present-fx away :first)))
+        (is (nil? (events/slides-presenter-view-fx away)))
+        (is (nil? (events/slides-present-linked-fx away)))
+        (is (false? (:presenting? (slides/layout-request away))))
+        (is (false? (slides/presenter-shown? (assoc-in away [:ui :presenter-view?] true))))))
+    (testing "the show's keys leave the palette and the keymap there; End Slide Show stays"
+      (let [ctx {:presenting? (slides/presenting? away) :show-here? (slides/show-here? away)}]
+        (doseq [id [:slides/black :slides/white :slides/fullscreen]]
+          (is (false? (commands/allowed? id ctx)) (name id)))
+        (is (true? (commands/allowed? :slides/stop ctx)))))
+    (testing "nor does Escape on another tab end the show; End Slide Show still does, from any tab"
+      (let [{:keys [db]} (input-events/escape-fx (assoc-in away [:ui :input :mode] :normal) {:on-document? true})]
+        (is (some? (slides/presentation db))))
+      (is (= [[:vv/presenter-leave {:session "show-1" :reason "stopped"}] [:async/cancel :slides/link-waiting]]
+             (:fx (events/slides-stop-fx away {})))))
+    (testing "the show's view again, its deck detected: the show resumes where the show is — the audience's page and
+              blank colour, recorded while away — and nothing is sent"
+      (let [moved           (-> away
+                                (assoc-in [:ui :slides-link :known] {:page 5 :blank :black})
+                                (assoc-in [:ui :active-tab] 1))
+            {:keys [db fx]} (events/slides-resume-fx moved talk)]
+        (is (nil? fx))
+        (is (not (link/away? (get-in db [:ui :slides-link]))))
+        (is (= 5 (get-in db [:ui :slides-link :applying])) "the new engine's first report, of page 5, sends nothing")
+        (is (= 5 (:from (slides/presentation db))))
+        (is (= :black (slides/blank db)))
+        (is (true? (slides/show-here? db)))
+        (is (true? (:presenting? (slides/layout-request db))) "its engine presents again")
+        (is (= 6 (:from (slides/presentation
+                         (:db (events/slides-link-state-fx db {:session "show-1" :seq 2 :page 6 :blank nil})))))
+            "a push before its engine presents moves the start again (R-from)")))
+    (testing "no resume for the deck detected in another tab, for another deck, or for a show that is not away"
+      (is (nil? (events/slides-resume-fx away talk)) "the show's tab is not in front")
+      (is (nil? (events/slides-resume-fx (assoc-in away [:ui :active-tab] 1) paper)))
+      (is (nil? (events/slides-resume-fx here talk))))
+    (testing "closing the show's tab ends the show — away from it, or showing it — and leaves the link: \"unmounted\""
+      (doseq [db [away (assoc-in (elsewhere here) [:ui :active-tab] 1)]]
+        (let [{db' :db fx :fx} (events/close-tab-result db 1)]
+          (is (nil? (slides/presentation db')))
+          (is (nil? (get-in db' [:ui :slides-link])))
+          (is (some #{[:vv/presenter-leave {:session "show-1" :reason "unmounted"}]} fx))))
+      (is (some? (slides/presentation (:db (events/close-tab-result away 2)))) "closing another tab keeps it"))))
 
 (def ^:private audience-link
   {:session "show-1" :seq 0 :role "audience" :page 3 :blank nil :fullscreen true})

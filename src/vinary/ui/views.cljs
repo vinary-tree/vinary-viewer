@@ -9,6 +9,7 @@
             [vinary.app.uri :as uri]
             [vinary.app.nav :as nav]
             [vinary.app.link :as link]
+            [vinary.app.commands :as commands]
             [vinary.renderer.math :as math]
             [vinary.renderer.markdown :as md]
             [vinary.ir.backend.html :as ir-html]
@@ -996,7 +997,13 @@
                                 (swap! gen* inc)
                                 (when @node (.removeEventListener @node "contextmenu" on-ctx))
                                 (unmount-doc!)
-                                (rf/dispatch [:slides/unmounted (second (r/argv this))]))
+                                ;; at once, not queued: a linked show's presenter goes away in this very step, so no
+                                ;; message from main is handled between the view going and the link going away
+                                ;; (events/slides-unmounted-fx, theory/11 §3.5)
+                                ;; Disabled 2026-10-19 (ADR-0048 §8.10): the queued dispatch let a push be shown to
+                                ;; no engine of the show's — or to the next view's engine.
+                                ;; (rf/dispatch [:slides/unmounted (second (r/argv this))])
+                                (commands/dispatch-now! [:slides/unmounted (second (r/argv this))]))
       :reagent-render         (fn [_path _stamp]
                                 ;; reactive → did-update: zoom/fit/invert + the layout request (ADR-0045)
                                 (reset! vstate (merge @(rf/subscribe [:pdf/view-state])

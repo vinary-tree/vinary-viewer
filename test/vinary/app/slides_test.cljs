@@ -49,10 +49,20 @@
         "View as Slide Show works for any PDF")
     (is (= :document (slides/effective-layout (nav/set-pdf-layout db1 :document) deck))
         "an explicit choice beats detection")
+    ;; Changed 2026-10-19 (ADR-0048 §8.10): the show's view presents — its tab and its document in front
+    ;; (slides/show-here?); a show elsewhere does not make this view present
     (is (= :slides (slides/effective-layout (-> db1 (nav/set-pdf-layout :document)
-                                                (assoc-in [:ui :presentation :active?] true))
+                                                (assoc-in [:ui :presentation] {:active? true :tab-id 1
+                                                                               :path "/d/talk.pdf"}))
                                             {:deck? false}))
         "presenting always shows slides")
+    (doseq [[why pres link] [["the show is of another tab" {:active? true :tab-id 2 :path "/d/paper.pdf"} nil]
+                             ["a linked show's presenter away from its deck" {:active? true :tab-id 1 :path "/d/talk.pdf"}
+                              {:phase :live :role :presenter :path "/d/talk.pdf" :away? true}]]]
+      (let [db (-> db1 (nav/set-pdf-layout :document) (assoc-in [:ui :presentation] pres)
+                   (assoc-in [:ui :slides-link] link))]
+        (is (= :document (slides/effective-layout db {:deck? false})) why)
+        (is (false? (:presenting? (slides/layout-request db))) why)))
     (is (= :slides (slides/open-as db1)) "the default preference")
     (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none :notes :auto
             :presenter-view? false}

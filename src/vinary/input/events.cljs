@@ -61,7 +61,9 @@
    the slide show's steps in a linked show's presenter window, which keeps its chrome (slides/chromeless?): Escape in
    its URI bar, its tree's filter or its bars cancels that control, not the show, nor the audience's blank. A window
    that hides its chrome has no chrome to be in, so there they are taken as before; and with no `:on-document?` (the
-   palette, a dispatch) Escape counts as one on the document."
+   palette, a dispatch) Escape counts as one on the document. The show itself ends only from its own view
+   (slides/show-view?): Escape on another tab — a linked show's presenter away from its deck — leaves it running, and
+   End Slide Show ends it from anywhere (ADR-0048 §8.10)."
   ([db] (escape-fx db nil))
   ([db {:keys [on-document?]}]
    (let [palette? (get-in db [:ui :palette :open?])
@@ -74,7 +76,8 @@
        (and show? (slides/overview? db))     (events/slides-overview-close-fx db)
        (and show? (slides/digits db))        (events/slides-digits-clear-fx db)
        (and show? (slides/blank db))         {:db (slides/clear-blank db)}
-       (and show? (slides/presenting? db))   (events/slides-stop-fx db {})
+       ;; the show ends from its own view; on another tab Escape leaves an away show running (ADR-0048 §8.10)
+       (and show? (slides/show-view? db))    (events/slides-stop-fx db {})
        (not= mode :normal)                   {:db (assoc-in db [:ui :input :mode] :normal)}
        :else                                 {:db (-> db (assoc-in [:ui :input :sequence] [])
                                                       (assoc-in [:ui :input :count] nil))}))))

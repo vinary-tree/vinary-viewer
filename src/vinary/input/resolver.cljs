@@ -68,6 +68,8 @@
             :pdf-view?     (slides/pdf-shown? db)
             :slides-view?  (slides/slides-view? db)
             :presenting?   (slides/presenting? db)
+            ;; the show is shown here — its view in front, its presenter not away (ADR-0048 §8.10)
+            :show-here?    (slides/show-here? db)
             :swap-offered? (slides-link/swap-offered? (get-in db [:ui :slides-link]))
             ;; the slides key layer applies (keyboard-only: the palette's context never sets it, so the typed-number
             ;; commands never show up there)

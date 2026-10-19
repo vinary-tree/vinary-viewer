@@ -17,8 +17,9 @@
      :role        :presenter or :audience                                              all
      :session     main's session id; nil while :opening                                all
      :path        the deck                                                             all
-     :known       the position last exchanged with main: the last move this window     :live
-                  sent, or the last push it showed
+     :known       the position last exchanged with main: the last move this window     :opening :live
+                  sent, or the last push it showed (an opening link: the position it
+                  asked main to open at)
      :seq         the newest move number seen                                          :joining :live
      :own-seq     the newest number of this window's own accepted moves                :joining :live
      :out         the mids sent that main has not acknowledged (a set)                 :joining :live
@@ -31,6 +32,8 @@
      :display     presenter: \"separate\", \"same\" or \"manual\" (the joined message)     :live
      :peer        presenter: :waiting until the audience's deck shows, then :live       :live
      :swap        presenter: main's last answer to Swap screens                        :live
+     :away?       presenter: its deck view unmounted while the show goes on in the      :opening :live
+                  audience window (theory/11 §3.5); absent otherwise
      :reason      why it ended, and :stop? whether the show stops with it              :ended
 
    The window's rules (theory/11 §3.2–§3.4):
@@ -46,6 +49,11 @@
 
    Following never sends: a window that shows a push reports the page it was told to show, which equals known. It
    sends a correction only when its engine snapped that page (a note page snaps to its slide, always downward).
+
+   Away and back (theory/11 §3.5): the presenter's deck view unmounting while its link opens or is live makes the link
+   AWAY (`away`) — it stays, and receives as above, but ⟨show π⟩ only records π as known, and nothing is sent. Its
+   deck mounting again (`resume`) opens the show at known, with known's blank colour and applying ← known's page, so
+   the new engine's first report sends nothing.
    The audience window never announces its start page as a move; it says vv:presenter-ready, which moves nothing.
 
    Returned keys, besides :link — the new link, always present:
@@ -104,6 +112,12 @@
   "Does message `msg` belong to `link`'s session, while the link is joining or live?"
   [link msg]
   (and (contains? #{:joining :live} (:phase link)) (= (:session msg) (:session link))))
+
+(defn away?
+  "Is `link` a presenter away from its deck — its deck view unmounted while the show goes on in the audience window
+   (theory/11 §3.5)?"
+  [link]
+  (true? (:away? link)))
 
 ;; ---- what the presenter's pane shows ---------------------------------------------------------------------------
 
@@ -185,6 +199,7 @@
    §3.2, control N-applying). After a report, call `reported` first: the report ends the push being shown."
   [link mirror]
   (when (and (live? link)
+             (not (away? link))                    ; an away window has no engine and no show on screen
              (true? (:presenting? mirror))
              (= :slides (:layout mirror))
              (= (:path mirror) (:path link)))
@@ -232,7 +247,9 @@
       ;; on-joined, which asked for the presenter's own fullscreen on a separate display. The presenter window now
       ;; stays windowed — it keeps its chrome, and the show runs in the audience window — so nothing reads it.
       ;; {:link {:phase :opening :role :presenter :path path :fullscreen (boolean fullscreen)}
-      {:link {:phase :opening :role :presenter :path path}
+      ;; :known — the position main is asked to open at: where the show resumes if this window leaves its deck and
+      ;; comes back before main answers (resume)
+      {:link {:phase :opening :role :presenter :path path :known (position page blank)}
        :open request})))
 
 (defn leave
@@ -290,9 +307,38 @@
   "⟨show π⟩ (theory/11 §3.3): this window now shows `pos`, a position main sent. → {:link :show pos}: `pos` is
    :known, and :applying holds its page until the engine reports it. The caller runs the EFFECT (show-effect pos) —
    not the :slides/command event, which would un-blank (ADR-0045 §5) — and sets app-db's blank colour to
-   (:blank pos). The engine records no jump history for [:show p] (ADR-0048 §3)."
+   (:blank pos). The engine records no jump history for [:show p] (ADR-0048 §3). An away link (theory/11 §3.5) only
+   records `pos` as :known — no engine shows it, and the show resumes there (`resume`): {:link}, no :show."
   [link pos]
-  {:link (assoc link :known pos :applying (:page pos)) :show pos})
+  (if (away? link)
+    {:link (assoc link :known pos)}
+    {:link (assoc link :known pos :applying (:page pos)) :show pos}))
+
+(defn away
+  "The presenter's deck view unmounted while its link opens or is live (theory/11 §3.5, the model's Unmount): the
+   link stays, :away?, and a push being shown is forgotten (:applying nil) — the engine that would have reported it is
+   gone, with the mirror and any report that was due. Nothing is sent: while away the link receives as before, but
+   shows nothing (`show`) and sends nothing (`outgoing`). → {:link}; any other link is unchanged.
+
+   An unmount while the link opens is that step taken as the link goes live: main's joined makes it live AND away at
+   the session's start (`on-joined` keeps the flag, and `outgoing` sends nothing), so a key pressed before the unmount
+   is not sent — no window shows its page any more."
+  [link]
+  (if (and (= :presenter (:role link)) (contains? #{:opening :live} (:phase link)))
+    {:link (assoc link :away? true :applying nil)}
+    {:link link}))
+
+(defn resume
+  "The presenter's deck mounted again in the show's view (theory/11 §3.5, the model's Remount). → {:link :show known}:
+   the link is back, and the caller opens the show at known's page ([:ui :presentation :from]) with known's blank
+   colour; a live link's :applying holds that page, so the new engine's first report — of that very page — sends
+   nothing (Lemma 3). Nothing is sent. Unchanged ({:link}) unless the link is away."
+  [link]
+  (if (away? link)
+    (let [known (:known link)]
+      {:link (-> link (dissoc :away?) (assoc :applying (when (live? link) (:page known))))
+       :show known})
+    {:link link}))
 
 (defn show-effect
   "The re-frame effect that shows `pos`'s page on the mounted slide show: [:slides/command [:show page]]."
@@ -364,20 +410,24 @@
 (defn on-ended
   "Main's ended message {session ended stop reason} reaches this window. For this link's session (joining or live)
    — or, while :opening, the \"no-window\" end of the session main had begun for it (the opening window knows no
-   session id yet) — the link ends, and :stop? says whether this window's show stops too. Anything else is a late
-   message about an older show, and is ignored."
+   session id yet) — the link ends, and :stop? says whether this window's show stops too: main's stop, or always for
+   an away presenter — the show it left runs nowhere any more (ADR-0048 §8.10). Anything else is a late message about
+   an older show, and is ignored."
   [link {:keys [stop reason] :as msg}]
   (if (or (in-session? link msg)
           (and (= :opening (:phase link)) (= "no-window" reason)))
-    {:link (ended link reason stop) :stop? (true? stop)}
+    (let [stop? (or (true? stop) (away? link))]
+      {:link (ended link reason stop?) :stop? stop?})
     {:link link}))
 
 (defn on-refused
   "Main refused this window's request {session: nil, refused: reason} — \"busy\", \"not-focused\", \"not-retained\"
-   or \"invalid\": an :opening link ends with that reason (the window shows it); otherwise ignored."
+   or \"invalid\": an :opening link ends with that reason (the window shows it), and an away one stops its show too —
+   no audience window will show it; otherwise ignored."
   [link {:keys [refused]}]
   (if (= :opening (:phase link))
-    {:link (ended link refused false)}
+    (let [stop? (away? link)]
+      (cond-> {:link (ended link refused stop?)} stop? (assoc :stop? true)))
     {:link link}))
 
 (defn on-peer

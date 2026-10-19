@@ -23,7 +23,13 @@
 //      its engine's first report of the deck, and that report keeps the blank (R-blank, docs/theory/11 §7); and the
 //      one-window show's fullscreen is left as the window becomes the presenter, which stays windowed;
 //   8. the presenter's chrome is its own: Ctrl+L focuses its URI bar without ending the show, and Escape there leaves
-//      the show and the audience's blank alone; Escape on the document then clears the blank, and again ends both.
+//      the show and the audience's blank alone; Escape on the document then clears the blank, and again ends both;
+//   9. the presenter leaves its deck and comes back (ADR-0048 §8.10, docs/theory/11 §3.5): a new tab in front makes it
+//      AWAY — the show runs on in the audience window, whose keys still drive it, and nothing of the show acts on
+//      the other deck in front (no console, no presenter view, b and Escape leave the show alone); a real click on
+//      the deck's tab resumes the console at the show's slide and blank, sending nothing, and Space there unblanks
+//      both, then flips both; a navigation in the deck's tab, to another deck, is away too — that deck does not
+//      present — and Back resumes; closing the deck's tab from another tab ends both shows.
 // Run twice by `npm run test:presenter-e2e`: with the warm pool (the default, VV_POOL=1 — the audience window is
 // the claimed pool window, joined at once) and with the runner's --env=VV_POOL=0 (every audience window is cold,
 // joined only once it has loaded — vinary.main.core claim-window!). Xvfb gives Chromium ONE display (RandR monitors set with
@@ -59,6 +65,8 @@ const CONFIG_HOME = path.join(SCRATCH, 'config');
 const DECK = path.join(SCRATCH, 'talk.pdf');
 const NOTE_1 = 'Welcome everyone and introduce the topic';
 const NOTE_2 = 'Point at the second build of this slide';
+const PAPER = path.join(SCRATCH, 'paper.pdf');           // step 9's other deck
+const ASIDE = path.join(SCRATCH, 'aside.pdf');           // step 9: a deck no tab holds, opened in the deck's own tab
 fs.mkdirSync(CONFIG_HOME, { recursive: true });
 process.env.XDG_CONFIG_HOME = CONFIG_HOME;
 // …and a private $XDG_RUNTIME_DIR with the password bridge off (test/fixtures/hermetic-env.js)
@@ -69,6 +77,8 @@ fs.writeFileSync(DECK, Buffer.from(makeDeckPdf({
   frames: [1, 2, 1, 1],
   textNotes: [{ page: 0, contents: NOTE_1 }, { page: 1, contents: NOTE_2 }],
 })));
+fs.writeFileSync(PAPER, Buffer.from(makeDeckPdf({ frames: [1, 1, 1] })));
+fs.writeFileSync(ASIDE, Buffer.from(makeDeckPdf({ frames: [1, 1] })));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 require(path.join(ROOT, 'dist', 'main', 'main.js'));
@@ -108,6 +118,17 @@ async function press(win, keyCode, modifiers = []) {
   key(win, keyCode, modifiers);
 }
 
+// A real mouse click at the centre of the first element `selector` matches in `win`, once it is on screen.
+async function clickAt(win, selector) {
+  const at = await until(() => evalIn(win, `(() => { const n = document.querySelector(${JSON.stringify(selector)});
+    if (!n || n.getClientRects().length === 0) return null; const r = n.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`), Boolean,
+  `${selector} on screen`);
+  win.focus();
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+}
+
 // One window's side of the show, as the test reads it: app-db's presentation, position mirror and link
 // ([:ui :slides-link]), and what the presenter view and the blank badge put on screen.
 const state = (win) => evalIn(win, `(() => {
@@ -122,6 +143,12 @@ const state = (win) => evalIn(win, `(() => {
     blank: slides.blank == null ? null : slides.blank,
     presenterView: ui['presenter-view?'] === true,
     role: link && link.role, phase: link && link.phase, peer: link && link.peer, display: link && link.display,
+    // away from its deck (ADR-0048 §8.10), the position the link last exchanged with main, and the newest move seen
+    away: link ? link['away?'] === true : null,
+    knownPage: link && link.known ? link.known.page : null, knownBlank: link && link.known ? link.known.blank : null,
+    seq: link ? link.seq : null,
+    // the deck the slides engine in front reports (app-db's position mirror, [:ui :slides])
+    slidesPath: slides.path == null ? null : slides.path,
     pane: Boolean(document.querySelector('.vv-presenter-pane')),
     notes: [...document.querySelectorAll('.vv-presenter-note')].map((n) => n.textContent.trim()),
     notice: text('.vv-presenter-link-notice'),
@@ -386,6 +413,73 @@ async function run() {
   await until(async () => fifth.isDestroyed() && !(await state(presenter)).presenting,
     Boolean, 'Escape again ends both, and the audience window closes');
   console.log(`[ok] ${MODE}: the presenter's URI bar and its Escape leave the show and the audience's blank alone`);
+
+  // 9. away and back (ADR-0048 §8.10, theory/11 §3.5): the show keeps running while the presenter is elsewhere
+  const sixth = await openLinkedShow(presenter);
+  await press(presenter, 'Home');
+  await samePage(presenter, sixth, 0, 'Home: both on the first slide');
+  await clickAt(presenter, '.vv-tab-new');                        // a new tab in front: the deck's view unmounts
+  await until(() => state(presenter), (s) => s.away === true && s.presenting && s.phase === 'live' && !s.console,
+    'a new tab in front: the presenter is away, its show running, no console');
+  await evalIn(presenter, `window.__vvopen(${JSON.stringify(PAPER)})`);
+  const otherShown = await until(() => state(presenter), (s) => s.slidesPath === PAPER && s.page != null,
+    'the other deck opens in the new tab', 20000);
+  assert.strictEqual(otherShown.enginePresenting, false, 'the other deck does not present');
+  assert.strictEqual(otherShown.pane, false, 'no console or presenter view over it');
+  assert.strictEqual(otherShown.chromeless, false, 'and the presenter window keeps its chrome');
+  await press(sixth, 'Space');
+  await until(() => state(sixth), (s) => s.page === 1, 'Space in the audience while the presenter is away: page 1');
+  await press(sixth, 'Space');
+  await until(() => state(sixth), (s) => s.page === 2, 'Space again in the audience: page 2');
+  await press(sixth, 'b');
+  const recorded = await until(() => state(presenter), (s) => s.knownPage === 2 && s.knownBlank === 'black',
+    'the away presenter records where the show is: the audience\'s page and blank');
+  assert.strictEqual(recorded.slidesPath, PAPER, 'the other deck stays in front');
+  assert.strictEqual(recorded.page, otherShown.page, 'it did not move');
+  assert.strictEqual(recorded.blank, null, 'nor blank');
+  await press(presenter, 'b');                                    // on the other deck: not the show's
+  await press(presenter, 'Escape');
+  await sleep(500);
+  const [keptP, keptA] = [await state(presenter), await state(sixth)];
+  assert.ok(keptP.presenting && keptP.away && keptP.phase === 'live' && !sixth.isDestroyed(),
+    'b and Escape on the other deck leave the show running, the presenter away');
+  assert.strictEqual(keptA.blank, 'black', 'the audience stays black');
+  assert.strictEqual(keptP.blank, null, 'and the other deck is not blanked');
+  const seqAway = keptA.seq;
+  await clickAt(presenter, '.vv-tab[title$="talk.pdf"]');         // back to the deck's tab, by a real click
+  await until(() => state(presenter),
+    (s) => !s.away && s.console && s.enginePresenting && s.slidesPath === DECK && s.page === 2 && s.blank === 'black'
+      && s.badge === 'Audience: black',
+    'back on the deck\'s tab: the console resumes at the show\'s slide, with its blank');
+  await sleep(500);
+  const resumed = await state(sixth);
+  assert.strictEqual(resumed.seq, seqAway, 'the resume sent nothing: the audience saw no move');
+  assert.strictEqual(resumed.page, 2, 'it stays where it was');
+  assert.strictEqual(resumed.blank, 'black', 'and black');
+  //    the show resumed blanked, and in a blanked show a slide step only ends the blanking (slides-command-fx, ADR-0045
+  //    §5): the audience sees the slide it left — the first Space unblanks both windows, the next one flips both
+  await press(presenter, 'Space');
+  await until(async () => [await state(presenter), await state(sixth)],
+    ([p, a]) => p.blank == null && a.blank == null && p.badge == null && p.page === 2 && a.page === 2,
+    'Space in the resumed presenter unblanks both windows, on the slide the audience left');
+  await press(presenter, 'Space');
+  await samePage(presenter, sixth, 3, 'Space again in the resumed presenter moves both');
+  //    a navigation in the deck's own tab, to a deck no tab holds: __vvopen is :doc/open, which FOCUSES a tab that
+  //    already shows its document — PAPER's would be a tab switch, and Back would then walk the paper's tab
+  await evalIn(presenter, `window.__vvopen(${JSON.stringify(ASIDE)})`);
+  const aside = await until(() => state(presenter), (s) => s.away === true && s.slidesPath === ASIDE && s.page != null,
+    'the deck\'s tab navigated to another deck: away again', 20000);
+  assert.strictEqual(aside.enginePresenting, false, 'another deck in the show\'s own tab does not present');
+  await clickAt(presenter, '.vv-uribar .vv-nav-btn[title^="Back"]');
+  await until(() => state(presenter), (s) => !s.away && s.console && s.enginePresenting && s.page === 3,
+    'Back: the deck again, and the show resumes at its slide');
+  await clickAt(presenter, '.vv-tab[title$="paper.pdf"]');        // the other tab in front: away
+  await until(() => state(presenter), (s) => s.away === true, 'the other tab in front: away');
+  await clickAt(presenter, '.vv-tab[title$="talk.pdf"] .vv-tab-close');
+  await until(async () => sixth.isDestroyed() && !(await state(presenter)).presenting,
+    Boolean, 'closing the deck\'s tab from another tab ends both shows, and the audience window closes');
+  assert.strictEqual((await state(presenter)).role, null, 'the presenter window leaves the link');
+  console.log(`[ok] ${MODE}: away from the deck the show runs on; back, the console resumes at the show's slide`);
 }
 
 app.whenReady().then(() =>

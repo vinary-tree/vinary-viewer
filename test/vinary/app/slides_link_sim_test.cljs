@@ -3,8 +3,8 @@
    drives the two windows' pure link models (vinary.app.slides-link) and main's pure sequencer
    (vinary.main.slides-link) through random interleavings of the people's moves (pages and blank colours), the
    engines' reports, the audience's mount, the windows learning their hidden pages at moments of their own (snaps,
-   always downward, the two windows disagreeing for a while), and the deliveries — over FIFO and reordering
-   channels.
+   always downward, the two windows disagreeing for a while), the presenter leaving its deck and coming back
+   (theory/11 §3.5: link/away and link/resume), and the deliveries — over FIFO and reordering channels.
 
    It plays the TLA+ model's part with the real code: the engine, app-db's mirror and the channels are simulated
    here, exactly as LinkedShow.tla describes them; every protocol decision is the code's. The model's ghost
@@ -13,7 +13,7 @@
    (bounded corrections) and the bookkeeping of Lemma 1; every quiescent state checks P1 (convergence) and, when no
    window ever snaps, P3 (no undo); a run that stops short of quiescence, or does not stop, violates P5.
 
-   The seven negative controls of theory/11 §6.3 are re-implemented here, each by wrapping one pure function so
+   The nine negative controls of theory/11 §6.3 are re-implemented here, each by wrapping one pure function so
    that one rule is gone. Each must find a violation of the property its rule protects: a control that passes, or
    fails on another property, would mean the simulation does not test what it claims to."
   (:require [cljs.test :refer-macros [deftest is]]
@@ -75,6 +75,8 @@
 
 (def ^:private fifo    {:name "fifo"    :pages 2 :max-user 3 :reorder? false :blanks [nil :black]})
 (def ^:private reorder {:name "reorder" :pages 2 :max-user 3 :reorder? true  :blanks [nil :black]})
+;; the presenter may leave its deck and come back, twice (LinkedShow.tla's MaxAway; every other configuration: 0)
+(def ^:private away-fifo (assoc fifo :name "away-fifo" :max-away 2))
 
 (def ^:private configurations
   "theory/11 §6.1's six configurations (same pages, people's actions, delivery and snaps; blanks none and black), and
@@ -87,12 +89,19 @@
    {:name "snap-reorder" :pages 3 :max-user 3 :reorder? true :blanks [nil :black]
     :snaps {presenter [hides-1-down] audience [hides-last]} :runs 300
     :expect #{:corrections :held-shown :stale-dropped}}
+   (assoc away-fifo :runs 300 :expect #{:away :remounted :away-recorded})
+   (assoc reorder :name "away-reorder" :max-away 2 :runs 300
+          :expect #{:away :remounted :away-recorded :held-shown :stale-dropped})
+   {:name "away-snap-fifo" :pages 3 :max-user 3 :reorder? false :blanks [nil :black] :max-away 2
+    :snaps {presenter [hides-1-down] audience [hides-last]} :runs 300 :expect #{:away :remounted :corrections}}
    {:name "fifo-deep" :pages 3 :max-user 5 :reorder? false :blanks [nil :black] :runs 200 :expect #{:held}}
    {:name "reorder-deep" :pages 3 :max-user 4 :reorder? true :blanks [nil :black] :runs 200
     :expect #{:held-shown :not-accepted}}
-   ;; 2–7 pages, 2–6 people's actions, either delivery order, a random start page, three blank colours, and up to two
-   ;; random downward snaps per window, each learned at a random moment — before the audience mounts, too.
-   {:name "random" :random? true :runs 600 :expect #{:corrections :deferred-blanks :held-shown :not-accepted}}])
+   ;; 2–7 pages, 2–6 people's actions, either delivery order, a random start page, three blank colours, up to two
+   ;; random downward snaps per window, each learned at a random moment — before the audience mounts, too — and the
+   ;; presenter leaving its deck up to twice.
+   {:name "random" :random? true :runs 600
+    :expect #{:corrections :deferred-blanks :held-shown :not-accepted :away :remounted}}])
 
 (defn- randomize
   "A random configuration for one run of `config` → [world' config']."
@@ -109,9 +118,10 @@
                                          [world (assoc snaps w ss)]
                                          (let [[world s] (random-snap world pages)]
                                            (recur world (inc k) (conj ss s)))))))
-                                 [world {}] windows)]
+                                 [world {}] windows)
+        [world max-away] (draw world 3)]
     [world (assoc config :pages pages :max-user (+ 2 max-user) :reorder? (= 1 order) :start-page start
-                  :blanks [nil :black :white] :snaps snaps)]))
+                  :blanks [nil :black :white] :snaps snaps :max-away max-away)]))
 
 ;; ---- the world ----------------------------------------------------------------------------------------------------
 ;; {:rng :config :seed :session :main
@@ -121,7 +131,7 @@
 ;;                           (:none :user :snap :announce) · :sent — the moves it sent}
 ;;  :to-main {wc [{:kind :move|:ready :payload … :user? …}]}    :user? is the model's ghost flag on a move
 ;;  :to-win  {wc [message …]}                                    main's vv:presenter-state messages
-;;  :users :rehides-done                                         the people's actions and Rehides so far
+;;  :users :rehides-done :aways                                  the people's actions, Rehides and departures so far
 ;;  :ghost   {:echo? :last-user-pos :non-user}                   theory/11 §4's ghosts
 ;;  :seen    {wc [seq own-seq]}                                  for P4
 ;;  :steps :trace :coverage}
@@ -161,6 +171,7 @@
            :to-win       {presenter [] audience []}
            :users        0
            :rehides-done 0
+           :aways        0
            :check-undo?  (every? empty? (vals snaps))   ; P3 holds only when no window snaps (theory/11 §5.3)
            :ghost        {:echo? false :last-user-pos {:page p0 :blank nil} :non-user 0}
            :seen         {presenter [0 0] audience [0 0]}
@@ -258,7 +269,8 @@
         s    (first (:rehides win))
         win  (assoc win :snap s :rehides (subvec (:rehides win) 1))
         page (nth s (:engine win))
-        win  (if (and (link/live? (:link win)) (not= page (:engine win)))
+        ;; an away window has no engine to snap (LinkedShow.tla's Rehide: phase live only)
+        win  (if (and (link/live? (:link win)) (not (link/away? (:link win))) (not= page (:engine win)))
                (assoc win :engine page :pending? true :cause (if (= :user (:cause win)) :user :snap))
                win)]
     (-> world (assoc-in [:wins w] win) (update :rehides-done inc))))
@@ -302,28 +314,37 @@
       user?                                 (assoc-in world [:ghost :last-user-pos] (select-keys payload [:page :blank]))
       :else                                 (update-in world [:ghost :non-user] inc))))
 
+(defn- take-message-rules
+  "Window link `lk` takes main's message `msg`: through link/on-state, or, under a control `cs` names, through the
+   wrapper that removes its one rule."
+  [cs lk msg shown]
+  (case (link/message-kind msg)
+    :push (cond
+            ;; N-hold: show a push even while my own move is on the way
+            (contains? cs :no-hold)
+            (assoc-in (link/on-push (assoc lk :out #{}) msg) [:link :out] (:out lk))
+            ;; N-staleguard: take a push even when it is not newer than what I have seen
+            (contains? cs :no-stale-guard)
+            (let [r (link/on-push (assoc lk :seq -1) msg)]
+              (assoc-in r [:link :seq] (max (:seq lk) (get-in r [:link :seq]))))
+            :else
+            (link/on-state lk msg shown))
+    :ack  (if (and (contains? cs :no-held-check) (:held lk))
+            ;; N-heldcheck: show the held push without comparing it to my own last accepted move
+            (let [r (link/on-ack (assoc-in lk [:held :seq] ##Inf) msg)]
+              (cond-> r (get-in r [:link :held]) (assoc-in [:link :held] (:held lk))))
+            (link/on-state lk msg shown))
+    (link/on-state lk msg shown)))
+
 (defn- take-message
-  "Window link `lk` takes main's message `msg`: through link/on-state, or, under a control, through the wrapper
-   that removes its one rule."
+  "Window link `lk` takes main's message `msg` (take-message-rules). N-awaydrop: an away link forgets the position a
+   message showed it — its :known stays as it was."
   [world lk msg shown]
-  (let [cs (controls world)]
-    (case (link/message-kind msg)
-      :push (cond
-              ;; N-hold: show a push even while my own move is on the way
-              (contains? cs :no-hold)
-              (assoc-in (link/on-push (assoc lk :out #{}) msg) [:link :out] (:out lk))
-              ;; N-staleguard: take a push even when it is not newer than what I have seen
-              (contains? cs :no-stale-guard)
-              (let [r (link/on-push (assoc lk :seq -1) msg)]
-                (assoc-in r [:link :seq] (max (:seq lk) (get-in r [:link :seq]))))
-              :else
-              (link/on-state lk msg shown))
-      :ack  (if (and (contains? cs :no-held-check) (:held lk))
-              ;; N-heldcheck: show the held push without comparing it to my own last accepted move
-              (let [r (link/on-ack (assoc-in lk [:held :seq] ##Inf) msg)]
-                (cond-> r (get-in r [:link :held]) (assoc-in [:link :held] (:held lk))))
-              (link/on-state lk msg shown))
-      (link/on-state lk msg shown))))
+  (let [cs (controls world)
+        r  (take-message-rules cs lk msg shown)]
+    (if (and (contains? cs :away-drop) (link/away? lk))
+      (assoc-in r [:link :known] (:known lk))
+      r)))
 
 (defn- show-position
   "⟨show π⟩ in the engine and app-db (LinkedShow.tla's Apply): app-db takes the colour at once, the engine is told
@@ -358,7 +379,39 @@
       (tally :held-shown)
 
       (and (= :ack kind) (:held lk) (nil? (:show r)) (nil? (:held lk')))
-      (tally :held-discarded))))
+      (tally :held-discarded)
+
+      (and (link/away? lk) (not= (:known lk) (:known lk')))
+      (tally :away-recorded))))
+
+(defn- unmount
+  "The presenter's deck view unmounts while its link is live — its tab shows another document (theory/11 §3.5,
+   LinkedShow.tla's Unmount) — through the code's link/away: the link stays, away; the report that was due, the mirror
+   and :applying are gone (app-db's colour stays, as the model's blank does); nothing is sent."
+  [world]
+  (let [win (get-in world [:wins presenter])]
+    (-> world
+        (update :aways inc)
+        (assoc-in [:wins presenter] (assoc win :link (:link (link/away (:link win))) :pending? false :mirror nil
+                                               :cause :none))
+        (tally :away))))
+
+(defn- remount
+  "The presenter's deck mounts again in the show's view (LinkedShow.tla's Remount), through the code's link/resume:
+   the engine opens at known's page — snapped, if the window hides it — with known's blank colour, and a report is
+   due: for the snap when it moved the page, else for nothing. Nothing is sent. N-staleremount: the engine reopens
+   where it was when the window went away."
+  [world]
+  (let [win    (get-in world [:wins presenter])
+        r      (link/resume (:link win))
+        pos    (:show r)
+        stale? (contains? (controls world) :stale-remount)
+        page   (shown-page win (if stale? (:engine win) (:page pos)))]
+    (-> world
+        (assoc-in [:wins presenter]
+                  (assoc win :link (:link r) :blank (:blank pos) :engine page :pending? true
+                             :cause (if (and (not stale?) (not= page (:page pos))) :snap :none)))
+        (tally :remounted))))
 
 ;; ---- choosing the next step ---------------------------------------------------------------------------------------
 
@@ -371,7 +424,8 @@
       (into []
             (mapcat (fn [w]
                       (let [win (get-in world [:wins w])]
-                        (when (link/live? (:link win))
+                        ;; an away presenter has no engine, nor a show on screen to blank
+                        (when (and (link/live? (:link win)) (not (link/away? (:link win))))
                           (concat (for [q (range pages)
                                         :when (and (not= q (:engine win)) (= q (shown-page win q)))]
                                     [:user-page w q])
@@ -383,6 +437,16 @@
   "Each window that has not yet learned all its snaps may learn the next one."
   [world]
   (into [] (comp (filter (fn [w] (seq (get-in world [:wins w :rehides])))) (map (fn [w] [:rehide w]))) windows))
+
+(defn- departures
+  "The presenter leaving its deck — fewer than :max-away times so far — or, while away, coming back (theory/11 §3.5's
+   Unmount and Remount). A person does both: like the people's actions, they need not happen at all."
+  [world]
+  (let [lk (get-in world [:wins presenter :link])]
+    (cond
+      (link/away? lk)                                                                [[:remount presenter]]
+      (and (link/live? lk) (< (:aways world) (get-in world [:config :max-away] 0))) [[:unmount presenter]]
+      :else                                                                          [])))
 
 (defn- protocol
   "The protocol's actions possible now (weakly fair in the model): a due report, the audience's mount, and a delivery
@@ -399,19 +463,23 @@
 
 (defn- choose
   "The next step → [world' action]: a person's about 40% of the time while any is possible, a window learning its
-   hidden pages about 5% of the time, else a protocol step — falling back to whatever is possible; nil when nothing
-   is. Every interleaving has a positive probability."
+   hidden pages about 5% of the time, the presenter leaving or coming back about 7% of the time, else a protocol
+   step — falling back to whatever is possible; nil when nothing is. Every interleaving has a positive probability.
+   A configuration whose presenter never leaves (:max-away 0) chooses exactly as before departures existed."
   [world]
   (let [ppl       (people world)
         rh        (rehides world)
+        dep       (departures world)
         prot      (protocol world)
         [world u] (draw world 100)
         pool      (cond
                     (and (seq ppl) (< u 40)) ppl
                     (and (seq rh) (< u 45))  rh
+                    (and (seq dep) (< u 52)) dep
                     (seq prot)               prot
                     (seq ppl)                ppl
-                    (seq rh)                 rh)]
+                    (seq rh)                 rh
+                    (seq dep)                dep)]
     (if pool
       (let [[world i] (draw world (count pool))] [world (nth pool i)])
       [world nil])))
@@ -423,6 +491,8 @@
         :report     (report world w)
         :mount      (mount world)
         :rehide     (rehide world w)
+        :unmount    (unmount world)
+        :remount    (remount world)
         :main-recv  (main-recv world w)
         :win-recv   (win-recv world w))
       (update :steps inc)
@@ -442,13 +512,15 @@
           windows))
 
 (defn- converged?
-  "P1: both windows show main's position, and that is what each last exchanged with main."
+  "P1: each window last exchanged main's position with main, and each window showing the deck shows it — an away
+   presenter shows it when it comes back (its Remount opens at :known)."
   [world]
   (let [{:keys [page blank]} (main-position world)
         target               (link/position page (link/wire->blank blank))]
     (every? (fn [w]
               (let [win (get-in world [:wins w])]
-                (and (= target (link/position (:engine win) (:blank win))) (= target (:known (:link win))))))
+                (and (= target (:known (:link win)))
+                     (or (link/away? (:link win)) (= target (link/position (:engine win) (:blank win)))))))
             windows)))
 
 (defn- in-flight-mids
@@ -476,10 +548,11 @@
 (defn- violation
   "The first property state `world` violates, or nil. In every state: P2, P4, P6 and Lemma 1. In a quiescent state:
    P1, and P3 when no window ever snaps. P6's bound is theory/11 Theorem 5's, counting the roots so far — the
-   people's actions, the one mount and the Rehides — times the largest page index."
+   people's actions, the one mount, the Rehides and the presenter's departures (each a Remount to come) — times the
+   largest page index."
   [world]
-  (let [{:keys [ghost config users rehides-done]} world
-        bound (* (+ users 1 rehides-done) (dec (:pages config)))]
+  (let [{:keys [ghost config users rehides-done aways]} world
+        bound (* (+ users 1 rehides-done aways) (dec (:pages config)))]
     (or (when (:echo? ghost)
           {:property :P2 :why "a move was sent for no cause"})
         (some (fn [w]
@@ -557,6 +630,10 @@
    {:control "N-staleguard" :config (assoc reorder :controls #{:no-stale-guard}) :violates :P1}
    {:control "N-midguard"   :config (assoc reorder :controls #{:no-mid-guard})   :violates :P1}
    {:control "N-announce"   :config (assoc fifo :controls #{:announce})          :violates :P3}
+   ;; the presenter leaves its deck and comes back: reopening where its engine was, or forgetting what it was shown
+   ;; while away
+   {:control "N-staleremount" :config (assoc away-fifo :controls #{:stale-remount}) :violates :P2}
+   {:control "N-awaydrop"     :config (assoc away-fifo :controls #{:away-drop})     :violates :P1}
    ;; neg-upsnap: pages {0, 1, 2}, one person's action, FIFO, the presenter snapping page 1 UP to 2 while the
    ;; audience snaps page 2 down to 1 — each window's correction makes the other snap back, for ever
    {:control "N-upsnap"     :config {:pages 3 :max-user 1 :reorder? false :blanks [nil :black]

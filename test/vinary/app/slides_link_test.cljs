@@ -2,7 +2,8 @@
   "A window's link model (ADR-0048 §8.4–§8.6; theory/11 §3): the presenter's request and its answer, the audience's
    join and mount, the interceptor's question (`outgoing`) under each of its conditions — `applying` included — and
    the report that ends a push being shown, a push shown, held or dropped, an ack that releases or forgets a held push,
-   the end of a link in every way, and the routing of main's messages. One worked race at the end runs both windows
+   the presenter leaving its deck and coming back (away, resume), the end of a link in every way, and the routing of
+   main's messages. One worked race at the end runs both windows
    and main's pure sequencer through crossing moves; the randomized simulation (vinary.app.slides-link-sim-test)
    runs every such race."
   (:require [cljs.test :refer-macros [deftest testing is]]
@@ -69,8 +70,9 @@
 
 (deftest shift-s-asks-main-for-a-show
   (testing "no link: a new opening link, and the request — which carries the fullscreen preference for the audience
-            window; the presenter's link does not keep it (it never asks for its own fullscreen, ADR-0048 §8.1)"
-    (is (= {:link {:phase :opening :role :presenter :path deck}
+            window; the presenter's link does not keep it (it never asks for its own fullscreen, ADR-0048 §8.1), but
+            knows the position it asked for: a presenter that leaves its deck before main answers resumes there"
+    (is (= {:link {:phase :opening :role :presenter :path deck :known {:page 2 :blank nil}}
             :open {:path deck :page 2 :blank nil :fullscreen true}}
            (link/request-open nil request))))
   (testing "the blank colour travels as a string, fullscreen as a boolean"
@@ -281,6 +283,64 @@
     (is (= {:page 4 :blank :black} (:known (:link r))))
     (is (= 4 (:applying (:link r)))))
   (is (= [:slides/command [:show 4]] (link/show-effect {:page 4 :blank :black}))))
+
+;; ---- away and back (theory/11 §3.5, ADR-0048 §8.10) ---------------------------------------------------------------
+
+(deftest the-presenter-leaves-its-deck-and-comes-back
+  (let [gone (:link (link/away (presenter)))]
+    (testing "its deck view unmounted while live: the link stays, away; a push being shown is forgotten — its engine
+              is gone — and nothing is sent"
+      (let [showing (:link (link/show (presenter) {:page 4 :blank nil}))
+            r       (link/away showing)]
+        (is (= [:link] (keys r)))
+        (is (true? (link/away? (:link r))))
+        (is (nil? (:applying (:link r))))
+        (is (= (dissoc showing :applying) (dissoc (:link r) :away? :applying)) "the rest of the link is as it was")))
+    (testing "only a presenter's opening or live link goes away"
+      (doseq [l [nil (joining) (:link (link/deck-mounted (joining) deck)) (link/ended (presenter) "stopped" false)]]
+        (is (= {:link l} (link/away l)) (pr-str (:role l) (:phase l)))))
+    (testing "away, a push is recorded as known — the show's position — and nothing shows it"
+      (let [r (link/on-push gone (push 1 5 "black"))]
+        (is (not (contains? r :show)))
+        (is (= {:page 5 :blank :black} (:known (:link r))))
+        (is (= 1 (:seq (:link r))))
+        (is (nil? (:applying (:link r))))))
+    (testing "away, nothing is sent, whatever the mirror says"
+      (doseq [m [(mirror 3) (mirror 2 :black) (mirror 2)]]
+        (is (nil? (link/outgoing gone m)) (pr-str m))))
+    (testing "back: the show resumes at known, :applying holds its page, and nothing is sent"
+      (let [moved (:link (link/on-push gone (push 1 5 "black")))
+            r     (link/resume moved)]
+        (is (= #{:link :show} (set (keys r))))
+        (is (= {:page 5 :blank :black} (:show r)))
+        (is (not (contains? (:link r) :away?)))
+        (is (= 5 (:applying (:link r))))
+        (is (nil? (link/outgoing (link/reported (:link r) (mirror 5 :black)) (mirror 5 :black)))
+            "the new engine's first report, of that page, sends nothing (Lemma 3)")
+        (is (= {:session sid :mid 1 :page 4 :blank "black"}
+               (:move (link/outgoing (link/reported (:link r) (mirror 4 :black)) (mirror 4 :black))))
+            "a first report of a page its engine snapped to is a correction (Theorem 5)")))
+    (testing "a link that is not away does not resume"
+      (is (= {:link (presenter)} (link/resume (presenter)))))
+    (testing "an unmount while the link opens: main's joined makes it live AND away, and nothing is sent"
+      (let [l                         (:link (link/away (opening)))
+            {:keys [link move] :as r} (link/on-joined l (joined) nil)]
+        (is (= {:page 2 :blank nil} (:known l)) "an opening link knows the position it asked main to open at")
+        (is (link/away? l))
+        (is (= :live (:phase link)))
+        (is (link/away? link))
+        (is (nil? move))
+        (is (= [:link] (keys r)))
+        (testing "…and comes back to the position it asked for, with nothing to apply while the link opens"
+          (is (= {:page 2 :blank nil} (:show (link/resume l))))
+          (is (nil? (:applying (:link (link/resume l))))))))
+    (testing "the show it left ends with its link: any end of an away presenter's link stops its show"
+      (is (true? (:stop? (link/on-ended gone {:session sid :ended true :stop false :reason "audience-left"}))))
+      (let [opening-away (:link (link/away (opening)))]
+        (is (true? (:stop? (link/on-refused opening-away {:session nil :refused "busy"}))))
+        (is (true? (:stop? (link/on-ended opening-away {:session sid :ended true :stop false :reason "no-window"})))))
+      (is (not (contains? (link/on-refused (opening) {:session nil :refused "busy"}) :stop?))
+          "a window that did not leave its deck keeps its show, as before"))))
 
 ;; ---- the end of a link, and the rest of main's messages -----------------------------------------------------------
 

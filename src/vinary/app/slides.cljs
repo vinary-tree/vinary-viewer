@@ -34,6 +34,12 @@
   [db]
   (and (presenting? db) (not= :presenter (get-in db [:ui :slides-link :role]))))
 
+(defn away?
+  "Is this window a linked show's presenter AWAY from its deck (ADR-0048 §8.10, theory/11 §3.5): its deck view
+   unmounted while the show goes on in the audience window, until the deck shows in the show's view again?"
+  [db]
+  (true? (get-in db [:ui :slides-link :away?])))
+
 (defn pdf-shown?
   "Is the active tab showing a PDF (directly, or as the PDF facet of a collocated group)?"
   [db]
@@ -56,6 +62,22 @@
   "Where the running slide show asked to start (:first / :current / a page index), or nil."
   [db]
   (get-in db [:ui :presentation :from]))
+
+(defn show-view?
+  "Does the view in front show the running slide show's deck — the show's own tab, showing the show's document
+   (ADR-0048 §8.10)? The same deck in another tab is not the show's view: it never presents. A linked show's presenter
+   that leaves its deck keeps the show running in the audience window, and nothing of the show acts on the view in
+   front until the deck is back."
+  [db]
+  (let [{:keys [active? tab-id path]} (presentation db)]
+    (boolean (and active? (= tab-id (nav/active-id db)) (= path (facet/active-content-path db))))))
+
+(defn show-here?
+  "Is the running slide show shown HERE: in the view in front (show-view?), its presenter not away (away?)? Only
+   then does the engine present (layout-request :presenting?), and only then do the show's own keys act — F5 again,
+   Shift+S, b . w , and F (ADR-0048 §8.10)."
+  [db]
+  (and (show-view? db) (not (away? db))))
 
 (defn fullscreen-preferred?
   "The :slides-fullscreen? preference — does a slide show make the window fullscreen? (default yes; settings
@@ -98,7 +120,9 @@
   [db]
   {:explicit        (explicit-layout db)
    :open-as         (open-as db)
-   :presenting?     (presenting? db)
+   ;; the engine presents only in the show's own view, its presenter not away (show-here?): a presenter that left its
+   ;; deck must not present the document in front, nor another tab's copy of the deck (ADR-0048 §8.10)
+   :presenting?     (show-here? db)
    :present-from    (present-from db)
    :transition      (transition db)
    :notes           (notes-position db)
@@ -193,9 +217,11 @@
 ;; ---- the presenter view (ADR-0048 §6) ------------------------------------------------------------------------
 
 (defn presenter-shown?
-  "Is the presenter view showing: asked for (presenter-view?), and a PDF in the slides layout?"
+  "Is the presenter view showing: asked for (presenter-view?), and a PDF in the slides layout — while a show runs,
+   only in the show's own view (show-view?): a presenter away from its deck sees the document in front as it is
+   (ADR-0048 §8.10)."
   [db]
-  (and (presenter-view? db) (slides-view? db)))
+  (and (presenter-view? db) (slides-view? db) (or (not (presenting? db)) (show-view? db))))
 
 (defn console?
   "Does this window show the presenter CONSOLE (ADR-0048 §6.2, amended 2026-10-19)? The presenter view shown

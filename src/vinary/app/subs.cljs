@@ -134,13 +134,14 @@
  ::palette-ctx
  :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
  :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
- :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?] :<- [:slides/swap-offered?]
- (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting? swap?] _]
+ :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?] :<- [:slides/show-here?]
+ :<- [:slides/swap-offered?]
+ (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting? here? swap?] _]
    {:tabs tabs :active-tab active-tab :active-path active-path
     :can-back? back? :can-forward? fwd?
     :find-visible? (:visible? find)
     ;; gate the PDF / Slides commands (ADR-0045); :slides-active? is deliberately absent — keyboard-only
-    :pdf-view? pdf? :slides-view? slides? :presenting? presenting? :swap-offered? swap?
+    :pdf-view? pdf? :slides-view? slides? :presenting? presenting? :show-here? here? :swap-offered? swap?
     ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being
     ;; free must not be offered
     :in-input? true}))
@@ -252,6 +253,9 @@
 ;; the running slide show ({:active? :tab-id :path :from :fullscreen?}) or nil — menus, palette (ADR-0045)
 (rf/reg-sub :slides/presentation (fn [db _] (get-in db [:ui :presentation])))
 (rf/reg-sub :slides/presenting? :<- [:slides/presentation] (fn [p _] (boolean (:active? p))))
+;; is the running show shown here — its own view in front, its presenter not away (slides/show-here?, ADR-0048 §8.10)?
+;; The show's keys act only then (the palette's :show-here?)
+(rf/reg-sub :slides/show-here? (fn [db _] (slides/show-here? db)))
 ;; does this window hide its chrome for the show (.vv-root.vv-presenting)? every show but a linked show's presenter
 ;; window (slides/chromeless?, ADR-0048 §8.1)
 (rf/reg-sub :slides/chromeless? (fn [db _] (slides/chromeless? db)))
@@ -281,8 +285,15 @@
 ;; the presenter view (ADR-0048 §6): asked for in this window (`s`), and showing — asked for, in a slides view (the
 ;; .vv-presenter-view wrap and its pane); the speaker-notes hint chip (P5)
 (rf/reg-sub ::presenter-view? (fn [db _] (slides/presenter-view? db)))
-(rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?]
-            (fn [[asked? slides?] _] (boolean (and asked? slides?))))
+;; while a show runs, the presenter view shows only in the show's own view: a presenter away from its deck sees the
+;; document in front as it is (slides/show-view?, ADR-0048 §8.10); outside a show, anywhere
+(rf/reg-sub ::show-view-or-none? (fn [db _] (or (not (slides/presenting? db)) (slides/show-view? db))))
+;; Disabled 2026-10-19 (ADR-0048 §8.10): the presenter view showed in any slides view; while a show runs it now
+;; shows only in the show's own view (::show-view-or-none?, slides/presenter-shown?).
+;; (rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?]
+;;             (fn [[asked? slides?] _] (boolean (and asked? slides?))))
+(rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?] :<- [::show-view-or-none?]
+            (fn [[asked? slides? here?] _] (boolean (and asked? slides? here?))))
 ;; the presenter console: the presenter view in a linked show's presenter window — the notes over the whole content
 ;; area, and a small next slide (the .vv-presenter-console wrap; slides/console?, ADR-0048 §6.2)
 (rf/reg-sub :slides/console? (fn [db _] (slides/console? db)))

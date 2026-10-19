@@ -74,7 +74,9 @@
 
 (def leave-reasons
   "Why a window leaves its show (vv:presenter-leave): \"stopped\" — Escape or End Slide Show — or \"unmounted\" — its
-   deck view went away (a tab switch or close, navigation, Reflow)."
+   deck view went away for good: the audience window's view, or the tab the presenter's show is of closed. A
+   presenter whose deck view only unmounts while that tab stays open (a tab switch, navigation, Reflow) does not
+   leave: it is away, and its show runs on in the audience window (ADR-0048 §8.10)."
   #{"stopped" "unmounted"})
 
 (def gone-causes

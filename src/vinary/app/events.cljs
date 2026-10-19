@@ -1073,17 +1073,25 @@
          db'')
        (not= db' db'') (with-active-tab-focus db'')))))
 
+(declare slides-stop-fx)
+
 (defn close-tab-result
   "Effects of closing tab `id`. When it was the ACTIVE tab, the tab revealed in its place comes back where it was
    left — its saved scroll, source line or slide (ADR-0045 §Remembering the slide) — exactly like an explicit tab
-   switch (activate-tab-result); without that, its re-mounted view opened at the top / on the first slide."
+   switch (activate-tab-result); without that, its re-mounted view opened at the top / on the first slide.
+
+   Closing the tab a slide show is of ends the show first (slides-stop-fx, as its view unmounting would: \"unmounted\")
+   — also while a linked show's presenter is away from it (ADR-0048 §8.10): its view went already, and the show would
+   run on, linked, in no tab."
   [db id]
-  (let [closing-active?    (= id (nav/active-id db))
-        [db' _uri _still?] (nav/close db id)
+  (let [stop               (when (= id (:tab-id (slides/presentation db))) (slides-stop-fx db {:reason "unmounted"}))
+        db0                (get stop :db db)
+        closing-active?    (= id (nav/active-id db0))
+        [db' _uri _still?] (nav/close db0 id)
         target             (nav/active-uri db')]
     (cond-> (with-retention
               {:db db'
-               :fx (cond-> [] (and closing-active? target (uri/file-path target))
+               :fx (cond-> (vec (:fx stop)) (and closing-active? target (uri/file-path target))
                      (conj-some (entry-restore-fx (nav/cur-entry db'))))}
               db')
       closing-active? (with-active-tab-focus db'))))
@@ -2070,7 +2078,7 @@
       [[:db/add eid :doc/deck summary]]
       [])))
 
-(declare slides-link-deck-fx)
+(declare slides-link-deck-fx slides-resume-fx)
 
 (rf/reg-event-fx
  :pdf/deck-detected
@@ -2082,8 +2090,9 @@
                   (cond-> [[:ds/transact tx]]
                     (and (slides/presenting? db) (get-in summary [:notes :has-notes?]))
                     (conj [:dispatch [:slides/notes-hint-check]])))
-         ;; an audience window joining a linked show starts it once its deck has mounted (ADR-0048 §8.6)
-         joined (slides-link-deck-fx db path)]
+         ;; an audience window joining a linked show starts it once its deck has mounted (ADR-0048 §8.6); a presenter
+         ;; away from its deck resumes the show once the deck shows in the show's view again (§8.10)
+         joined (or (slides-link-deck-fx db path) (slides-resume-fx db path))]
      (cond
        joined (update joined :fx #(into (vec deck) %))
        deck   {:fx deck}
@@ -2168,12 +2177,25 @@
 (defn slides-unmounted-fx
   "Effects of the pdf-view unmounting `path` (a tab switch, navigation, Reflow): drop its position mirror, and
    end a slide show of that document — the show is of a VIEW, and the view is gone. A linked show is left as
-   \"unmounted\" (ADR-0048 §8.6)."
+   \"unmounted\" (ADR-0048 §8.6) — except by its presenter window while the link opens or is live and the show's tab
+   is still open: there the show goes on in the audience window, and the presenter is AWAY (slides-link/away,
+   ADR-0048 §8.10, theory/11 §3.5) until the deck shows in the show's view again (slides-resume-fx). Nothing is sent.
+   An away show's deck unmounting again — shown in another tab, never as the show — changes nothing.
+
+   The view dispatches this synchronously from its own unmount (commands/dispatch-now!): theory/11's Unmount is one
+   step, so no message from main is handled between the view going and the link going away — a push shown then
+   would be shown to no engine of the show's."
   [db path]
-  (let [db' (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)]
-    (if (= path (:path (slides/presentation db')))
-      (slides-stop-fx db' {:reason "unmounted"})
-      {:db db'})))
+  (let [db'  (if (= path (get-in db [:ui :slides :path])) (update db :ui dissoc :slides) db)
+        l    (get-in db' [:ui :slides-link])
+        pres (slides/presentation db')]
+    (cond
+      (not= path (:path pres)) {:db db'}
+      (slides-link/away? l)    {:db db'}
+      (and (= :presenter (:role l)) (contains? #{:opening :live} (:phase l))
+           (some #(= (:tab-id pres) (:id %)) (nav/tabs db')))
+      {:db (assoc-in db' [:ui :slides-link] (:link (slides-link/away l)))}
+      :else                    (slides-stop-fx db' {:reason "unmounted"}))))
 
 (rf/reg-event-fx :slides/unmounted (fn [{:keys [db]} [_ path]] (slides-unmounted-fx db path)))
 
@@ -2283,10 +2305,12 @@
      (cond
        (not (slides/pdf-shown? db)) nil
 
+       ;; F5 again moves the show only where it is shown (a presenter away from its deck: nothing, ADR-0048 §8.10)
        (slides/presenting? db)
-       (cond (= :first from)   {:fx [[:dispatch [:slides/command :first]]]}
-             (integer? from)   {:fx [[:dispatch [:slides/command [:goto from]]]]}
-             :else             nil)
+       (when (slides/show-here? db)
+         (cond (= :first from)   {:fx [[:dispatch [:slides/command :first]]]}
+               (integer? from)   {:fx [[:dispatch [:slides/command [:goto from]]]]}
+               :else             nil))
 
        :else
        (let [fs? (if (some? fullscreen?) (boolean fullscreen?) (slides/fullscreen-preferred? db))]
@@ -2327,9 +2351,10 @@
 (defn slides-presenter-view-fx
   "Effects of `s` (ADR-0048 P1): toggle this window between the audience view and the presenter view — the current
    slide beside a pane with the notes, the next slide and the counter — in any slides view, windowed or presenting.
-   Choosing the presenter view dismisses the speaker-notes hint, which pointed at it. nil without a slides view."
+   Choosing the presenter view dismisses the speaker-notes hint, which pointed at it. nil without a slides view, and
+   while a show runs elsewhere than the view in front (a presenter away from its deck, ADR-0048 §8.10)."
   [db]
-  (when (slides/slides-view? db)
+  (when (and (slides/slides-view? db) (or (not (slides/presenting? db)) (slides/show-view? db)))
     (if (slides/presenter-view? db)
       {:db (update db :ui dissoc :presenter-view?)}
       (cond-> {:db (-> db (assoc-in [:ui :presenter-view?] true) slides/clear-notes-hint)}
@@ -2339,9 +2364,10 @@
 
 (defn slides-blank-fx
   "Effects of the black/white screen keys (`color` :black / :white) while presenting: blank the screen to that
-   colour, or un-blank it when it already is. A no-op outside a show."
+   colour, or un-blank it when it already is. A no-op outside a show, and where the show is not shown (a presenter
+   away from its deck — slides/show-here?, ADR-0048 §8.10)."
   [db color]
-  (when (slides/presenting? db)
+  (when (slides/show-here? db)
     {:db (if (= color (slides/blank db))
            (slides/clear-blank db)
            (assoc-in db [:ui :slides :blank] color))}))
@@ -2406,9 +2432,10 @@
   "Effects of `F` (Shift+f, ADR-0048 §7): toggle this window's fullscreen during a show, through vv:set-fullscreen,
    so main's `decide` still leaves only a fullscreen it entered. The show records the request (:fullscreen?): leaving
    by `F` keeps the show running (fullscreen-changed-fx ends it only when a fullscreen it asked for goes), and the
-   show's end leaves a fullscreen `F` entered. nil outside a show."
+   show's end leaves a fullscreen `F` entered. nil outside a show, and where the show is not shown (a presenter away
+   from its deck — slides/show-here?, ADR-0048 §8.10)."
   [db]
-  (when (slides/presenting? db)
+  (when (slides/show-here? db)
     (let [on? (not (get-in db [:ui :fullscreen?]))]
       {:db (assoc-in db [:ui :presentation :fullscreen?] on?)
        :fx [[:vv/set-fullscreen {:on on?}]]})))
@@ -2456,9 +2483,11 @@
    windowed (slides/chromeless?): a one-window show (F5) that holds a fullscreen leaves it first — on one display it
    would cover the audience window. Again while this window presents a live link, the request goes again and main
    raises the audience window; while it is being opened, nothing is sent (slides-link/request-open). nil unless a PDF
-   is shown, and in an audience window."
+   is shown, in an audience window, and while a show runs elsewhere than the view in front (a presenter away from its
+   deck, ADR-0048 §8.10)."
   [db]
-  (when (and (slides/pdf-shown? db) (not (audience-member? db)))
+  (when (and (slides/pdf-shown? db) (not (audience-member? db))
+             (or (not (slides/presenting? db)) (slides/show-here? db)))
     (let [path    (facet/active-content-path db)
           started (if (slides/presenting? db)
                     {:db db}
@@ -2556,6 +2585,22 @@
         (-> started
             (update :db with-blank (:blank pos))
             (update :fx #(into (vec %) (link-sends r))))))))
+
+(defn slides-resume-fx
+  "Effects of deck `path` mounting in the show's view while its presenter is away (ADR-0048 §8.10, theory/11 §3.5):
+   the link is back (slides-link/resume), and the show opens where the show IS — the position last exchanged with
+   main, which a push shown while away recorded — with its blank colour: [:ui :presentation :from] ← its page, which
+   the engine applies as it starts presenting (a push shown before then moves it again, R-from). Nothing is sent: the
+   engine's first report, of that very page, finds :applying holding it. nil unless this window's away link is of
+   `path` and the show's view shows it (slides/show-view?)."
+  [db path]
+  (let [l (get-in db [:ui :slides-link])]
+    (when (and (slides-link/away? l) (= path (:path l)) (slides/show-view? db))
+      (let [{l' :link pos :show} (slides-link/resume l)]
+        {:db (-> db
+                 (assoc-in [:ui :slides-link] l')
+                 (assoc-in [:ui :presentation :from] (:page pos))
+                 (with-blank (:blank pos)))}))))
 
 (defn slides-swap-screens-fx
   "Effects of Swap screens (ADR-0048 §8.7): ask main to exchange the two windows' displays. nil unless this window's
