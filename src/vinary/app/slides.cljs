@@ -72,18 +72,27 @@
   (let [v (get-in db [:ui :settings :slides-notes])]
     (if (contains? deck/notes-positions v) v :auto)))
 
+(defn presenter-view?
+  "Has this window asked for the presenter view (ADR-0048 §6.1, `s`)? A window-level choice, kept across tabs: it
+   shows only while a PDF is in the slides layout (presenter-shown?). A single-window show starts in the audience
+   view and gives the choice back when it ends ([:ui :presentation :notes-view-before])."
+  [db]
+  (boolean (get-in db [:ui :presenter-view?])))
+
 (defn layout-request
   "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from
-   :transition :notes}. The engine combines it with the document's own deck classification, applies :present-from
-   when :presenting? turns on, animates command-driven flips per :transition, and shows a second-screen deck's
-   slide half per :notes."
+   :transition :notes :presenter-view?}. The engine combines it with the document's own deck classification, applies
+   :present-from when :presenting? turns on, animates command-driven flips per :transition — except while the
+   presenter view is asked for, when every flip is instant (ADR-0048 §6.3) — and shows a second-screen deck's slide
+   half per :notes."
   [db]
-  {:explicit     (explicit-layout db)
-   :open-as      (open-as db)
-   :presenting?  (presenting? db)
-   :present-from (present-from db)
-   :transition   (transition db)
-   :notes        (notes-position db)})
+  {:explicit        (explicit-layout db)
+   :open-as         (open-as db)
+   :presenting?     (presenting? db)
+   :present-from    (present-from db)
+   :transition      (transition db)
+   :notes           (notes-position db)
+   :presenter-view? (presenter-view? db)})
 
 (defn effective-layout
   "The layout the shown PDF uses: :slides or :document (vinary.slides.deck/effective-layout)."
@@ -153,3 +162,46 @@
    default — the slide fully built, pdfpc's convention) or :first."
   [db]
   (if (= :first (get-in db [:ui :settings :slides-overview-page])) :first :last))
+
+;; ---- the presenter view (ADR-0048 §6) ------------------------------------------------------------------------
+
+(defn presenter-shown?
+  "Is the presenter view showing: asked for (presenter-view?), and a PDF in the slides layout?"
+  [db]
+  (and (presenter-view? db) (slides-view? db)))
+
+(defn notes-hinted?
+  "Has the speaker-notes hint been shown on this installation (the :slides-notes-hinted? setting, ADR-0048 P5)?"
+  [db]
+  (true? (get-in db [:ui :settings :slides-notes-hinted?])))
+
+(defn notes-hint?
+  "Is the speaker-notes hint showing in this window's show?"
+  [db]
+  (boolean (get-in db [:ui :presentation :hint?])))
+
+(defn clear-notes-hint
+  "db without the speaker-notes hint showing."
+  [db]
+  (if (contains? (get-in db [:ui :presentation]) :hint?)
+    (update-in db [:ui :presentation] dissoc :hint?)
+    db))
+
+(defn deck-has-notes?
+  "Does the shown deck have speaker notes, as far as this window knows (ADR-0048 §6.1, the hint's test): its notes
+   model's — split halves, note pages, a sidecar with notes, pdfpc metadata (:doc/deck's :notes :has-notes?) — or a
+   text note on a page the engine has rendered (the position report's :text-notes?)."
+  [db]
+  (boolean (or (get-in (shown-deck db) [:notes :has-notes?])
+               (get-in db [:ui :slides :text-notes?]))))
+
+(defn notes-hint-due?
+  "Should the speaker-notes hint show now (ADR-0048 P5)? A show runs in this window in the audience view, the deck has
+   notes (deck-has-notes?), and the hint is neither showing nor already shown on this installation. Re-asked whenever
+   one of those can change: the show starts, the deck's notes settle, a rendered page turns out to carry a text note."
+  [db]
+  (and (presenting? db)
+       (not (presenter-view? db))
+       (not (notes-hint? db))
+       (not (notes-hinted? db))
+       (deck-has-notes? db)))

@@ -1,6 +1,7 @@
 (ns vinary.slides.presenter
-  "The presenter view's timer, counter and pace (ADR-0048 §6.5, decision P4): pure and DOM-free, with pdfpc's
-   semantics. No js/Date, no DOM, no re-frame — TIME IS AN INPUT, so what the status strip shows is a function of
+  "The presenter view's pane, timer, counter and pace (ADR-0048 §6.1 and §6.5, decisions P1–P4): pure and DOM-free,
+   with pdfpc's semantics. `pane` is what the pane shows for a slide — the counter, the notes regions and the next
+   slide — from the engine's deck and notes model. No js/Date, no DOM, no re-frame — TIME IS AN INPUT, so what the status strip shows is a function of
    data, and the tests never depend on the machine's clock or time zone. The pdfpc sources are v4.7.0 (master
    0524719d leaves these files unchanged): timer.vala (TIMER), presentation_controller.vala (CTRL) and
    window/presenter.vala (PRES); line numbers refer to them.
@@ -41,7 +42,9 @@
      · the pace compares with the exact expected time; pdfpc truncates it to a whole second first (CTRL 386), which
        moves the ahead edge by less than a second when the expected time is not whole
      · End goes on from the end slide to the last page; pdfpc's End always returns to the end slide (CTRL 1731-1736)
-     · an end slide outside the deck is ignored, as deck/deck ignores it; pdfpc counts it (\"3/999\")")
+     · an end slide outside the deck is ignored, as deck/deck ignores it; pdfpc counts it (\"3/999\")"
+  (:require [vinary.slides.deck :as deck]
+            [vinary.slides.notes :as notes]))
 
 ;; ---- constants ------------------------------------------------------------------------------------------
 
@@ -347,3 +350,47 @@
             last-page (second (peek frames))
             page      (if (number? page) page 0)]
         (if (< page end-last) end-last last-page)))))
+
+;; ---- the pane (ADR-0048 §6.1) ----------------------------------------------------------------------------------
+
+(defn next-label
+  "The next slide's accessible name for its `position` {:frame :frames :end-frame :overlay :overlays} (deck/position
+   with the deck's end frame): \"Next: slide f+1 of e+1\", counted as `counter` counts, and its overlay — \", overlay
+   o+1 of k\" — when its frame has several. nil without a frame to count."
+  [{:keys [frame frames end-frame overlay overlays]}]
+  (let [e (effective-end-frame frames end-frame)]
+    (when (and e (integer? frame) (>= frame 0))
+      (str "Next: slide " (inc frame) " of " (inc e)
+           (when (and (integer? overlays) (> overlays 1) (integer? overlay) (<= 0 overlay))
+             (str ", overlay " (inc overlay) " of " overlays))))))
+
+(defn pane
+  "What the presenter view's pane shows (ADR-0048 §6.1) while the view stands on `page`, from the engine's deck `d`,
+   the page `sizes`, the notes `model` (vinary.slides.notes), the :slides-notes preference `pref` and the slide half
+   `side` the audience sees (deck/slide-side; nil: whole pages):
+     :page             the page the slide shows: `page` snapped (a note page shows as its slide)
+     :counter          \"Slide u+1 / e+1\" (`counter`), nil for a deck without frames
+     :overlay-counter  \"overlay o+1 / k\", or nil for a frame of one page (`overlay-counter`)
+     :regions          the notes regions, in order — a split deck's notes half, an interleaved deck's note pages after
+                       the slide — as [{:page :rect}…], page units with y down (notes/sources-for)
+     :sidecar-note     the pdfpc sidecar's note for the page, or nil (its annotation note is read from the document)
+     :next             the next slide, {:page :rect :label}: what the next step (:next) will show, its audience
+                       rectangle and its accessible name (`next-label`); nil when no step goes on — the end of the show
+     :deck-notes?      whether the notes model knows of notes on some page (notes/has-notes?)"
+  [d sizes model pref side page]
+  (let [p       (deck/snap d (or page 0))
+        at      (fn [q] (assoc (deck/position d q) :end-frame (:end-frame d)))
+        pos     (at p)
+        nxt     (:page (deck/step d {:page p :back [] :fwd []} :next))
+        regions (into [] (comp (filter #(= :region (:kind %))) (map #(select-keys % [:page :rect])))
+                      (notes/sources-for model d sizes p pref))]
+    {:page            p
+     :counter         (counter pos)
+     :overlay-counter (overlay-counter pos)
+     :regions         regions
+     :sidecar-note    (get-in model [:sidecar :notes p])
+     :next            (when (and (integer? nxt) (not= nxt p))
+                        {:page  nxt
+                         :rect  (deck/half-rect (nth sizes nxt [0 0]) side)
+                         :label (next-label (at nxt))})
+     :deck-notes?     (notes/has-notes? model)}))

@@ -25,9 +25,12 @@
   (with-redefs [slides/pdf-shown? (constantly true)]
     (testing "F5 starts from the first slide, focuses the document, and asks for fullscreen"
       (let [{:keys [db fx]} (events/slides-present-fx shown-db :first)]
-        (is (= {:active? true :tab-id 1 :path talk :from :first :fullscreen? true} (slides/presentation db)))
+        (is (= {:active? true :tab-id 1 :path talk :from :first :fullscreen? true :notes-view-before false}
+               (slides/presentation db))
+            "a show starts in the audience view, and remembers the view it leaves (ADR-0048 §6.1)")
         (is (= [[:dom/focus :content] [:vv/set-fullscreen {:on true}]] fx))
-        (is (= {:explicit nil :open-as :slides :presenting? true :present-from :first :transition :none :notes :auto}
+        (is (= {:explicit nil :open-as :slides :presenting? true :present-from :first :transition :none :notes :auto
+                :presenter-view? false}
                (slides/layout-request db))
             "the engine sees :presenting? and where to start through the layout request")))
     (testing "nil means :first; Shift+F5 starts from the current slide"

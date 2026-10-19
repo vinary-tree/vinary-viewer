@@ -397,6 +397,55 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-slides-overview.vv-pdf-invert .vv-slides-tile-canvas { filter: invert(1) hue-rotate(180deg); }
 .vv-slides-tile-label { font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; opacity: 0.85;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the speaker-notes HINT (ADR-0048 §6.1, P5): where the "Go to 12" chip floats, shown once per installation when a
+   show hides a deck's notes; it fades out over the last tenth of its 6 s and ignores the pointer like the chip */
+.vv-slides-notes-hint { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9;
+  display: flex; align-items: baseline; gap: 4px; padding: 6px 14px; border-radius: 16px; font-size: 14px;
+  white-space: nowrap; pointer-events: none; background: var(--vv-bg2); color: var(--vv-fg);
+  border: 1px solid var(--vv-head1); box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  animation: vv-notes-hint-fade 6s linear forwards; }
+.vv-slides-notes-hint b { color: var(--vv-head1); }
+@keyframes vv-notes-hint-fade { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .vv-slides-notes-hint { animation: none; } }
+/* the PRESENTER VIEW (ADR-0048 §6.2; s): the slides keep the left 58 % of the content area — the engine's own
+   ResizeObserver refits them — and the pane takes the rest. The pane is absolutely positioned because the wrap is a
+   flex column whose other children must not reflow; z 5 sits under the transition snapshot (6 — no flip makes one
+   while the pane is shown), the blank screen (7: a single-window blank covers the notes too), the overview (8), the
+   chips (9) and find (10). No tokens of its own: the theme's while windowed, the show's #000 / #111 / #ddd while
+   presenting. */
+.vv-content-wrap.vv-presenter-view > .vv-content { margin-right: 42%; }
+.vv-presenter-pane { position: absolute; top: 0; right: 0; bottom: 0; width: 42%; z-index: 5; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; overflow: hidden; font-size: 14px;
+  background: var(--vv-bg2); color: var(--vv-fg); border-left: 1px solid var(--vv-border); }
+.vv-root.vv-presenting .vv-presenter-pane { background: #111; color: #ddd; border-left-color: #000; }
+.vv-presenter-strip { flex: 0 0 auto; font-size: 18px; font-variant-numeric: tabular-nums; }
+.vv-presenter-overlay { color: var(--vv-meta); }
+.vv-presenter-heading { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--vv-meta); }
+.vv-presenter-notes { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.vv-presenter-next { flex: 0 0 32%; min-height: 0; display: flex; flex-direction: column; }
+/* a region box (renderer.pdf-region): the CSS sizes the box — a notes region the full width at its own aspect ratio,
+   at most the notes' height; the next slide whatever its section leaves — and the controller fits the region inside
+   it, centred, on a white sheet that clips the region's text layer */
+.vv-presenter-region { position: relative; flex: 0 0 auto; width: 100%; max-height: 100%; overflow: hidden; }
+.vv-presenter-next-box { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.vv-pdf-region-sheet { position: absolute; overflow: hidden; background: #fff; }
+.vv-pdf-region-canvas { display: block; width: 100%; height: 100%; }
+.vv-presenter-pane.vv-pdf-invert .vv-pdf-region-canvas { filter: invert(1) hue-rotate(180deg); }
+.vv-presenter-note.markdown-body { font-size: inherit; line-height: 1.5; }
+.vv-presenter-note.markdown-body > :first-child { margin-top: 0; }
+.vv-presenter-note.markdown-body > :last-child { margin-bottom: 0; }
+.vv-presenter-note-plain { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.vv-presenter-empty,
+.vv-presenter-end { margin: 0; font-style: italic; color: var(--vv-meta); }
+.vv-root.vv-presenting :is(.vv-presenter-overlay, .vv-presenter-heading, .vv-presenter-empty, .vv-presenter-end) {
+  color: #ddd; opacity: 0.7; }
+/* while presenting the pane is #111 whatever the theme, so a note's Markdown takes the show's palette whole: the theme's
+   heading, code and quote colours are made for its own background and would be unreadable on #111 in a light theme */
+.vv-root.vv-presenting .vv-presenter-note.markdown-body,
+.vv-root.vv-presenting .vv-presenter-note.markdown-body * { color: #ddd !important; background-color: transparent !important;
+  border-color: #000 !important; }
+.vv-root.vv-presenting .vv-presenter-note.markdown-body a { text-decoration: underline; }
 /* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
 .vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
   background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }

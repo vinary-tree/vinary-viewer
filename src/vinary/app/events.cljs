@@ -2071,9 +2071,14 @@
 
 (rf/reg-event-fx
  :pdf/deck-detected
- (fn [_ [_ path _stamp summary]]
+ (fn [{:keys [db]} [_ path _stamp summary]]
    (let [tx (deck-tx (ds/snapshot) path summary)]
-     (when (seq tx) {:fx [[:ds/transact tx]]}))))
+     (when (seq tx)
+       ;; notes that a running show learns of only now (the background scan settled them) may make the speaker-notes
+       ;; hint due: asked once the transaction has landed, by the event it queues (ADR-0048 P5)
+       {:fx (cond-> [[:ds/transact tx]]
+              (and (slides/presenting? db) (get-in summary [:notes :has-notes?]))
+              (conj [:dispatch [:slides/notes-hint-check]]))}))))
 
 ;; ---- slides layout (ADR-0045) -------------------------------------------------------------------------------
 ;; The engine owns the slide show (vinary.renderer.pdf); app-db holds the document view's explicit layout choice
@@ -2094,14 +2099,58 @@
    (when (and (slides/pdf-shown? db) (contains? #{:slides :document nil} layout))
      {:db (nav/set-pdf-layout db layout)})))
 
-(rf/reg-event-db
- :slides/changed
- (fn [db [_ m]]
-   ;; the mounted engine's position report {:path :layout :page :pages :frame :frames :overlay :overlays :label
-   ;; :doc-gen} — one per animation frame at most; feeds the slide counter, menus and tests. The UI-owned keys
-   ;; (slides/ui-keys: a typed slide number, …) survive the reports of the same deck in the slides layout; a
-   ;; different document or the document layout starts without them.
-   (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m))))
+;; ---- the speaker-notes hint (ADR-0048 P5) ------------------------------------------------------------------------
+;; The first single-window show that hides a deck's notes says how to see them: a chip names `s`, the key that shows
+;; them, once per installation. Whether it is due is a function of app-db (slides/notes-hint-due?), asked after
+;; every event that can make it so: the show starting, the deck's notes settling, a rendered page with a text note.
+(def notes-hint-key
+  "The scheduler key of the speaker-notes hint's timeout."
+  :slides/notes-hint-timeout)
+
+(def notes-hint-ms
+  "The speaker-notes hint goes this long after it appears (ADR-0048 P5)."
+  6000)
+
+(defn with-notes-hint
+  "`fx`, an event's effect map whose :db (else `db`) is the app-db the event leaves, plus the speaker-notes hint when
+   that app-db makes it due (slides/notes-hint-due?): the hint shows ([:ui :presentation :hint?]), the
+   :slides-notes-hinted? setting is saved — every window receives it (ADR-0047), so the hint shows once per
+   installation — and its timeout is armed. `fx` nil is an event that changes nothing; the result is then nil
+   unless the hint is due."
+  [db fx]
+  (let [db' (get fx :db db)]
+    (if (slides/notes-hint-due? db')
+      (-> (or fx {})
+          (assoc :db (assoc-in db' [:ui :presentation :hint?] true))
+          (update :fx (fnil into []) [[:dispatch [:settings/set :slides-notes-hinted? true]]
+                                      [:async/debounce {:key notes-hint-key :ms notes-hint-ms
+                                                        :dispatch [:slides/notes-hint-dismiss]}]]))
+      fx)))
+
+(defn notes-hint-dismiss-fx
+  "Effects of the hint's timeout, of the next key or click, or of a typed digit: the hint goes. nil when it is not
+   showing."
+  [db]
+  (when (slides/notes-hint? db)
+    {:db (slides/clear-notes-hint db) :fx [[:async/cancel notes-hint-key]]}))
+
+(rf/reg-event-fx :slides/notes-hint-check   (fn [{:keys [db]} _] (with-notes-hint db nil)))
+(rf/reg-event-fx :slides/notes-hint-dismiss (fn [{:keys [db]} _] (notes-hint-dismiss-fx db)))
+
+(defn slides-changed-fx
+  "Effects of the mounted engine's position report `m` {:path :layout :page :pages :frame :frames :overlay :overlays
+   :label :doc-gen :text-notes?} — one per animation frame at most; it feeds the slide counter, the
+   presenter view, menus and tests. The UI-owned keys (slides/ui-keys: a typed slide number, …) survive the reports
+   of the same deck in the slides layout; a different document or the document layout starts without them. A report
+   whose :text-notes? turned true (the engine found a text note on a page it rendered) may make the speaker-notes hint
+   due."
+  [db m]
+  (let [db' (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m))]
+    (if (and (:text-notes? m) (not (get-in db [:ui :slides :text-notes?])))
+      (with-notes-hint db {:db db'})
+      {:db db'})))
+
+(rf/reg-event-fx :slides/changed (fn [{:keys [db]} [_ m]] (slides-changed-fx db m)))
 
 (declare slides-stop-fx)
 
@@ -2148,8 +2197,9 @@
    layout (the [:ui :slides] mirror says so) — and re-arm the 2.5 s timeout. nil otherwise."
   [db d]
   (when (and (integer? d) (<= 0 d 9) (= :slides (get-in db [:ui :slides :layout])))
-    {:db (assoc-in db [:ui :slides :digits] (deck/digits-step (slides/digits db) d))
-     :fx (rearm-digits [])}))
+    ;; the speaker-notes hint floats where the "Go to 12" chip does: a typed digit dismisses it first (ADR-0048 P5)
+    {:db (-> db (assoc-in [:ui :slides :digits] (deck/digits-step (slides/digits db) d)) slides/clear-notes-hint)
+     :fx (cond-> (rearm-digits []) (slides/notes-hint? db) (conj [:async/cancel notes-hint-key]))}))
 
 (defn slides-enter-fx
   "Effects of Enter: go to the typed slide (label first, then page number), else the next slide."
@@ -2190,15 +2240,18 @@
 (rf/reg-event-fx :slides/digits-clear (fn [{:keys [db]} _] (slides-digits-clear-fx db)))
 
 ;; ---- presenting: the fullscreen slide show (ADR-0045 §Presenting) ---------------------------------------
-;; A show is of the shown PDF in THIS window: [:ui :presentation] {:active? :tab-id :path :from :fullscreen?}. The
-;; engine sees :presenting? (and :present-from) through the :pdf/layout-request sub — it forces the slides layout,
-;; drops the slide margin, applies :from, and turns on click-advance and the idle cursor. CSS hides the app chrome
-;; (.vv-root.vv-presenting); main makes the window fullscreen when the :slides-fullscreen? preference allows, and
-;; only ever leaves a fullscreen it entered (vinary.main.fullscreen/decide).
+;; A show is of the shown PDF in THIS window: [:ui :presentation] {:active? :tab-id :path :from :fullscreen?
+;; :notes-view-before :hint?} — :hint? while the speaker-notes hint is shown (ADR-0048 P5). The engine sees :presenting? (and :present-from) through the :pdf/layout-request sub — it
+;; forces the slides layout, drops the slide margin, applies :from, and turns on click-advance and the idle cursor.
+;; CSS hides the app chrome (.vv-root.vv-presenting); main makes the window fullscreen when the :slides-fullscreen?
+;; preference allows, and only ever leaves a fullscreen it entered (vinary.main.fullscreen/decide). A single-window
+;; show starts in the AUDIENCE view — its screen may be mirrored to a projector — and gives back the view the window
+;; had (:notes-view-before) when it ends (ADR-0048 §6.1).
 (defn slides-present-fx
   "Effects of starting the slide show of the shown PDF from `from` (:first — the default, :current, or a page
    index). A no-op unless a PDF is shown. While a show is already running, :first goes back to the first slide (F5
-   again), an index goes there, and :current does nothing."
+   again), an index goes there, and :current does nothing. A new show starts in the audience view, with the
+   speaker-notes hint when it is due (with-notes-hint)."
   [db from]
   (let [from (or from :first)]
     (cond
@@ -2211,25 +2264,48 @@
 
       :else
       (let [fs? (slides/fullscreen-preferred? db)]
-        {:db (-> db
-                 (assoc-in [:ui :presentation] {:active?     true
-                                                :tab-id      (nav/active-id db)
-                                                :path        (facet/active-content-path db)
-                                                :from        from
-                                                :fullscreen? fs?})
-                 slides/clear-digits
-                 slides/clear-blank)
-         :fx (cond-> [[:dom/focus :content]]
-               fs? (conj [:vv/set-fullscreen {:on true}]))}))))
+        (with-notes-hint
+          db
+          {:db (-> db
+                   (assoc-in [:ui :presentation] {:active?           true
+                                                  :tab-id            (nav/active-id db)
+                                                  :path              (facet/active-content-path db)
+                                                  :from              from
+                                                  :fullscreen?       fs?
+                                                  :notes-view-before (slides/presenter-view? db)})
+                   (update :ui dissoc :presenter-view?)
+                   slides/clear-digits
+                   slides/clear-blank)
+           :fx (cond-> [[:dom/focus :content]]
+                 fs? (conj [:vv/set-fullscreen {:on true}]))})))))
 
 (defn slides-stop-fx
-  "Effects of ending the slide show: forget it and any blanking, and leave the fullscreen it asked for (main
-   ignores that when the window was fullscreen before the show). `:fullscreen-gone?` — the window already left
-   fullscreen, so there is nothing to leave. nil when no show is running."
+  "Effects of ending the slide show: forget it, any blanking and the speaker-notes hint, give the window back the
+   view it had before the show (the presenter view or the audience view — :notes-view-before), and leave the
+   fullscreen it asked for (main ignores that when the window was fullscreen before the show). `:fullscreen-gone?` —
+   the window already left fullscreen, so there is nothing to leave. nil when no show is running."
   [db {:keys [fullscreen-gone?]}]
   (when-let [pres (slides/presentation db)]
-    {:db (-> db (update :ui dissoc :presentation) slides/clear-blank)
-     :fx (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])}))
+    {:db (-> db
+             (update :ui dissoc :presentation)
+             (cond-> (:notes-view-before pres)       (assoc-in [:ui :presenter-view?] true)
+                     (not (:notes-view-before pres)) (update :ui dissoc :presenter-view?))
+             slides/clear-blank)
+     :fx (cond-> (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])
+           (:hint? pres) (conj [:async/cancel notes-hint-key]))}))
+
+(defn slides-presenter-view-fx
+  "Effects of `s` (ADR-0048 P1): toggle this window between the audience view and the presenter view — the current
+   slide beside a pane with the notes, the next slide and the counter — in any slides view, windowed or presenting.
+   Choosing the presenter view dismisses the speaker-notes hint, which pointed at it. nil without a slides view."
+  [db]
+  (when (slides/slides-view? db)
+    (if (slides/presenter-view? db)
+      {:db (update db :ui dissoc :presenter-view?)}
+      (cond-> {:db (-> db (assoc-in [:ui :presenter-view?] true) slides/clear-notes-hint)}
+        (slides/notes-hint? db) (assoc :fx [[:async/cancel notes-hint-key]])))))
+
+(rf/reg-event-fx :slides/presenter-view (fn [{:keys [db]} _] (slides-presenter-view-fx db)))
 
 (defn slides-blank-fx
   "Effects of the black/white screen keys (`color` :black / :white) while presenting: blank the screen to that

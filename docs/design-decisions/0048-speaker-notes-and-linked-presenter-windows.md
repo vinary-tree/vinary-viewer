@@ -572,8 +572,8 @@ other children must not reflow. z-index 5 sits below the transition snapshot (6;
 shown, §6.3), the blank screen (7), the overview
 (8), the chip (9) and find (10), so a single-window blank also covers the notes — right for a mirrored screen — and the
 overview covers the window. The slides' existing ResizeObserver refits the slide at once. **No new `--vv-*` tokens:**
-while presenting the pane uses the show's palette (`#000`, `#111`, `#ddd`); windowed, the theme's `--vv-bg`, `--vv-fg`,
-`--vv-border`, `--vv-meta` and `--vv-error`.
+while presenting the pane uses the show's palette (`#000`, `#111`, `#ddd`); windowed, the theme's `--vv-bg2`, `--vv-fg`,
+`--vv-border` and `--vv-meta`.
 
 #### 6.3 Rendering the pane (P3)
 

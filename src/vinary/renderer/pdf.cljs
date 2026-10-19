@@ -7,6 +7,7 @@
    (scripts/sync-pdfjs.mjs). Pure geometry/zoom/outline helpers live in vinary.renderer.pdf-layout."
   (:require [vinary.renderer.pdf-layout :as layout]
             [vinary.renderer.pdf-cache :as cache]
+            [vinary.renderer.pdf-region :as region]
             [vinary.renderer.scroll :as scroll]
             [vinary.slides.deck :as deck]
             [vinary.slides.evidence :as evidence]
@@ -31,7 +32,7 @@
 
 (declare render-page! release-canvas! build-text-layer! ensure-text-at! build-link-layer!
          resolve-dest scroll-to-page! apply-fit! rescale! ensure-all-text! watch-dpr! command! current-anchor
-         keep-set)
+         keep-set read-text-notes!)
 
 ;; ---- pdf.js module + worker bootstrap -----------------------------------------------------------
 ;; pdfjs-dist uses dynamic import() internally, which Closure :simple cannot bundle — so we do NOT
@@ -298,7 +299,8 @@
                                           (.replaceWith old canvas)
                                           (.prepend div canvas))
                                         (build-text-layer! state idx pg vp)
-                                        (build-link-layer! state idx pg vp))))
+                                        (build-link-layer! state idx pg vp)
+                                        (when (slides? state) (read-text-notes! state idx)))))
                              (.catch (fn [^js err]
                                        (js/clearTimeout slow)
                                        (when (identical? (get-in @state [:tasks idx]) task)
@@ -345,15 +347,10 @@
 (defn- hide-offslide-runs!
   "On a split page, hide the text runs of the half that is not shown (a second-screen deck's notes — which, with
    Beamer's default note template, also repeat the slide's own words in a thumbnail): find, selection and copy then
-   see what the eye sees. A run's position comes from its own inline style (pdf-layout/run-percent), so this reads
-   no layout; a run in a format it does not know stays visible."
-  [^js tdiv side [pw ph]]
-  (doseq [^js run (array-seq (.querySelectorAll tdiv "span:not(.markedContent)"))]
-    (let [st (.-style run)
-          lp (layout/run-percent (.-left st) pw)
-          tp (layout/run-percent (.-top st) ph)]
-      (when (and (some? lp) (some? tp) (not (deck/on-slide-half? side lp tp)))
-        (.add (.-classList run) "vv-pdf-offslide")))))
+   see what the eye sees. The runs outside the slide half are hidden as the presenter view hides the runs outside the
+   notes half (pdf-region/hide-runs-outside!), so the two take every run exactly once between them."
+  [^js tdiv side size]
+  (region/hide-runs-outside! tdiv (deck/half-rect size side) size))
 
 ;; :text-built maps page index → the Promise of that page's text-layer render, NOT just the index.
 ;;
@@ -728,7 +725,9 @@
 ;; ---- slides layout: current slide, navigation, listeners (ADR-0045) ------------------------------------
 (defn- report!
   "Tell app-db where the slide show stands — [:ui :slides] via :slides/changed: the deck position of the current
-   page plus the layout — coalesced to one dispatch per animation frame however many scroll events arrive."
+   page plus the layout, and whether a page rendered in the slides layout carries a text note (:text-notes?, the
+   speaker-notes hint's test, ADR-0048 P5) — coalesced to one dispatch per animation frame however many scroll events
+   arrive."
   [state]
   (when-not (:report-raf @state)
     (swap! state assoc :report-raf
@@ -736,9 +735,25 @@
             (fn [_]
               (swap! state assoc :report-raf nil)
               (when-not (:destroyed? @state)
-                (let [{:keys [deck path layout current doc-gen]} @state]
+                (let [{:keys [deck path layout current doc-gen text-notes?]} @state]
                   (rf/dispatch [:slides/changed (assoc (deck/position deck (or current 0))
-                                                       :path path :layout layout :doc-gen (or doc-gen 0))]))))))))
+                                                       :path path :layout layout :doc-gen (or doc-gen 0)
+                                                       :text-notes? (boolean text-notes?))]))))))))
+
+(defn- read-text-notes!
+  "Read page `idx`'s text notes (vinary.slides.evidence/text-notes) once per version of the document, when the slides
+   layout has rendered it. The first page found to carry one turns the position report's :text-notes? true: the
+   speaker-notes hint counts a text note on any page rendered so far (ADR-0048 §6.1, P5). A read that lands after the
+   document was replaced or the view torn down does nothing."
+  [state idx]
+  (let [{:keys [doc text-notes-read text-notes?]} @state]
+    (when (and doc (not text-notes?) (not (contains? text-notes-read idx)))
+      (swap! state update :text-notes-read (fnil conj #{}) idx)
+      (-> (evidence/text-notes doc idx (get-in @state [:evidence :producer]))
+          (.then (fn [note]
+                   (when (and note (identical? doc (:doc @state)) (not (:destroyed? @state)) (not (:text-notes? @state)))
+                     (swap! state assoc :text-notes? true)
+                     (report! state))))))))
 
 (defn- slot-height [state] (second (:slot @state [1 1])))
 
@@ -861,15 +876,17 @@
   "Apply a slide-navigation `op` (any vinary.slides.deck/step op: :next :prev :next-frame :prev-frame :first
    :last [:goto i] [:goto-label s] [:jump i] :back :forward) in the slides layout. Jumps are recorded in the
    GoBack/GoForward history; sequential steps are not. No-op in the document layout. A flip animates when the
-   :slides-transition preference asks for it (deck/transition-plan); a flip during one ends it first."
+   :slides-transition preference asks for it (deck/transition-plan) — never while the presenter view is asked for:
+   the outgoing slide's snapshot would cross the pane (ADR-0048 §6.3) — and a flip during one ends it first."
   [state op]
   (when (and (slides? state) (not (:destroyed? @state)))
     (let [from (:current @state 0)
           nav  {:page from :back (:back @state []) :fwd (:fwd @state [])}
           nav' (deck/step (:deck @state) nav op)
           to   (:page nav')
-          plan (deck/transition-plan {:transition (:transition @state) :from from :to to
-                                      :reduced-motion? (reduced-motion?)})
+          plan (when-not (:presenter-view? @state)
+                 (deck/transition-plan {:transition (:transition @state) :from from :to to
+                                        :reduced-motion? (reduced-motion?)}))
           snap (when plan (finish-transition! state) (snapshot-of state from))]
       (swap! state assoc :back (:back nav') :fwd (:fwd nav'))
       (go-to-page! state to)
@@ -1312,7 +1329,10 @@
   {:command!  (fn [op] (command! state op))
    :slides?   (fn [] (and (slides? state) (not (:destroyed? @state))))
    :position  (fn [] (when (slides? state) (:current @state 0)))
-   :snapshot  (fn [] (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout :side]))})
+   :snapshot  (fn [] (assoc (select-keys @state [:doc :sizes :deck :current :doc-gen :path :layout :side
+                                                 :notes-model :notes :invert?])
+                            :producer   (get-in @state [:evidence :producer])
+                            :text-layer (some-> ^js @pdfjs .-TextLayer)))})
 
 (defn mount-prepared!
   "Mount a leased artifact (prepare!) into a fresh DOM surface, in the layout `view-state` asks for
@@ -1330,6 +1350,7 @@
         state  (atom {:container container :path path :stamp (:stamp view-state) :doc doc :owns-doc? false
                       :deck d :evidence evidence :notes-model model :doc-gen 0 :layout layout
                       :presenting? (boolean (:presenting? view-state))
+                      :presenter-view? (boolean (:presenter-view? view-state))
                       :transition (:transition view-state)
                       :notes (:notes view-state)
                       :current (if (= layout :slides) (deck/snap d page) (deck/clamp-page d page))
@@ -1427,7 +1448,8 @@
       ;; borrow the proxy — the overview grid — rebuild when it moves)
       (swap! state #(-> %
                         (assoc :doc doc :sizes sizes :deck d :evidence evidence :notes-model model :stamp stamp
-                               :tasks {} :rendered #{} :text-built {} :toc-ids [])
+                               :tasks {} :rendered #{} :text-built {} :toc-ids []
+                               :text-notes-read #{} :text-notes? false)
                         (update :gen inc)
                         (update :doc-gen (fnil inc 0))))
       (mark-deck! container d)
@@ -1460,7 +1482,8 @@
   [state view-state]
   (when-not (:destroyed? @state)
     (toggle-class! (:container @state) "vv-pdf-invert" (:invert? view-state))
-    (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state))
+    (swap! state assoc :invert? (boolean (:invert? view-state)) :transition (:transition view-state)
+           :presenter-view? (boolean (:presenter-view? view-state)))
     (when (not= (:notes view-state) (:notes @state))
       (swap! state assoc :notes (:notes view-state))
       (rebuild-deck! state))

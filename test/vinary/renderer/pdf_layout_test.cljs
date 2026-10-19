@@ -1,9 +1,12 @@
 (ns vinary.renderer.pdf-layout-test
   "Pure PDF geometry added for in-place refresh and the slides layout: the scale-free reading anchor
-   (anchor-of / anchor-top) and the per-canvas device-pixel budget (budget-dpr). The older helpers (zoom, fit,
-   page-rects, visible-range, outline) are covered by core-test/pdf-layout-helpers."
+   (anchor-of / anchor-top) and the per-canvas device-pixel budget (budget-dpr); and, for the presenter view's region
+   boxes (ADR-0048 §6.3), a region's scale and place in its box and which text runs belong to it. The older helpers
+   (zoom, fit, page-rects, visible-range, outline) are covered by core-test/pdf-layout-helpers."
   (:require [cljs.test :refer-macros [deftest testing is]]
-            [vinary.renderer.pdf-layout :as layout]))
+            [vinary.renderer.pdf-layout :as layout]
+            [vinary.renderer.pdf-region :as region]
+            [vinary.slides.deck :as deck]))
 
 (defn- approx= [a b] (< (js/Math.abs (- a b)) 1e-9))
 
@@ -80,3 +83,69 @@
     (is (nil? (layout/run-percent "" 725.669)))
     (is (nil? (layout/run-percent nil 725.669)))
     (is (nil? (layout/run-percent "calc(var(--total-scale-factor) *10px)" 0)) "no extent → no percent")))
+
+;; ---- one region of a page in a box (ADR-0048 §6.3) ---------------------------------------------------------------
+
+(deftest a-region-fits-its-box
+  (testing "the largest scale that fits both ways"
+    (is (approx= 2 (layout/region-scale {:w 100 :h 50} 200 400)) "limited by the width")
+    (is (approx= 1.5 (layout/region-scale {:w 100 :h 50} 400 75)) "limited by the height"))
+  (testing "a box whose height follows its width: the width alone"
+    (is (approx= 3 (layout/region-scale {:w 100 :h 50} 300 nil)))
+    (is (approx= 3 (layout/region-scale {:w 100 :h 50} 300 0)) "a box not laid out yet has no height"))
+  (testing "no extent, no scale"
+    (is (nil? (layout/region-scale {:w 0 :h 50} 300 300)))
+    (is (nil? (layout/region-scale {:w 100 :h 50} 0 300)))
+    (is (nil? (layout/region-scale {} 300 300))))
+  (testing "region/fit centres the scaled region in the box"
+    (is (= {:scale 2 :w 200 :h 100 :left 0 :top 150} (region/fit {:w 100 :h 50} 200 400)))
+    (is (= {:scale 1.5 :w 150 :h 75 :left 125 :top 0} (region/fit {:w 100 :h 50} 400 75)))
+    (is (= {:scale 3 :w 300 :h 150 :left 0 :top 0} (region/fit {:w 100 :h 50} 300 nil)) "no height: at the top")
+    (is (nil? (region/fit {:w 100 :h 50} 0 0)))))
+
+(deftest whole-pages
+  (is (layout/whole-page? {:x 0 :y 0 :w 362.835 :h 272.126} [362.835 272.126]))
+  (is (layout/whole-page? {:x 0.004 :y 0 :w 362.83 :h 272.126} [362.835 272.126]) "within a hundredth of a unit")
+  (is (not (layout/whole-page? {:x 362.835 :y 0 :w 362.835 :h 272.126} [725.67 272.126])) "a half is not the page"))
+
+(def ^:private doubled [725.67 272.126])
+
+(deftest runs-of-a-region
+  (testing "a run belongs to the region it starts in"
+    (let [notes (deck/half-rect doubled :right)]
+      (is (layout/run-in-region? notes doubled 53.9 10) "a notes run (x 391 of 725.7)")
+      (is (not (layout/run-in-region? notes doubled 1.2 40)) "a slide run")
+      (is (layout/run-in-region? notes doubled 50 10) "the midline belongs to the second half")))
+  (testing "an edge on the page's own edge reaches out: a run that starts just off the page still belongs"
+    (let [slide (deck/half-rect doubled :left)
+          notes (deck/half-rect doubled :right)]
+      (is (layout/run-in-region? slide doubled -0.5 40) "a negative margin on the left")
+      (is (layout/run-in-region? notes doubled 100.2 40) "past the right edge")
+      (is (layout/run-in-region? slide doubled 20 -1) "above the top")
+      (is (layout/run-in-region? slide doubled 20 100) "on the bottom edge")))
+  (testing "an inner edge does not reach out"
+    (let [middle {:x 100 :y 50 :w 200 :h 100}]
+      (is (layout/run-in-region? middle [400 200] 25 25) "at the region's corner")
+      (is (not (layout/run-in-region? middle [400 200] 24.9 30)))
+      (is (not (layout/run-in-region? middle [400 200] 75 30)) "on its right edge: what lies beyond")
+      (is (not (layout/run-in-region? middle [400 200] 30 75)) "on its bottom edge: what lies beyond"))))
+
+(deftest the-halves-of-a-split-page-take-every-run-once
+  ;; the engine hides the runs outside the SLIDE half, the presenter view those outside the NOTES half — the same
+  ;; predicate both ways (pdf-region/hide-runs-outside!) — so every run must lie in exactly one of the two, and the
+  ;; slide half must be exactly deck/on-slide-half?, which the engine used before
+  (let [opposite {:left :right :right :left :top :bottom :bottom :top}
+        pcts     (concat [-20 -0.01 0 0.01 25 49.99 50 50.01 75 99.99 100 100.01 120]
+                         (map #(* 0.37 %) (range -50 330)))]
+    (doseq [side [:left :right :top :bottom]
+            :let [slide (deck/half-rect doubled side)
+                  notes (deck/half-rect doubled (opposite side))]
+            lp pcts
+            tp [-5 0 33.3 50 66.7 100 105]]
+      (let [in-slide (layout/run-in-region? slide doubled lp tp)
+            in-notes (layout/run-in-region? notes doubled lp tp)]
+        (is (not= in-slide in-notes) (str side " " lp "% " tp "%: exactly one half"))
+        (is (= (boolean (deck/on-slide-half? side lp tp)) in-slide) (str side " " lp "% " tp "%: as on-slide-half?"))))
+    (testing "the whole page takes every run"
+      (doseq [lp pcts tp [-5 0 50 100 105]]
+        (is (layout/run-in-region? (deck/half-rect doubled nil) doubled lp tp))))))

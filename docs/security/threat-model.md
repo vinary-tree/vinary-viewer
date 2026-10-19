@@ -290,7 +290,10 @@ The read is bounded the same way the documents are:
   fails the PDF's read. A piped-in PDF and an archive member have no sidecar.
 - **Data only.** The renderer parses the text with `JSON.parse` (no reviver), or as pdfpc's line-oriented legacy
   format, into plain data: page indices, flags, settings and note strings. A format above the one this version
-  reads is ignored. In this version nothing renders the notes as HTML; the deck model only counts and places them.
+  reads is ignored. The presenter view renders the notes (ADR-0048 §4, `vinary.renderer.notes-html`). A pdfpc note is
+  Markdown, as in pdfpc, unless the deck disables Markdown. It goes through the Markdown document's own sanitizer,
+  `rehype-raw` then `rehype-sanitize` with the app's one schema (GitHub's allowlist, §5), so no script, style, event
+  handler or `javascript:` URL survives. Every other note, a PDF reader's sticky note included, is plain text.
 - **Watching.** A local sidecar is watched with its PDF: creating, editing or deleting it re-reads the PDF and the
   sidecar together.
 

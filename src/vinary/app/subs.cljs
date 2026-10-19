@@ -259,6 +259,12 @@
 (rf/reg-sub :slides/doc-gen        (fn [db _] (get-in db [:ui :slides :doc-gen])))
 (rf/reg-sub :slides/overview-page  (fn [db _] (slides/overview-page db)))
 (rf/reg-sub :pdf/invert?           (fn [db _] (boolean (get-in db [:ui :pdf :invert?]))))
+;; the presenter view (ADR-0048 §6): asked for in this window (`s`), and showing — asked for, in a slides view (the
+;; .vv-presenter-view wrap and its pane); the speaker-notes hint chip (P5)
+(rf/reg-sub ::presenter-view? (fn [db _] (slides/presenter-view? db)))
+(rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?]
+            (fn [[asked? slides?] _] (boolean (and asked? slides?))))
+(rf/reg-sub :slides/notes-hint? (fn [db _] (slides/notes-hint? db)))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown
 ;; doc is a git-produced diff. Kind-guarded so a stale attr on a re-typed doc can never leak through.

@@ -60,6 +60,7 @@ Settings persist as EDN (the keys below are exactly those the Preferences UI wri
  :slides-notes :auto           ; a second-screen deck's NOTES side: :auto :right :left :bottom :top, or :off
                                ; (:off also shows a `show notes` deck's note pages)
  :slides-fullscreen? true      ; a slide show (F5) makes its window fullscreen
+ :slides-notes-hinted? false   ; set once the speaker-notes hint (press s) has been shown, so it shows once
  :slides-click-advance? true}  ; a click on the slide advances a running show (Shift+click goes back)
 ```
 

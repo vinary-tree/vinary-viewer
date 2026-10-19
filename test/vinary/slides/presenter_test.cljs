@@ -1,9 +1,12 @@
 (ns vinary.slides.presenter-test
   "The presenter clock (ADR-0048 §6.5): pdfpc's times of day, schedule and talk start, the phases at their edges,
-   the pace at its ±60 s edges, the counter, where End goes, and the timer label. Deterministic: every instant is
+   the pace at its ±60 s edges, the counter, where End goes, and the timer label; and what the presenter view's pane
+   shows (§6.1): the counter, the notes regions, the sidecar note and the next slide. Deterministic: every instant is
    fixed data — one local midnight and offsets from it — so no test reads the machine's clock or depends on its
    time zone."
   (:require [cljs.test :refer-macros [deftest testing is are]]
+            [vinary.slides.deck :as deck]
+            [vinary.slides.notes :as notes]
             [vinary.slides.presenter :as presenter]))
 
 (def midnight
@@ -475,3 +478,80 @@
     -1.9    "-00:00:01"
     -0.5    "00:00:00")
   (are [s] (nil? (presenter/hms s)) nil js/NaN js/Infinity "12"))
+
+;; ---- the pane (ADR-0048 §6.1) ------------------------------------------------------------------------------------
+;; The real LuaLaTeX `show notes` deck (test/fixtures/beamer-shownotes.pdf, as vinary.slides.notes-test reads it): ten
+;; pages of Beamer's 128 mm × 96 mm paper, note pages {1 3 4 8}, so the audience's pages are 0 2 5 6 7 9 — four frames:
+;; Intro [0 2] (two overlays), Middle [5], Outro [6 7] (two overlays), and Middle again [9].
+
+(def ^:private paper [362.835 272.126])
+(def ^:private whole {:x 0 :y 0 :w 362.835 :h 272.126})
+
+(def ^:private shownotes
+  {:creator "LaTeX with Beamer class" :producer "LuaTeX-1.18.0" :creator-tool nil :page-mode nil
+   :labels ["1" "2" "1" "4" "5" "2" "3" "3" "9" "4"] :sizes (vec (repeat 10 paper)) :pdfpc nil})
+
+(def ^:private sn-model (notes/initial shownotes nil))
+(def ^:private sn-deck (deck/deck (merge shownotes (notes/deck-evidence sn-model :auto))))
+
+(deftest next-label-names-the-next-slide
+  (is (= "Next: slide 8 of 12" (presenter/next-label {:frame 7 :frames 12 :overlay 0 :overlays 1})))
+  (is (= "Next: slide 1 of 4, overlay 2 of 2" (presenter/next-label {:frame 0 :frames 4 :overlay 1 :overlays 2})))
+  (is (= "Next: slide 4 of 3" (presenter/next-label {:frame 3 :frames 5 :end-frame 2 :overlay 0 :overlays 1}))
+      "counted as the counter counts: up to the end slide, and past it")
+  (is (nil? (presenter/next-label {:frames 0})) "nothing to count"))
+
+(deftest the-pane-of-a-show-notes-deck
+  (testing "the first overlay of Intro: its note page, then its text notes; the next step is Intro's second overlay"
+    (is (= {:page 0 :counter "Slide 1 / 4" :overlay-counter "overlay 1 / 2"
+            :regions [{:page 1 :rect whole}]
+            :sidecar-note nil
+            :next {:page 2 :rect whole :label "Next: slide 1 of 4, overlay 2 of 2"}
+            :deck-notes? true}
+           (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 0))))
+  (testing "Intro's second overlay has two note pages after it (an in-frame note and a between-frames one)"
+    (let [p (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 2)]
+      (is (= [{:page 3 :rect whole} {:page 4 :rect whole}] (:regions p)))
+      (is (= "overlay 2 / 2" (:overlay-counter p)))
+      (is (= {:page 5 :rect whole :label "Next: slide 2 of 4"} (:next p)))))
+  (testing "a note page shows as its slide"
+    (is (= (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 2)
+           (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 3))))
+  (testing "a slide without note pages; the last slide has no next one"
+    (let [p (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 5)]
+      (is (= [] (:regions p)))
+      (is (= "Slide 2 / 4" (:counter p)))
+      (is (nil? (:overlay-counter p)) "a one-page frame has no overlays to count"))
+    (is (nil? (:next (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil 9))) "the end of the show"))
+  (testing "a page that is not a number is the first page"
+    (is (= 0 (:page (presenter/pane sn-deck (:sizes shownotes) sn-model :auto nil nil)))))
+  (testing ":off shows every page as it is: no note pages, no regions"
+    (let [d (deck/deck (merge shownotes (notes/deck-evidence sn-model :off)))
+          p (presenter/pane d (:sizes shownotes) sn-model :off nil 0)]
+      (is (= [] (:regions p)))
+      (is (= {:page 1 :rect whole :label "Next: slide 2 of 9"} (:next p))
+          "page 1 is a frame of its own again (the deck then has nine frames by its labels)"))))
+
+(deftest the-pane-of-a-split-deck
+  (let [doubled {:creator "LaTeX with Beamer class" :producer "LuaTeX-1.18.0" :creator-tool nil :page-mode nil
+                 :labels nil :sizes [[725.67 272.126] [725.67 272.126]] :pdfpc nil}
+        m       (notes/initial doubled nil)
+        d       (deck/deck doubled)
+        side    (deck/slide-side (:second-screen d) (notes/notes-position :auto (get-in m [:pdfpc :notes-position])))
+        p       (presenter/pane d (:sizes doubled) m :auto side 0)]
+    (is (= :left side) "notes on the right by default: the audience sees the left half")
+    (is (= [{:page 0 :rect {:x 362.835 :y 0 :w 362.835 :h 272.126}}] (:regions p)) "the notes half of the page")
+    (is (= {:page 1 :rect {:x 0 :y 0 :w 362.835 :h 272.126} :label "Next: slide 2 of 2"} (:next p))
+        "the next slide is the audience's half of the next page")))
+
+(deftest the-pane-carries-the-sidecar-note-and-the-deck-flag
+  (let [m (assoc-in sn-model [:sidecar :notes] {0 "From the sidecar"})]
+    (is (= "From the sidecar" (:sidecar-note (presenter/pane sn-deck (:sizes shownotes) m :auto nil 0))))
+    (is (nil? (:sidecar-note (presenter/pane sn-deck (:sizes shownotes) m :auto nil 5)))))
+  (let [plain {:creator "LaTeX with Beamer class" :producer "LuaTeX-1.18.0" :creator-tool nil :page-mode nil
+               :labels ["1" "2" "3"] :sizes (vec (repeat 3 paper)) :pdfpc nil}
+        m     (notes/initial plain nil)
+        p     (presenter/pane (deck/deck plain) (:sizes plain) m :auto nil 0)]
+    (is (false? (:deck-notes? p)) "a deck without notes still gets the counter and the next slide")
+    (is (= "Slide 1 / 3" (:counter p)))
+    (is (= 1 (get-in p [:next :page])))))

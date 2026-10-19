@@ -76,6 +76,7 @@ slide keys is added on top.
 | Overview grid | Tab, `o` | the same | the same |
 | Start a show from the first / the current slide | F5 / Shift+F5 | the same | the same |
 | During a show: black / white screen | `b` `.` / `w` `,` | the same | the same |
+| Speaker notes: the presenter view on / off | `s` | the same | the same |
 | Cancel, one step at a time | Escape, Ctrl+G | Escape | Escape, `C-g` |
 
 - **The mouse and touch.** The mouse wheel and a trackpad flip slides one at a time: one notch of a mouse wheel is
@@ -88,8 +89,8 @@ slide keys is added on top.
   any slide step or 2.5 s of quiet forgets it.
 - **Escape unwinds one step at a time**, after the palette and the find bar: the overview, a typed number, a blanked
   screen, then the show itself.
-- **When the slide keys apply.** Space, Shift+Space, Backspace, Enter, the Shift+arrows, `b` `.` `w` `,`, Tab, `o` and
-  the digits form a `:slides` layer that is active only while a PDF shows in the Slides layout **and** the keyboard is
+- **When the slide keys apply.** Space, Shift+Space, Backspace, Enter, the Shift+arrows, `b` `.` `w` `,`, `s`, Tab,
+  `o` and the digits form a `:slides` layer that is active only while a PDF shows in the Slides layout **and** the keyboard is
   on the document — not in a text field, the sidebar, the address bar, or an open menu, dialog or prompt. The layer
   sits below the current mode, so in Vim's normal mode Space stays the leader (use →, `j` or PgDn there; Space flips
   in insert mode). It is identical in every set and can be overridden like a mode, under `:keymaps {:slides {…}}` in
@@ -190,9 +191,20 @@ them, and its notes and settings (duration, end slide, notes position) are kept 
 the PDF's own metadata win over the sidecar's, as they do in pdfpc. Saving the sidecar refreshes the open deck. Over
 `sftp://` the sidecar is read with every read of the PDF, so an edit to it alone shows at the PDF's next change.
 
-**Where the notes are shown.** This version shows note pages in the Document layout. A presenter view that shows the
-current slide's notes beside it and the next slide, in this window or a second one, is described in ADR-0048 §6–§8
-and is not available yet.
+**Where the notes are shown: the presenter view.** Press `s` (or **Slides: Speaker notes** in the palette) in the
+Slides layout, windowed or during a show, and the window splits. The slide keeps the left 58 % and a pane takes the
+right 42 %:
+
+- a counter, "Slide 7 / 12 · overlay 2 / 3", that counts the audience's frames (up to pdfpc's end slide);
+- the notes of the slide you are on: its note pages (`show notes`), its notes half (`show notes on second screen`), and
+  its text notes (pdfpc notes, and sticky-note annotations from a PDF reader);
+- the next slide, small.
+
+Every slide key still works, and flips stay instant. `s` again goes back to the audience view. A show that starts in
+the audience view gives the choice back when it ends. The first time a deck with notes is presented, a hint names `s`
+for a few seconds, once per installation. pdfpc notes are Markdown, as in pdfpc, unless the deck turns Markdown off;
+they pass through the same sanitizer as a Markdown document. Any other note is plain text. Presenting in one window
+and showing the notes in another (ADR-0048 §7–§8) is not available yet.
 
 ### Preferences
 

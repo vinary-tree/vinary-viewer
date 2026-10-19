@@ -154,6 +154,41 @@
         (when (and (number? extent) (pos? extent))
           (/ (* 100 (js/parseFloat units)) extent))))))
 
+;; ---- one region of a page, in a box of its own (ADR-0048 §6.3: the presenter view's notes and next slide) --------
+
+(defn region-scale
+  "PURE. The CSS scale at which a page region `rect` {:w :h} (page units) fits a `box-w` × `box-h` px box: the largest
+   that fits both ways, or the width alone when `box-h` is nil or not positive (a box whose height follows its width).
+   nil when the region or the box has no extent."
+  [{:keys [w h]} box-w box-h]
+  (when (and (number? w) (number? h) (pos? w) (pos? h) (number? box-w) (pos? box-w))
+    (if (and (number? box-h) (pos? box-h))
+      (min (/ box-w w) (/ box-h h))
+      (/ box-w w))))
+
+(defn whole-page?
+  "PURE. Does `rect` {:x :y :w :h} cover the whole of a page of size [pw ph] (within a hundredth of a unit)?"
+  [{:keys [x y w h]} [pw ph]]
+  (let [near (fn [a b] (<= (js/Math.abs (- a b)) 0.01))]
+    (and (near x 0) (near y 0) (near w pw) (near h ph))))
+
+(defn run-in-region?
+  "PURE. Does a text run whose top-left corner sits at (`left-pct`, `top-pct`) — percent of the FULL page [pw ph], y
+   down, as run-percent reads them — belong to the region `rect` {:x :y :w :h} of that page (page units, y down)? It
+   does when it starts inside the rectangle, half-open as vinary.slides.deck/on-slide-half? is (a run that starts on
+   an inner edge belongs to what lies beyond it), except that an edge lying on the page's own edge (within a hundredth
+   of a unit) reaches out without bound: a run that starts just off the page — a negative margin — still belongs to the
+   region whose page edge it crossed. So the two halves of a split page (deck/half-rect) take every run exactly once
+   between them, the slide half exactly as on-slide-half? does, and the whole page takes every run."
+  [{:keys [x y w h]} [pw ph] left-pct top-pct]
+  (let [px    (* pw (/ left-pct 100))
+        py    (* ph (/ top-pct 100))
+        edge? (fn [a b] (<= (js/Math.abs (- a b)) 0.01))]
+    (and (or (edge? x 0) (<= x px))
+         (or (edge? (+ x w) pw) (< px (+ x w)))
+         (or (edge? y 0) (<= y py))
+         (or (edge? (+ y h) ph) (< py (+ y h))))))
+
 ;; ---- the slide overview grid (ADR-0045 §Overview) ------------------------------------------------------------
 (def overview-defaults
   "The overview grid's geometry knobs: tiles at least :min-tile CSS px wide, :gap between and around them, at most

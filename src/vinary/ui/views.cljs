@@ -43,6 +43,7 @@
             [vinary.ui.slides-hud :as slides-hud]
             [vinary.ui.slides-bar :as slides-bar]
             [vinary.ui.slides-overview :as slides-overview]
+            [vinary.ui.slides-presenter :as slides-presenter]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -1942,8 +1943,12 @@
      [uri-bar]
      ;; content + its top-right floating find bar share a positioning context that starts BELOW the chrome,
      ;; so the find bar floats over the document (not over the tab strip / address bar)
-     [:div.vv-content-wrap
+     ;; .vv-presenter-view: the presenter view (s) gives the slides the left 58 % and the pane the rest (ADR-0048 §6.2)
+     [:div.vv-content-wrap {:class (when @(rf/subscribe [:slides/presenter-shown?]) "vv-presenter-view")}
       [content-view]
+      ;; the presenter view's pane — the slide's notes and the next slide — in a FIXED slot right after the content
+      ;; view, so showing or hiding it never remounts the slides view (that would end a show)
+      [slides-presenter/pane]
       ;; the non-fatal live-refresh banner (the last good version stays on screen beneath it)
       [refresh-note/refresh-note]
       ;; the slide show's indicators (the "Go to 12" chip) — over the slides, never inside the scroller (ADR-0045)

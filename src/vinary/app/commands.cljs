@@ -125,6 +125,8 @@
    ;; the overview grid of frames (Tab / o): see the whole deck and jump anywhere; Go to slide… opens it
    :slides/overview        {:id :slides/overview :title "Slide overview" :category "Slides" :dispatch [:slides/overview] :when :slides-view?}
    :slides/goto            {:id :slides/goto :title "Go to slide…" :category "Slides" :dispatch [:slides/overview {:open? true}] :when :slides-view?}
+   ;; the presenter view (ADR-0048 §6, `s`): the current slide beside the speaker notes, the next slide and the counter
+   :slides/presenter-view  {:id :slides/presenter-view :title "Speaker notes (presenter view)" :category "Slides" :dispatch [:slides/presenter-view] :when :slides-view?}
    ;; ---- Settings / Help ----
    :settings/open  {:id :settings/open :title "Preferences…" :category "Settings" :dispatch [:settings/open]}
    :passwords/open {:id :passwords/open :title "Passwords" :category "Web" :dispatch [:passwords/open]}

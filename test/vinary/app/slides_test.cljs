@@ -54,7 +54,8 @@
                                             {:deck? false}))
         "presenting always shows slides")
     (is (= :slides (slides/open-as db1)) "the default preference")
-    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none :notes :auto}
+    (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none :notes :auto
+            :presenter-view? false}
            (slides/layout-request db1)))))
 
 (deftest the-transition-preference
