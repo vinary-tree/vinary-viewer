@@ -6,13 +6,16 @@
 // harness boots dist/main/main.js, so the real vinary.main.presenter claims a real window, the real
 // vinary.main.slides-link orders the moves, and each window's real slide engine shows them. It proves:
 //   1. Shift+S opens a second live, painting window that presents the deck, while the first shows the presenter
-//      view with the slide's notes — notes the audience window does not show; the audience window hides its chrome,
-//      and the presenter window keeps its menus, tabs, URI bar and bottom bar, windowed;
-//   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience);
-//   3. a blank (b) in either window blanks the other, the presenter's badge says so, and Escape's first step —
-//      clearing the blank — clears it in both;
+//      console with the slide's notes — notes the audience window does not show: the notes over the whole content
+//      area, a small next slide beside them, and no current slide; the audience window hides its chrome, and the
+//      presenter window keeps its menus, tabs, URI bar and bottom bar, windowed;
+//   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience), and a
+//      click on the console — its notes scrolling or not — leaves the keyboard with the show;
+//   3. a blank (b) in either window blanks the other, the console's strip says so (no blank screen covers the notes),
+//      and Escape's first step — clearing the blank — clears it in both;
 //   4. Escape in the audience window ends the show in BOTH windows, and main closes the audience window;
-//   5. closing the audience window by hand leaves the presenter presenting, with the notice that says so;
+//   5. closing the audience window by hand leaves the presenter presenting, with the notice that says so, in the
+//      console, and a blank there is still shown in the strip, not over the notes;
 //   6. Shift+S while linked raises the audience window instead of opening another, and Escape in the presenter
 //      window ends both and closes the audience window;
 //   7. a show blanked before Shift+S stays blanked in both windows: the audience window's show starts blanked before
@@ -27,6 +30,7 @@
 // placement on a second display and Swap screens are covered by test/vinary/main/displays_test.cljs and
 // test/vinary/app/slides_linked_test.cljs.
 // Hermetic: XDG_CONFIG_HOME and XDG_RUNTIME_DIR point into a scratch directory (test/fixtures/hermetic-env.js).
+// VV_PRESENTER_SHOTS=<dir> also saves PNGs of the presenter console and the audience window after step 1, for a look.
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1';
 const OZONE = process.env.VV_OZONE || (process.platform === 'linux' ? 'x11' : null);
@@ -121,7 +125,25 @@ const state = (win) => evalIn(win, `(() => {
     notes: [...document.querySelectorAll('.vv-presenter-note')].map((n) => n.textContent.trim()),
     notice: text('.vv-presenter-link-notice'),
     swap: Boolean(document.querySelector('.vv-presenter-swap')),
-    badge: text('.vv-slides-blank-badge'),
+    badge: text('.vv-presenter-blank'),
+    // the presenter console (ADR-0048 §6.2): the wrap's mode; what a click at the content area's centre hits; the next
+    // slide's and the notes' shares of its width; whether the next slide is drawn; and no blank screen or old badge
+    console: Boolean(document.querySelector('.vv-content-wrap.vv-presenter-console')),
+    split: Boolean(document.querySelector('.vv-content-wrap.vv-presenter-view')),
+    covered: (() => { const w = document.querySelector('.vv-content-wrap').getBoundingClientRect();
+      const hit = document.elementFromPoint(w.left + w.width / 2, w.top + w.height / 2);
+      return Boolean(hit && hit.closest('.vv-presenter-pane')); })(),
+    nextShare: (() => { const n = document.querySelector('.vv-presenter-next-box');
+      const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
+      return n ? n.getBoundingClientRect().width / w : null; })(),
+    notesShare: (() => { const n = document.querySelector('.vv-presenter-notes');
+      const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
+      return n ? n.getBoundingClientRect().width / w : null; })(),
+    nextDrawn: Boolean(document.querySelector('.vv-presenter-next-box canvas')),
+    blankScreen: Boolean(document.querySelector('.vv-slides-blank')),
+    oldBadge: Boolean(document.querySelector('.vv-slides-blank-badge')),
+    focusOnDocument: (() => { const a = document.activeElement;
+      return !a || a === document.body || Boolean(a.closest('.vv-content')); })(),
     noteOnScreen: document.body.innerText.includes(${JSON.stringify(NOTE_1)}),
     // the window hides its chrome for the show (.vv-root.vv-presenting), and whether its chrome is on screen
     chromeless: document.querySelector('.vv-root').classList.contains('vv-presenting'),
@@ -184,6 +206,20 @@ async function run() {
   assert.strictEqual(shown.display, 'same', 'one display: the audience window opens beside the presenter');
   assert.strictEqual(shown.notice, 'One display: share the audience window in a call.', 'the presenter is told how');
   assert.strictEqual(shown.swap, false, 'Swap screens is not offered on one display');
+  const consoled = await until(() => state(presenter), (s) => s.console && s.nextDrawn, 'the console draws the next slide');
+  assert.strictEqual(consoled.split, false, 'the console, not the presenter view\'s split');
+  assert.strictEqual(consoled.covered, true, 'the console covers the content area: no current slide is shown');
+  assert.ok(consoled.nextShare > 0 && consoled.nextShare < 0.4, `the next slide is small (${consoled.nextShare})`);
+  assert.ok(consoled.notesShare > 0.55, `the notes fill the rest (${consoled.notesShare})`);
+  console.log(`[info] ${MODE}: the console's next slide takes ${consoled.nextShare.toFixed(3)} of the content width, `
+    + `its notes ${consoled.notesShare.toFixed(3)}`);
+  if (process.env.VV_PRESENTER_SHOTS) {
+    const dir = process.env.VV_PRESENTER_SHOTS;
+    fs.mkdirSync(dir, { recursive: true });
+    const tag = COLD ? 'cold' : 'warm';
+    fs.writeFileSync(path.join(dir, `console-${tag}.png`), (await presenter.webContents.capturePage()).toPNG());
+    fs.writeFileSync(path.join(dir, `audience-${tag}.png`), (await audience.webContents.capturePage()).toPNG());
+  }
   assert.strictEqual(shown.chromeless, false, 'the presenter window keeps its chrome');
   assert.strictEqual(shown.chrome, true, 'its menu bar, tabs, URI bar and bottom bar are on screen');
   assert.strictEqual(presenter.isFullScreen(), false, 'and it stays windowed');
@@ -203,13 +239,36 @@ async function run() {
   await samePage(presenter, audience, p0 + 2, 'Space in the audience');
   await press(audience, 'Space', ['shift']);
   await samePage(presenter, audience, p0 + 1, 'Shift+Space in the audience');
-  console.log(`[ok] ${MODE}: a flip in either window moves the other`);
+  //    a click on the console leaves the keyboard with the show — and so does one on its notes when they scroll (a
+  //    long note): Chromium can focus a scroller that has no focusable children
+  const clickNotes = async () => {
+    const at = await evalIn(presenter, `(() => { const r = document.querySelector('.vv-presenter-notes').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 14)) }; })()`);
+    presenter.focus();
+    presenter.webContents.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+    presenter.webContents.sendInputEvent({ type: 'mouseUp', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+    await sleep(300);
+  };
+  await clickNotes();
+  assert.strictEqual((await state(presenter)).focusOnDocument, true, 'a click on the console leaves the focus on the document');
+  key(presenter, 'Space');                                // no focusDocument: the keyboard is where the click left it
+  await samePage(presenter, audience, p0 + 2, 'Space after a click on the console');
+  await evalIn(presenter, `(() => { const n = document.querySelector('.vv-presenter-notes'); n.style.maxHeight = '24px';
+    return n.scrollHeight > n.clientHeight; })()`).then((scrolls) => assert.ok(scrolls, 'the notes scroll'));
+  await clickNotes();
+  assert.strictEqual((await state(presenter)).focusOnDocument, true, 'a click on scrolling notes leaves the focus on the document');
+  key(presenter, 'Space', ['shift']);
+  await samePage(presenter, audience, p0 + 1, 'Shift+Space after a click on the scrolling notes');
+  await evalIn(presenter, `(() => { document.querySelector('.vv-presenter-notes').style.maxHeight = ''; return true; })()`);
+  console.log(`[ok] ${MODE}: a flip in either window moves the other; a click on the console keeps the keyboard`);
 
   // 3. a blank in either window is the other's; Escape's first step clears it in both
   await press(audience, 'b');
   await until(async () => [await state(presenter), await state(audience)],
     ([p, a]) => p.blank === 'black' && a.blank === 'black' && p.badge === 'Audience: black',
     'b in the audience: both black, and the presenter\'s badge says so');
+  const blanked = await state(presenter);
+  assert.ok(!blanked.blankScreen && !blanked.oldBadge && blanked.console, 'the console stays in view: no blank screen covers it');
   await press(presenter, 'b');
   await until(async () => [await state(presenter), await state(audience)],
     ([p, a]) => p.blank == null && a.blank == null && p.badge == null, 'b again in the presenter: both back');
@@ -233,10 +292,19 @@ async function run() {
   // 5. closing the audience window by hand: the presenter keeps presenting, and is told
   const second = await openLinkedShow(presenter);
   second.close();
-  const left = await until(() => state(presenter), (s) => s.phase === 'ended',
-    'closing the audience window by hand ends the link');
+  //    (the phase is app-db's and the notice the DOM's: the wait takes both, for the render that shows the ended link —
+  //    waiting on the phase alone raced that render, and the M1 control run of 2026-10-19 read the live link's notice)
+  const left = await until(() => state(presenter),
+    (s) => s.phase === 'ended' && s.notice === 'The audience window closed. Shift+S opens it again.',
+    'closing the audience window by hand ends the link, and the presenter is told why');
   assert.strictEqual(left.presenting, true, 'the presenter window keeps presenting');
   assert.strictEqual(left.notice, 'The audience window closed. Shift+S opens it again.', 'and says why');
+  assert.strictEqual(left.console, true, 'in the console');
+  await press(presenter, 'b');
+  await until(() => state(presenter), (s) => s.blank === 'black' && s.badge === 'Audience: black' && !s.blankScreen,
+    'b after the audience window closed: the strip shows the blank Shift+S would open it with, not a blank screen');
+  await press(presenter, 'Escape');
+  await until(() => state(presenter), (s) => s.blank == null && s.badge == null && s.presenting, 'Escape lifts that blank');
   await press(presenter, 'Escape');
   await until(async () => !(await state(presenter)).presenting, Boolean, 'Escape then ends the presenter\'s show');
   console.log(`[ok] ${MODE}: closing the audience window leaves the presenter presenting, told why`);

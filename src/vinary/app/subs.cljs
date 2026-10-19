@@ -263,10 +263,15 @@
 (rf/reg-sub :slides/link-notice :<- [:slides/link] (fn [l _] (slides-link/notice l)))
 ;; is Swap screens offered in this window (a live link, its presenter, on separate displays)?
 (rf/reg-sub :slides/swap-offered? :<- [:slides/link] (fn [l _] (slides-link/swap-offered? l)))
-;; blanking in the presenter view of a live link shows a badge, not a blank screen (ADR-0048 §8.2): the colour, or nil
-(rf/reg-sub :slides/audience-blank
-            :<- [:slides/blank] :<- [:slides/link] :<- [:slides/presenter-shown?]
-            (fn [[b l shown?] _] (when (and b shown? (slides-link/live? l) (= :presenter (:role l))) b)))
+;; blanking in a presenter console shows a badge in its strip, not a blank screen (ADR-0048 §8.2): the colour, or nil
+;; (slides/audience-blank)
+;; Disabled 2026-10-19 (ADR-0048 §8.2, amended): the badge showed only while the link was live, over the slide of the
+;; presenter view. The presenter console has no slide to cover, and a blank screen over it would hide the notes, so
+;; the console shows the badge whatever the phase of its link.
+;; (rf/reg-sub :slides/audience-blank
+;;             :<- [:slides/blank] :<- [:slides/link] :<- [:slides/presenter-shown?]
+;;             (fn [[b l shown?] _] (when (and b shown? (slides-link/live? l) (= :presenter (:role l))) b)))
+(rf/reg-sub :slides/audience-blank (fn [db _] (slides/audience-blank db)))
 ;; the overview grid (ADR-0045 §Overview): open?, the mounted view's document generation (a live refresh bumps
 ;; it — the grid re-borrows the document), which page a frame's tile shows, and the dark-invert flag it mirrors
 (rf/reg-sub :slides/overview?      (fn [db _] (boolean (get-in db [:ui :slides :overview?]))))
@@ -278,6 +283,9 @@
 (rf/reg-sub ::presenter-view? (fn [db _] (slides/presenter-view? db)))
 (rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?]
             (fn [[asked? slides?] _] (boolean (and asked? slides?))))
+;; the presenter console: the presenter view in a linked show's presenter window — the notes over the whole content
+;; area, and a small next slide (the .vv-presenter-console wrap; slides/console?, ADR-0048 §6.2)
+(rf/reg-sub :slides/console? (fn [db _] (slides/console? db)))
 (rf/reg-sub :slides/notes-hint? (fn [db _] (slides/notes-hint? db)))
 
 ;; the active document's commit-diff facts ({:root :from :to :range?}, ADR-0042) — nil unless the shown

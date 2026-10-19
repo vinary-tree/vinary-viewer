@@ -3,7 +3,8 @@
    current slide without fullscreen, the presenter view, the request; a one-window show's fullscreen left); main's
    messages (joined never makes the presenter ask for a fullscreen of its own, a push is shown by the :slides/command
    EFFECT with its blank colour, an end stops the show or lets it go on); the presenter window keeps its chrome
-   (focusing it, leaving a fullscreen, Escape in it); the audience window's join and start; the ONE outgoing
+   (focusing it, leaving a fullscreen, Escape in it); its presenter view is the console, whose strip shows the
+   audience's blank; the audience window's join and start; the ONE outgoing
    interceptor (a report or a blank change sends, :slides/link-state never does); Escape and unmount leave; Swap
    screens and the report that ends it; the pane's line; and S in every preset. The protocol itself is
    vinary.app.slides-link-test's."
@@ -151,6 +152,33 @@
           (commands/run :input/escape {:in-input? true :tabs [1]}))
         (is (= [[:input/escape {:on-document? false}] [:input/escape {:on-document? true}] [:input/escape {}]]
                @sent))))))
+
+(deftest the-presenter-console
+  (with-redefs [slides/slides-view? (constantly true)]
+    (let [console (-> (presenting-db false) (assoc-in [:ui :presenter-view?] true) (assoc-in [:ui :slides-link] live))]
+      (testing "the presenter view in a linked show's presenter window is the console — while the link opens, while it
+                is live, and after the audience window closed"
+        (doseq [phase [:opening :live :ended]]
+          (is (true? (slides/console? (assoc-in console [:ui :slides-link :phase] phase))) (str phase))))
+      (testing "the presenter view anywhere else is not: a one-window show's, a deck's outside a show, an audience
+                window's"
+        (is (false? (slides/console? (update console :ui dissoc :slides-link))))
+        (is (false? (slides/console? (assoc-in shown-db [:ui :presenter-view?] true))))
+        (is (false? (slides/console? (assoc-in console [:ui :slides-link :role] :audience)))))
+      (testing "nor is it without the presenter view (s hid it), or without a slides view"
+        (is (false? (slides/console? (update console :ui dissoc :presenter-view?))))
+        (with-redefs [slides/slides-view? (constantly false)]
+          (is (false? (slides/console? console)))))
+      (testing "a blank in the console is the audience's: the strip shows it whatever the link's phase, and the console
+                never goes blank itself"
+        (doseq [phase [:opening :live :ended]]
+          (is (= :black (slides/audience-blank (-> console (assoc-in [:ui :slides-link :phase] phase)
+                                                    (assoc-in [:ui :slides :blank] :black))))
+              (str phase)))
+        (is (nil? (slides/audience-blank console)) "no blank, no badge")
+        (is (nil? (slides/audience-blank (-> console (update :ui dissoc :presenter-view?)
+                                             (assoc-in [:ui :slides :blank] :white))))
+            "outside the console a blank is this window's own blank screen")))))
 
 (deftest main-pushes-another-windows-move
   (let [{:keys [db fx]} (events/slides-link-state-fx (assoc-in (presenting-db) [:ui :slides-link] live)

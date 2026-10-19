@@ -44,13 +44,18 @@
 
 (defn blank-overlay
   "The black / white screen of a running show (keys b . / w ,): covers the slides beneath (z 7 — under the chip,
-   the refresh note and the find bar); a click, any navigation key or Escape ends it. In the presenter view of a
-   linked show the audience's screen is the blank one: this window shows a badge over the slide instead, and keeps
-   its notes in view (ADR-0048 §8.2)."
+   the refresh note and the find bar); a click, any navigation key or Escape ends it. A presenter console never shows
+   it: the audience's screen is the blank one, and the console's strip says so, keeping the notes in view
+   (slides/audience-blank, ADR-0048 §8.2)."
   []
   (when-let [b @(rf/subscribe [:slides/blank])]
-    (if @(rf/subscribe [:slides/audience-blank])
-      [:div.vv-slides-blank-badge {:data-blank (name b) :role "status"} (str "Audience: " (name b))]
+    ;; Disabled 2026-10-19 (ADR-0048 §8.2, amended): the badge floated over the slide in the presenter view of a live
+    ;; link. That window now shows the presenter console, whose strip carries the badge (ui.slides-presenter's
+    ;; .vv-presenter-blank).
+    ;; (if @(rf/subscribe [:slides/audience-blank])
+    ;;   [:div.vv-slides-blank-badge {:data-blank (name b) :role "status"} (str "Audience: " (name b))]
+    ;;   [:div.vv-slides-blank …])
+    (when-not @(rf/subscribe [:slides/audience-blank])
       [:div.vv-slides-blank {:data-blank (name b) :aria-hidden true
                              :on-click #(rf/dispatch [:slides/unblank])}])))
 

@@ -197,6 +197,24 @@
   [db]
   (and (presenter-view? db) (slides-view? db)))
 
+(defn console?
+  "Does this window show the presenter CONSOLE (ADR-0048 §6.2, amended 2026-10-19)? The presenter view shown
+   (presenter-shown?) in a linked show's presenter window ([:ui :slides-link :role] :presenter — while the link opens,
+   while it is live, and after the audience window closed). The audience window shows the slide, so this one gives the
+   whole content area to the notes, with the next slide small in a narrow column beside them and no current slide;
+   the slides view stays mounted beneath, so the show and its keys go on."
+  [db]
+  (boolean (and (presenter-shown? db) (= :presenter (get-in db [:ui :slides-link :role])))))
+
+(defn audience-blank
+  "The blank colour (:black / :white) a presenter console shows as the audience's, or nil: a blanked show in this
+   window's console (console?). The console never goes blank itself — the audience window does — so the notes stay in
+   view, and its strip says what the audience sees (ADR-0048 §8.2): while the link is live, the audience window's blank
+   screen; while it opens, the blank the audience window opens with; after the audience window closed, the one Shift+S
+   opens it with."
+  [db]
+  (when (console? db) (blank db)))
+
 (defn notes-hinted?
   "Has the speaker-notes hint been shown on this installation (the :slides-notes-hinted? setting, ADR-0048 P5)?"
   [db]

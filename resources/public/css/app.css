@@ -375,11 +375,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-slides-blank { position: absolute; inset: 0; z-index: 7; cursor: none; }
 .vv-slides-blank[data-blank="black"] { background: #000; }
 .vv-slides-blank[data-blank="white"] { background: #fff; }
-/* blanking in the presenter view of a linked show (ADR-0048 §8.2): the audience's screen is blank, and this one says
-   so over the slide, in the colour the audience sees */
+/* Disabled 2026-10-19 (ADR-0048 §8.2, amended): blanking in the presenter view of a linked show put this badge over the
+   slide; that window now shows the presenter console, whose strip carries it (.vv-presenter-blank, below).
 .vv-slides-blank-badge { position: absolute; top: 12px; left: 12px; z-index: 9; padding: 4px 12px; border-radius: 12px;
   font-size: 13px; pointer-events: none; background: #000; color: #fff; border: 1px solid #666; }
 .vv-slides-blank-badge[data-blank="white"] { background: #fff; color: #000; border-color: #999; }
+*/
 /* the slide OVERVIEW grid (ADR-0045 §Overview): a focused overlay over the slides layout (a sibling of .vv-content,
    z 8 — over the blank screen, under the chip and the find bar) with its own scroller; one tile per frame */
 .vv-slides-overview { position: absolute; inset: 0; z-index: 8; overflow-y: auto; outline: none;
@@ -434,6 +435,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-root.vv-presenting .vv-presenter-link-notice { color: #ddd; }
 .vv-root.vv-presenting .vv-presenter-link-notice[data-tone="warning"] { color: #f5c26b; }
 .vv-root.vv-presenting .vv-presenter-swap { color: #ddd; border-color: #444; }
+/* blanking in a presenter console (ADR-0048 §8.2): the audience's screen is blank, and the strip says so in the colour
+   the audience sees */
+.vv-presenter-blank { padding: 2px 10px; border-radius: 12px; font-size: 13px; font-variant-numeric: normal;
+  background: #000; color: #fff; border: 1px solid #666; }
+.vv-presenter-blank[data-blank="white"] { background: #fff; color: #000; border-color: #999; }
 .vv-presenter-overlay { color: var(--vv-meta); }
 .vv-presenter-heading { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--vv-meta); }
@@ -461,6 +467,20 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-root.vv-presenting .vv-presenter-note.markdown-body * { color: #ddd !important; background-color: transparent !important;
   border-color: #000 !important; }
 .vv-root.vv-presenting .vv-presenter-note.markdown-body a { text-decoration: underline; }
+/* the PRESENTER CONSOLE (ADR-0048 §6.2, amended 2026-10-19): in a linked show's presenter window — the audience window
+   shows the slide — the pane takes the whole content area: the strip on one line across the top, the notes filling the
+   rest, and the next slide small in a narrow column on the right; no current slide. The slides view stays mounted, full
+   size and focused, under the opaque pane, so the show and its keys go on, and a click or the wheel lands on the pane,
+   never on a slide. The theme's colours: the window keeps its chrome (slides/chromeless?). */
+.vv-content-wrap.vv-presenter-console > .vv-presenter-pane { inset: 0; width: auto; border-left: 0; display: grid;
+  gap: 10px 18px; grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 360px);
+  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "notes next"; background: var(--vv-bg1); }
+.vv-presenter-console .vv-presenter-strip { grid-area: strip; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 14px; }
+.vv-presenter-console .vv-presenter-link { margin: 0 0 0 auto; }
+.vv-presenter-console .vv-presenter-notes { grid-area: notes; font-size: clamp(16px, 1.6vw, 26px); }
+.vv-presenter-console .vv-presenter-next { grid-area: next; align-self: start; }
+.vv-presenter-console .vv-presenter-next-box { flex: none; width: 100%; }
 /* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
 .vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
   background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }

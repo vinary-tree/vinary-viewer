@@ -20,6 +20,11 @@
    re-derived deck. The text notes of the current page and of its neighbours are read ahead into a per-document cache,
    so a flip finds its notes already read.
 
+   In a linked show's presenter window the pane is the presenter CONSOLE (slides/console?, ADR-0048 §6.2, amended
+   2026-10-19): the audience window shows the slide, so the pane covers the whole content area — the strip on one line
+   (the counter, the overlay, the audience's blank, the link's line), the notes filling the rest, and the next slide
+   small in a narrow column on the right, at its own aspect ratio. The slides view stays mounted, full size, beneath it.
+
    An <aside role=\"complementary\"> in a slot of .vv-content-wrap after .vv-content (z 5), never focusable: a click on
    it leaves the keyboard with the document, so the slide keys keep working, and find, the Contents scroll-spy and the
    content MutationObserver never see it. Canvases are aria-hidden; the next slide is role=\"img\" with its label. A
@@ -177,9 +182,11 @@
       :component-did-update (fn [_ _] (sync!))
       :reagent-render
       (fn []
-        (let [slides  @(rf/subscribe [:slides/state])   ; the slides view's position report: a move re-renders
-              _       @(rf/subscribe [:doc/deck])        ; the deck re-derived (notes settled, a refresh)
-              invert? @(rf/subscribe [:pdf/invert?])
+        (let [slides   @(rf/subscribe [:slides/state])   ; the slides view's position report: a move re-renders
+              _        @(rf/subscribe [:doc/deck])        ; the deck re-derived (notes settled, a refresh)
+              invert?  @(rf/subscribe [:pdf/invert?])
+              console? @(rf/subscribe [:slides/console?])
+              blank    @(rf/subscribe [:slides/audience-blank])
               {:keys [doc sizes current doc-gen side notes-model producer text-layer] d :deck pref :notes}
               (pdf-cache/slides-snapshot)]
           (if-not (and doc d (seq sizes))
@@ -197,8 +204,12 @@
               [:aside.vv-presenter-pane {:role "complementary" :aria-label "Speaker notes and next slide"
                                          :class (when invert? "vv-pdf-invert")}
                [:div.vv-presenter-strip
-                [:span.vv-presenter-counter counter]
-                (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])
+                [:span.vv-presenter-position
+                 [:span.vv-presenter-counter counter]
+                 (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])]
+                ;; the audience's blank screen, in the colour it shows (ADR-0048 §8.2)
+                (when blank
+                  [:span.vv-presenter-blank {:data-blank (name blank) :role "status"} (str "Audience: " (name blank))])
                 [link-status]]
                [:section.vv-presenter-notes {:aria-label "Speaker notes" :on-click on-notes-click}
                 [:h2.vv-presenter-heading "Notes"]
@@ -218,6 +229,8 @@
                 [:h2.vv-presenter-heading "Next"]
                 (if next
                   [region-box {:gen     doc-gen
+                               ;; the console's narrow column sizes the box by the slide's own shape
+                               :ratio   (when console? (ratio-of (:rect next)))
                                :attrs   {:class "vv-presenter-next-box" :role "img" :aria-label (:label next)
                                          :data-page (:page next)}
                                :request {:doc doc :page (:page next) :rect (:rect next) :text? false}}]
