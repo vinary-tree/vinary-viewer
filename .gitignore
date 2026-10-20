@@ -52,3 +52,8 @@ src/mouse-forward-back/node_modules/
 .DS_Store
 *.swp
 *~
+
+# Local agent workspace state (including nested Git worktrees); not part of the app.
+/.claude/
+/.codex/
+/.agents/
