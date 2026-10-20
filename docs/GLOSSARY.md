@@ -573,15 +573,16 @@ semantics are modelled in `vinary.slides.presenter`, for a deferred feature requ
 *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §4–§5.*
 
 **presenter console** — The **presenter view** of a **linked show**'s presenter window, where the audience window
-shows the slide: the **speaker notes** fill the content area, the next slide sits small in a narrow column on the
-right, and one line on top holds the frame counter, the overlay, the audience's blank colour (*Audience: black*) and
-the link's notice. There is no current slide. The slides view stays mounted, focused, beneath it, so the slide keys
+shows the slide: a left strip starts at the first step, follows the current step through the middle, and reveals clipped
+neighbours above or below when more steps exist; the **speaker notes**
+fill the right side, vertically centred when they fit. One line on top holds the frame counter, overlay, audience
+blank colour (*Audience: black*) and link notice. The slides view stays mounted, focused, beneath it, so the slide keys
 still drive the show (`slides/console?`, `.vv-presenter-console`). *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.2 (amended
 2026-10-19).*
 
-**presenter view** — The layout `s` toggles during a show or in the Slides layout: the current slide on the left, and
-a pane (`vinary.ui.slides-presenter`) holding the frame counter, the current slide's **speaker notes** and the next
-slide. (A timer is deferred to a feature request — ADR-0048 §6.5.) In a **linked show**'s presenter window it is the
+**presenter view** — The normal Slides layout joins the current slide with its **speaker notes** as one centred,
+equal-size unit when that step has notes; `s` and View ▸ Show Slide Notes toggle this window's choice. A notes-free
+step shows the slide alone, with no next-slide preview. In a **linked show**'s presenter window it is the
 **presenter console**. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
 
 **presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)

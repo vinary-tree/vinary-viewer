@@ -6,8 +6,8 @@
 // harness boots dist/main/main.js, so the real vinary.main.presenter claims a real window, the real
 // vinary.main.slides-link orders the moves, and each window's real slide engine shows them. It proves:
 //   1. Shift+S opens a second live, painting window that presents the deck, while the first shows the presenter
-//      console with the slide's notes — notes the audience window does not show: the notes over the whole content
-//      area, a small next slide beside them, and no current slide; the audience window hides its chrome, and the
+//      console with the slide's notes — notes the audience window does not show: centred notes on the right and a
+//      left strip of slide-step previews centred on the current step; the audience window hides its chrome, and the
 //      presenter window keeps its menus, tabs, URI bar and bottom bar, windowed; neither shows the speaker-notes hint,
 //      which is the single-window show's (no linked show spends it, checked again after step 6);
 //   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience), and a
@@ -15,8 +15,7 @@
 //   3. a blank (b) in either window blanks the other, the console's strip says so (no blank screen covers the notes),
 //      and Escape's first step — clearing the blank — clears it in both;
 //   4. Escape in the audience window ends the show in BOTH windows, and main closes the audience window;
-//   5. closing the audience window by hand leaves the presenter presenting, with the notice that says so, in the
-//      console, and a blank there is still shown in the strip, not over the notes;
+//   5. closing the audience window by hand ends the show and returns to its current slide beside the notes;
 //   6. Shift+S while linked raises the audience window instead of opening another, and Escape in the presenter
 //      window ends both and closes the audience window;
 //   7. a show blanked before Shift+S stays blanked in both windows: the audience window's show starts blanked before
@@ -149,25 +148,51 @@ const state = (win) => evalIn(win, `(() => {
     seq: link ? link.seq : null,
     // the deck the slides engine in front reports (app-db's position mirror, [:ui :slides])
     slidesPath: slides.path == null ? null : slides.path,
+    currentNotes: slides['current-notes?'] === true,
     pane: Boolean(document.querySelector('.vv-presenter-pane')),
     notes: [...document.querySelectorAll('.vv-presenter-note')].map((n) => n.textContent.trim()),
     notice: text('.vv-presenter-link-notice'),
     swap: Boolean(document.querySelector('.vv-presenter-swap')),
     badge: text('.vv-presenter-blank'),
-    // the presenter console (ADR-0048 §6.2): the wrap's mode; what a click at the content area's centre hits; the next
-    // slide's and the notes' shares of its width; whether the next slide is drawn; and no blank screen or old badge
+    // the presenter console: a left strip of slide steps around the current preview, and centred notes on the right
     console: Boolean(document.querySelector('.vv-content-wrap.vv-presenter-console')),
     split: Boolean(document.querySelector('.vv-content-wrap.vv-presenter-view')),
     covered: (() => { const w = document.querySelector('.vv-content-wrap').getBoundingClientRect();
       const hit = document.elementFromPoint(w.left + w.width / 2, w.top + w.height / 2);
       return Boolean(hit && hit.closest('.vv-presenter-pane')); })(),
-    nextShare: (() => { const n = document.querySelector('.vv-presenter-next-box');
+    previewShare: (() => { const n = document.querySelector('.vv-presenter-previews');
       const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
       return n ? n.getBoundingClientRect().width / w : null; })(),
     notesShare: (() => { const n = document.querySelector('.vv-presenter-notes');
       const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
       return n ? n.getBoundingClientRect().width / w : null; })(),
-    nextDrawn: Boolean(document.querySelector('.vv-presenter-next-box canvas')),
+    previews: [...document.querySelectorAll('.vv-presenter-preview')].map((n) => ({
+      page: Number(n.dataset.page), current: n.getAttribute('aria-current') === 'step',
+      peek: n.classList.contains('vv-presenter-preview-peek'),
+      drawn: Boolean(n.querySelector('canvas')),
+      top: n.getBoundingClientRect().top,
+      center: n.getBoundingClientRect().top + n.getBoundingClientRect().height / 2,
+    })),
+    previewCanvasCount: document.querySelectorAll('.vv-presenter-preview canvas').length,
+    previewCenter: (() => { const n = document.querySelector('.vv-presenter-previews');
+      return n ? n.getBoundingClientRect().top + n.getBoundingClientRect().height / 2 : null; })(),
+    previewTop: (() => { const n = document.querySelector('.vv-presenter-previews');
+      return n ? n.getBoundingClientRect().top : null; })(),
+    nextPreview: Boolean(document.querySelector('.vv-presenter-next')),
+    joined: (() => { const a = document.querySelector('.vv-content-wrap.vv-presenter-view .vv-content');
+      const b = document.querySelector('.vv-content-wrap.vv-presenter-view .vv-presenter-pane');
+      if (!a || !b) return null;
+      const x = a.getBoundingClientRect(), y = b.getBoundingClientRect();
+      return { equal: Math.abs(x.width - y.width) < 2 && Math.abs(x.height - y.height) < 2,
+        touching: Math.abs(x.right - y.left) < 2 || Math.abs(y.right - x.left) < 2
+          || Math.abs(x.bottom - y.top) < 2 || Math.abs(y.bottom - x.top) < 2,
+        centered: Math.abs((x.top + x.bottom) / 2 - (document.querySelector('.vv-content-wrap').getBoundingClientRect().top
+          + document.querySelector('.vv-content-wrap').getBoundingClientRect().bottom) / 2) < 2 }; })(),
+    notesCentered: (() => { const box = document.querySelector('.vv-presenter-notes');
+      const body = document.querySelector('.vv-presenter-notes-body');
+      if (!box || !body || body.scrollHeight > box.clientHeight) return null;
+      const a = box.getBoundingClientRect(), b = body.getBoundingClientRect();
+      return Math.abs((a.top + a.bottom - b.top - b.bottom) / 2) < 3; })(),
     blankScreen: Boolean(document.querySelector('.vv-slides-blank')),
     oldBadge: Boolean(document.querySelector('.vv-slides-blank-badge')),
     focusOnDocument: (() => { const a = document.activeElement;
@@ -238,12 +263,30 @@ async function run() {
   assert.strictEqual(shown.display, 'same', 'one display: the audience window opens beside the presenter');
   assert.strictEqual(shown.notice, 'One display: share the audience window in a call.', 'the presenter is told how');
   assert.strictEqual(shown.swap, false, 'Swap screens is not offered on one display');
-  const consoled = await until(() => state(presenter), (s) => s.console && s.nextDrawn, 'the console draws the next slide');
+  const consoled = await until(() => state(presenter),
+    (s) => s.console && s.previews.some((p) => p.current && p.drawn), 'the console draws the current slide');
   assert.strictEqual(consoled.split, false, 'the console, not the presenter view\'s split');
-  assert.strictEqual(consoled.covered, true, 'the console covers the content area: no current slide is shown');
-  assert.ok(consoled.nextShare > 0 && consoled.nextShare < 0.4, `the next slide is small (${consoled.nextShare})`);
+  assert.strictEqual(consoled.covered, true, 'the console covers the content area');
+  assert.ok(consoled.previewShare > 0 && consoled.previewShare < 0.4, `the preview strip is narrow (${consoled.previewShare})`);
   assert.ok(consoled.notesShare > 0.55, `the notes fill the rest (${consoled.notesShare})`);
-  console.log(`[info] ${MODE}: the console's next slide takes ${consoled.nextShare.toFixed(3)} of the content width, `
+  assert.ok(consoled.previews.length >= 2 && consoled.previews.every((p, i) => p.page === i),
+    'the strip begins with consecutive overlays that fit');
+  assert.ok(Math.abs(consoled.previews.find((p) => p.current).top - consoled.previewTop) < 2,
+    'the first current preview starts at the top');
+  assert.ok(consoled.previewCanvasCount <= consoled.previews.length,
+    'only visible slide previews hold canvases');
+  assert.strictEqual(consoled.notesCentered, true, 'short notes are vertically centred');
+  const originalSize = presenter.getBounds();
+  presenter.setSize(originalSize.width, Math.max(500, originalSize.height - 180));
+  await until(() => state(presenter), (s) => s.console && s.previewCenter !== consoled.previewCenter
+    && s.previews.some((p) => p.current && Math.abs(p.top - s.previewTop) < 2),
+  'resizing keeps the first preview top aligned');
+  presenter.setSize(originalSize.width, originalSize.height);
+  await until(() => state(presenter), (s) => s.console
+    && Math.abs(s.previewCenter - consoled.previewCenter) < 2
+    && s.previews.some((p) => p.current && Math.abs(p.top - s.previewTop) < 2),
+  'restoring the window keeps the first preview top aligned');
+  console.log(`[info] ${MODE}: the console's slide strip takes ${consoled.previewShare.toFixed(3)} of the content width, `
     + `its notes ${consoled.notesShare.toFixed(3)}`);
   if (process.env.VV_PRESENTER_SHOTS) {
     const dir = process.env.VV_PRESENTER_SHOTS;
@@ -277,6 +320,15 @@ async function run() {
   await samePage(presenter, audience, p0 + 2, 'Space in the audience');
   await press(audience, 'Space', ['shift']);
   await samePage(presenter, audience, p0 + 1, 'Shift+Space in the audience');
+  await clickAt(presenter, '.vv-presenter-preview[data-page="0"]');
+  await samePage(presenter, audience, p0, 'clicking an earlier preview jumps both windows');
+  await clickAt(presenter, '.vv-presenter-preview[data-page="1"]');
+  await samePage(presenter, audience, p0 + 1, 'clicking the next overlay preview jumps both windows');
+  await evalIn(presenter, `document.querySelector('.vv-presenter-preview[data-page="0"]').focus(); true`);
+  key(presenter, 'Enter');
+  await samePage(presenter, audience, p0, 'Enter on a focused preview jumps both windows');
+  await clickAt(presenter, '.vv-presenter-preview[data-page="1"]');
+  await samePage(presenter, audience, p0 + 1, 'a click restores the next overlay after keyboard selection');
   //    a click on the console leaves the keyboard with the show — and so does one on its notes when they scroll (a
   //    long note): Chromium can focus a scroller that has no focusable children
   const clickNotes = async () => {
@@ -324,28 +376,42 @@ async function run() {
     Boolean, 'Escape in the audience: the show ends in both and the audience window closes');
   const ended = await state(presenter);
   assert.strictEqual(ended.role, null, 'the presenter window leaves the link');
-  assert.strictEqual(ended.presenterView, false, 'and its presenter view is closed with the show');
+  assert.strictEqual(ended.presenterView, true, 'and automatic notes remain enabled outside the show');
   console.log(`[ok] ${MODE}: Escape in the audience window ends both shows and closes it`);
 
-  // 5. closing the audience window by hand: the presenter keeps presenting, and is told
+  // 5. closing the audience window by hand ends presentation on the last slide with its notes beside it
   const second = await openLinkedShow(presenter);
+  await evalIn(second, `window.__vvslides('first')`);
+  await samePage(presenter, second, 0, 'the second show returns to its first slide');
+  const beforeClose = await until(() => state(second),
+    (s) => s.enginePresenting && s.page != null, 'the second audience window is showing its starting slide');
+  await press(second, 'Space');
+  const afterClosePage = await until(() => state(second),
+    (s) => s.page > beforeClose.page, 'the audience advances before its window closes');
+  await samePage(presenter, second, afterClosePage.page, 'the presenter follows that advance');
   second.close();
-  //    (the phase is app-db's and the notice the DOM's: the wait takes both, for the render that shows the ended link —
-  //    waiting on the phase alone raced that render, and the M1 control run of 2026-10-19 read the live link's notice)
   const left = await until(() => state(presenter),
-    (s) => s.phase === 'ended' && s.notice === 'The audience window closed. Shift+S opens it again.',
-    'closing the audience window by hand ends the link, and the presenter is told why');
-  assert.strictEqual(left.presenting, true, 'the presenter window keeps presenting');
-  assert.strictEqual(left.notice, 'The audience window closed. Shift+S opens it again.', 'and says why');
-  assert.strictEqual(left.console, true, 'in the console');
-  await press(presenter, 'b');
-  await until(() => state(presenter), (s) => s.blank === 'black' && s.badge === 'Audience: black' && !s.blankScreen,
-    'b after the audience window closed: the strip shows the blank Shift+S would open it with, not a blank screen');
-  await press(presenter, 'Escape');
-  await until(() => state(presenter), (s) => s.blank == null && s.badge == null && s.presenting, 'Escape lifts that blank');
-  await press(presenter, 'Escape');
-  await until(async () => !(await state(presenter)).presenting, Boolean, 'Escape then ends the presenter\'s show');
-  console.log(`[ok] ${MODE}: closing the audience window leaves the presenter presenting, told why`);
+    (s) => !s.presenting && s.role == null && !s.console && s.page === afterClosePage.page,
+    'closing the audience window returns to the current slide and notes');
+  assert.strictEqual(left.role, null, 'the link is forgotten');
+  assert.strictEqual(left.presenterView, true, 'the main window shows its slide beside its notes');
+  assert.strictEqual(left.console, false, 'the notes-only console closes');
+  const joined = await until(() => state(presenter),
+    (s) => s.currentNotes && s.split && s.joined && s.joined.equal && s.notes.includes(NOTE_2),
+    'the current slide and its note become one joined page');
+  assert.strictEqual(joined.joined.touching, true, 'the slide and notes are connected');
+  assert.strictEqual(joined.joined.centered, true, 'the joined page is vertically centred');
+  assert.strictEqual(left.nextPreview, false, 'the normal view has no next-slide preview');
+  if (process.env.VV_PRESENTER_SHOTS) {
+    const dir = process.env.VV_PRESENTER_SHOTS;
+    fs.writeFileSync(path.join(dir, `joined-${COLD ? 'cold' : 'warm'}.png`),
+      (await presenter.webContents.capturePage()).toPNG());
+  }
+  await evalIn(presenter, `window.__vvslides('next')`);
+  await until(() => state(presenter), (s) => s.page === 2 && !s.currentNotes && !s.split && !s.pane,
+    'a following slide without notes appears by itself');
+  assert.strictEqual(left.blank, null, 'the linked show blank is cleared');
+  console.log(`[ok] ${MODE}: closing the audience window returns to the current slide and notes`);
 
   // 6. Shift+S while linked raises the audience window; Escape in the presenter ends both
   const third = await openLinkedShow(presenter);
@@ -475,8 +541,21 @@ async function run() {
     'Back: the deck again, and the show resumes at its slide');
   await clickAt(presenter, '.vv-tab[title$="paper.pdf"]');        // the other tab in front: away
   await until(() => state(presenter), (s) => s.away === true, 'the other tab in front: away');
+  await press(sixth, 'Space');
+  await until(() => state(presenter), (s) => s.knownPage === 4, 'the audience advances while the presenter is away');
+  sixth.close();
+  await until(() => state(presenter),
+    (s) => !s.presenting && s.slidesPath === PAPER,
+    'closing the audience keeps the other tab in front and ends presentation');
+  await clickAt(presenter, '.vv-tab[title$="talk.pdf"]');
+  await until(() => state(presenter),
+    (s) => !s.split && s.page === 4 && s.presenterView,
+    'returning to a notes-free step shows the audience\'s last slide by itself');
+  const seventh = await openLinkedShow(presenter);
+  await clickAt(presenter, '.vv-tab[title$="paper.pdf"]');
+  await until(() => state(presenter), (s) => s.away === true, 'the presenter leaves the deck again');
   await clickAt(presenter, '.vv-tab[title$="talk.pdf"] .vv-tab-close');
-  await until(async () => sixth.isDestroyed() && !(await state(presenter)).presenting,
+  await until(async () => seventh.isDestroyed() && !(await state(presenter)).presenting,
     Boolean, 'closing the deck\'s tab from another tab ends both shows, and the audience window closes');
   assert.strictEqual((await state(presenter)).role, null, 'the presenter window leaves the link');
   console.log(`[ok] ${MODE}: away from the deck the show runs on; back, the console resumes at the show's slide`);

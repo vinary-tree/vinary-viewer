@@ -28,12 +28,14 @@
 
 (deftest s-toggles-the-presenter-view
   (with-redefs [slides/slides-view? (constantly true)]
-    (let [on (:db (events/slides-presenter-view-fx shown-db))]
-      (is (true? (slides/presenter-view? on)) "s shows the presenter view")
-      (is (true? (slides/presenter-shown? on)))
-      (is (false? (slides/presenter-view? (:db (events/slides-presenter-view-fx on)))) "s again hides it")
-      (is (not (contains? (:ui (:db (events/slides-presenter-view-fx on))) :presenter-view?))
-          "hiding it removes the key (the audience view is the absence of the choice)"))
+    (let [off (:db (events/slides-presenter-view-fx shown-db))
+          on  (:db (events/slides-presenter-view-fx off))]
+      (is (true? (slides/presenter-view? shown-db)) "notes are allowed by default")
+      (is (false? (slides/presenter-view? off)) "s hides joined notes")
+      (is (false? (get-in off [:ui :presenter-view?])) "the slide-only choice is explicit")
+      (is (true? (slides/presenter-view? on)) "s again allows joined notes")
+      (is (true? (slides/presenter-shown?
+                  (assoc-in shown-db [:ui :slides :current-notes?] true))) "current notes pair automatically"))
     (testing "while presenting too"
       (is (true? (slides/presenter-view? (:db (events/slides-presenter-view-fx (presenting shown-db)))))))
     (testing "choosing the presenter view dismisses the hint that pointed at it, and its timer"
@@ -48,9 +50,13 @@
         "the choice outlives the slides view, but the pane shows only in one")))
 
 (deftest the-presenter-view-reaches-the-engine
-  (is (false? (:presenter-view? (slides/layout-request shown-db))))
-  (is (true? (:presenter-view? (slides/layout-request (assoc-in shown-db [:ui :presenter-view?] true))))
-      "the engine sees the presenter view through the layout request (its flips are instant while it is shown)"))
+  (is (false? (:presenter-view? (slides/layout-request shown-db))) "a notes-free step may still animate")
+  (is (false? (:presenter-view? (slides/layout-request (assoc-in shown-db [:ui :presenter-view?] false)))))
+  (is (true? (:joined? (slides/layout-request (assoc-in shown-db [:ui :slides :current-notes?] true))))
+      "the engine gives the joined slide its full cell")
+  (is (true? (:presenter-view? (slides/layout-request
+                                (assoc-in shown-db [:ui :slides :current-notes?] true))))
+      "a joined page disables the engine's separate transition snapshot"))
 
 (deftest a-show-starts-in-the-audience-view-and-gives-the-view-back
   (with-redefs [slides/pdf-shown?     (constantly true)
@@ -68,7 +74,7 @@
         (is (true? (slides/presenter-view? (:db (events/slides-stop-fx started {}))))
             "ending the show without s gives the presenter view back")))
     (testing "from the audience view: s during the show is forgotten when it ends"
-      (let [started (:db (events/slides-present-fx shown-db :first))
+      (let [started (:db (events/slides-present-fx (assoc-in shown-db [:ui :presenter-view?] false) :first))
             shown   (:db (events/slides-presenter-view-fx started))]
         (is (false? (:notes-view-before (slides/presentation started))))
         (is (true? (slides/presenter-view? shown)))

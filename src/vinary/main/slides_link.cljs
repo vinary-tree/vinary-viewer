@@ -54,9 +54,9 @@
      either     leave \"stopped\" (Escape, End Slide Show)         {stop: true,  reason: \"stopped\"}
      presenter  leave \"unmounted\"; its window closed, reloaded   {stop: true,  reason: \"presenter-left\"}
                 or crashed
-     audience   leave \"unmounted\"; its window closed, reloaded   {stop: false, reason: \"audience-left\"}
+     audience   leave \"unmounted\"; its window closed, reloaded   {stop: true, reason: \"audience-left\", page}
                 or crashed
-     audience   its display was removed                            {stop: false, reason: \"display-removed\"}
+     audience   its display was removed                            {stop: true, reason: \"display-removed\", page}
 
    In every row main closes the audience window (unless that is the window that closed). A member that is gone is
    sent nothing. Swap screens changes no session field but :swapping: roles, positions and the seq are untouched, so
@@ -203,7 +203,11 @@
   [reason]
   {:session nil :refused reason})
 
-(defn- ended-message [id stop? reason] {:session id :ended true :stop stop? :reason reason})
+(defn- ended-message
+  ([id stop? reason] (ended-message id stop? reason nil))
+  ([id stop? reason page]
+   (cond-> {:session id :ended true :stop stop? :reason reason}
+     (some? page) (assoc :page page))))
 (defn- ack-message [id s mid accepted?] {:session id :seq s :ack mid :accepted accepted?})
 (defn- push-message [id s page blank] {:session id :seq s :page page :blank blank})
 
@@ -229,8 +233,8 @@
   {[:presenter :stopped]         {:stop true  :reason "stopped"}
    [:audience  :stopped]         {:stop true  :reason "stopped"}
    [:presenter :unmounted]       {:stop true  :reason "presenter-left"}
-   [:audience  :unmounted]       {:stop false :reason "audience-left"}
-   [:audience  :display-removed] {:stop false :reason "display-removed"}})
+   [:audience  :unmounted]       {:stop true  :reason "audience-left"}
+   [:audience  :display-removed] {:stop true  :reason "display-removed"}})
 
 (defn- end-session
   "Session `id` ends because its member `wc` left for `why` (:stopped, :unmounted or :display-removed): the other
@@ -238,9 +242,12 @@
   [state id wc why]
   (let [sess                  (session state id)
         {:keys [stop reason]} (get endings [(get-in sess [:members wc]) why])
-        audience              (audience-of state id)]
+        audience              (audience-of state id)
+        final-page            (when (and (= :audience (get-in sess [:members wc]))
+                                         (not= why :stopped))
+                                (:page sess))]
     {:state (remove-session state id)
-     :out   (into [] (comp (remove #{wc}) (map (fn [w] [w (ended-message id stop reason)])))
+     :out   (into [] (comp (remove #{wc}) (map (fn [w] [w (ended-message id stop reason final-page)])))
                   (members-in-order sess))
      :close (if audience [audience] [])
      :ended {:session id :reason reason}}))

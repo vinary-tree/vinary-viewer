@@ -63,6 +63,8 @@
              :event [:slides/present-linked] :pdf-only true :tooltip "Speaker notes stay in this window"}
             {:label "Slide Overview"           :access-key "e" :accel "Tab"
              :event [:slides/overview {:open? true}] :slides-only true}
+            {:label "Show Slide Notes"         :access-key "l" :accel "S" :check-toggle :slide-notes
+             :event [:slides/presenter-view] :slides-only true}
             ;; diff-only (ADR-0037): ONE toggling item — realize-item flips its label to "Expand All
             ;; Files" once every file is collapsed; the static :event picks the right direction itself.
             {:label "Collapse All Files" :dyn-label :diff-collapse-toggle :access-key "a"
@@ -159,6 +161,7 @@
     {:pdf?  (= :pdf (zoom/context db))
      :slides? (slides/slides-view? db)
      :presenting? (slides/presenting? db)
+     :slide-notes? (slides/presenter-view? db)
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
@@ -181,14 +184,16 @@
   "Realize a dynamic item label from the menu ctx. The item keeps a STATIC default :label (raw-`menus`
    readers and tests stay sane) and a static :event — only its displayed name flips."
   [ctx item]
-  (case (when (map? item) (:dyn-label item))
+  (let [item (if (= :slide-notes (:check-toggle item))
+               (assoc item :checked? (boolean (:slide-notes? ctx))) item)]
+    (case (when (map? item) (:dyn-label item))
     :diff-collapse-toggle
     (assoc item :label (if (:diff-all-collapsed? ctx) "Expand All Files" "Collapse All Files"))
     ;; the flipped label carries its own access key: no letter is free in BOTH labels, and an access key must be
     ;; a letter of the label it underlines
     :slides-layout-toggle
     (if (:slides? ctx) (assoc item :label "View as Document" :access-key "m") item)
-    item))
+    item)))
 
 (defn- clean-seps
   "Drop separators left leading, trailing, or consecutive by item filtering."
@@ -452,12 +457,14 @@
     ^{:key i}
     [:div
      (merge (cond-> {:class          (menu-item-class "vv-menu-item" (= focus i))
-                     :role           "menuitem"
+                     :role           (if (:check-toggle item) "menuitemcheckbox" "menuitem")
+                     :aria-checked   (when (:check-toggle item) (boolean (:checked? item)))
                      :on-click       #(act! (:event item))
                      :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
                                           (rf/dispatch [:menu/submenu nil]))}
               (:tooltip item) (assoc :title (:tooltip item)))
             (access/access-attrs (:access-key item)))
+     (when (:check-toggle item) [:span.vv-menu-check (when (:checked? item) "✓")])
      [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
      (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))
 

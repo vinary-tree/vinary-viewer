@@ -40,7 +40,10 @@
       (is (nil? (by-label items "View as Slide Show")))
       (is (= "m" (:access-key (by-label items "View as Document"))))
       (is (= [:pdf/layout-toggle] (:event (by-label items "View as Document"))) "one static event, both labels")
-      (is (= [:slides/overview {:open? true}] (:event (by-label items "Slide Overview"))))))
+      (is (= [:slides/overview {:open? true}] (:event (by-label items "Slide Overview"))))
+      (is (= [:slides/presenter-view] (:event (by-label items "Show Slide Notes"))))
+      (is (true? (:checked? (by-label (view-items (assoc (:pdf-slides ctxs) :slide-notes? true))
+                                      "Show Slide Notes"))) "the View item reports the session choice")))
   (testing "Reflow Text moved to w — r is Reset Zoom's"
     (is (= "w" (:access-key (by-label (view-items (:pdf-doc ctxs)) "Reflow Text"))))
     (is (= "r" (:access-key (by-label (view-items (:pdf-doc ctxs)) "Reset Zoom"))))))

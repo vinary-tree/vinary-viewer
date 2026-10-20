@@ -314,6 +314,31 @@
                          %)
                       ts)))))
 
+(defn set-deck-return
+  "Remember the final linked-show slide on the show's tab, including a history entry left by Back or another file.
+   The active entry keeps its mirrored layout; an older entry is restored when navigation returns to it."
+  [db tab-id path page]
+  (update-in db [:ui :tabs]
+             (fn [ts]
+               (mapv
+                (fn [t]
+                  (if (not= tab-id (:id t))
+                    t
+                    (let [{:keys [stack idx]} (:hist t)
+                          matches (keep-indexed
+                                   (fn [i entry]
+                                     (when (= path (or (get-in entry [:facet :path])
+                                                       (uri/file-path (:uri entry)) (:uri entry))) i))
+                                   (take (inc idx) stack))
+                          at (last matches)]
+                      (if (nil? at)
+                        t
+                        (cond-> (-> t
+                                    (assoc-in [:hist :stack at :page] page)
+                                    (assoc-in [:hist :stack at :pdf-layout] :slides))
+                          (= at idx) (assoc :pdf-layout :slides))))))
+                ts))))
+
 ;; ---- Diff unified⇄split view (per-tab; only meaningful for a .diff/.patch doc) ----
 ;; A tab's :diff-view is the user's explicit choice (:unified / :split); nil follows the
 ;; WIDTH-ADAPTIVE default (ADR-0043, amending ADR-0026's unconditional :unified): Split when the

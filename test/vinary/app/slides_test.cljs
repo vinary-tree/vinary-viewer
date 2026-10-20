@@ -65,7 +65,7 @@
         (is (false? (:presenting? (slides/layout-request db))) why)))
     (is (= :slides (slides/open-as db1)) "the default preference")
     (is (= {:explicit nil :open-as :slides :presenting? false :present-from nil :transition :none :notes :auto
-            :presenter-view? false}
+            :presenter-view? false :joined? false}
            (slides/layout-request db1)))))
 
 (deftest the-transition-preference

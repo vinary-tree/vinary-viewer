@@ -419,7 +419,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
    while the pane is shown), the blank screen (7: a single-window blank covers the notes too), the overview (8), the
    chips (9) and find (10). No tokens of its own: the theme's while windowed, the show's #000 / #111 / #ddd while
    presenting. */
-.vv-content-wrap.vv-presenter-view > .vv-content { margin-right: 42%; }
+.vv-content-wrap.vv-presenter-view > .vv-content { position: absolute; flex: none; margin: 0;
+  left: 0; top: 0; width: 50%; height: 100%; }
+.vv-content-wrap.vv-presenter-view > .vv-presenter-pane { right: auto; bottom: auto; border: 0; padding: 0;
+  left: 50%; top: 0; width: 50%; height: 100%; }
+.vv-presenter-view .vv-presenter-notes { overflow-y: auto; background: var(--vv-bg2); }
+.vv-presenter-view .vv-presenter-notes-body { min-height: 100%; box-sizing: border-box; padding: 18px; }
+.vv-presenter-view .vv-presenter-pane[data-has-region="true"] .vv-presenter-notes-body { padding: 0; }
+.vv-presenter-view .vv-presenter-region { min-height: 100%; }
 .vv-presenter-pane { position: absolute; top: 0; right: 0; bottom: 0; width: 42%; z-index: 5; box-sizing: border-box;
   display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; overflow: hidden; font-size: 14px;
   background: var(--vv-bg2); color: var(--vv-fg); border-left: 1px solid var(--vv-border); }
@@ -444,6 +451,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-presenter-heading { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--vv-meta); }
 .vv-presenter-notes { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.vv-presenter-notes-body { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .vv-presenter-next { flex: 0 0 32%; min-height: 0; display: flex; flex-direction: column; }
 /* a region box (renderer.pdf-region): the CSS sizes the box — a notes region the full width at its own aspect ratio,
    at most the notes' height; the next slide whatever its section leaves — and the controller fits the region inside
@@ -467,20 +475,31 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-root.vv-presenting .vv-presenter-note.markdown-body * { color: #ddd !important; background-color: transparent !important;
   border-color: #000 !important; }
 .vv-root.vv-presenting .vv-presenter-note.markdown-body a { text-decoration: underline; }
-/* the PRESENTER CONSOLE (ADR-0048 §6.2, amended 2026-10-19): in a linked show's presenter window — the audience window
-   shows the slide — the pane takes the whole content area: the strip on one line across the top, the notes filling the
-   rest, and the next slide small in a narrow column on the right; no current slide. The slides view stays mounted, full
+/* the PRESENTER CONSOLE: the pane takes the whole content area, with a top-aligned strip of slide steps on the left
+   and vertically centred notes on the right. The slides view stays mounted, full
    size and focused, under the opaque pane, so the show and its keys go on, and a click or the wheel lands on the pane,
    never on a slide. The theme's colours: the window keeps its chrome (slides/chromeless?). */
 .vv-content-wrap.vv-presenter-console > .vv-presenter-pane { inset: 0; width: auto; border-left: 0; display: grid;
-  gap: 10px 18px; grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 360px);
-  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "notes next"; background: var(--vv-bg1); }
+  gap: 10px 18px; grid-template-columns: clamp(180px, 22%, 360px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "previews notes"; background: var(--vv-bg1); }
 .vv-presenter-console .vv-presenter-strip { grid-area: strip; display: flex; flex-wrap: wrap; align-items: baseline;
   gap: 4px 14px; }
 .vv-presenter-console .vv-presenter-link { margin: 0 0 0 auto; }
 .vv-presenter-console .vv-presenter-notes { grid-area: notes; font-size: clamp(16px, 1.6vw, 26px); }
-.vv-presenter-console .vv-presenter-next { grid-area: next; align-self: start; }
-.vv-presenter-console .vv-presenter-next-box { flex: none; width: 100%; }
+.vv-presenter-console .vv-presenter-notes-body { margin-block: auto; }
+.vv-presenter-previews { grid-area: previews; }
+.vv-vertical-strip { position: relative; min-height: 0; overflow: hidden; }
+.vv-vertical-strip-item { position: absolute; left: 0; width: 100%; box-sizing: border-box; display: flex;
+  flex-direction: column; align-items: stretch; gap: 2px; padding: 2px; border: 1px solid var(--vv-border);
+  border-radius: 4px; color: var(--vv-fg); background: var(--vv-bg2); cursor: pointer; font: inherit; }
+.vv-vertical-strip-item:hover, .vv-vertical-strip-item:focus-visible { border-color: var(--vv-fg); }
+.vv-vertical-strip-current { outline: 3px solid var(--vv-head1); outline-offset: -3px; }
+.vv-vertical-strip-peek { pointer-events: auto; z-index: 0; }
+.vv-vertical-strip-peek .vv-vertical-strip-label { visibility: hidden; }
+.vv-vertical-strip-item:not(.vv-vertical-strip-peek) { z-index: 1; }
+.vv-presenter-preview-box { position: relative; width: 100%; min-height: 0; overflow: hidden; }
+.vv-vertical-strip-label { display: block; height: 18px; line-height: 18px; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; font-size: 11px; text-align: center; }
 /* non-fatal streamed-doc note (e.g. a remote SSH connection dropped mid-stream); the committed content stays */
 .vv-stream-note { position: sticky; top: 3px; z-index: 5; padding: 4px 12px; font-size: 0.85em;
   background: rgba(210, 153, 34, 0.16); color: var(--vv-head4, #b1951d); border-bottom: 1px solid var(--vv-border); }
@@ -1169,6 +1188,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-radio-dot::before { content: "\25CB"; }            /* ○ */
 .vv-radio-dot-on::before { content: "\25CF"; }         /* ● */
 .vv-radio-dot-blank::before { content: ""; }
+.vv-menu-check { display: inline-block; width: 12px; color: var(--vv-head1); font-weight: bold; }
 
 /* ----- Context menu ----- */
 .vv-ctx-overlay { position: fixed; inset: 0; z-index: 120; }

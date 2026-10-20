@@ -195,17 +195,14 @@ them, and its notes and settings (duration, end slide, notes position) are kept 
 the PDF's own metadata win over the sidecar's, as they do in pdfpc. Saving the sidecar refreshes the open deck. Over
 `sftp://` the sidecar is read with every read of the PDF, so an edit to it alone shows at the PDF's next change.
 
-**Where the notes are shown: the presenter view.** Press `s` (or **Slides: Speaker notes** in the palette) in the
-Slides layout, windowed or during a show, and the window splits. The slide keeps the left 58 % and a pane takes the
-right 42 %:
+**Where the notes are shown.** In the windowed Slides layout, a slide with notes opens as one centred unit: its slide
+and a matching-size notes area touch, with no next-slide preview. A split PDF keeps its authored left/right or
+top/bottom arrangement; separate PDF note pages and text notes share a scrollable notes area. A slide without notes
+appears by itself. Press `s`, **View ▸ Show Slide Notes**, or **Slides: Speaker notes** in the palette to toggle this
+automatic view and slide-only view for the current window session.
 
-- a counter, "Slide 7 / 12 · overlay 2 / 3", that counts the audience's frames (up to pdfpc's end slide);
-- the notes of the slide you are on: its note pages (`show notes`), its notes half (`show notes on second screen`), and
-  its text notes (pdfpc notes, and sticky-note annotations from a PDF reader);
-- the next slide, small.
-
-Every slide key still works, and flips stay instant. `s` again goes back to the audience view. A show that starts in
-the audience view gives the choice back when it ends. The first time a deck with notes is presented in one window, a
+Every slide key still works, and flips stay instant. A single-window show starts with the audience slide alone and
+gives the previous notes choice back when it ends. The first time a deck with notes is presented in one window, a
 hint names `s` — and `S`, which presents in a new window — for a few seconds, once per installation. pdfpc notes are
 Markdown, as in pdfpc, unless the deck turns Markdown off; they pass through the same sanitizer as a Markdown document.
 Any other note is plain text.
@@ -215,12 +212,14 @@ Any other note is plain text.
 **Present in New Window** (`S`, that is Shift+s; **View ▸ Present in New Window**; the palette) keeps the speaker notes
 in the window you are in and shows the slides in a second window, the **audience window**
 ([ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8). It is offered for every PDF,
-notes or not: the counter and the next slide help without them.
+notes or not: the counter and slide previews help without them.
 
 1. **Start.** Press `S` in the window that shows the deck. That window starts the show from the slide you are on and
-   becomes the **presenter console**: the notes fill its content area, the next slide is small in a narrow column on
-   the right, and one line on top holds the counter, the overlay and what the link needs you to know. There is no
-   current slide — the audience window shows it. Your window keeps its menus, tabs, sidebar and bars, and stays
+   becomes the **presenter console**: a narrow strip on the left starts with the first slide at the top, shows every
+   full-size preview that fits, and clips a small glimpse of more steps above or below. The selection travels to the
+   middle, stays there while the strip can advance, then travels to the end. Overlays are separate steps. Click a preview to jump to it in both windows. The
+   notes fill the right side and sit vertically centred when short; long notes scroll. One line on top holds the
+   counter, the overlay and what the link needs you to know. Your window keeps its menus, tabs, sidebar and bars, and stays
    windowed: `F` makes it fullscreen when you want, and leaving that fullscreen keeps the show running. (A show
    already running fullscreen in it — F5 — leaves fullscreen when you press `S`.) The audience window opens with the
    slides, without taking the focus:
@@ -246,9 +245,9 @@ notes or not: the counter and the next slide help without them.
 5. **End.** Escape on the deck, or *End Slide Show* (also in your window's View menu), in either window ends the show
    in both and closes the audience window; from your window, *End Slide Show* works on any tab. Closing the deck's tab
    ends it too. An Escape in your window's address bar or filter only leaves that field. Closing the audience window
-   yourself ends only the link: your window keeps presenting, and `S` opens a new audience window — unless you are on
-   another tab at the time, when your show ends too. `S` while linked brings the audience window to the front instead
-   of opening another. A window takes part in one linked show at a time.
+   yourself ends the show and returns your window to the current slide beside its notes. If you are on another tab,
+   that tab stays in front; returning to the deck shows its last slide and notes. `S` while linked brings the audience
+   window to the front instead of opening another. A window takes part in one linked show at a time.
 
 SSH prompts for the audience window (a host key, a password) appear in your window, never on the projector, and the
 audience window's size and position are never saved.

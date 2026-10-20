@@ -292,8 +292,7 @@
 ;; shows only in the show's own view (::show-view-or-none?, slides/presenter-shown?).
 ;; (rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?]
 ;;             (fn [[asked? slides?] _] (boolean (and asked? slides?))))
-(rf/reg-sub :slides/presenter-shown? :<- [::presenter-view?] :<- [:slides/view?] :<- [::show-view-or-none?]
-            (fn [[asked? slides? here?] _] (boolean (and asked? slides? here?))))
+(rf/reg-sub :slides/presenter-shown? (fn [db _] (slides/presenter-shown? db)))
 ;; the presenter console: the presenter view in a linked show's presenter window — the notes over the whole content
 ;; area, and a small next slide (the .vv-presenter-console wrap; slides/console?, ADR-0048 §6.2)
 (rf/reg-sub :slides/console? (fn [db _] (slides/console? db)))

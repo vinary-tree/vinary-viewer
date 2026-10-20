@@ -501,6 +501,26 @@
       "counted as the counter counts: up to the end slide, and past it")
   (is (nil? (presenter/next-label {:frames 0})) "nothing to count"))
 
+(deftest preview-items-cover-the-navigable-steps
+  (let [items (presenter/preview-items sn-deck (:sizes shownotes) nil 5)]
+    (is (= [0 2 5 6 7 9] (mapv :id items)) "note pages are hidden; overlays remain separate")
+    (is (= "Slide 1 / 4 · overlay 2 / 2" (:label (second items))))))
+
+(deftest joined-pages-touch-and-keep-the-authored-order
+  (doseq [[side first?] [[:left true] [:right false] [:top true] [:bottom false]]]
+    (let [{slide :slide note :notes} (presenter/joined-geometry 1000 700 {:w 400 :h 300} side)
+          vertical? (#{:top :bottom} side)]
+      (is (= (select-keys slide [:width :height]) (select-keys note [:width :height])))
+      (is (= (if vertical? (:left slide) (:top slide))
+             (if vertical? (:left note) (:top note))))
+      (is (= (if first? (if vertical? (:top slide) (:left slide))
+                      (if vertical? (:top note) (:left note)))
+             (min (if vertical? (:top slide) (:left slide))
+                  (if vertical? (:top note) (:left note)))))))
+  (let [{slide :slide note :notes} (presenter/joined-geometry 1000 700 {:w 400 :h 300} nil)]
+    (is (= (+ (:left slide) (:width slide)) (:left note)))
+    (is (= 350 (+ (:top slide) (/ (:height slide) 2))))))
+
 (deftest the-pane-of-a-show-notes-deck
   (testing "the first overlay of Intro: its note page, then its text notes; the next step is Intro's second overlay"
     (is (= {:page 0 :counter "Slide 1 / 4" :overlay-counter "overlay 1 / 2"

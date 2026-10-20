@@ -394,3 +394,36 @@
                          :rect  (deck/half-rect (nth sizes nxt [0 0]) side)
                          :label (next-label (at nxt))})
      :deck-notes?     (notes/has-notes? model)}))
+
+(defn preview-items
+  "All selectable slide steps in order. The generic vertical strip decides which few need rendering."
+  [d sizes side page]
+  (let [current (deck/snap d (or page 0))
+        pages (or (:shown d) (vec (range (:pages d 0))))
+        pages (->> pages (remove (or (:skipped d) #{})) (cons current) distinct sort)]
+    (mapv (fn [p]
+            (let [pos (assoc (deck/position d p) :end-frame (:end-frame d))]
+              {:id p :rect (deck/half-rect (nth sizes p [0 0]) side)
+               :label (str (or (counter pos) (str "Page " (inc p)))
+                           (when-let [overlay (overlay-counter pos)] (str " · " overlay)))}))
+          pages)))
+
+(defn joined-geometry
+  "Pixel rectangles for two touching, equal-size pages centred in the available pane. `side` names the slide's
+   authored half; nil (separate note pages or text notes) puts the slide on the left."
+  [width height {:keys [w h]} side]
+  (when (and (number? width) (pos? width) (number? height) (pos? height)
+             (number? w) (pos? w) (number? h) (pos? h))
+    (let [vertical? (contains? #{:top :bottom} side)
+          scale (min (/ (max 1 (- width 24)) (* w (if vertical? 1 2)))
+                     (/ (max 1 (- height 24)) (* h (if vertical? 2 1))))
+          pw (* w scale)
+          ph (* h scale)
+          x (/ (- width (* pw (if vertical? 1 2))) 2)
+          y (/ (- height (* ph (if vertical? 2 1))) 2)
+          note-first? (contains? #{:right :bottom} side)
+          first-rect {:left x :top y :width pw :height ph}
+          second-rect (if vertical? (assoc first-rect :top (+ y ph))
+                         (assoc first-rect :left (+ x pw)))]
+      {:slide (if note-first? second-rect first-rect)
+       :notes (if note-first? first-rect second-rect)})))

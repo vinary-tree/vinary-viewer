@@ -1,7 +1,6 @@
 (ns vinary.ui.slides-presenter
-  "The presenter view's pane (ADR-0048 §6, decisions P1–P3). `s` (Slides: Speaker notes) splits the content area: the
-   slides view keeps the left 58 %, untouched and never remounted (remounting would end a show), and this pane takes
-   the right 42 %, showing
+  "The presenter view's pane (ADR-0048 §6). Outside a show, a noted slide and its notes share one centered,
+   equal-size stage; the slides view stays mounted when the pane appears or disappears. The pane shows
 
      · a status strip: \"Slide 7 / 12 · overlay 2 / 3\" — frames counted up to pdfpc's end slide
        (vinary.slides.presenter/counter and overlay-counter; the timer and the pace are deferred, §6.5) — and, in a
@@ -12,22 +11,20 @@
        (vinary.slides.notes/page-notes) — as sanitized Markdown when the deck carries pdfpc metadata and Markdown is not
        disabled (vinary.renderer.notes-html), else as plain text in the note's own direction; or, without any, \"No
        notes on this slide\" — \"This deck has no speaker notes\" when no page has any;
-     · the next slide: what the next step shows (the next shown page's audience rectangle), or \"End of the slide
-       show\".
+     · in a linked console, a reusable vertical strip of slide-step previews beside the notes.
 
    It borrows the mounted slides view's PDFDocumentProxy through pdf-cache/slides-snapshot, as the overview does (never
    a second proxy), and reads the snapshot again whenever the slides view reports a move, a new document generation or a
    re-derived deck. The text notes of the current page and of its neighbours are read ahead into a per-document cache,
    so a flip finds its notes already read.
 
-   In a linked show's presenter window the pane is the presenter CONSOLE (slides/console?, ADR-0048 §6.2, amended
-   2026-10-19): the audience window shows the slide, so the pane covers the whole content area — the strip on one line
-   (the counter, the overlay, the audience's blank, the link's line), the notes filling the rest, and the next slide
-   small in a narrow column on the right, at its own aspect ratio. The slides view stays mounted, full size, beneath it.
+   In a linked show's presenter window the pane covers the content area as a console: the status strip above a left
+   column of slide-step previews, top-aligned at the start of the show, and vertically centred notes on the right. The slides
+   view stays mounted beneath it.
 
    An <aside role=\"complementary\"> in a slot of .vv-content-wrap after .vv-content (z 5), never focusable: a click on
    it leaves the keyboard with the document, so the slide keys keep working, and find, the Contents scroll-spy and the
-   content MutationObserver never see it. Canvases are aria-hidden; the next slide is role=\"img\" with its label. A
+   content MutationObserver never see it. Canvases are aria-hidden; previews have accessible slide labels. A
    link in a note opens outside the app (http, https and mailto only), and gives the focus back."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
@@ -37,7 +34,8 @@
             [vinary.slides.deck :as deck]
             [vinary.slides.evidence :as evidence]
             [vinary.slides.notes :as notes]
-            [vinary.slides.presenter :as presenter]))
+            [vinary.slides.presenter :as presenter]
+            [vinary.ui.vertical-strip :as vertical-strip]))
 
 ;; ---- one region in a box ----------------------------------------------------------------------------------------
 
@@ -172,14 +170,42 @@
   (let [cache (r/atom {:doc nil :pages {} :reading #{}})
         memo  (atom {})
         last  (atom nil)                    ; {:doc :producer :pages} of the last render, for the read-ahead
+        pane-node (atom nil)
+        stage (atom nil)
+        stage-observer (atom nil)
+        layout-stage! (fn []
+                        (when-let [^js node @pane-node]
+                          (let [^js wrap (.-parentElement node)
+                                ^js content (.querySelector wrap ":scope > .vv-content")
+                                geometry (when-let [{:keys [rect side]} @stage]
+                                           (presenter/joined-geometry (.-clientWidth wrap) (.-clientHeight wrap)
+                                                                      rect side))]
+                            (doseq [[el place] [[content (:slide geometry)] [node (:notes geometry)]]
+                                    :when el
+                                    k [:left :top :width :height]]
+                              (if-let [v (get place k)]
+                                (.setProperty (.-style el) (name k) (str v "px"))
+                                (.removeProperty (.-style el) (name k)))))))
         sync! (fn []
                 (when-let [{:keys [doc producer pages]} @last]
                   (when-not (identical? doc (:doc @cache)) (reset! memo {}))
                   (read-ahead! cache doc producer pages)))]
     (r/create-class
      {:display-name "vv-presenter-pane"
-      :component-did-mount  (fn [_] (sync!))
-      :component-did-update (fn [_ _] (sync!))
+      :component-did-mount  (fn [_]
+                              (sync!) (layout-stage!)
+                              (when (and @pane-node (exists? js/ResizeObserver))
+                                (let [o (js/ResizeObserver. (fn [_] (layout-stage!)))]
+                                  (.observe o (.-parentElement ^js @pane-node))
+                                  (reset! stage-observer o))))
+      :component-did-update (fn [_ _] (sync!) (layout-stage!))
+      :component-will-unmount (fn [_]
+                                (when-let [^js o @stage-observer] (.disconnect o))
+                                (when-let [^js wrap (some-> @pane-node .-parentElement)]
+                                  (doseq [el [(.querySelector wrap ":scope > .vv-content") @pane-node]
+                                          :when el
+                                          k ["left" "top" "width" "height"]]
+                                    (.removeProperty (.-style el) k))))
       :reagent-render
       (fn []
         (let [slides   @(rf/subscribe [:slides/state])   ; the slides view's position report: a move re-renders
@@ -190,7 +216,7 @@
               {:keys [doc sizes current doc-gen side notes-model producer text-layer] d :deck pref :notes}
               (pdf-cache/slides-snapshot)]
           (if-not (and doc d (seq sizes))
-            [:aside.vv-presenter-pane {:role "complementary" :aria-label "Speaker notes and next slide"}]
+            [:aside.vv-presenter-pane {:role "complementary" :aria-label "Speaker notes and slide previews"}]
             (let [{:keys [page counter overlay-counter regions sidecar-note next deck-notes?]}
                   (presenter/pane d sizes notes-model pref side current)
                   c          @cache
@@ -199,42 +225,53 @@
                   pending?   (and (nil? read) (empty? regions))
                   any-text?  (or (:text-notes? slides)
                                  (some (comp some? :annotation) (vals (when (identical? doc (:doc c)) (:pages c)))))
-                  markdown?  (boolean (:markdown? notes-model))]
+                  markdown?  (boolean (:markdown? notes-model))
+                  previews   (when console? (presenter/preview-items d sizes side page))
+                  slide-rect (deck/half-rect (nth sizes page [0 0]) side)]
               (reset! last {:doc doc :producer producer :pages (reads-for d page (:page next))})
-              [:aside.vv-presenter-pane {:role "complementary" :aria-label "Speaker notes and next slide"
+              (reset! stage (when-not console? {:rect slide-rect :side side}))
+              [:aside.vv-presenter-pane {:ref #(reset! pane-node %)
+                                         :role "complementary" :aria-label "Speaker notes and slide previews"
+                                         :data-joined (when-not console? "true")
+                                         :data-has-region (when (seq regions) "true")
                                          :class (when invert? "vv-pdf-invert")}
-               [:div.vv-presenter-strip
-                [:span.vv-presenter-position
-                 [:span.vv-presenter-counter counter]
-                 (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])]
-                ;; the audience's blank screen, in the colour it shows (ADR-0048 §8.2)
-                (when blank
-                  [:span.vv-presenter-blank {:data-blank (name blank) :role "status"} (str "Audience: " (name blank))])
-                [link-status]]
+               (when console?
+                 [:div.vv-presenter-strip
+                  [:span.vv-presenter-position
+                   [:span.vv-presenter-counter counter]
+                   (when overlay-counter [:span.vv-presenter-overlay " · " overlay-counter])]
+                  (when blank
+                    [:span.vv-presenter-blank {:data-blank (name blank) :role "status"}
+                     (str "Audience: " (name blank))])
+                  [link-status]])
                [:section.vv-presenter-notes {:aria-label "Speaker notes" :on-click on-notes-click}
-                [:h2.vv-presenter-heading "Notes"]
-                (for [[i {rp :page rect :rect}] (map-indexed vector regions)]
-                  ^{:key i}
-                  [region-box {:gen     doc-gen
-                               :ratio   (ratio-of rect)
-                               :attrs   {:class "vv-presenter-region" :data-page rp}
-                               :request {:doc doc :page rp :rect rect :text? true :text-layer text-layer}}])
-                (for [[i n] (map-indexed vector texts)]
-                  ^{:key i} [text-note memo markdown? n])
-                (when (and (empty? regions) (empty? texts) (not pending?))
-                  [:p.vv-presenter-empty (if (or deck-notes? any-text?)
-                                           "No notes on this slide"
-                                           "This deck has no speaker notes")])]
-               [:section.vv-presenter-next {:aria-label "Next slide"}
-                [:h2.vv-presenter-heading "Next"]
-                (if next
-                  [region-box {:gen     doc-gen
-                               ;; the console's narrow column sizes the box by the slide's own shape
-                               :ratio   (when console? (ratio-of (:rect next)))
-                               :attrs   {:class "vv-presenter-next-box" :role "img" :aria-label (:label next)
-                                         :data-page (:page next)}
-                               :request {:doc doc :page (:page next) :rect (:rect next) :text? false}}]
-                  [:p.vv-presenter-end "End of the slide show"])]]))))})))
+                [:div.vv-presenter-notes-body
+                 (when console? [:h2.vv-presenter-heading "Notes"])
+                 (for [[i {rp :page rect :rect}] (map-indexed vector regions)]
+                   ^{:key i}
+                   [region-box {:gen     doc-gen
+                                :ratio   (ratio-of rect)
+                                :attrs   {:class "vv-presenter-region" :data-page rp}
+                                :request {:doc doc :page rp :rect rect :text? true :text-layer text-layer}}])
+                 (for [[i n] (map-indexed vector texts)]
+                   ^{:key i} [text-note memo markdown? n])
+                 (when (and console? (empty? regions) (empty? texts) (not pending?))
+                   [:p.vv-presenter-empty (if (or deck-notes? any-text?)
+                                            "No notes on this slide"
+                                            "This deck has no speaker notes")])]]
+               (when console?
+                 [vertical-strip/strip
+                  {:items previews :current page
+                   :class "vv-presenter-previews" :item-class "vv-presenter-preview"
+                   :aria-label "Slide previews"
+                   :item-attrs (fn [item] {:data-page (:id item)})
+                   :ratio (let [{:keys [w h]} slide-rect] (if (pos? w) (/ h w) 0.5625))
+                   :on-select #(rf/dispatch [:slides/preview-pick (:id %)])
+                   :render-item (fn [{:keys [id rect]} visual-height]
+                                  [region-box {:gen doc-gen
+                                               :attrs {:class "vv-presenter-preview-box"
+                                                       :style {:height (str visual-height "px")}}
+                                               :request {:doc doc :page id :rect rect :text? false}}])}])]))))})))
 
 (defn pane
   "The presenter view's pane while this window shows it (s in the slides layout), else nothing."

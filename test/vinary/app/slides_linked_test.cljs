@@ -42,7 +42,7 @@
     (testing "from a deck in a window: the show starts from the current slide, without fullscreen, in the presenter
               view, and the request carries the page, the blank colour and the fullscreen preference"
       (let [{:keys [db fx]} (events/slides-present-linked-fx shown-db)]
-        (is (= {:active? true :tab-id 1 :path talk :from :current :fullscreen? false :notes-view-before false}
+        (is (= {:active? true :tab-id 1 :path talk :from :current :fullscreen? false :notes-view-before true}
                (slides/presentation db)))
         (is (true? (get-in db [:ui :presenter-view?])))
         (is (= {:phase :opening :role :presenter :path talk :known {:page 2 :blank nil}} (get-in db [:ui :slides-link])))
@@ -170,6 +170,11 @@
         (is (false? (slides/console? (update console :ui dissoc :presenter-view?))))
         (with-redefs [slides/slides-view? (constantly false)]
           (is (false? (slides/console? console)))))
+      (testing "a preview click is an explicit jump and clears a blank in one action"
+        (let [{:keys [db fx]} (events/slides-preview-pick-fx (assoc-in console [:ui :slides :blank] :black) 5)]
+          (is (nil? (slides/blank db)))
+          (is (= [[:slides/command [:jump 5]] [:dom/focus :content]] fx)))
+        (is (nil? (events/slides-preview-pick-fx shown-db 5))))
       (testing "a blank in the console is the audience's: the strip shows it whatever the link's phase, and the console
                 never goes blank itself"
         (doseq [phase [:opening :live :ended]]
@@ -196,14 +201,16 @@
       (is (nil? (slides/presentation db)))
       (is (nil? (get-in db [:ui :slides-link])))
       (is (= [[:vv/set-fullscreen {:on false}]] fx))))
-  (testing "the audience window closed: the presenter keeps presenting, and the pane says so"
+  (testing "the audience window closed: leave presentation on its final slide with notes"
     (let [{:keys [db fx]} (events/slides-link-state-fx (assoc-in (presenting-db) [:ui :slides-link] live)
-                                                       {:session "show-1" :ended true :stop false
-                                                        :reason "audience-left"})]
-      (is (some? (slides/presentation db)))
-      (is (= [] fx))
-      (is (= {:tone :warning :text "The audience window closed. Shift+S opens it again."}
-             (link/notice (get-in db [:ui :slides-link])))))))
+                                                       {:session "show-1" :ended true :stop true
+                                                        :reason "audience-left" :page 5})]
+      (is (nil? (slides/presentation db)))
+      (is (nil? (get-in db [:ui :slides-link])))
+      (is (true? (slides/presenter-view? db)))
+      (is (= :slides (slides/explicit-layout db)))
+      (is (= 5 (get-in db [:ui :tabs 0 :hist :stack 0 :page])))
+      (is (= [[:slides/command [:show 5]] [:vv/set-fullscreen {:on false}]] fx)))))
 
 (defn- ctx
   "A re-frame context after `event`'s handler ran: app-db `before` and the handler's :db `after`."
@@ -272,6 +279,26 @@
   (-> db
       (update-in [:ui :tabs] conj {:id 2 :uri paper :hist {:stack [{:uri paper :scroll 0 :facet nil}] :idx 0}})
       (assoc-in [:ui :active-tab] 2)))
+
+(deftest audience-loss-while-away-keeps-the-other-tab
+  (let [away (-> (elsewhere (assoc-in (presenting-db false) [:ui :slides-link] live))
+                 (events/slides-unmounted-fx talk) :db)
+        {:keys [db fx]} (events/slides-link-state-fx away
+                                                    {:session "show-1" :ended true :stop true
+                                                     :reason "audience-left" :page 5})]
+    (is (= 2 (get-in db [:ui :active-tab])) "the user's tab stays in front")
+    (is (nil? (slides/presentation db)))
+    (is (= 5 (get-in db [:ui :tabs 0 :hist :stack 0 :page])))
+    (is (= :slides (get-in db [:ui :tabs 0 :hist :stack 0 :pdf-layout])))
+    (is (= {:tab-id 1 :path talk} (get-in db [:ui :presenter-return])))
+    (is (empty? fx) "there is no mounted deck to command")
+    (let [back (-> db
+                   (assoc-in [:ui :active-tab] 1)
+                   (events/slides-changed-fx {:path talk :layout :slides :page 5 :presenting? false}) :db)]
+      (is (true? (slides/presenter-view? back)))
+      (is (nil? (get-in back [:ui :presenter-return]))))
+    (is (nil? (get-in (:db (events/close-tab-result db 1)) [:ui :presenter-return]))
+        "closing the deck tab clears its deferred return")))
 
 (deftest away-and-back
   ;; ADR-0048 §8.10, theory/11 §3.5: a linked show's presenter that leaves its deck — a tab switch, a navigation,

@@ -3039,9 +3039,7 @@ async function main() {
     console.log('[ok] PDF note pages: marked and never rasterized in the slides layout; next/prev/goto over the audience\'s pages; the next slide pre-rendered; find skips them (the document layout finds them); :off shows every page; one XeLaTeX pass settled by the scan; the pdfpc sidecar\'s hidden page is skipped');
   }
 
-  // ── PRESENTER VIEW (ADR-0048 §6, P1–P5): `s` splits the content area — the slides keep the left 58 %, a pane takes
-  // the rest: the counter, the current page's notes (its note pages or its notes half, each rendered into a box of its
-  // own with a text layer, then its text notes — Markdown for a pdfpc deck) and the next slide. Find stays on the
+  // ── PRESENTER VIEW (ADR-0048 §6): a noted slide and its notes form one centered, joined page. Find stays on the
   // slides; a click on the pane leaves the keyboard with them; no flip animates while the pane is shown. A single-window
   // show starts in the audience view and gives the window back the view it had; the first such show of a deck with
   // notes says how to see them, once per installation. Real TeX output throughout. ──
@@ -3061,6 +3059,14 @@ async function main() {
     };
     const step = async (op, page, label) => { await evalIn(win, `window.__vvslides(${JSON.stringify(op)})`); return slidesAt(page, label); };
     const toDocument = () => evalIn(win, `document.querySelector('.vv-content').focus({ preventScroll: true }); true`);
+    const clickNotesMenu = async () => {
+      await evalIn(win, `(() => { const label = Array.from(document.querySelectorAll('.vv-menubar .vv-menu-label'))
+        .find((el) => el.textContent.trim().startsWith('View')); label.click(); return true; })()`);
+      await waitCalm(win, `Boolean(document.querySelector('.vv-menu-dropdown'))`, 'View menu opens for slide notes', 4000);
+      return evalIn(win, `(() => { const item = Array.from(document.querySelectorAll('.vv-menu-dropdown .vv-menu-item'))
+        .find((el) => (el.querySelector('.vv-menu-item-label') || el).textContent.trim() === 'Show Slide Notes');
+        if (!item) return false; item.click(); return true; })()`);
+    };
     // what the pane shows, read from the DOM in one go
     const PANE = `(() => { const p = document.querySelector('.vv-presenter-pane'); if (!p) return null;
       const inked = (cv) => { if (!cv || !cv.width || !cv.height) return false;
@@ -3133,23 +3139,24 @@ async function main() {
     await evalIn(win, `window.__vvopen(${JSON.stringify(luaPath)})`);
     await waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {}; return Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides'))
       && s.path === ${JSON.stringify(luaPath)} && s.page === 0; })()`, 'the show-notes deck opens in the slides layout', 15000);
-    await noPane('no pane until s');
-    await toDocument();
-    await sendChord(win, 's');
-    let p = await paneWhen(`p.strip === 'Slide 1 / 4 · overlay 1 / 2'`, 's shows the presenter pane with the counter');
-    assert.deepStrictEqual([p.role, p.label, p.tabindex], ['complementary', 'Speaker notes and next slide', null],
+    let p = await paneWhen(`p.regions.length === 1`, 'the noted first slide opens as a joined page');
+    assert.strictEqual(await clickNotesMenu(), true, 'View menu toggles joined notes off');
+    await noPane('View ▸ Show Slide Notes reveals the slide alone');
+    assert.strictEqual(await clickNotesMenu(), true, 'View menu toggles joined notes on');
+    p = await paneWhen(`p.regions.length === 1`, 'View ▸ Show Slide Notes restores the joined page');
+    assert.deepStrictEqual([p.role, p.label, p.tabindex], ['complementary', 'Speaker notes and slide previews', null],
       'the pane is a complementary landmark, never focusable');
     const split = await evalIn(win, `(() => { const w = document.querySelector('.vv-content-wrap'); const c = document.querySelector('.vv-content');
       return { view: w.classList.contains('vv-presenter-view'), ratio: c.getBoundingClientRect().width / w.getBoundingClientRect().width }; })()`);
-    assert.ok(split.view && Math.abs(split.ratio - 0.58) < 0.01, `the slides keep 58 % of the content area (${split.ratio.toFixed(3)})`);
+    assert.ok(split.view && split.ratio > 0 && split.ratio < 0.55,
+      `the joined slide fits beside its equal-size notes (${split.ratio.toFixed(3)} of the content width)`);
     await waitCalm(win, `(() => { const c = document.querySelector('.vv-content'); const pg = document.querySelector('.vv-pdf-doc .vv-pdf-page');
       return Math.abs(pg.offsetWidth - c.clientWidth) <= 1; })()`, 'the slides refit to the narrower content area', 8000);
     await slidesAt(0, 'the slide stays on page 0');
-    p = await paneWhen(`p.regions.length === 1 && p.regions[0].inked && /Notesfortheintroduction/.test(p.regions[0].text || '')
-      && p.next && p.next.inked`, 'the note page and the next slide are drawn');
+    p = await paneWhen(`p.regions.length === 1 && p.regions[0].inked && /Notesfortheintroduction/.test(p.regions[0].text || '')`,
+      'the note page is drawn beside its slide');
     assert.deepStrictEqual(p.regions.map((r) => [r.page, r.hidden]), [[1, 'true']], 'the notes: note page 1, its canvas aria-hidden');
-    assert.deepStrictEqual([p.next.page, p.next.role, p.next.label], [2, 'img', 'Next: slide 1 of 4, overlay 2 of 2'],
-      'the next slide is the Intro\'s second overlay, named for a screen reader');
+    assert.strictEqual(p.next, null, 'the normal view has no next-slide preview');
     assert.strictEqual(p.empty, null, 'no empty state beside a note page');
     // find searches the slides, not the pane (the note page's words are in the pane's text layer)
     await evalIn(win, `window.__vvfindtoggle()`);
@@ -3158,19 +3165,20 @@ async function main() {
     await closeFind();
     // the pane follows the slides
     await step('next', 2, 'next');
-    p = await paneWhen(`p.strip === 'Slide 1 / 4 · overlay 2 / 2' && p.regions.length === 2 && p.regions.every((r) => r.inked)
-      && p.next && p.next.label === 'Next: slide 2 of 4'`, 'page 2: two note pages, the next slide is Middle');
+    p = await paneWhen(`p.regions.length === 2 && p.regions.every((r) => r.inked)`,
+      'page 2: two note pages scroll in one matching-size notes area');
     assert.deepStrictEqual(p.regions.map((r) => r.page), [3, 4], 'an in-frame note page and a between-frames one');
     await step('next', 5, 'Middle');
-    p = await paneWhen(`p.strip === 'Slide 2 / 4' && p.regions.length === 0 && p.empty === 'No notes on this slide'`,
-      'a slide without notes in a deck with notes');
+    await noPane('a slide without notes appears by itself');
     await step('last', 9, 'End');
-    p = await paneWhen(`p.end === 'End of the slide show' && !p.next`, 'the last slide: the end of the show');
+    await noPane('the last slide has no notes or next-slide preview');
+    await step('prev', 7, 'back to a slide with notes');
+    await paneWhen(`p.regions.length === 1`, 'the joined notes return');
     // no flip animates while the pane is shown; the same flip without it does (the instrument's positive control)
     await send('{:slides-transition :push}', 'slides-transition', 'push', 'push selected');
     assert.deepStrictEqual(await flipAndWatch('prev'), { overlay: false, sheetAnim: false },
       'no flip makes a transition snapshot while the pane is shown');
-    await slidesAt(7, 'the instant flip lands on page 7');
+    await slidesAt(6, 'the instant flip lands on page 6');
     await toDocument();
     await sendChord(win, 's');
     await noPane('s again hides the pane');
@@ -3179,11 +3187,12 @@ async function main() {
     await waitCalm(win, `Boolean(document.querySelector('#vv-pdf-page-7 canvas.vv-pdf-canvas'))`, 'page 6 rendered for the control flip', 8000);
     const control = await flipAndWatch('prev');
     assert.ok(control.overlay, `…and without the pane the same flip animates (the record can see one): ${JSON.stringify(control)}`);
-    await slidesAt(6, 'the animated flip lands on page 6');
+    await slidesAt(5, 'the animated flip lands on page 5');
     await send('{:slides-transition :none}', 'slides-transition', 'none', 'transitions off again');
     // a click on the pane leaves the keyboard with the slides
+    await step('first', 0, 'back to the noted first slide');
     await sendChord(win, 's');
-    p = await paneWhen(`p.strip === 'Slide 3 / 4 · overlay 1 / 2'`, 'the pane again, on Outro');
+    p = await paneWhen(`p.regions.length === 1`, 'the joined page is enabled again');
     const at = await evalIn(win, `(() => { const r = document.querySelector('.vv-presenter-notes').getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 40)) }; })()`);
     win.webContents.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 });
@@ -3191,7 +3200,7 @@ async function main() {
     await waitCalm(win, `(() => { const a = document.activeElement; return !a || a === document.body || Boolean(a.closest('.vv-content')); })()`,
       'the click left the focus on the document', 4000);
     await sendChord(win, 'Right');
-    await slidesAt(7, '→ after a click on the pane still flips the slide');
+    await slidesAt(2, '→ after a click on the pane still flips the slide');
 
     // 2 — a single-window show starts in the audience view, and gives the window back the view it had. (The NOTE
     // PAGES block's show of a deck with notes already showed the hint once: the setting is cleared, as on a fresh
@@ -3212,7 +3221,7 @@ async function main() {
     await slidesAt(2, '…and still does what it does');
     await sendChord(win, 'Escape');
     await waitCalm(win, `!window.__vvdb().ui.presentation`, 'Escape ends the show', 4000);
-    p = await paneWhen(`p.strip === 'Slide 1 / 4 · overlay 2 / 2'`, 'the show gives the window back its presenter view');
+    p = await paneWhen(`p.regions.length === 2 && !p.next`, 'the show gives the window back its joined notes');
     await sendChord(win, 's');
     await noPane('the audience view, windowed');
     await recordFrames('.vv-slides-notes-hint');
@@ -3251,10 +3260,9 @@ async function main() {
       'the second-screen deck opens on its slide half', 15000);
     await toDocument();
     await sendChord(win, 's');
-    p = await paneWhen(`p.strip === 'Slide 1 / 3' && p.regions.length === 1 && p.regions[0].inked && p.next && p.next.inked
-      && /NotesForFrameOne/.test(p.regions[0].text || '')`, 'the notes half of page 0, and the next slide');
-    assert.deepStrictEqual([p.regions[0].page, p.next.page, p.next.label], [0, 1, 'Next: slide 2 of 3'],
-      'the notes are page 0\'s other half; the next slide is page 1\'s slide half');
+    p = await paneWhen(`p.regions.length === 1 && p.regions[0].inked && !p.next
+      && /NotesForFrameOne/.test(p.regions[0].text || '')`, 'the notes half of page 0 beside the slide');
+    assert.strictEqual(p.regions[0].page, 0, 'the notes are page 0\'s other half');
     const halves = await evalIn(win, `(() => { const b = document.querySelector('.vv-presenter-region');
       const sheet = b.querySelector('.vv-pdf-region-sheet'); const t = sheet.querySelector('.vv-pdf-text');
       const pct = (v, extent) => { let m = /^\\s*(-?\\d+(?:\\.\\d+)?)%\\s*$/.exec(v); if (m) return parseFloat(m[1]);
@@ -3289,7 +3297,7 @@ async function main() {
     const gen0 = await evalIn(win, `(window.__vvdb().ui.slides || {})['doc-gen']`);
     win.webContents.send('vv:content', { path: realPath, kind: 'pdf', bytes: new Uint8Array(fs.readFileSync(realPath)), stamp: Date.now() + 7 });
     await waitCalm(win, `(window.__vvdb().ui.slides || {})['doc-gen'] > ${gen0}`, 'the refresh is swapped in', 15000);
-    await paneWhen(`p.regions.length === 1 && p.regions[0].inked && /NotesForFrameOne/.test(p.regions[0].text || '') && p.next && p.next.inked`,
+    await paneWhen(`p.regions.length === 1 && p.regions[0].inked && /NotesForFrameOne/.test(p.regions[0].text || '') && !p.next`,
       'after a refresh the pane draws the new document');
 
     // 4 — pdfpc: text notes, as Markdown; the annotation note and the sidecar note that differs; a link opens outside
@@ -3300,14 +3308,13 @@ async function main() {
     await evalIn(win, `window.__vvopen(${JSON.stringify(pcPath)})`);
     await waitCalm(win, `(() => { const s = window.__vvdb().ui.slides || {}; return s.path === ${JSON.stringify(pcPath)} && s.page === 0; })()`,
       'the pdfpc deck opens, the pane still shown', 15000);
-    p = await paneWhen(`p.strip === 'Slide 1 / 3 · overlay 1 / 2' && p.notes.length === 2`, 'page 0\'s two text notes');
+    p = await paneWhen(`p.notes.length === 2 && !p.next`, 'page 0\'s two text notes in a matching card');
     assert.deepStrictEqual(p.notes.map((n) => [n.from, n.md]), [['annotation', true], ['sidecar', true]],
       'the annotation note, then the sidecar note that differs — Markdown, for a pdfpc deck');
     assert.ok(p.notes[0].text.includes('A pdfpc note on both overlays of frame one') && p.notes[0].text.includes('café and naïve'),
       `the annotation note reads as written: ${JSON.stringify(p.notes[0].text)}`);
     assert.strictEqual(p.notes[1].text.trim(), 'A sidecar note that differs from the annotation');
-    assert.deepStrictEqual([p.regions.length, p.next && p.next.label], [0, 'Next: slide 1 of 3, overlay 2 of 2'],
-      'no notes regions; the counter and the next slide count to the end slide pdfpc names (3)');
+    assert.strictEqual(p.regions.length, 0, 'text-only notes need no PDF region');
     await evalIn(win, `window.__vvslides('goto', 2)`);
     p = await paneWhen(`p.notes.length === 1 && /<em>emphasis<\\/em>/.test(p.notes[0].html)`, 'page 2\'s note, as Markdown');
     assert.ok(p.notes[0].html.includes('<a href="https://example.org/">link</a>'), `a Markdown link: ${p.notes[0].html}`);
@@ -3319,12 +3326,12 @@ async function main() {
     await evalIn(win, `window.__vvslides('goto', 3)`);
     p = await paneWhen(`p.notes.length === 1 && p.notes[0].from === 'sidecar'`, 'page 3: the sidecar\'s note only');
     assert.strictEqual(p.notes[0].text.trim(), 'A sidecar note for frame three');
-    assert.strictEqual(p.end, 'End of the slide show', 'the only page ahead is hidden in the sidecar: the show ends here');
+    assert.strictEqual(p.end, null, 'the normal view has no next-slide or end-preview area');
     await toDocument();
     await sendChord(win, 's');
     await noPane('s hides the pane');
 
-    console.log('[ok] PDF presenter view: s splits the area (58 % slides, the pane the rest); counter, note pages / notes half / Markdown text notes, next slide; find stays on the slides; no flip animates beside the pane; a click keeps the keyboard; the show starts in the audience view and gives the view back; the hint once, dismissed by a key, a digit or its timeout; a refresh redraws; note links open outside');
+    console.log('[ok] PDF joined notes: note pages / notes halves / Markdown text notes beside equal-size slides; notes-free steps show one slide; find stays on the slides; S toggles the view; a click keeps the keyboard; the show starts in the audience view and gives the joined view back; the hint once, dismissed by a key, a digit or its timeout; a refresh redraws; note links open outside');
   }
 
   // ===== Bugs A + B1 + B2 (round 5) — run with the PDF active (the content pane); default keymap restored after.

@@ -1085,7 +1085,9 @@
    run on, linked, in no tab."
   [db id]
   (let [stop               (when (= id (:tab-id (slides/presentation db))) (slides-stop-fx db {:reason "unmounted"}))
-        db0                (get stop :db db)
+        db0                (cond-> (get stop :db db)
+                             (= id (get-in db [:ui :presenter-return :tab-id]))
+                             (update :ui dissoc :presenter-return))
         closing-active?    (= id (nav/active-id db0))
         [db' _uri _still?] (nav/close db0 id)
         target             (nav/active-uri db')]
@@ -2165,7 +2167,14 @@
    speaker-notes hint due."
   [db m]
   (let [db' (assoc-in db [:ui :slides] (slides/merge-report (get-in db [:ui :slides]) m
-                                                            (:path (slides/presentation db))))]
+                                                            (:path (slides/presentation db))))
+        ret (get-in db' [:ui :presenter-return])
+        db' (if (and ret (= (:tab-id ret) (nav/active-id db'))
+                     (= (:path ret) (:path m))
+                     (= (:path ret) (facet/active-content-path db')))
+              (-> db' (update :ui dissoc :presenter-return)
+                  (assoc-in [:ui :presenter-view?] true))
+              db')]
     (if (and (:text-notes? m) (not (get-in db [:ui :slides :text-notes?])))
       (with-notes-hint db {:db db'})
       {:db db'})))
@@ -2341,22 +2350,20 @@
     (let [{:keys [leave]} (slides-link/leave (get-in db [:ui :slides-link]) (or reason "stopped"))]
       {:db (-> db
                (update :ui dissoc :presentation :slides-link)
-               (cond-> (:notes-view-before pres)       (assoc-in [:ui :presenter-view?] true)
-                       (not (:notes-view-before pres)) (update :ui dissoc :presenter-view?))
+               (assoc-in [:ui :presenter-view?] (boolean (:notes-view-before pres)))
                slides/clear-blank)
        :fx (cond-> (if (and (:fullscreen? pres) (not fullscreen-gone?)) [[:vv/set-fullscreen {:on false}]] [])
              (:hint? pres) (conj [:async/cancel notes-hint-key])
              leave         (conj [:vv/presenter-leave leave] [:async/cancel slides-link-waiting-key]))})))
 
 (defn slides-presenter-view-fx
-  "Effects of `s` (ADR-0048 P1): toggle this window between the audience view and the presenter view — the current
-   slide beside a pane with the notes, the next slide and the counter — in any slides view, windowed or presenting.
+  "Effects of `s` (ADR-0048 P1): toggle this window between the slide-only view and the joined slide/notes view.
    Choosing the presenter view dismisses the speaker-notes hint, which pointed at it. nil without a slides view, and
    while a show runs elsewhere than the view in front (a presenter away from its deck, ADR-0048 §8.10)."
   [db]
   (when (and (slides/slides-view? db) (or (not (slides/presenting? db)) (slides/show-view? db)))
     (if (slides/presenter-view? db)
-      {:db (update db :ui dissoc :presenter-view?)}
+      {:db (assoc-in db [:ui :presenter-view?] false)}
       (cond-> {:db (-> db (assoc-in [:ui :presenter-view?] true) slides/clear-notes-hint)}
         (slides/notes-hint? db) (assoc :fx [[:async/cancel notes-hint-key]])))))
 
@@ -2423,9 +2430,18 @@
   {:db (-> db (update-in [:ui :slides] dissoc :overview?) slides/clear-blank slides/clear-digits)
    :fx [[:slides/command [:jump page]] [:dom/focus :content]]})
 
+(defn slides-preview-pick-fx
+  "A console preview is an explicit jump to that overlay; it also unblanks the audience and returns focus to the
+   document so the next slide key keeps working."
+  [db page]
+  (when (and (slides/console? db) (integer? page))
+    {:db (-> db slides/clear-blank slides/clear-digits)
+     :fx [[:slides/command [:jump page]] [:dom/focus :content]]}))
+
 (rf/reg-event-fx :slides/overview       (fn [{:keys [db]} [_ opts]] (slides-overview-fx db opts)))
 (rf/reg-event-fx :slides/overview-close (fn [{:keys [db]} _] (slides-overview-close-fx db)))
 (rf/reg-event-fx :slides/overview-pick  (fn [{:keys [db]} [_ page]] (slides-overview-pick-fx db page)))
+(rf/reg-event-fx :slides/preview-pick   (fn [{:keys [db]} [_ page]] (slides-preview-pick-fx db page)))
 
 (rf/reg-event-fx :slides/present      (fn [{:keys [db]} [_ opts]] (slides-present-fx db (:from opts))))
 (defn slides-fullscreen-toggle-fx
@@ -2527,6 +2543,11 @@
    alone: changing it would only re-render the view."
   [db msg]
   (let [before   (get-in db [:ui :slides-link])
+        audience-lost? (and (= :presenter (:role before))
+                            (contains? #{"audience-left" "display-removed"} (:reason msg)))
+        final-page (when (and audience-lost? (integer? (:page msg))) (:page msg))
+        pres-before (slides/presentation db)
+        here? (slides/show-here? db)
         ;; Disabled 2026-10-19 (ADR-0048 §8.1, amended), with its two uses below: main's joined made a presenter on a
         ;; separate display ask for its own fullscreen (:fullscreen? from slides-link/on-joined), recorded on the
         ;; show. The presenter window now stays windowed, and on-joined returns no :fullscreen?.
@@ -2550,7 +2571,18 @@
                    (and (waiting before) (not (waiting l)))
                    (conj [:async/cancel slides-link-waiting-key]))]
     (if-let [stopped (when stop? (slides-stop-fx db1 {}))]
-      (update stopped :fx #(into fx %))
+      (let [return-db (if (and audience-lost? pres-before)
+                        (cond-> (-> (:db stopped)
+                                    (nav/set-deck-return (:tab-id pres-before) (:path pres-before)
+                                                         (or final-page (get-in db [:ui :slides :page]) 0)))
+                          here? (assoc-in [:ui :presenter-view?] true)
+                          (not here?) (assoc-in [:ui :presenter-return]
+                                                {:tab-id (:tab-id pres-before) :path (:path pres-before)}))
+                        (:db stopped))
+            show (when (and here? final-page) (slides-link/show-effect {:page final-page :blank nil}))]
+        (-> stopped
+            (assoc :db return-db)
+            (update :fx #(into (cond-> fx show (conj show)) %))))
       {:db db1 :fx fx})))
 
 (defn slides-link-waited-fx

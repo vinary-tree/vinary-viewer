@@ -1952,13 +1952,13 @@
      [uri-bar]
      ;; content + its top-right floating find bar share a positioning context that starts BELOW the chrome,
      ;; so the find bar floats over the document (not over the tab strip / address bar)
-     ;; .vv-presenter-view: the presenter view (s) gives the slides the left 58 % and the pane the rest (ADR-0048 §6.2);
-     ;; .vv-presenter-console: in a linked show's presenter window the pane takes all of it — the notes and a small next
-     ;; slide over the slides view, which stays mounted beneath (the audience window shows the slide)
+     ;; .vv-presenter-view: the noted slide and notes share one centered stage (ADR-0048 §6);
+     ;; .vv-presenter-console: in a linked show's presenter window the pane takes all of it — a left strip of slide
+     ;; previews and notes on the right, over the still-mounted slides view
      [:div.vv-content-wrap {:class (cond @(rf/subscribe [:slides/console?])         "vv-presenter-console"
                                          @(rf/subscribe [:slides/presenter-shown?]) "vv-presenter-view")}
       [content-view]
-      ;; the presenter view's pane — the slide's notes and the next slide — in a FIXED slot right after the content
+      ;; the presenter view's pane — notes, and linked-console slide previews — in a fixed slot right after the content
       ;; view, so showing or hiding it never remounts the slides view (that would end a show)
       [slides-presenter/pane]
       ;; the non-fatal live-refresh banner (the last good version stays on screen beneath it)

@@ -167,7 +167,7 @@
         shown  (if side (mapv #(deck/display-size % side) sizes) sizes)
         sw     (max 1 (if scroller (.-clientWidth scroller) 1))
         sh     (max 1 (if scroller (.-clientHeight scroller) 1))
-        scales (layout/slide-scales shown sw sh (if presenting? 0 slides-margin))
+        scales (layout/slide-scales shown sw sh (if (or presenting? (:joined? @state)) 0 slides-margin))
         rects  (layout/slot-rects (count sizes) sw sh)]
     (swap! state assoc :rects rects :scales scales :slot [sw sh] :side side)
     (dotimes [i (count page-divs)]
@@ -741,9 +741,17 @@
             (fn [_]
               (swap! state assoc :report-raf nil)
               (when-not (:destroyed? @state)
-                (let [{:keys [deck path layout current doc-gen text-notes? presenting?]} @state]
+                (let [{:keys [deck path layout current doc-gen text-notes? presenting? notes-model sizes
+                              text-notes-by-page notes]} @state
+                      page (deck/snap deck (or current 0))
+                      sources (notes/sources-for notes-model deck sizes page notes)
+                      visual? (some #(= :region (:kind %)) sources)
+                      sidecar (get-in notes-model [:sidecar :notes page])
+                      current-notes? (boolean (or visual?
+                                                  (seq (notes/page-notes (get text-notes-by-page page) sidecar))))]
                   (rf/dispatch-sync [:slides/changed (assoc (deck/position deck (or current 0))
                                                             :path path :layout layout :doc-gen (or doc-gen 0)
+                                                            :current-notes? current-notes?
                                                             :text-notes? (boolean text-notes?)
                                                             :presenting? (boolean presenting?))]))))))))
 
@@ -753,14 +761,15 @@
    speaker-notes hint counts a text note on any page rendered so far (ADR-0048 §6.1, P5). A read that lands after the
    document was replaced or the view torn down does nothing."
   [state idx]
-  (let [{:keys [doc text-notes-read text-notes?]} @state]
-    (when (and doc (not text-notes?) (not (contains? text-notes-read idx)))
+  (let [{:keys [doc text-notes-read]} @state]
+    (when (and doc (not (contains? text-notes-read idx)))
       (swap! state update :text-notes-read (fnil conj #{}) idx)
       (-> (evidence/text-notes doc idx (get-in @state [:evidence :producer]))
           (.then (fn [note]
-                   (when (and note (identical? doc (:doc @state)) (not (:destroyed? @state)) (not (:text-notes? @state)))
-                     (swap! state assoc :text-notes? true)
-                     (report! state))))))))
+                   (when (and (identical? doc (:doc @state)) (not (:destroyed? @state)))
+                     (swap! state (fn [s] (cond-> (assoc-in s [:text-notes-by-page idx] note)
+                                            note (assoc :text-notes? true))))
+                     (when (or note (= idx (:current @state))) (report! state)))))))))
 
 (defn- slot-height [state] (second (:slot @state [1 1])))
 
@@ -1358,13 +1367,15 @@
                       :deck d :evidence evidence :notes-model model :doc-gen 0 :layout layout
                       :presenting? (boolean (:presenting? view-state))
                       :presenter-view? (boolean (:presenter-view? view-state))
+                      :joined? (boolean (:joined? view-state))
                       :transition (:transition view-state)
                       :notes (:notes view-state)
                       :current (if (= layout :slides) (deck/snap d page) (deck/clamp-page d page))
                       :sizes sizes :rects [] :page-divs [] :sheet-divs [] :toc-ids []
                       :scale (layout/clamp-zoom (or (:scale view-state) 1.0))
                       :fit (:fit view-state) :invert? (boolean (:invert? view-state))
-                      :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0})
+                      :rendered #{} :text-built {} :tasks {} :observer nil :destroyed? false :gen 0
+                      :text-notes-read #{} :text-notes-by-page {}})
         ensure-fn (fn [] (ensure-all-text! state))
         hook      (slides-hook state)]
     (swap! state assoc :ensure-fn ensure-fn :hook hook)
@@ -1456,7 +1467,7 @@
       (swap! state #(-> %
                         (assoc :doc doc :sizes sizes :deck d :evidence evidence :notes-model model :stamp stamp
                                :tasks {} :rendered #{} :text-built {} :toc-ids []
-                               :text-notes-read #{} :text-notes? false)
+                               :text-notes-read #{} :text-notes-by-page {} :text-notes? false)
                         (update :gen inc)
                         (update :doc-gen (fnil inc 0))))
       (mark-deck! container d)
@@ -1498,16 +1509,19 @@
           layout      (wanted-layout (:deck @state) view-state)
           was-presenting? (boolean (:presenting? @state))
           presenting? (boolean (:presenting? view-state))
+          was-joined? (boolean (:joined? @state))
+          joined? (boolean (:joined? view-state))
           shown-side  (:side @state)]
       (cond
         (not= layout (:layout @state))
-        (do (swap! state assoc :presenting? presenting? :fit (:fit view-state)
+        (do (swap! state assoc :presenting? presenting? :joined? joined? :fit (:fit view-state)
                    :scale (layout/clamp-zoom (or (:scale view-state) old-scale)))
             (set-layout! state layout))
 
         (slides? state)
-        (when (or (not= presenting? was-presenting?) (not= (split-side state) shown-side))
-          (swap! state assoc :presenting? presenting?)
+        (when (or (not= presenting? was-presenting?) (not= joined? was-joined?)
+                  (not= (split-side state) shown-side))
+          (swap! state assoc :presenting? presenting? :joined? joined?)
           (relayout! state (current-anchor state)))
 
         :else

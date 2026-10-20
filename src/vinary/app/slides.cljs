@@ -105,11 +105,19 @@
     (if (contains? deck/notes-positions v) v :auto)))
 
 (defn presenter-view?
-  "Has this window asked for the presenter view (ADR-0048 §6.1, `s`)? A window-level choice, kept across tabs: it
-   shows only while a PDF is in the slides layout (presenter-shown?). A single-window show starts in the audience
-   view and gives the choice back when it ends ([:ui :presentation :notes-view-before])."
+  "Whether this window allows joined slide notes. Outside a show nil means automatic; false is the session's
+   explicit slide-only choice. A show starts slide-only and uses true only after an explicit request."
   [db]
-  (boolean (get-in db [:ui :presenter-view?])))
+  (let [v (get-in db [:ui :presenter-view?])]
+    (if (presenting? db) (true? v) (not= false v))))
+
+(defn joined-view?
+  "The current deck step has notes and this window is showing them as a joined page."
+  [db]
+  (boolean (and (presenter-view? db)
+                (not= :presenter (get-in db [:ui :slides-link :role]))
+                (= (facet/active-content-path db) (get-in db [:ui :slides :path]))
+                (get-in db [:ui :slides :current-notes?]))))
 
 (defn layout-request
   "What the pdf-view hands the engine besides zoom/fit/invert: {:explicit :open-as :presenting? :present-from
@@ -118,7 +126,8 @@
    presenter view is asked for, when every flip is instant (ADR-0048 §6.3) — and shows a second-screen deck's slide
    half per :notes."
   [db]
-  {:explicit        (explicit-layout db)
+  (let [joined? (joined-view? db)]
+   {:explicit        (explicit-layout db)
    :open-as         (open-as db)
    ;; the engine presents only in the show's own view, its presenter not away (show-here?): a presenter that left its
    ;; deck must not present the document in front, nor another tab's copy of the deck (ADR-0048 §8.10)
@@ -126,7 +135,10 @@
    :present-from    (present-from db)
    :transition      (transition db)
    :notes           (notes-position db)
-   :presenter-view? (presenter-view? db)})
+   :presenter-view? (boolean (or joined?
+                                 (and (presenter-view? db)
+                                      (= :presenter (get-in db [:ui :slides-link :role])))))
+   :joined?         joined?}))
 
 (defn effective-layout
   "The layout the shown PDF uses: :slides or :document (vinary.slides.deck/effective-layout)."
@@ -217,27 +229,25 @@
 ;; ---- the presenter view (ADR-0048 §6) ------------------------------------------------------------------------
 
 (defn presenter-shown?
-  "Is the presenter view showing: asked for (presenter-view?), and a PDF in the slides layout — while a show runs,
-   only in the show's own view (show-view?): a presenter away from its deck sees the document in front as it is
-   (ADR-0048 §8.10)."
+  "Is a notes pane or linked presenter console showing for the current PDF slide? During a show this only applies
+   to the show's own view; a presenter away from its deck sees the document in front as it is (ADR-0048 §8.10)."
   [db]
-  (and (presenter-view? db) (slides-view? db) (or (not (presenting? db)) (show-view? db))))
+  (and (presenter-view? db) (slides-view? db) (or (not (presenting? db)) (show-view? db))
+       (or (= :presenter (get-in db [:ui :slides-link :role]))
+           (and (= (facet/active-content-path db) (get-in db [:ui :slides :path]))
+                (true? (get-in db [:ui :slides :current-notes?]))))))
 
 (defn console?
-  "Does this window show the presenter CONSOLE (ADR-0048 §6.2, amended 2026-10-19)? The presenter view shown
-   (presenter-shown?) in a linked show's presenter window ([:ui :slides-link :role] :presenter — while the link opens,
-   while it is live, and after the audience window closed). The audience window shows the slide, so this one gives the
-   whole content area to the notes, with the next slide small in a narrow column beside them and no current slide;
-   the slides view stays mounted beneath, so the show and its keys go on."
+  "Does this window show the linked presenter's console? The pane covers the slides view with a left strip of slide
+   previews and notes on the right while the link opens or is live. An audience-window loss ends the show and link."
   [db]
   (boolean (and (presenter-shown? db) (= :presenter (get-in db [:ui :slides-link :role])))))
 
 (defn audience-blank
   "The blank colour (:black / :white) a presenter console shows as the audience's, or nil: a blanked show in this
    window's console (console?). The console never goes blank itself — the audience window does — so the notes stay in
-   view, and its strip says what the audience sees (ADR-0048 §8.2): while the link is live, the audience window's blank
-   screen; while it opens, the blank the audience window opens with; after the audience window closed, the one Shift+S
-   opens it with."
+   view, and its strip says what the audience sees (ADR-0048 §8.2): the audience window's blank screen while live,
+   or the blank it will open with while the link opens."
   [db]
   (when (console? db) (blank db)))
 
