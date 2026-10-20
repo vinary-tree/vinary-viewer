@@ -456,6 +456,14 @@ is the slide-only view of any window — the **Slides layout** as ADR-0045 made 
 view**; a single-window show starts in it, because its screen may be mirrored to a projector. Main closes the audience
 window when the show ends and never saves its bounds to `window.edn`. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.1 and §8.*
 
+**away (linked show)** — The state of a **linked show**'s presenter window whose deck view went while the show's tab
+stays open — another tab chosen, another file opened in that tab, Reflow: the show goes on in the **audience window**,
+whose own keys still flip it. While away the window sends nothing and shows nothing of the show; each **push** is only
+recorded as the show's position (`slides-link/away`). Back in the show's view — the deck's tab showing the deck — the
+show resumes at that position, with its blank colour, and the **presenter console** returns, again sending nothing
+(`slides-link/resume`). Closing the deck's tab ends the show, and so does the audience ending it meanwhile.
+*First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8.10; proved and model-checked in [`theory/11`](theory/11-linked-slide-show-protocol.md) §3.5.*
+
 **beam / beam width $`\beta`$** — The prune width bounding the WPDA streaming decoder's frontier;
 $`\textsf{prune}_\beta`$ keeps the $`\beta`$ lowest-weight configs. *First introduced in
 `theory/09-document-streaming-and-the-wpda.md`.*
@@ -524,8 +532,9 @@ hard reject. *First introduced in `features/29-remote-files-over-ssh.md`; ADR-00
 Window* (View menu, the palette, or `S` = Shift+S) in the presenter's window; **Swap screens** exchanges their
 displays. Main runs it as a *session* (`vinary.main.slides-link`): the members and their roles, a move
 counter `seq`, and the authoritative position. Either window drives — keys, clicks, the overview, links, find,
-blanking — and Escape in either ends it. Its protocol converges, never echoes and never undoes a move, for any delivery
-order of the messages. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8; proved and model-checked in [`theory/11`](theory/11-linked-slide-show-protocol.md).*
+blanking — and Escape in the show's view of either window ends it, as does closing the deck's tab. The presenter window
+keeps its chrome, stays windowed and shows the **presenter console**; it may leave its deck and come back (**away**).
+Its protocol converges, never echoes and never undoes a move, for any delivery order of the messages. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §8; proved and model-checked in [`theory/11`](theory/11-linked-slide-show-protocol.md).*
 
 **move (linked show)** — A window's new *position* — a physical page index and a blank colour — sent to main on
 `vv:presenter-move` with the window's own counter `mid`. It is always a whole position, never a step, so the last move
@@ -563,14 +572,24 @@ pdfpc's semantics for the notes position, the end slide and hidden pages, and ne
 semantics are modelled in `vinary.slides.presenter`, for a deferred feature request — ADR-0048 §6.5.)
 *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §4–§5.*
 
+**presenter console** — The **presenter view** of a **linked show**'s presenter window, where the audience window
+shows the slide: the **speaker notes** fill the content area, the next slide sits small in a narrow column on the
+right, and one line on top holds the frame counter, the overlay, the audience's blank colour (*Audience: black*) and
+the link's notice. There is no current slide. The slides view stays mounted, focused, beneath it, so the slide keys
+still drive the show (`slides/console?`, `.vv-presenter-console`). *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.2 (amended
+2026-10-19).*
+
 **presenter view** — The layout `s` toggles during a show or in the Slides layout: the current slide on the left, and
 a pane (`vinary.ui.slides-presenter`) holding the frame counter, the current slide's **speaker notes** and the next
-slide. (A timer is deferred to a feature request — ADR-0048 §6.5.) In a **linked show** it is the presenter window's view. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
+slide. (A timer is deferred to a feature request — ADR-0048 §6.5.) In a **linked show**'s presenter window it is the
+**presenter console**. *First introduced in [ADR-0048](design-decisions/0048-speaker-notes-and-linked-presenter-windows.md) §6.*
 
 **presenting (slide show)** — A slide show running in one window, started with F5 or Shift+F5 (`:slides/present`)
 and recorded in `[:ui :presentation]`: the **Slides layout** without a margin, the app chrome hidden by CSS
 (`.vv-root.vv-presenting`) and, by default, the window made fullscreen by main — which only ever leaves a fullscreen
-it entered. The app's own prompts stay above the show; Escape unwinds it one step at a time.
+it entered. The app's own prompts stay above the show; Escape unwinds it one step at a time. A **linked show** is
+presenting in both of its windows, but only the **audience window** hides its chrome (`slides/chromeless?`): the
+presenter window keeps its menus, tabs, sidebar and bars, and stays windowed (ADR-0048 §8.1).
 *First introduced in [ADR-0045](design-decisions/0045-slide-deck-presentation.md) §5.*
 
 **push (linked show)** — Main's copy of an accepted **move**, sent on `vv:presenter-state` to every member except the

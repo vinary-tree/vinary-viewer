@@ -117,6 +117,9 @@ the slide show, in every keymap set.
 | click / `Shift`+click | during a show: next / previous slide (not on a link, not the end of a text selection or a drag) |
 | `Tab` / `o` | the **overview** grid: one tile per frame, each showing the frame fully built. Arrows, PgUp/PgDn and Home/End move; digits pick a frame by the number on its slide; `Enter` opens it fully built and `Shift+Enter` at its first overlay; a click opens a tile (`Shift`+click the other end); `Escape`, `Tab` or `o` close it. Opening a slide from the overview is a jump, so Back returns. |
 | `Escape` during a show | unwinds one step at a time: the overview, a typed number, a blanked screen, then the show itself |
+| `s` | the **presenter view**, windowed or during a show: the slide beside its speaker notes, the next slide and a frame counter; `s` again goes back. In a linked show's presenter window it is the **presenter console**: the notes, a small next slide, no current slide ([ADR-0048 §6](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)) |
+| `S` (`Shift+S`) | **Present in New Window**: the notes stay in this window, which keeps its menus, tabs and bars and stays windowed, and an audience window shows the slides; either window drives the show. Again while linked: brings the audience window to the front ([ADR-0048 §8](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)) |
+| `F` (`Shift+F`) | during a show: this window's fullscreen on or off; the show keeps running |
 
 A swipe is a quick (≤ 0.7 s), mostly horizontal (≥ 1.5 × its vertical travel) touch or pen gesture of at least 48 px;
 a mouse drag never flips a slide, because it selects text. Each of these flips can animate — Preferences ▸ Slides ▸
@@ -146,7 +149,11 @@ fullscreen afterwards). The pointer hides after 2.5 s without moving. The SSH pa
 the find bar still appear over a show. Switching tabs, navigating, focusing the address bar (`Ctrl+L`) or the
 sidebar, or leaving fullscreen yourself (`F11`, your window manager) also ends it. `F5` and `Shift+F5` are in
 every set's `:all` block, so they work in any mode; the Alt access keys of the hidden menu bar are off during
-a show.
+a show. A linked show's presenter window (`S`) is different: it keeps its chrome and its Alt access keys, stays
+windowed, and its show survives a tab switch or another file — the audience window keeps the show, and coming
+back to the deck brings the notes back at its slide. There, `Escape` in the URI bar or a filter only leaves that
+field, `Escape` on the deck ends the show, and **View ▸ End Slide Show** ends it from any tab
+([ADR-0048 §8.10](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md#810-away-and-back-l10)).
 
 **Opening files/folders is OS-dependent.** In both the **directory browser** and the
 **git file tree**, a **single click opens on Linux** and a **double click opens on

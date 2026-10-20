@@ -114,8 +114,9 @@ slide keys is added on top.
    the slide they left.
 4. **End.** Press Escape (once per open step), choose **End Slide Show** from the right-click menu or the palette, or
    leave fullscreen yourself (F11, your window manager). Switching tabs, navigating, or focusing the address bar or
-   the sidebar also ends the show. A window you had made fullscreen before the show stays fullscreen afterwards; the
-   app leaves only a fullscreen it entered.
+   the sidebar also ends a show in one window; a show in two linked windows keeps running (*Notes in one window,
+   slides in another*, below). A window you had made fullscreen before the show stays fullscreen afterwards; the app
+   leaves only a fullscreen it entered.
 
 ### The overview
 
@@ -204,9 +205,10 @@ right 42 %:
 - the next slide, small.
 
 Every slide key still works, and flips stay instant. `s` again goes back to the audience view. A show that starts in
-the audience view gives the choice back when it ends. The first time a deck with notes is presented, a hint names `s`
-for a few seconds, once per installation. pdfpc notes are Markdown, as in pdfpc, unless the deck turns Markdown off;
-they pass through the same sanitizer as a Markdown document. Any other note is plain text.
+the audience view gives the choice back when it ends. The first time a deck with notes is presented in one window, a
+hint names `s` — and `S`, which presents in a new window — for a few seconds, once per installation. pdfpc notes are
+Markdown, as in pdfpc, unless the deck turns Markdown off; they pass through the same sanitizer as a Markdown document.
+Any other note is plain text.
 
 ### Notes in one window, slides in another
 
@@ -216,25 +218,37 @@ in the window you are in and shows the slides in a second window, the **audience
 notes or not: the counter and the next slide help without them.
 
 1. **Start.** Press `S` in the window that shows the deck. That window starts the show from the slide you are on and
-   switches to the presenter view (the counter, the notes, the next slide). The audience window opens with the
+   becomes the **presenter console**: the notes fill its content area, the next slide is small in a narrow column on
+   the right, and one line on top holds the counter, the overlay and what the link needs you to know. There is no
+   current slide — the audience window shows it. Your window keeps its menus, tabs, sidebar and bars, and stays
+   windowed: `F` makes it fullscreen when you want, and leaving that fullscreen keeps the show running. (A show
+   already running fullscreen in it — F5 — leaves fullscreen when you press `S`.) The audience window opens with the
    slides, without taking the focus:
-   - with a second display, it opens there; with Preferences ▸ Slides ▸ *Present full screen* on, both windows go
-     fullscreen, each on its own display;
+   - with a second display, it opens there, fullscreen when Preferences ▸ Slides ▸ *Present full screen* is on;
    - with one display, it opens beside the first, windowed: share it in a video call;
    - on Wayland, the compositor places it: move it to the other screen and press `F` in it.
 
-   The presenter view's status strip says which of these happened, and says *Waiting for the audience window…* until
-   the audience window's slides show.
+   The console's top line says which of these happened, and says *Waiting for the audience window…* until the
+   audience window's slides show. `s` turns the console off and shows the slides themselves in your window; `s` again
+   brings the console back.
 2. **Either window drives.** A flip, a typed number, an overview pick, a link, a click or a blank (`b`, `w`) in either
-   window is shown at once in the other. While the notes are shown, a blank leaves your screen as it is and shows a
-   badge, *Audience: black* or *Audience: white*, over your slide.
+   window is shown at once in the other; a click on the console itself never flips. A blank leaves your screen as it
+   is: the console's top line shows *Audience: black* or *Audience: white*.
 3. **Swap screens.** When the audience window went to the wrong display, press **Swap screens** in the status strip
    (or *Swap the presenter and audience screens* in the palette): each window moves to the other's display and keeps
    its fullscreen. It is offered only when the two windows were placed on separate displays.
-4. **End.** Escape, or *End Slide Show*, in either window ends the show in both and closes the audience window. Closing
-   the audience window yourself ends only the link: your window keeps presenting, and `S` opens a new audience window.
-   `S` while linked brings the audience window to the front instead of opening another. A window takes part in one
-   linked show at a time.
+4. **Switch tabs, and come back.** While the show runs you can switch tabs, open another file or turn on Reflow in
+   your window ([ADR-0048 §8.10](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md#810-away-and-back-l10)).
+   The show goes on in the audience window, whose own keys still flip it, and nothing of the show acts on what your
+   window shows: `b`, `w`, F5, `S` and `F` do nothing there, and Escape only cancels what it cancels there. Come back
+   to the deck — its tab, or Back in that tab — and the console returns at the slide the audience is on, with its
+   blank. A first step from there only unblanks, as in any blanked show.
+5. **End.** Escape on the deck, or *End Slide Show* (also in your window's View menu), in either window ends the show
+   in both and closes the audience window; from your window, *End Slide Show* works on any tab. Closing the deck's tab
+   ends it too. An Escape in your window's address bar or filter only leaves that field. Closing the audience window
+   yourself ends only the link: your window keeps presenting, and `S` opens a new audience window — unless you are on
+   another tab at the time, when your show ends too. `S` while linked brings the audience window to the front instead
+   of opening another. A window takes part in one linked show at a time.
 
 SSH prompts for the audience window (a host key, a password) appear in your window, never on the projector, and the
 audience window's size and position are never saved.
@@ -326,6 +340,8 @@ bytes + pdfpc sidecar read (vv:content → byte cache, as a CANDIDATE version)
                            ├─ keys      key-scroll! / keymap → scroll delegate or :slides layer → step! → command!
                            ├─ report!   :slides/changed → [:ui :slides] → slide bar, menus, chip, tests
                            ├─ F5        :slides/present → [:ui :presentation] → .vv-presenting + vv:set-fullscreen
+                           ├─ s         :slides/presenter-view → the pane beside the slides | the console over them
+                           ├─ S         :slides/present-linked → vv:presenter-open → main's session → audience window
                            ├─ Tab       :slides/overview → ui/slides-overview + renderer.pdf-thumbs (borrowed doc)
                            └─ refresh   new stamp → refresh! → replace-doc! (same view, same slide) | refresh note
 ```
@@ -361,7 +377,17 @@ re-frame's queue ([experiment 12 §8](../scientific/12-slide-deck-detection-and-
 
 **Presenting is window-level.** The show asks main to make *its* window fullscreen; main decides, remembers that it
 did, and leaves only a fullscreen it entered. CSS hides the chrome, so nothing unmounts and the app's own prompts stay
-on top ([ADR-0045 §5](../design-decisions/0045-slide-deck-presentation.md#5-presenting)).
+on top ([ADR-0045 §5](../design-decisions/0045-slide-deck-presentation.md#5-presenting)). A linked show's presenter
+window is the exception: it presents but keeps its chrome and stays windowed (`slides/chromeless?` decides), and its
+presenter view is the console, laid over the slides view, which stays mounted beneath it so the show and its keys go
+on ([ADR-0048 §6.2, §8.1](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)).
+
+**A linked show is sequenced by main.** Each window keeps its side of the protocol in `[:ui :slides-link]`; main numbers
+every move, acknowledges it to its sender and pushes it to the other window, which holds a push while its own move is
+on its way. The protocol converges, never echoes and never undoes a move, for any delivery order
+([theory/11](../theory/11-linked-slide-show-protocol.md)). A presenter that leaves its deck is *away*: it only records
+the pushes, and resumes at the show's position when its deck mounts again in the show's tab
+([ADR-0048 §8.10](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md#810-away-and-back-l10)).
 
 **The overview borrows the document.** It is an overlay beside the slides, not a layout of them, so it opens and
 closes instantly; its thumbnails are drawn lazily from the mounted view's own `PDFDocumentProxy`
@@ -386,6 +412,8 @@ verified read per change to every window ([ADR-0046](../design-decisions/0046-re
 | `vinary.app.commands` · `vinary.input.resolver` · `resources/keymaps/*.edn` | the Slides commands, the immediate view moves, the `:slides` layer |
 | `vinary.ui.slides-bar` · `.slides-hud` · `.slides-overview` · `.refresh-note` · `.pdf-view-lifecycle` | the slide bar and toolbar button; the chip and blank screen; the overview; the refresh banner; the refresh-in-place decisions |
 | `vinary.main.fullscreen` | main's fullscreen decision, per window |
+| `vinary.ui.slides-presenter` · `vinary.slides.presenter` · `vinary.renderer.pdf-region` | the presenter view's pane, and in a linked show's presenter window the console; the frame counter (and the deferred timer's pure model); one region of a borrowed page rendered into a box |
+| `vinary.app.slides-link` · `vinary.main.slides-link` · `vinary.main.presenter` · `vinary.main.displays` | a linked show: a window's side of the protocol, away and back included; main's session; its shell (the audience window, moves, Swap screens); which display the audience window goes to, and the swap plan |
 | `vinary.cli.core` (`--deck-info`) | the headless diagnostic |
 
 Every event, effect and subscription is catalogued in [events-effects-subs](../reference/events-effects-subs.md), the
@@ -436,7 +464,8 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
 - **Tab opens the overview** in the Slides layout instead of moving the focus, and **Space is a slide key** — both
   rebindable under `:keymaps {:slides …}`. In Vim's normal mode Space stays the leader.
 - **The show does not go fullscreen** when *Present full screen* is off — it then fills the window — and **leaving
-  fullscreen ends the show**, by design.
+  fullscreen ends a show in one window**, by design. A linked show's presenter window never goes fullscreen by itself,
+  and leaving the fullscreen `F` gave it keeps the show running.
 - **The middle of Beamer's slide-navigation symbol does nothing.** It asks the viewer for Acrobat's *GoToPage* dialog,
   which is not on the allow-list. Type the slide's number and Enter, or press Tab.
 - **The jump history** (Beamer's back link, *Back to the slide before the last jump*) belongs to the view and ends with
@@ -454,8 +483,10 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
   Compiling with pdfLaTeX or LuaLaTeX, or letting XeLaTeX run twice, gives the viewer labels it can use.
 - **A page pdfpc hides is still reachable.** The hidden pages of a pdfpc sidecar are skipped by → and ← and the
   frame steps, as in pdfpc, but Home, End, a typed number and the overview still show them.
-- **Not available yet:** the presenter view (the current slide's notes with the next slide, in this window or a second
-  one, ADR-0048 §6–§8) and slide navigation in `vv --tui`; both are filed feature requests.
+- **Not available yet:** slide navigation in `vv --tui`, a filed feature request (the terminal tools read decks only
+  for `vv --cli --deck-info`). The presenter view, the presenter console and linked windows shipped with
+  [ADR-0048](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md);
+  its timer, pace, wall clock and slide transitions are a filed feature request too (ADR-0048 §6.5).
 
 ---
 
@@ -490,6 +521,20 @@ three fullscreen channels in [ipc-channels](../reference/ipc-channels.md), and t
 ![Presenting: F5 → window-level fullscreen owned by main → Escape](../diagrams/sequence-slides-present.svg)
 
 *Diagram source: [`../diagrams/sequence-slides-present.puml`](../diagrams/sequence-slides-present.puml).*
+
+- **Sequence — two linked windows:** Shift+S, main's session and the audience window, a move and its push, a push held
+  while the window's own move is on its way, away and back, and the end in both windows (ADR-0048 §8).
+
+![A linked show's messages: open, join, moves, pushes, away and back, end](../diagrams/seq-linked-slide-show.svg)
+
+*Diagram source: [`../diagrams/seq-linked-slide-show.puml`](../diagrams/seq-linked-slide-show.puml).*
+
+- **State — a linked show:** main's session, and each window's link — opening, joining, live, away, ended — with what
+  moves it from one state to the next.
+
+![A linked show's states: main's session and each window's link](../diagrams/state-linked-slide-show.svg)
+
+*Diagram source: [`../diagrams/state-linked-slide-show.puml`](../diagrams/state-linked-slide-show.puml).*
 
 - **Sequence — live refresh in place:** a changed PDF swapped in under the same view, and every failure kept behind the
   refresh note.

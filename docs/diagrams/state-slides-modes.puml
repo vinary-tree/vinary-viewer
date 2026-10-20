@@ -10,7 +10,7 @@
 '' show returns to, deck/effective-layout).
 !include _vv-theme.iuml
 
-title A PDF view's modes (ADR-0045): the Document layout, the Slides layout, and Presenting
+title A PDF view's modes (ADR-0045, ADR-0048): the Document layout, the Slides layout, and Presenting
 
 hide empty description
 skinparam state {
@@ -32,8 +32,8 @@ state "a PDF view is mounted (vinary.ui.views/pdf-view → renderer.pdf controll
     SOver -[KEYMAP_BORDER]-> SShow : Escape · Tab · o ·\nopen a tile (a jump)
   }
 
-  state "Presenting — a slide show\n[:ui :presentation] · .vv-root.vv-presenting" as Present APPDB_FILL {
-    state "Showing slide p\nno margin · chrome hidden ·\na click advances · idle pointer hides" as PShow RENDERER_TINT
+  state "Presenting — a slide show\n[:ui :presentation] · .vv-root.vv-presenting only when chromeless:\nnot in a linked show's presenter window, which keeps its chrome" as Present APPDB_FILL {
+    state "Showing slide p\nno margin · a click advances ·\nchromeless: chrome hidden, idle pointer hides" as PShow RENDERER_TINT
     state "Blanked black or white\n[:ui :slides :blank]" as PBlank APPDB_TINT
     state "Typing a slide number\n[:ui :slides :digits]" as PDigits APPDB_TINT
     state "Overview grid open\n[:ui :slides :overview?]" as POver APPDB_TINT
@@ -59,19 +59,22 @@ state "a PDF view is mounted (vinary.ui.views/pdf-view → renderer.pdf controll
   Slides -[REFRAME_BORDER]-> Present : F5 · Shift+F5 ·\nPresent (slide bar)
 
   PShow -[KEYMAP_BORDER]-> stopChoice : Escape — the last step
-  Present -[REFRAME_BORDER]-> stopChoice : End Slide Show ·\nfocus the address bar or sidebar
-  Present -[MAIN_BORDER,dashed]-> stopChoice : the window left the\nfullscreen the show asked for
+  Present -[REFRAME_BORDER]-> stopChoice : End Slide Show (also the View menu) ·\nfocusing the address bar or sidebar\n(a chromeless window only)
+  Present -[MAIN_BORDER,dashed]-> stopChoice : a chromeless window left the\nfullscreen the show asked for
   stopChoice -[RENDERER_BORDER]-> Slides : a deck, or this view's\nchoice is :slides
   stopChoice -[RENDERER_BORDER]-> Document : otherwise
 }
 
-View -[RENDERER_BORDER]-> [*] : unmount — a tab switch, navigation, Reflow\n(:slides/unmounted also ends a show)
+View -[RENDERER_BORDER]-> [*] : unmount — a tab switch, navigation, Reflow\n(:slides/unmounted also ends a show — but a linked\nshow's presenter, its show tab still open, goes AWAY:\nthe show runs on in the audience window, ADR-0048 §8.10)
 
 note left of View #FFF6D6
   **Escape unwinds one step at a time**
   (vinary.input.events/escape-fx), after the
   palette and the find bar:
   overview → typed number → blanking → the show.
+  The show ends only in its own view; in a window
+  that keeps its chrome, an Escape from a text
+  field or a bar leaves the show's steps alone.
   Ending a show leaves only a fullscreen
   main entered (vinary.main.fullscreen/decide).
 end note

@@ -9,12 +9,12 @@
 '' vinary.main.slides-link model, and the windows it opens).
 !include _vv-theme.iuml
 
-title A linked slide show (ADR-0048 §8): Shift+S opens an audience window; either window drives; main numbers every move
+title A linked slide show (ADR-0048 §8): Shift+S opens an audience window; either window drives; main numbers every move;\nthe presenter may leave its deck and come back
 
 autonumber "0:"
 
 actor "presenter" as U KEYMAP_TINT
-participant "window A — the presenter\n(re-frame · app.slides-link ·\nPDF engine · presenter pane)" as A RENDERER_TINT
+participant "window A — the presenter\n(re-frame · app.slides-link ·\nPDF engine · presenter console)" as A RENDERER_TINT
 participant "main\n(main.presenter shell over the\npure main.slides-link model)" as M MAIN_TINT
 participant "window B — the audience\n(a warm-pool window:\nre-frame · app.slides-link · engine)" as B RENDERER_TINT
 actor "audience\n(the projector)" as V KEYMAP_TINT
@@ -22,7 +22,7 @@ actor "audience\n(the projector)" as V KEYMAP_TINT
 == Shift+S — link a second window ==
 U -[KEYMAP_BORDER]> A : Shift+S on slide 3 (page index 2)
 activate A
-A -> A : slides-present-linked-fx: start the show from the\ncurrent slide WITHOUT fullscreen; presenter view on;\n[:ui :slides-link] ← {:phase :opening}
+A -> A : slides-present-linked-fx: start the show from the current slide,\nWITHOUT fullscreen (a show already fullscreen leaves it); presenter\nview on — the console: the notes, a small next slide; A keeps its\nchrome; [:ui :slides-link] ← {:phase :opening, :known {page 2, blank nil}}
 A -[IPC_BORDER]> M : **vv:presenter-open** {path, page: 2, blank: null, fullscreen: true}
 deactivate A
 activate M
@@ -32,7 +32,7 @@ M -[IPC_BORDER]> A : **vv:presenter-state** {session: "show-1", seq: 0, role: "p
 M -[IPC_BORDER]> B : **vv:open-files** {paths: [path], link: {session: "show-1", seq: 0,\nrole: "audience", page: 2, blank: null, fullscreen: true}}
 deactivate M
 activate A
-A -> A : phase :live, known = the start (page 2); the interceptor runs once —\nA has not moved, so nothing is sent; peer :waiting ("Waiting for the\naudience window…"); a separate display and :slides-fullscreen? →\nvv:set-fullscreen {on: true} for window A itself
+A -> A : phase :live, known = the start (page 2); the interceptor runs once —\nA has not moved, so nothing is sent; peer :waiting ("Waiting for the\naudience window…"); A stays windowed: it never asks for fullscreen\n(F gives it one when the presenter wants)
 deactivate A
 activate B
 B -> B : :files/opened with `link` joins in the same update that opens\nthe deck in a tab: phase :joining, :start {seq 0, page 2}
@@ -44,7 +44,7 @@ deactivate B
 activate M
 M -[IPC_BORDER]> A : **vv:presenter-state** {session, peer: "live"}
 deactivate M
-A -> A : peer :live — the pane's "Waiting…" notice goes away
+A -> A : peer :live — the console's "Waiting…" notice goes away
 
 == Space in window A ==
 U -[KEYMAP_BORDER]> A : Space
@@ -86,6 +86,26 @@ note over A, B #E3F2ED
   each window's report equals its known position. Proof and model check: docs/theory/11.
 end note
 
+== A leaves its deck, and comes back (ADR-0048 §8.10) ==
+U -[KEYMAP_BORDER]> A : clicks another tab
+activate A
+A -> A : the deck view unmounts → :slides/unmounted, processed at once\n(dispatch-now!); the show's tab is still open → AWAY: :away? true,\napplying nothing; the show goes on, nothing is sent, and the\ndocument in front never presents (show-here? is false)
+deactivate A
+U -[KEYMAP_BORDER]> B : Space in the audience window (to page 3)
+B -> V : slide 4 — B's engine steps at once
+B -[IPC_BORDER]> M : {mid: 2, page: 3} — out = {2}
+activate M
+M -> M : seq 4, page 3
+M -[IPC_BORDER]> B : {seq: 4, ack: 2}
+M -[IPC_BORDER]> A : {seq: 4, page: 3}
+deactivate M
+A -> A : away: push seq 4 > 3, out = {} → known = page 3, and nothing\nelse — no [:show]: there is no engine to show it
+U -[KEYMAP_BORDER]> A : clicks the deck's tab again
+activate A
+A -> A : the deck mounts in the show's view → :pdf/deck-detected →\nslides-resume-fx: :away? cleared; :from = known's page (3),\nknown's blank; applying = 3 — no move, no ready, no open
+A -> A : the engine presents at page 3; its first report equals known →\nnothing is sent, so the audience sees no move; the console is back
+deactivate A
+
 == Escape in either window ends the show ==
 U -[KEYMAP_BORDER]> B : Escape
 activate B
@@ -97,7 +117,7 @@ M -> M : leave: the session ends ("stopped")
 M -[IPC_BORDER]> A : **vv:presenter-state** {session, ended: true, stop: true, reason: "stopped"}
 M -> B : close() — the audience window existed only for the show
 deactivate M
-A -> A : ended + stop → slides-stop-fx: the show ends; window A leaves\nthe fullscreen it asked for and returns to the view it had before
+A -> A : ended + stop → slides-stop-fx: the show ends; window A leaves\nany fullscreen F gave it and returns to the view it had before
 
 legend right
   |= Colour |= Concept |
@@ -106,5 +126,6 @@ legend right
   |<#B1951D>&#160;&#160;&#160;&#160;| the IPC seam (preload, vv:presenter-* and vv:open-files) |
   |<#3A5BA0>&#160;&#160;&#160;&#160;| main: the session model, the shell, the windows it opens |
   A move carries a whole position {page, blank}, never a step; `mid` is the sender's own counter.
+  Away from its deck, the presenter sends nothing and only records the pushes (theory/11 §3.5).
 endlegend
 @enduml

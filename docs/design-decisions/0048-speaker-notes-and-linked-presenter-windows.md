@@ -13,6 +13,12 @@
   transitions in the presenter view and across linked windows, are not part of this decision. They are filed as the
   feature request `vinary-viewer-presenter-timer-pace-and-wall-clock-slide-transitions-in-the-presenter-view-and-across-linked-windows-64e248`. Their design is kept in §6.3 and §6.5 as that request's starting point; until it
   lands, a flip with the pane shown, or followed from the other window, is instant.
+- **Amended (2026-10-19, the user's decisions):** in a linked show the presenter window keeps its chrome and stays
+  windowed (§8.1). It shows the **presenter console**: the notes, with a small next slide beside them and no current
+  slide (§6.1, §6.2). It may leave its deck and come back while the show goes on in the audience window (§8.10, L10).
+  Escape ends a show only from the show's own view, and, in the presenter window, only with the keyboard on the
+  document (§6.4). The one-window presenter view and the audience window are unchanged. The speaker-notes hint now
+  names both ways to the notes, as P5 decided; its first implementation named only `s`.
 
 ## Context
 
@@ -53,10 +59,13 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | note page | A whole page of notes, interleaved after the overlay it belongs to — Beamer's `show notes`. |
 | text notes | Notes carried as text: a page's annotation contents (`\pdfpcnote`, sticky notes) or the pdfpc sidecar file. |
 | shown page · hidden page | A page the audience sees in the Slides layout · a note page, which the audience never sees there. |
-| presenter view | This window shows the current slide beside a pane with the slide counter, the notes and the next slide. |
+| presenter view | This window shows the current slide beside a pane with the slide counter, the notes and the next slide (§6.1). |
+| presenter console | The presenter view of a linked show's presenter window: the notes fill the content area, the next slide is small in a narrow column beside them, and there is no current slide — the audience window shows it (§6.1, §6.2). |
 | audience view | This window shows only the slide — the Slides layout as ADR-0045 made it. |
 | linked show | Two windows of one deck whose slide shows move together; main runs it as a **session**. |
-| presenter window · audience window | The window that linked the show (it shows the presenter view) · the window main opened for it. |
+| presenter window · audience window | The window that linked the show (it keeps its chrome, stays windowed and shows the presenter console) · the window main opened for it (it hides its chrome and shows only the slide). |
+| chromeless | A window that hides its chrome for a running show — its menus, tabs, sidebar and bars (`.vv-root.vv-presenting`): a one-window show's window and the audience window, never the presenter window (`slides/chromeless?`, §8.1). |
+| the show's view · away | The show's own tab showing the show's deck (`slides/show-view?`) · the state of a presenter whose deck view went while that tab stays open; the show goes on in the audience window (§8.10). |
 | position | What a window shows: a physical page index and a blank colour (`nil`, `:black`, `:white`). |
 | move · ack · push | A window's new position, sent to main · main's reply to the sender, carrying the number it gave the move · main's copy of the move, sent to every other window. |
 | `seq` · `mid` | Main's per-session move number · the sender's own per-window move counter. |
@@ -72,21 +81,22 @@ What the formats carry, established before this decision (§1 and §2 have the d
 | N5 | pdfpc's settings are read from the raw XMP and from the sidecar (XMP first): notes position, duration, start and end time, last minutes, end slide, Markdown, hidden pages and forced overlays. |
 | N6 | The GUI and `vv --cli --deck-info` run one detection pipeline, `evidence/detect`, so the CLI prints the GUI's decision. |
 | N7 | Main reads the sidecar beside the PDF — locally and over SFTP — and attaches it to the PDF's payload. A local sidecar is watched by the PDF's own content watcher, so creating, editing or deleting it re-delivers the PDF; over SFTP a change to the sidecar alone shows at the PDF's next read. A piped-in PDF and an archive member have no sidecar. |
-| P1 | `s` toggles the **presenter view** in any slides view, windowed or presenting. A single-window show starts in the audience view. |
-| P2 | The engine is never remounted: the pane is an absolutely positioned sibling of the slides, and the slides shrink beside it. |
+| P1 | `s` toggles the **presenter view** in any slides view, windowed or presenting — while a show runs, in the show's view. A single-window show starts in the audience view. |
+| P2 | The engine is never remounted: the pane is an absolutely positioned sibling of the slides, and the slides shrink beside it. In a linked show's presenter window the pane is the **presenter console** instead: it covers the slides, which stay mounted, full size and focused, beneath it (§6.2). |
 | P3 | The pane renders the notes regions and the next slide from the engine's document into canvases of its own (`vinary.renderer.pdf-region`). While the pane is shown, a flip is instant (transitions clipped to the slides are deferred, §6.3). |
 | P4 | The counter counts frames up to pdfpc's end slide (`vinary.slides.presenter/counter`). The timer, the pace and the wall clock are deferred to a feature request (§6.5). |
 | P5 | When a single-window show starts on a deck with notes, a hint names `s` and *Present in New Window*, once: then `:slides-notes-hinted?` is saved. |
 | F1 | `F` (Shift+f) toggles this window's fullscreen during a show, through main's existing ownership rule. |
-| L1 | **Present in New Window** (the View menu, the palette, and `S` = Shift+s; offered for every PDF view) links a second window: main opens an **audience window** from the warm pool without taking the focus, on another display when there is one, fullscreen there when the platform lets it place windows. The speaker notes stay in the window it was chosen in. |
+| L1 | **Present in New Window** (the View menu, the palette, and `S` = Shift+s; offered for every PDF view) links a second window: main opens an **audience window** from the warm pool without taking the focus, on another display when there is one, fullscreen there when the platform lets it place windows. The speaker notes stay in the window it was chosen in, which keeps its chrome, stays windowed and shows the presenter console (§8.1). |
 | L2 | Main sequences the session: every move gets a `seq`, an ack goes to its sender and a push to every other member. A window holds a push that arrives while its own move is on the way. The protocol converges, never echoes and never undoes a move (proof and model check: [theory/11](../theory/11-linked-slide-show-protocol.md)). |
 | L3 | A window sends its position through one interceptor that runs after the engine's report or a local blank change, never after an incoming message. |
 | L4 | The audience window starts at the position main gave it and announces itself with a `ready` message that moves nothing. |
-| L5 | Either window ends the show; main closes the audience window it opened. A member that closes, reloads, crashes or loses its display ends the session. |
+| L5 | Either window ends the show — Escape in the show's view, or *End Slide Show* — and so does closing the show's tab in the presenter window; main closes the audience window it opened. A member that closes, reloads, crashes or loses its display ends the session. |
 | L6 | window.edn is saved per window, and never for an audience window. |
 | L7 | SSH prompts never go to an audience window. |
 | L8 | The trust boundary widens by exactly three capabilities, each constrained (§8.9); the threat model is updated. |
 | L9 | With the two windows on different displays, **Swap screens** in the presenter view moves each window to the other's display, keeping each one's fullscreen (§8.7). |
+| L10 | A presenter that leaves its deck while the show's tab stays open — another tab, another file in that tab, Reflow — is **away**: the show goes on in the audience window, whose keys still drive it, and the presenter sends nothing and only records the pushes. Back in the show's view, the show resumes at the show's position and blank colour, again sending nothing (§8.10). |
 
 ---
 
@@ -548,6 +558,12 @@ current slide on the left (58 % of the width) and a pane on the right holding:
 - the **notes**: the notes regions of the current page (its split half, or its note page), then its text notes;
 - the **next slide**: what the next step will show (the next shown page), or *End of the slide show*.
 
+**In a linked show's presenter window: the presenter console** (amended 2026-10-19). The audience window shows the
+slide, so the presenter window does not. The notes fill the content area, and the next slide is small, at its page's
+aspect ratio, in a narrow column on the right; the counter, the overlay, the audience's blank colour (§8.2) and the
+link's line (§8.6) share one line on top. `test/presenter-e2e.js` measures the next slide at 0.214 of the content
+width and the notes at 0.740. The one-window presenter view keeps the current slide: no other window shows it.
+
 A **single-window show starts in the audience view**, because its screen may be mirrored to a projector; the previous
 view is remembered in `[:ui :presentation :notes-view-before]` and restored when the show ends. A deck without notes
 still gets the counter and the next slide, with *This deck has no speaker notes* in the notes box, or *No notes on this
@@ -559,7 +575,9 @@ halves, note pages, a sidecar with notes, pdfpc metadata, or a text note on any 
 already reads every rendered page's annotations) — a chip at the bottom reads *Speaker notes: **s** shows them here ·
 **Shift+S** presents in a new window*. It fades after 6 s or at the next key or click, and is `role="status"`
 (polite). Then `:slides-notes-hinted? true` is saved in settings.edn, which every window receives (ADR-0047), so it is
-shown once per installation. It is never shown in an audience window, nor when the show starts in the presenter view.
+shown once per installation. It is never shown in a linked show's audience window, in any phase of the link — so a
+text note found on a page that window renders does not ask for it either — nor when the show starts in the presenter
+view.
 Notes found after the show started — a background scan that finishes, a text note on a later page — show it then, if
 it has not been shown. The chip floats where the *Go to 12* chip does (`vinary.ui.slides-hud`), and a typed digit
 dismisses it first. A mirrored projector shows it too, for those six seconds, once.
@@ -576,6 +594,27 @@ shown, §6.3), the blank screen (7), the overview
 overview covers the window. The slides' existing ResizeObserver refits the slide at once. **No new `--vv-*` tokens:**
 while presenting the pane uses the show's palette (`#000`, `#111`, `#ddd`); windowed, the theme's `--vv-bg2`, `--vv-fg`,
 `--vv-border` and `--vv-meta`.
+
+**The presenter console** (`slides/console?`: the presenter view shown in a linked show's presenter window, in any phase
+of the link — while it opens, while it is live, and after the audience window closed). `.vv-content-wrap` gets
+`.vv-presenter-console` instead of `.vv-presenter-view`, and the same pane, told `console?`, covers the whole content
+area on the theme's `--vv-bg1`, as a grid — the strip across the top, then the notes beside the next slide:
+
+```css
+.vv-content-wrap.vv-presenter-console > .vv-presenter-pane { inset: 0; width: auto; border-left: 0; display: grid;
+  gap: 10px 18px; grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 360px);
+  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "notes next"; background: var(--vv-bg1); }
+```
+
+The notes are set at `clamp(16px, 1.6vw, 26px)`, and the next slide's box takes its column's width at the slide's own
+aspect ratio. The slides view stays mounted, full size and focused, under the opaque console: the pane borrows the
+engine's document (§6.3), the show goes on, and the slide keys need the focus in `.vv-content`. A click or the wheel
+lands on the console — a sibling of the content — so neither flips a slide, and a click leaves the focus on the
+document, even on notes long enough to scroll. A focus guard was planned for that case. Before adding it, the e2e was
+run without one, on the hypothesis that a click would focus a scrolling container with no focusable children
+(H-FOCUS). The keyboard stayed with the show, so the hypothesis was refuted and the guard was not added;
+`test/presenter-e2e.js` checks both clicks. The console is never chromeless, so it always wears the theme; it needs
+no new tokens.
 
 #### 6.3 Rendering the pane (P3)
 
@@ -599,12 +638,22 @@ is the same size as before), so the presenter view animates like the audience vi
 
 #### 6.4 Keys, Escape, focus, accessibility
 
-The presenter view is a layout, not a modal: Escape keeps its ADR-0045 chain and still ends the show. The pane is not
-focusable; a click on it leaves the focus on the document, so the slide keys keep working. The pane is an
-`<aside role="complementary" aria-label="Speaker notes and next slide">`; canvases are `aria-hidden` (the text layer
-carries the text); the next slide is `role="img"` with `aria-label="Next: slide 8 of 12"`; the counter is plain text.
+The presenter view is a layout, not a modal: Escape keeps its ADR-0045 chain and still ends the show — from the show's
+view (amended 2026-10-19, below). The pane is not focusable; a click on it leaves the focus on the document, so the
+slide keys keep working. The pane is an `<aside role="complementary" aria-label="Speaker notes and next slide">`;
+canvases are `aria-hidden` (the text layer carries the text); the next slide is `role="img"` with
+`aria-label="Next: slide 8 of 12"`; the counter is plain text.
 *Deferred with the timer (§6.5):* the timer is `role="timer" aria-live="off"`, with a visually hidden polite live region
 that speaks only when a threshold is crossed.
+
+**Escape where the show is not** (amended 2026-10-19). The resolver's context says whether a key came from the document
+(`:on-document?`: the focus on the document, not in a text field), and `:input/escape` passes it on. In a window that
+keeps its chrome — a linked show's presenter window — an Escape from the URI bar, the tree's filter or a bar cancels
+that control and leaves the show's steps alone: the overview, typed digits, the blank and the end. A window that hides
+its chrome has no chrome to be in, so there every Escape takes them as before, and the palette's Escape and a dispatched
+`:input/escape` carry no `:on-document?` and count as on the document. The last step, ending the show, is taken only in
+the show's view (`slides/show-view?`): on another tab, Escape leaves an away show running (§8.10), and *End Slide Show*
+ends it from anywhere.
 
 #### 6.5 The counter (P4), and the deferred timer
 
@@ -645,11 +694,13 @@ t_{\text{expected}} = D \cdot \frac{u + \tfrac{1}{2}}{e + 1},
 
 ### 7. `F` — this window's fullscreen (F1)
 
-`F` (Shift+f; *Fullscreen (this window)*, `:when :presenting?`) toggles the window's fullscreen through the existing
-`vv:set-fullscreen`, so `vinary.main.fullscreen/decide` still owns it: main leaves only a fullscreen it entered. It is
-needed on Wayland (§8.7), with one display, and when the `:slides-fullscreen?` preference is off.
+`F` (Shift+f; *Fullscreen (this window)*, `:when :show-here?` — amended 2026-10-19 from `:presenting?`, so that it
+does nothing on another tab while a linked show's presenter is away, §8.10) toggles the window's fullscreen through the
+existing `vv:set-fullscreen`, so `vinary.main.fullscreen/decide` still owns it: main leaves only a fullscreen it
+entered. The show records the request first, so leaving fullscreen by `F` keeps the show running. It is needed on
+Wayland (§8.7), with one display, and when the `:slides-fullscreen?` preference is off.
 
-### 8. Two linked windows (L1–L9)
+### 8. Two linked windows (L1–L10)
 
 #### 8.1 What the presenter does
 
@@ -661,15 +712,26 @@ as F5 does. Both the menu item and the palette row carry the tooltip *Speaker no
 one new optional field, `:tooltip`, on menu items and on commands, rendered as the row's `title`.
 
 The command is offered for every PDF view, not only for decks with notes. The counter and the next slide help without
-notes. And a deck without labels learns its notes only after its first paint (§2.4), so a command that appeared
-then would be a surprise. Chosen in window A, it starts the show from the current slide if none is running — **without**
-asking for fullscreen yet — switches A to the presenter view, and asks main for a linked show. Main opens window B, the
-audience window, from the warm pool when one is ready: B appears without taking the focus (`showInactive`), on another
-display when there is one, and goes fullscreen there when the platform lets main place it. From then on either window
-drives the show — keys, clicks, swipes, overview picks, typed numbers, links, find, blanking — and the other follows.
+notes. And a deck without labels learns its notes only after its first paint (§2.4), so a command that appeared then
+would be a surprise. Chosen in window A, it starts the show from the current slide if none is running — **without**
+asking for fullscreen, then or later — switches A to the presenter view, and asks main for a linked show. Main opens
+window B, the audience window, from the warm pool when one is ready: B appears without taking the focus
+(`showInactive`), on another display when there is one, and goes fullscreen there when the platform lets main place it.
+From then on either window drives the show — keys, clicks, swipes, overview picks, typed numbers, links, find,
+blanking — and the other follows.
 A window that follows a move shows it instantly; animating both windows alike is deferred with the timer (§6.5). `S` again while linked re-sends the state and raises B; nothing new opens. A window takes part
 in at most one linked show; joining an existing window is not offered, because the audience window's whole lifecycle
 (placement, fullscreen, closing) is main's, and an existing window's is the user's.
+
+**The presenter window keeps its chrome, and stays windowed** (amended 2026-10-19). The show runs in A too: its engine
+presents, so its moves are sent and its blank keys work. But only a window that is **chromeless** for the show — a
+one-window show's window, or B — hides its menus, tabs, sidebar and bars (`slides/chromeless?` drives
+`.vv-root.vv-presenting`, and with it the show's black backgrounds and the idle cursor). A asks for no fullscreen. `F`
+fullscreens it when the presenter wants, and when F11 or the window manager leaves that fullscreen, A keeps presenting
+(`fullscreen-changed-fx`). When A was already presenting fullscreen (F5), Shift+S leaves that fullscreen first: on one
+display it would cover B. Focusing A's chrome — the URI bar, the sidebar — no longer ends the show, and its Alt access
+keys work. During the show its View menu offers *End Slide Show* (Esc) and hides *Start Slide Show* and *Start from
+Current Slide*. Its presenter view is the presenter console (§6.1, §6.2).
 
 #### 8.2 Who owns what
 
@@ -685,8 +747,10 @@ and a move is a whole position, never a step, so "the last move wins" is well de
 | the end of the show | the jump history (a follower uses `[:show p]`), fullscreen, tabs, focus |
 | | transitions: a window animates only the flips it makes itself; a move it follows is shown at once (§8.1) |
 
-In the presenter view of a linked show, blanking shows a badge (*Audience: black*) instead of blacking the presenter's
-screen.
+In a linked show's presenter console, blanking never blacks the presenter's screen. The console's strip shows the
+audience's colour instead (*Audience: black*, `.vv-presenter-blank`, from `slides/audience-blank`), and the notes stay
+in view. It does so in every phase of the link: while it opens (the colour the audience window opens with), while it
+is live, and after the audience window closed (the colour Shift+S opens it with).
 
 #### 8.3 Channels
 
@@ -791,9 +855,10 @@ move `:start`.
 
 | Event | Detected by | Effect |
 |---|---|---|
-| Escape or *End Slide Show* in either window | `slides-stop-fx` → leave `"stopped"` | the other window gets `ended {stop: true}` and stops, leaving any fullscreen it asked for; main closes the audience window |
-| the presenter's view unmounts (tab switch or close, navigation, Reflow) | `slides-unmounted-fx` → leave `"unmounted"` | the same as stopped |
-| the audience's view unmounts | the same | the presenter gets `ended {stop: false, reason: "audience-left"}` and keeps presenting, with a notice; main closes the audience window, which existed only for the show |
+| Escape (in the show's view) or *End Slide Show* in either window | `slides-stop-fx` → leave `"stopped"` | the other window gets `ended {stop: true}` and stops, leaving any fullscreen it asked for; main closes the audience window |
+| the presenter's deck view unmounts while the show's tab stays open (another tab, another file in that tab, Reflow) | `slides-unmounted-fx` | the presenter is **away** (§8.10): nothing is sent, and the show goes on in the audience window |
+| the presenter's show tab closes, from any tab | `close-tab-result` → `slides-stop-fx` → leave `"unmounted"` | the audience gets `ended {stop: true, reason: "presenter-left"}` and stops; main closes the audience window |
+| the audience's view unmounts | `slides-unmounted-fx` → leave `"unmounted"` | the presenter gets `ended {stop: false, reason: "audience-left"}` and keeps presenting, with a notice — or, away from its deck, stops (§8.10); main closes the audience window, which existed only for the show |
 | a member window closes, reloads or crashes | `closed`, `did-start-navigation` (main frame), `render-process-gone` | as an unmount of that member's view; *Shift+S* links again |
 | the audience window's display is removed | `screen` `display-removed` | the session ends (`"display-removed"`) and the audience window closes, so the OS never moves a fullscreen projector window over the presenter |
 | a display is added, or its metrics change | each window's DPR watcher | nothing in main; link again to use a new display |
@@ -801,7 +866,7 @@ move `:start`.
 | the warm pool | — | standby windows never receive `vv:presenter-state` (members only) |
 | no window could be claimed, or a cold audience window closed or crashed before it loaded | the claim throws, or the window's `closed` / `render-process-gone` while it is still *unclaimed* (§8.8) | the presenter gets `ended {stop: false, reason: "no-window"}`; a crashed window still open is closed |
 
-The presenter's pane carries one line about the link (`slides-link/notice`; the audience window shows none — its
+The presenter's console carries one line about the link (`slides-link/notice`; the audience window shows none — its
 screen is the projector's). The first that applies is shown:
 
 | When | The line |
@@ -824,9 +889,10 @@ session — `startup/wayland-session?` with `VV_OZONE` not `x11` — where a cli
 un-maximizes the claimed window (a pool window may have been maximized by `window/remember!`), sets its bounds on the
 target display, and shows it inactive. The link's `fullscreen` is the presenter's `:slides-fullscreen?` preference
 **and** a separate display **and** placement supported; B then asks for its own fullscreen with the existing
-`vv:set-fullscreen`, owned by `decide`. A asks for its own fullscreen when the joined message says `display:
-"separate"`, so a presenter never covers the only display: with one display, B is the window to share in a call, and
-A's pane says so (*One display: share the audience window in a call.*). On
+`vv:set-fullscreen`, owned by `decide`. A never asks for its own (amended 2026-10-19; it used to when the joined
+message said `display: "separate"`): it keeps its chrome and stays windowed, and `F` fullscreens it when the presenter
+wants (§8.1). With one display, B is the window to share in a call, and A's console says so (*One display: share the
+audience window in a call.*). On
 Wayland, B opens where the compositor puts it (`display: "manual"`), and A's pane says: *Move the audience window to
 the other screen, then press Shift+F in it.* After B goes fullscreen, main re-focuses A (best effort — window managers
 differ; correctness never depends on the focus, since either window drives).
@@ -919,6 +985,57 @@ tables drawn at random on every call, so a hostile PDF has no keys to flood. The
 16 ms ([experiment 14](../scientific/14-note-signature-cost.md)). [The threat model](../security/threat-model.md)
 records the new boundary.
 
+#### 8.10 Away and back (L10)
+
+*Added 2026-10-19, the user's decision: switching tabs in the presenter window keeps the show running.* The presenter
+window is the user's own window, with its tabs and its chrome, so a presenter may look at another document in the
+middle of a talk. The audience window does not change: it keeps its slide, and its own keys still flip it.
+
+**Away.** The presenter's deck view unmounts — another tab chosen, another file opened in the deck's tab, Reflow on the
+deck — while the show's tab stays open and its link is `:opening` or `:live`. `slides-unmounted-fx` then makes the link
+**away** (`slides-link/away`: `:away? true`, and a push being shown is forgotten, `:applying nil`). It keeps the
+presentation and sends nothing. While away:
+
+- a push is only recorded: `show` sets `:known` and returns no `:show` — there is no engine to show it;
+- `outgoing` returns nil, so nothing the window does elsewhere is a move of the show;
+- no engine in front presents: the layout request's `:presenting?` is `slides/show-here?` — the show's view, and not
+  away — so neither another PDF nor another tab's copy of the deck becomes the show;
+- the show's own keys do nothing there — F5 again, Shift+S, `b` `.` `w` `,` and `F`, and their commands
+  (`:when :show-here?`); *End Slide Show* (the View menu, the palette) ends the show from anywhere;
+- Escape there cancels what it cancels on that tab, and leaves the show running (§6.4);
+- the presenter view is not shown (`presenter-shown?` requires the show's view), and the window keeps its chrome.
+
+**Back.** The deck mounts again in the show's view: its tab chosen again, Back in that tab, or Reflow off.
+`:pdf/deck-detected` then runs `slides-resume-fx`. `slides-link/resume` clears `:away?` and, when the link is live,
+sets `:applying` to the known page. The presentation's `:from` becomes the known page, and the blank colour the known
+one. The new engine starts presenting at that position, and its first report equals `:known`, so it sends nothing. The
+console returns with the audience's blank in its strip. The gap between the resume and the engine's first report is
+covered by the two rules that make the audience window's start one step
+([theory/11](../theory/11-linked-slide-show-protocol.md) §7): a push in that gap moves `:from` (R-from), and the blank
+survives the engine's first report (R-blank).
+
+**What ends an away show.**
+
+| Event | Effect |
+|---|---|
+| the show's tab closes, from any tab | `close-tab-result` stops the show (leave `"unmounted"`): both windows end, and main closes the audience window |
+| the audience ends the show (Escape there), or its window closes | the link's `ended` stops the show here too (`slides-link/on-ended`; `on-refused` likewise): a presenter away from its deck has no slide to keep presenting |
+| *End Slide Show* in the presenter window | the show ends, from any tab |
+
+**The unmount is one step.** The pdf view's unmount destroys the engine and then dispatches `:slides/unmounted` with
+`commands/dispatch-now!`, which processes it at once (a dispatch made inside an event falls back to the queue). Reagent
+unmounts a view while it renders on an animation frame, outside any event, so the synchronous path is taken. No message,
+key or report is processed between the engine's destruction and the window going away, so the code has the model's
+single `Unmount` step, and theory/11's proofs apply as stated (theory/11 §3.5, §7). No harness can place a push between
+the two steps deterministically, so this rule is argued rather than tested end to end.
+
+**Proof.** [theory/11](../theory/11-linked-slide-show-protocol.md) §3.5 adds `Unmount` and `Remount` to the protocol,
+and §5 extends its proofs to them. TLC checks three away configurations, and two negative controls each break the
+property their rule protects (theory/11 §6). In N-staleremount the engine reopens where it was, not at `:known`, and
+its first report echoes (NoEcho fails). In N-awaydrop an away link forgets what it is shown, and the windows do not
+converge. The randomized simulation drives the real `away` and `resume` with the same two controls
+(`vinary.app.slides-link-sim-test`).
+
 ---
 
 ## Consequences
@@ -930,9 +1047,12 @@ records the new boundary.
 - A `show notes` deck is presented without its note pages: they leave the slide sequence, the overview, the counter and
   typed numbers, and appear in the presenter view instead. A deck without page labels (a single XeLaTeX pass) gets the
   same once its background scan ends.
-- *Present in New Window* (Shift+S) puts the audience view on the other display and keeps the presenter view here;
-  either window drives the show, and Escape in either ends it. *Swap screens* fixes a wrong
-  guess of which display is the projector.
+- *Present in New Window* (Shift+S) puts the audience view on the other display and keeps the presenter console
+  here, in a window that keeps its chrome and stays windowed: the notes, large, and the next slide, small. Either
+  window drives the show, and Escape in either ends it. *Swap screens* fixes a wrong guess of which display is the
+  projector.
+- The presenter may switch tabs, or open another file, mid-talk: the show goes on in the audience window, and the notes
+  come back at the show's slide. Closing the deck's tab ends the show.
 - The first single-window show of a deck with notes says, once, how to see them.
 - `F` fullscreens the window it is pressed in.
 - Two ordinary windows no longer cancel each other's window.edn save.
@@ -941,6 +1061,12 @@ records the new boundary.
 
 - The pane is not searched by find, and a presenter view in a window shared on a call shows the notes (the audience
   view is one key away).
+- The presenter console shows no current slide. The presenter sees it on the audience window, or presses `s`, which
+  turns the console off and shows the presenting slides view beneath it. Find in the presenter window searches those
+  covered slides (find is rooted at `.vv-content`), so its matches are not seen there.
+- While away, the presenter window does not drive the show; the audience window does, until the deck is back in front.
+  F5, Shift+S, `b`, `w` and `F` do nothing on other tabs, while *End Slide Show* still ends the show.
+- In the presenter window, Escape from the URI bar or a filter no longer ends the show; Escape on the document does.
 - The skew between linked windows is about one animation frame (the report is coalesced) plus sub-millisecond IPC —
   invisible across two displays. A synchronous position hook would save that frame at the cost of a second position
   channel that must agree with the report; rejected.
@@ -994,15 +1120,32 @@ records the new boundary.
 
 **The presenter view.**
 - *A notes drawer over the slide*: covers the slide and cannot show rendered note regions.
-- *Swapping the slide for its notes in place*: both cannot be seen at once.
+- *Swapping the slide for its notes in place*: both cannot be seen at once. Adopted for a linked show's presenter
+  window (amended 2026-10-19): there the audience window shows the slide, so the presenter needs the notes and the next
+  slide rather than both — the presenter console.
 - *A second engine instance*: the engine registers process-global slots (`cache/set-slides!`, the ensurer).
 - *Rendering the whole presenter view from the borrowed document and hiding the engine*: renders everything twice, and
-  find and links would target a hidden view.
+  find and links would target a hidden view. The presenter console does cover the engine, but it keeps it presenting:
+  the show, its keys and its moves stay the engine's, and the console renders only the notes and the next slide.
 - *Cropping the engine's canvas, or rasterizing whole pages and cropping with CSS*: the engine rasterizes only the slide
   half; whole pages would double the audience canvas, change the fit, and render notes in the audience window for
   nothing.
 - *Downgrading `:push` to `:fade` in the presenter view*: the presenter would see a different animation from the
   audience.
+
+**The presenter window** (amended 2026-10-19, chosen with the user).
+- *Ending the show when the presenter switches tabs, as a one-window show does*: a glance at another document
+  mid-talk would end the audience's show. The show keeps running (§8.10).
+- *Fullscreen for the presenter window on a separate display*: it hid the chrome the presenter keeps for the rest of
+  their work, and with one display it covered the audience window. The presenter window stays windowed; `F` is one key
+  away.
+- *Keeping the current slide in the console*: the audience window already shows it, so the notes get the room.
+- *Unmounting the slides view under the console*: that ends the show (ADR-0045 §5), and the console borrows its
+  document.
+- *Stopping pushes to an away presenter at main*: the presenter must open at main's newest position when it returns;
+  a window that forgets them comes back to a slide the audience has left (control N-awaydrop, theory/11 §6.3).
+- *Reopening the engine where it was when it went*: its first report would send that stale page, an echo that takes
+  the audience back (control N-staleremount).
 
 **Linked windows.**
 - *BroadcastChannel or localStorage between renderers*: no total order across senders (windows diverge), no lifecycle,
@@ -1047,15 +1190,15 @@ records the new boundary.
 | A byte-cache version carries its sidecar read | unit: `vinary.renderer.pdf-cache-test` `the-sidecar-is-part-of-its-version` |
 | §3 in the engine: note pages marked and never drawn in the Slides layout, flips over them, the next slide kept rendered, typed numbers, the overview, find, a show started from a note page, `:off`, one XeLaTeX pass settled by the scan, the sidecar's hidden page | the `npm run test:electron` NOTE PAGES block, on the real LuaLaTeX, XeLaTeX and pdfpc fixtures. Seven mutants, each killed at the check named before its run: the note pages not hidden, note pages rasterized, no keep-set, no background settle, the sidecar dropped by the view, the note-page CSS removed, and no snap in `go-to-page!`. The last one paints the first frame of a show started from a note page on that page's blank slot, and `snap!`, at the end of the scroll, repairs it one frame later. Only a record taken at the end of each frame (a `ResizeObserver` callback, after layout, before paint) sees that frame: the show starts inside Reagent's own animation-frame callback (its `flushSync` commit), so an end-state check and a record taken in an animation-frame callback both missed it — both were tried first ([test strategy §3.5](../engineering/03-test-strategy.md#35-the-harnesses-that-run-the-real-main-process)). A double mutant, with no snap anywhere, is killed too |
 | The presenter view, the pane, instant flips while it is shown, find | `npm run test:electron` blocks |
-| The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages, a presenter leaving its deck and coming back; nine negative controls); unit tests of both pure models (`vinary.main.slides-link-test`, 20 tests; `vinary.app.slides-link-test`, 27); and `vinary.app.slides-link-sim-test`, a seeded randomized simulation that drives the real pure code of both windows and main: 2 200 runs over seven configurations (FIFO and reordering channels, windows snapping pages, deeper runs, random ones), each step checking P2, P4 and P6 and each quiescent state P1 and P3, with seven negative controls that each break the property their rule protects |
+| The protocol | [theory/11](../theory/11-linked-slide-show-protocol.md): proofs for any delivery order, and TLC (FIFO and reordering channels, two windows snapping pages, a presenter leaving its deck and coming back; nine negative controls); unit tests of both pure models (`vinary.main.slides-link-test`, 19 tests; `vinary.app.slides-link-test`, 27, the last of them a presenter leaving its deck and coming back); and `vinary.app.slides-link-sim-test`, a seeded randomized simulation that drives the real pure code of both windows and main: 3 100 runs over ten configurations (FIFO and reordering channels, windows snapping pages, a presenter leaving its deck and coming back — up to twice, with snaps too — deeper runs, random ones), each step checking P2, P4 and P6 and each quiescent state P1 and P3, with nine negative controls that each break the property their rule protects, among them N-staleremount (P2) and N-awaydrop (P1) |
 | Display choice, placement, the swap plan | unit: `vinary.main.displays-test` (10 tests: the display holding most of a window, the audience display, centred placement in the work area, the sessions that let main place windows, what the presenter is told, swapping screens, nothing to swap, where the audience window of a new show goes, and which removed display ends a show) |
-| The window side of a linked show: Shift+S, the joined message, the other window's moves, the end, the one outgoing interceptor, leaving, the audience joining and starting, Swap screens, the pane's line, `S` in every preset | unit: `vinary.app.slides-linked-test` (10 tests), over the real event handlers and the interceptor |
-| The real main: Shift+S opens a second window that paints and presents the deck while the notes stay in the first; a flip in either window moves the other; a blank in either is the other's, and Escape's first step clears it in both; Escape in either window ends both, and main closes the audience window; the audience window closed by hand leaves the presenter presenting, told why; Shift+S while linked opens nothing new; a show blanked before Shift+S stays blanked in both windows (R-blank, [theory/11](../theory/11-linked-slide-show-protocol.md) §7) | `npm run test:presenter-e2e` (`test/presenter-e2e.js`), twice: with the warm pool (the audience window is the pool window that was ready) and with `VV_POOL=0` (a cold window, joined once it has loaded). Xvfb gives Chromium one display, so the show is the one-display one (`display: "same"`). The blanked start fails only when the audience window's `:pdf/deck-detected` is processed before its engine's first report, an order that varies from run to run. With that order forced (a scratch build holding each mount's first report 50 ms), the build before the fix failed it in both modes (`null !== 'black'`) and the fixed build passed all seven steps; `vinary.app.slides-linked-test` gates R-blank and R-from deterministically |
+| The window side of a linked show: Shift+S, the joined message, the other window's moves, the end, the one outgoing interceptor, leaving, the audience joining and starting, Swap screens, the pane's line, `S` in every preset; the presenter window keeping its chrome and staying windowed, the console and the audience's blank in its strip, Escape off the document; away and back — an unmount that goes away or stops, closing the show's tab, the resume's `:from`, `:applying` and blank, and the show's effects doing nothing while away | unit: `vinary.app.slides-linked-test` (16 tests), over the real event handlers and the interceptor; `vinary.app.slides-test` (the layout request presents only in the show's view, its presenter not away); `vinary.ui.slides-entry-test` (the View menu's *End Slide Show*) |
+| The real main: Shift+S opens a second window that paints and presents the deck while the notes stay in the first; a flip in either window moves the other; a blank in either is the other's, and Escape's first step clears it in both; Escape in either window ends both, and main closes the audience window; the audience window closed by hand leaves the presenter presenting, told why; Shift+S while linked opens nothing new; a show blanked before Shift+S stays blanked in both windows (R-blank, [theory/11](../theory/11-linked-slide-show-protocol.md) §7); the presenter window keeps its chrome, stays windowed and shows the console — the next slide at 0.214 of the content width, the notes at 0.740, no current slide, the audience's blank in its strip; a click on the console, even on scrolling notes, leaves the keyboard with the show; Escape in the URI bar leaves the show and the blank alone; no linked show shows the speaker-notes hint, in either window (H-HINT); away and back — a new tab, another deck opened there that does not present, the audience flipping and blanking meanwhile, `b` and Escape on the other deck changing nothing, the return resuming at the audience's slide and blank with no move sent, Space then unblanking both and flipping both, a navigation in the deck's tab to another deck that does not present and Back, and closing the deck's tab from another tab ending both | `npm run test:presenter-e2e` (`test/presenter-e2e.js`), twice: with the warm pool (the audience window is the pool window that was ready) and with `VV_POOL=0` (a cold window, joined once it has loaded). Xvfb gives Chromium one display, so the show is the one-display one (`display: "same"`). The blanked start fails only when the audience window's `:pdf/deck-detected` is processed before its engine's first report, an order that varies from run to run. With that order forced (a scratch build holding each mount's first report 50 ms), the build before the fix failed it in both modes (`null !== 'black'`) and the fixed build passed all seven steps the harness then had; `vinary.app.slides-linked-test` gates R-blank and R-from deterministically. Negative controls for the amendment, each failing at the step named before its run: the code before the console (at the console's next slide); an audience blank that needs a live link (at the strip after the audience window closed); the code before the hint fix (at the audience window's hint); the code before away and back (at the first departure: the show stopped); and a resume that does not set `:from` (at the return: page 0 instead of 2) |
 | Swap screens in the shell: leave, move, enter again, then one report per window with its fullscreen and owner back; a window the window manager will not make fullscreen again; a window closed part-way | unit: `vinary.main.fullscreen-test`, on fake windows — no display server the tests can run gives Chromium two displays (Xvfb reports one, with RandR monitors added by `xrandr --setmonitor` and with two screens joined by Xinerama; probed 2026-10-19). A mutant without `wire!`'s swapping guard fails both tests |
 | A remote deck in a linked show (§8.8): the audience window's open of an `ssh://` deck the presenter retains costs at most one more read; flips from either window; a change on the server is one read, shown in both on the same slide; Escape ends both | `test/remote-pdf-e2e.js` arm H: the real main, a real SFTP server and a cold audience window, with the fixture's byte and OPEN counters |
 | SSH prompts of an audience window go to its presenter | unit: `vinary.main.windows-test` `prompts-follow-the-redirect-to-a-live-window` |
 | window.edn: per-window saves, an audience window never saved | unit: `vinary.main.window-test` (`a-second-window-does-not-cancel-the-first-windows-save`, `an-ephemeral-window-is-never-saved-and-close-flushes`, `persistable-bounds-skips-an-ephemeral-window`) |
-| The hint: when it shows, once per installation | unit: `vinary.app.slides-presenter-test` (`the-notes-hint-is-due`, `the-notes-hint-shows-once`, `the-notes-hint-goes`); and the `npm run test:electron` PRESENTER VIEW block, step 2: the first show of a deck with notes names `s` in a `role="status"` hint, `settings.edn` remembers it, the next key dismisses it and still does its work, no frame of a second show has it, and its own timeout and a typed digit dismiss it too |
+| The hint: when it shows, once per installation | unit: `vinary.app.slides-presenter-test` (`the-notes-hint-is-due`, `the-notes-hint-shows-once`, `the-notes-hint-goes`); and the `npm run test:electron` PRESENTER VIEW block, step 2: the first show of a deck with notes names `s`, and Shift+S, in a `role="status"` hint, `settings.edn` remembers it, the next key dismisses it and still does its work, no frame of a second show has it, and its own timeout and a typed digit dismiss it too. The chip before its second half (Shift+S) fails this step, at the hint's text (2026-10-19) |
 
 ## References
 

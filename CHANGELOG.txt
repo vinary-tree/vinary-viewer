@@ -44,8 +44,9 @@ Added
       second-screen deck, and its text notes: pdfpc notes, as Markdown through
       the document sanitizer unless the deck turns Markdown off, and a PDF
       reader's sticky notes as plain text. Every slide key still works and flips
-      stay instant; s again goes back. The first show of a deck with notes
-      names the key in a hint, once per installation.
+      stay instant; s again goes back. The first show of a deck with notes in
+      one window names s -- and Shift+S, which presents in a new window -- in a
+      hint, once per installation.
     - F (Shift+f) during a slide show turns this window's fullscreen on or
       off, and the show keeps running either way: for one display, on
       Wayland, or with Preferences > Slides > Present full screen off. Only a
@@ -53,18 +54,28 @@ Added
     - Present in New Window (Shift+S; the View menu, after Start from Current
       Slide; the palette) puts a deck's speaker notes in one window and its
       slides in another (ADR-0048 §8). The window you are in starts the show
-      from its current slide and shows the speaker notes; a second window, the
-      audience window, opens with the slides without taking the focus -- on
-      another display, fullscreen, when there is one (on Wayland, move it there
-      and press Shift+F in it). Either window drives: a flip, a typed number,
-      an overview pick, a link or a blank (b / w) in one is shown at once in
-      the other, and Escape in either ends the show in both and closes the
-      audience window. Closing the audience window leaves the notes window
-      presenting; Shift+S opens it again. With two displays, Swap screens (in
-      the notes pane and the palette) moves each window to the other's display,
-      keeping each one's fullscreen. While the notes are shown, a blank shows an
-      "Audience: black" badge instead of blacking them, and SSH prompts for the
-      audience window appear in the notes window, never on the projector.
+      from its current slide and becomes the presenter console: the notes fill
+      it, the next slide is small in a narrow column on the right, and one line
+      on top holds the counter, the overlay and the link's status -- no current
+      slide, since the audience window shows it. That window keeps its menus,
+      tabs, sidebar and bars and stays windowed (F fullscreens it when you
+      want). A second window, the audience window, opens with the slides
+      without taking the focus -- on another display, fullscreen, when there is
+      one (on Wayland, move it there and press Shift+F in it). Either window
+      drives: a flip, a typed number, an overview pick, a link or a blank
+      (b / w) in one is shown at once in the other, and Escape on the deck in
+      either ends the show in both and closes the audience window; End Slide
+      Show is also in the presenter window's View menu. You can switch tabs or
+      open another file in the presenter window mid-talk: the show goes on in
+      the audience window, whose keys still drive it, and coming back to the
+      deck brings the notes back at the slide the audience is on, with its
+      blank. Closing the deck's tab ends the show. Closing the audience window
+      leaves the presenter presenting; Shift+S opens it again. With two
+      displays, Swap screens (in the console and the palette) moves each window
+      to the other's display, keeping each one's fullscreen. A blank never
+      blacks the console -- its top line says "Audience: black" -- and SSH
+      prompts for the audience window appear in the presenter window, never on
+      the projector.
     - vv --cli --deck-info talk.pdf prints, as one JSON line per PDF, why the
       viewer does or does not treat it as a slide deck: the evidence it reads
       (Creator / Producer, page mode, page sizes, how many page labels) and the
@@ -622,6 +633,22 @@ Changed
       concepts in both colour legends; the IR orange was a local !define in one diagram.
 
 Fixed
+    - A release build (npm run release) no longer warns "Malformed Regular
+      Expression" about the presenter view's check for web and mail links in
+      speaker notes. The check was written with an inline case-insensitive
+      group, (?i:...), which ClojureScript's release compiler rejects; it now
+      uses a leading (?i), which becomes the JavaScript i flag. A lint check now
+      rejects an inline flag group in any regex under src/vinary.
+    - A linked show's audience window no longer shows the speaker-notes hint.
+      A text note found on one of its pages asked for the hint again after the
+      show had started without it, so the hint appeared on the projector, and
+      the once-per-installation hint was spent there.
+    - A linked show's audience window now starts at the presenter's newest
+      slide, and a show blanked before Shift+S stays blanked in both windows.
+      A flip arriving while the audience window's deck was still opening could
+      be overwritten by the slide it opened at, and its first report then sent
+      that slide back, undoing the move; the window's first report could also
+      unblank both windows.
     - A crafted PDF can no longer freeze a window for seconds while the viewer
       looks for Beamer's note pages. One comparison of two pages' text could
       take 2.58 s, and a deck makes up to 2 003 of them; the fix's first two

@@ -134,7 +134,7 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:presenter-open` | `presenterOpen(req)` | `{path, page, blank, fullscreen}` | `presenter` | A linked slide show (ADR-0048 §8.1): this window asks main for an audience window showing its deck at `page`. Accepted only from an app window's own main webContents that is focused, retains `path` (`service/window-retains?`) and is in no other show; main claims a window (the warm pool first), places it on another display when there is one, shows it without the focus and answers on `vv:presenter-state` (joined, or refused). Again from the presenter of a live show: main re-sends joined and raises the audience window. |
 | `vv:presenter-move` | `presenterMove(move)` | `{session, mid, page, blank}` | `presenter` | This window moved (`page` a page index in $`[0, 10^6)`$, `blank` null / `"black"` / `"white"`, `mid` a positive integer): main numbers a newer `mid` (`seq + 1`), acks it to the sender and pushes it to the other member; an older `mid` is acked as not accepted; a malformed move or one from a non-member is dropped (`vinary.main.slides-link/move`, theory/11 §3.1). |
 | `vv:presenter-ready` | `presenterReady(req)` | `{session}` | `presenter` | The audience window's deck shows: main tells the presenter `{peer: "live"}`. Moves nothing (theory/11 §3.4). |
-| `vv:presenter-leave` | `presenterLeave(req)` | `{session, reason: "stopped" \| "unmounted"}` | `presenter` | This window leaves its show — Escape or End Slide Show, or its deck view went away. Main tells the other member (`ended`) and closes the audience window (ADR-0048 §8.6). |
+| `vv:presenter-leave` | `presenterLeave(req)` | `{session, reason: "stopped" \| "unmounted"}` | `presenter` | This window leaves its show — Escape or End Slide Show, or its deck view went for good: the audience window's view, or the presenter's show tab closed. A presenter whose deck view only unmounts while that tab stays open is away and does not leave (ADR-0048 §8.10). Main tells the other member (`ended`) and closes the audience window (ADR-0048 §8.6). |
 | `vv:presenter-swap` | `presenterSwap(req)` | `{session}` | `presenter` | Swap screens (ADR-0048 §8.7): accepted from a focused member of a live show placed on separate displays, one swap at a time; main leaves fullscreen, exchanges the two windows' displays, restores each window's fullscreen and ownership, and answers `swapped`. |
 
 ### 1.8 Retired native-PDF seam
@@ -306,5 +306,5 @@ The renderer does not receive direct access to `fs`, arbitrary file reads,
 `ipcRenderer`, `child_process`, or Node `require`. SSH/password secrets stay
 main-side by construction (`vv:ssh-prompt-reply` is the sole secret-bearing
 renderer→main channel, and it is one-shot and never persisted). See
-[architecture/03-ipc-protocol.md §8](../architecture/03-ipc-protocol.md#8-what-is-intentionally-not-exposed)
+[architecture/03-ipc-protocol.md §5](../architecture/03-ipc-protocol.md#5-security-posture)
 and [security/threat-model.md](../security/threat-model.md).

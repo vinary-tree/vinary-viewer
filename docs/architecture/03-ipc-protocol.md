@@ -163,7 +163,7 @@ Preferences font field — and a window claimed from the pool shows the current 
 | `vv:presenter-open` | `presenterOpen(p)` | `{path, page, blank, fullscreen}` | `vinary.main.presenter` | *Present in New Window* ([ADR-0048 §8](../design-decisions/0048-speaker-notes-and-linked-presenter-windows.md)): ask for a linked show of a deck this window shows. Accepted only from an app window's own main frame, focused, in no other show, retaining `path`; main claims the audience window and answers on `vv:presenter-state` (joined, or refused). |
 | `vv:presenter-move` | `presenterMove(p)` | `{session, mid, page, blank}` | `vinary.main.presenter` | A member's local change, sent by the `slides-link-out` interceptor; main orders it (`seq`), acks the sender and pushes it to the other member. |
 | `vv:presenter-ready` | `presenterReady(p)` | `{session}` | `vinary.main.presenter` | The audience window's deck is showing; main tells the presenter `{peer: "live"}`. Moves nothing. |
-| `vv:presenter-leave` | `presenterLeave(p)` | `{session, reason}` | `vinary.main.presenter` | The member's show stopped (`"stopped"`) or its view unmounted (`"unmounted"`); main tells the other member and closes the audience window. |
+| `vv:presenter-leave` | `presenterLeave(p)` | `{session, reason}` | `vinary.main.presenter` | The member's show stopped (`"stopped"`) or its deck view went for good (`"unmounted"`: the audience's view, or the presenter's show tab closed — a presenter whose deck view only unmounts while that tab stays open is away and sends nothing, ADR-0048 §8.10); main tells the other member and closes the audience window. |
 | `vv:presenter-swap` | `presenterSwap(p)` | `{session}` | `vinary.main.presenter` | Swap screens: from a focused member of a live show on separate displays; main moves each window to the other's display, keeping each one's fullscreen. |
 
 > **Retired PDF shims.** `pdfShow` / `pdfHide` / `pdfBounds` (channels `vv:pdf-show`,
@@ -417,7 +417,7 @@ it — `vv` spawns one on demand, so it usually belongs to no service manager. `
 mtime of `dist/main/main.js` *as loaded at boot*) is what lets `install.sh` verify that a re-install
 actually landed on the new build, and lets `vv` retire a stale **idle** daemon; `windows` (the live
 registry, never the warm pool) is what stops it retiring one mid-session. See
-[`usage/02-installation-and-build.md`](../usage/02-installation-and-build.md#the-resident-daemon-and-staleness).
+[`usage/02-installation-and-build.md`](../usage/02-installation-and-build.md#12-the-resident-daemon-and-staleness).
 `test/daemon-smoke.js` covers the whole seam, including the legacy-inertness contract.
 
 ---

@@ -258,6 +258,14 @@ npm run test:tree-e2e     # compile main+renderer, then run the real app through
 > screens joined by Xinerama (probed 2026-10-19). So the harness covers the one-display show (`display: "same"`), and
 > Swap screens' choreography is unit-tested on fake windows (`vinary.main.fullscreen-test`), its plan by
 > `vinary.main.displays-test`.
+>
+> Three traps it hit, each a harness error that a run exposed (2026-10-19). **A probe that reads app-db and the
+> DOM in one evaluation can land between the two:** app-db changes in an event, but Reagent renders on the next
+> animation frame. So a wait names the DOM field that renders with the change it waits for — the ended link's
+> notice, not only its phase. **A blanked show's first slide step only unblanks** (`slides-command-fx`, ADR-0045
+> §5), so a step after a blank expects the blank to clear before any flip. **`window.__vvopen` is `:doc/open`,
+> which focuses a tab that already shows the document**, so a harness that means "navigate this tab" opens a
+> document no tab holds; otherwise it switches tabs, and Back then walks the other tab's history.
 
 > **Note on `test/test-sidebar.js`.** This is the legacy v0.1.0 vmd-patch sidebar
 > harness. It is parse-checked by [`test/lint.js`](../../test/lint.js) but is not
