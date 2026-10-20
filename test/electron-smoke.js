@@ -3204,8 +3204,8 @@ async function main() {
     await waitCalm(win, `Boolean((window.__vvdb().ui.presentation || {})['active?'])`, 'F5 starts the show', 8000);
     await noPane('the show starts in the audience view, though the window showed the pane');
     await waitCalm(win, `(() => { const h = document.querySelector('.vv-slides-notes-hint');
-      return Boolean(h) && h.getAttribute('role') === 'status' && h.textContent === 'Speaker notes: s shows them here'; })()`,
-      'the first show of a deck with notes says how to see them', 4000);
+      return Boolean(h) && h.getAttribute('role') === 'status' && h.textContent === 'Speaker notes: s shows them here · Shift+S presents in a new window'; })()`,
+      'the first show of a deck with notes says how to see them, here and in a new window', 4000);
     await waitCalm(win, `window.__vvdb().ui.settings['slides-notes-hinted?'] === true`, '…and remembers that it did (settings.edn)', 4000);
     await sendChord(win, 'Right');
     await waitCalm(win, `!document.querySelector('.vv-slides-notes-hint')`, 'the next key dismisses the hint', 4000);

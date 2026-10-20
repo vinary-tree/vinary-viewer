@@ -17,8 +17,9 @@
      "Go to " [:b typed] [:span.vv-slides-goto-hint "Enter ⏎"]]))
 
 (defn- hint-chip
-  "The hint itself, mounted while it is shown: the next key or click anywhere dismisses it (captured, never consumed —
-   the key still does what it does), as the 6 s timer does (:slides/notes-hint-dismiss)."
+  "The hint itself, mounted while it is shown. It names both ways to the notes — `s` in this window, Shift+S in a new
+   one — and the next key or click anywhere dismisses it (captured, never consumed — the key still does what it does),
+   as the 6 s timer does (:slides/notes-hint-dismiss)."
   []
   (let [dismiss! (fn [_] (rf/dispatch [:slides/notes-hint-dismiss]))]
     (r/create-class
@@ -33,8 +34,9 @@
         (.removeEventListener js/window "pointerdown" dismiss! true))
       :reagent-render
       (fn []
+        ;; both ways to the notes, as ADR-0048 P5 decided: here (s), or in a window of their own (Shift+S)
         [:div.vv-slides-notes-hint {:role "status" :aria-live "polite"}
-         "Speaker notes: " [:b "s"] " shows them here"])})))
+         "Speaker notes: " [:b "s"] " shows them here · " [:b "Shift+S"] " presents in a new window"])})))
 
 (defn notes-hint
   "The speaker-notes hint while a show that hides the deck's notes has just started (ADR-0048 §6.1, P5), else nothing."
