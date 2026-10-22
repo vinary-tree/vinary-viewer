@@ -45,6 +45,7 @@
             [vinary.ui.slides-bar :as slides-bar]
             [vinary.ui.slides-overview :as slides-overview]
             [vinary.ui.slides-presenter :as slides-presenter]
+            [vinary.ui.preview-strip :as preview-strip]
             [vinary.ui.keybindings-editor :as kbedit]
             [vinary.renderer.toc :as toc]
             [vinary.stream.flag :as stream-flag]
@@ -1953,12 +1954,13 @@
      ;; content + its top-right floating find bar share a positioning context that starts BELOW the chrome,
      ;; so the find bar floats over the document (not over the tab strip / address bar)
      ;; .vv-presenter-view: the noted slide and notes share one centered stage (ADR-0048 §6);
-     ;; .vv-presenter-console: in a linked show's presenter window the pane takes all of it — a left strip of slide
-     ;; previews and notes on the right, over the still-mounted slides view
-     [:div.vv-content-wrap {:class (cond @(rf/subscribe [:slides/console?])         "vv-presenter-console"
+     ;; .vv-presenter-console: in a linked show's presenter window the pane takes all of it — notes on the left
+     ;; and the scrollable Preview Strip on the right, over the still-mounted slides view
+     [:div.vv-reader-area
+      [:div.vv-content-wrap {:class (cond @(rf/subscribe [:slides/console?])         "vv-presenter-console"
                                          @(rf/subscribe [:slides/presenter-shown?]) "vv-presenter-view")}
       [content-view]
-      ;; the presenter view's pane — notes, and linked-console slide previews — in a fixed slot right after the content
+      ;; the presenter view's pane — notes, and linked-console slide previews — in a fixed slot after the content
       ;; view, so showing or hiding it never remounts the slides view (that would end a show)
       [slides-presenter/pane]
       ;; the non-fatal live-refresh banner (the last good version stays on screen beneath it)
@@ -1971,6 +1973,7 @@
       ;; the hover-URL status bar lives INSIDE this wrap, so its bottom:0 floats above the zoom bar (the
       ;; wrap ends above the bar) instead of overlapping it
       [status-bar]]
+      [preview-strip/panel]]
      ;; [mode-line] removed per user — the Vim NORMAL/VISUAL badge floated over the zoom bar and serves no
      ;; functional purpose here (the resolver's modal state is unaffected; only the visual badge is gone)
      [zoombar/zoombar]]]

@@ -3900,6 +3900,11 @@ async function main() {
   assert.strictEqual(await dispatchWindowKey(win, 'c', { ctrlKey: true }), true, 'Ctrl+C must be handled for preview selections');
   await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
   console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
+  await waitFor(() => evalIn(win, `(() => { const rail = document.querySelector('.vv-preview-rail');
+    const map = rail?.querySelector('.vv-preview-minimap-canvas');
+    const content = document.querySelector('.vv-content-wrap');
+    return Boolean(rail && map && map.width > 0 && rail.getBoundingClientRect().left >= content.getBoundingClientRect().right - 2);
+  })()`), 'Markdown has a right-side visual Preview Strip');
 
   // The common IR is the UNCONDITIONAL render path (ADR-0017): the Markdown assertions above (H1, MathJax SVG,
   // Mermaid SVG, badge layout, preview copy) already flow through render-ir, so they ARE the end-to-end
@@ -4938,14 +4943,15 @@ async function main() {
     await waitFor(() => evalIn(win, unifiedShowing),
       'narrowing returns the unchosen diff to Unified', 10000);
 
-    // 4 — the sidebar straddle: at 1120px the sidebar toggle alone crosses the threshold
-    win.setContentSize(1120, 700);
+    // 4 — the sidebar straddle: the right Preview Strip also consumes width.
+    // At 1300px the sidebar toggle alone crosses the threshold.
+    win.setContentSize(1300, 700);
     await waitFor(() => evalIn(win, unifiedShowing),
-      'sidebar visible at 1120px (content ≈840) → Unified', 10000);
-    await sendChord(win, 'B', ['control']);   // collapse to the rail → content ≈1084 → wide
+      'sidebar visible at 1300px → Unified', 10000);
+    await sendChord(win, 'B', ['control']);   // collapse to the rail → wide
     await waitFor(() => evalIn(win, splitShowing),
       'collapsing the sidebar crosses into wide → Split', 10000);
-    await sendChord(win, 'B', ['control']);   // expand again → ≈840 → narrow
+    await sendChord(win, 'B', ['control']);   // expand again → narrow
     await waitFor(() => evalIn(win, unifiedShowing),
       'restoring the sidebar returns Unified', 10000);
 
@@ -5091,6 +5097,12 @@ async function main() {
   await waitFor(() => state.httpShow && state.httpShow.bounds && state.httpShow.bounds.width > 100,
     'web view show + bounds sent');
   await waitFor(() => state.httpVisible === true, 'web view initially shown');
+  win.webContents.send('vv:web-minimap', { url: 'http://127.0.0.1:9/smoke', total: 4000, viewport: 500,
+    scroll: 1000, blocks: [{ top: 300, height: 40, width: 0.6, tag: 'P' }] });
+  await waitFor(() => evalIn(win, `(() => { const map = document.querySelector('.vv-preview-minimap-canvas');
+    const marker = document.querySelector('.vv-preview-viewport');
+    return Boolean(map && map.width > 0 && marker && parseFloat(marker.style.top) > 0);
+  })()`), 'HTTP page Preview Strip receives bounded web geometry and viewport');
   // simulate main's proactive snapshot push so web-host has a pre-cached image (the instant-freeze path)
   win.webContents.send('vv:http-snapshot-ready', state.snapshotDataUrl);
   await delay(60);
@@ -5867,6 +5879,8 @@ async function main() {
     'large streamed Markdown switches to its source editor', 20000);
   assert.strictEqual(await evalIn(win, `document.querySelector('.vv-content .cm-line')?.textContent || ''`), '# Big Markdown Document',
     'Source displays the Markdown text rather than leaving the streamed Preview mounted');
+  await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-preview-minimap-canvas'))`),
+    'Source uses the Preview Strip minimap');
   await evalIn(win, `(() => { const b=[...document.querySelectorAll('.vv-combo-group .vv-combo-main, .vv-combo-group .vv-combo-plain')]
     .find(x => x.textContent.trim() === 'Preview'); if (b) b.click(); return Boolean(b); })()`);
   await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-stream-progress'))`),
@@ -6743,7 +6757,7 @@ const hardTimeout = setTimeout(() => {
   cleanupTempDirs();
   console.error('Electron smoke test timed out');
   app.exit(1);
-}, 240000);   // headroom for the document-streaming sections (a >5 MiB log + a >256 KiB markdown parity render)
+}, 420000);   // headroom for the document-streaming sections and Preview Strip maps across the full format matrix
 
 main()
   .then(() => {

@@ -60,7 +60,7 @@ stable actions available across the current UI include:
 | Action | Typical binding |
 |--------|-----------------|
 | Find | `Ctrl+F` in Standard; `/` in Vim normal mode. |
-| History back/forward | `Alt+Left` / `Alt+Right`, toolbar buttons, and mouse thumb buttons. **Keymap-independent** — bound in the `:all` block of every keymap (Standard, Vim, Emacs), so they work in any mode. |
+| History back/forward | `Alt+Left` / `Alt+Right`, toolbar buttons, and mouse thumb buttons outside the slides layout. **Keymap-independent** — bound in the `:all` block of every keymap (Standard, Vim, Emacs), so they work in any mode. |
 | Parent directory | `Alt+Up` (`:nav/parent`); Vim `K`. Navigate the active tab to the current path's parent folder. Alt key is keymap-independent. |
 | Open highlighted entry | `Alt+Down` (`:nav/open-target`); Vim `J`. Open the highlighted child of the active directory listing. Alt key is keymap-independent. |
 | Switch tabs | `Ctrl+PageUp` (previous/left) / `Ctrl+PageDown` (next/right), wrapping at the ends — **keymap-independent** (in the `:all` block of every keymap). Vim also has `g t` / `g T`; Emacs also `M-f` / `M-b`. A blank tab restores, focuses, and selects its unfinished URI; a document tab focuses its body. All backed by `:tab/next` / `:tab/prev`. |
@@ -96,6 +96,12 @@ toward an *accumulating* target, so a held key scrolls continuously and smoothly
 page/half-page commands. Implemented in `vinary.input.fx` (`:dom/scroll`); the
 bare-arrow / page-key capture handler is `vinary.renderer.core/key-scroll!`.
 
+**Preview Strip.** The right side of the reader shows a Preview Strip by default. PDF pages and
+slides have selectable thumbnails; other documents have a visual map with an outlined viewport.
+Scroll the strip to browse it independently, or click and drag its map to move through the
+document. The active page or viewport is brought back into view when the document position
+changes. Use View ▸ Show Preview Strip or its edge button to collapse or reopen it.
+
 ### Slides (a PDF in the slides layout)
 
 When a PDF shows one slide per screen (a detected slide deck, or View ▸ View as Slide Show — ADR-0045), the
@@ -104,8 +110,8 @@ the slide show, in every keymap set.
 
 | Keys | Slides action |
 |------|---------------|
-| `→` `↓` `PgDn`, Vim `j` `l` `Ctrl+D` `Ctrl+F`, Emacs `C-v` `C-n`, `Space`, the mouse wheel, a leftward touch / pen swipe | next slide (one overlay page) |
-| `←` `↑` `PgUp`, Vim `k` `h` `Ctrl+U` `Ctrl+B`, Emacs `M-v` `C-p`, `Shift+Space`, `Backspace`, a rightward swipe | previous slide |
+| `→` `↓` `PgDn`, Vim `j` `l` `Ctrl+D` `Ctrl+F`, Emacs `C-v` `C-n`, `Space`, `n` (Standard/Emacs), mouse Forward, the wheel, a leftward touch / pen swipe | next slide (one overlay page) |
+| `←` `↑` `PgUp`, Vim `k` `h` `Ctrl+U` `Ctrl+B`, Emacs `M-v` `C-p`, `Shift+Space`, `Backspace`, `p`, mouse Back, a rightward swipe | previous slide |
 | `Shift+→` `Shift+↓` `Shift+PgDn` | next **frame** — skips the rest of this Beamer slide's overlays |
 | `Shift+←` `Shift+↑` `Shift+PgUp` | previous frame, shown fully built |
 | `Home` / `End`, Vim `g g` / `G` | first / last slide |

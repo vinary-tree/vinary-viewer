@@ -370,10 +370,19 @@
                        (js/Promise.resolve nil))))))
     (.on ipcMain "vv:http-toc-goto"
          (fn [_e ^js id] (when-let [^js v (:view @state)] (.send (.-webContents v) "vv:web-scroll-to" id))))
+    (.on ipcMain "vv:http-scroll-fraction"
+         (fn [e ^js fraction]
+           (when (identical? (.-sender e) (app-wc))
+             (when-let [^js v (:view @state)]
+               (.send (.-webContents v) "vv:web-scroll-fraction" fraction)))))
     ;; ---- web view (its preload) → app renderer (relayed) ----
     (.on ipcMain "vv:web-toc"
          (fn [_e ^js headings] (when-let [^js awc (app-wc)] (.send awc "vv:web-toc" headings))))
     (.on ipcMain "vv:web-active-heading"
          (fn [_e ^js id]
            (when-let [^js awc (app-wc)] (.send awc "vv:web-active-heading" id))
-           (capture-soon!)))))   ; page scrolled → refresh the frozen-page snapshot
+           (capture-soon!)))   ; page scrolled → refresh the frozen-page snapshot
+    (.on ipcMain "vv:web-minimap"
+         (fn [e ^js report]
+           (when (identical? (.-sender e) (active-webcontents))
+             (when-let [^js awc (app-wc)] (.send awc "vv:web-minimap" report)))))))

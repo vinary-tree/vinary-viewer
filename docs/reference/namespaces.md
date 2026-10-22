@@ -251,7 +251,8 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.refresh-note` | The non-fatal live-refresh banner (ADR-0045 / ADR-0046): the last good version stays on screen; Retry / dismiss. |
 | `vinary.ui.slides-hud` | What floats over the slides layout in `.vv-content-wrap`: the "Go to 12" chip while a slide number is typed, the speaker-notes hint, and the black / white screen of a running show — never over a presenter console, whose strip shows the audience's blank instead. |
 | `vinary.ui.slides-presenter` | Joined slide-and-notes display for noted steps, with the live slide renderer retained; a linked show's presenter console uses the reusable vertical strip beside notes. |
-| `vinary.ui.vertical-strip` | Reusable, bounded vertical preview strip with responsive sizing, current-item tracking, and clipped previews of items beyond the visible range. |
+| `vinary.ui.preview-strip` | Right-side Preview Strip with selectable PDF/slide pages and bounded visual minimaps for continuous documents and web pages. |
+| `vinary.ui.vertical-strip` | Reusable, scrollable and virtualized vertical preview strip with responsive sizing, selectable items, and current-item reveal. |
 | `vinary.ui.slides-overview` | The slide overview grid (ADR-0045): a focused `[data-vv-keynav]` overlay of one tile per frame — grid keys, label digits, Enter / Shift+Enter, click — drawn by `vinary.renderer.pdf-thumbs` from the mounted view's borrowed document; tiles take the shape of the page as SHOWN (a second-screen deck's slide half — the snapshot's `:side`). |
 
 ---

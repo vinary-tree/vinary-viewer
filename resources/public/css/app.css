@@ -55,6 +55,23 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 /* the content region below the tab strip + address bar; positioning context for the floating find bar */
 .vv-content-wrap { position: relative; flex: 1 1 auto; display: flex; flex-direction: column;
   min-height: 0; min-width: 0; }
+.vv-reader-area { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; }
+.vv-preview-rail { width: clamp(140px, 17vw, 230px); flex: 0 0 auto; display: flex; flex-direction: column;
+  min-height: 0; min-width: 0; border-left: 1px solid var(--vv-border); background: var(--vv-bg1); }
+.vv-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  min-height: 28px; padding: 2px 4px 2px 9px; font-size: 12px; color: var(--vv-fg-dim); }
+.vv-preview-collapse { border: 0; background: transparent; color: var(--vv-fg); cursor: pointer; }
+.vv-preview-reopen { flex: 0 0 14px; width: 14px; border: 0; border-left: 1px solid var(--vv-border);
+  padding: 0; background: var(--vv-bg1); color: var(--vv-fg-dim); cursor: pointer; }
+.vv-preview-rail .vv-vertical-strip, .vv-preview-minimap { flex: 1 1 auto; min-height: 0; }
+.vv-preview-minimap { overflow: auto; position: relative; scrollbar-width: thin; }
+.vv-preview-minimap-track { position: relative; width: 100%; cursor: crosshair; }
+.vv-preview-minimap-canvas { display: block; width: 100%; }
+.vv-preview-viewport { position: absolute; left: 0; right: 0; box-sizing: border-box;
+  background: rgba(130, 160, 220, 0.17); border: 1px solid var(--vv-head1); pointer-events: none; }
+.vv-preview-page-viewport { position: absolute; left: 2px; right: 2px; box-sizing: border-box;
+  border: 2px solid var(--vv-head1); background: rgba(130, 160, 220, 0.15); pointer-events: none; }
+.vv-root.vv-presenting .vv-preview-rail { display: none; }
 .vv-content { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
   padding: 32px 45px; box-sizing: border-box; }
 /* the content pane carries tabindex="-1" so the keyboard can be handed BACK to it (closing the find bar,
@@ -475,20 +492,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-root.vv-presenting .vv-presenter-note.markdown-body * { color: #ddd !important; background-color: transparent !important;
   border-color: #000 !important; }
 .vv-root.vv-presenting .vv-presenter-note.markdown-body a { text-decoration: underline; }
-/* the PRESENTER CONSOLE: the pane takes the whole content area, with a top-aligned strip of slide steps on the left
-   and vertically centred notes on the right. The slides view stays mounted, full
+/* the PRESENTER CONSOLE: the pane takes the whole content area, with vertically centred notes on the left
+   and a top-aligned Preview Strip on the right. The slides view stays mounted, full
    size and focused, under the opaque pane, so the show and its keys go on, and a click or the wheel lands on the pane,
    never on a slide. The theme's colours: the window keeps its chrome (slides/chromeless?). */
 .vv-content-wrap.vv-presenter-console > .vv-presenter-pane { inset: 0; width: auto; border-left: 0; display: grid;
-  gap: 10px 18px; grid-template-columns: clamp(180px, 22%, 360px) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "previews notes"; background: var(--vv-bg1); }
+  gap: 10px 18px; grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 360px);
+  grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "strip strip" "notes previews"; background: var(--vv-bg1); }
+.vv-presenter-console .vv-presenter-pane.vv-preview-hidden { display: flex; }
 .vv-presenter-console .vv-presenter-strip { grid-area: strip; display: flex; flex-wrap: wrap; align-items: baseline;
   gap: 4px 14px; }
 .vv-presenter-console .vv-presenter-link { margin: 0 0 0 auto; }
 .vv-presenter-console .vv-presenter-notes { grid-area: notes; font-size: clamp(16px, 1.6vw, 26px); }
 .vv-presenter-console .vv-presenter-notes-body { margin-block: auto; }
 .vv-presenter-previews { grid-area: previews; }
-.vv-vertical-strip { position: relative; min-height: 0; overflow: hidden; }
+.vv-vertical-strip { position: relative; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+.vv-vertical-strip-track { position: relative; width: 100%; }
 .vv-vertical-strip-item { position: absolute; left: 0; width: 100%; box-sizing: border-box; display: flex;
   flex-direction: column; align-items: stretch; gap: 2px; padding: 2px; border: 1px solid var(--vv-border);
   border-radius: 4px; color: var(--vv-fg); background: var(--vv-bg2); cursor: pointer; font: inherit; }

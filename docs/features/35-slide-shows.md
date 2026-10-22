@@ -215,10 +215,10 @@ in the window you are in and shows the slides in a second window, the **audience
 notes or not: the counter and slide previews help without them.
 
 1. **Start.** Press `S` in the window that shows the deck. That window starts the show from the slide you are on and
-   becomes the **presenter console**: a narrow strip on the left starts with the first slide at the top, shows every
-   full-size preview that fits, and clips a small glimpse of more steps above or below. The selection travels to the
-   middle, stays there while the strip can advance, then travels to the end. Overlays are separate steps. Click a preview to jump to it in both windows. The
-   notes fill the right side and sit vertically centred when short; long notes scroll. One line on top holds the
+   becomes the **presenter console**: the scrollable **Preview Strip** on the right starts with the first slide at the top,
+   shows the previews near its viewport, and automatically reveals the current one as the show advances. Scrolling the
+   strip browses it without moving the show; click a preview to jump to it in both windows. Overlays are separate steps.
+   The notes fill the left side and sit vertically centred when short; long notes scroll. One line on top holds the
    counter, the overlay and what the link needs you to know. Your window keeps its menus, tabs, sidebar and bars, and stays
    windowed: `F` makes it fullscreen when you want, and leaving that fullscreen keeps the show running. (A show
    already running fullscreen in it — F5 — leaves fullscreen when you press `S`.) The audience window opens with the

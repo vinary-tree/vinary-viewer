@@ -30,6 +30,8 @@
 (rf/reg-sub :diff/all-collapsed? (fn [db _] (facet/diff-all-collapsed? db))) ; flips the "Collapse All Files" ↔ "Expand All Files" menu label
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
+(rf/reg-sub :ui/preview-strip-visible? (fn [db _] (not= false (get-in db [:ui :preview-strip-visible?]))))
+(rf/reg-sub :web/minimap (fn [db _] (get-in db [:ui :web-minimap])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
 (rf/reg-sub :ui/sidebar-tab    (fn [db _] (get-in db [:ui :sidebar-tab])))
 (rf/reg-sub :ui/projects       (fn [db _] (get-in db [:ui :projects])))

@@ -9,6 +9,7 @@
         :active-heading nil
         :sidebar-visible? true      ; the PANEL column; the icon rail always renders (ADR-0041)
         :sidebar-width 280          ; px, TOTAL incl. the 36px rail; the resize splitter writes this (clamped 180-720)
+        :preview-strip-visible? true ; right-side document minimap/page previews; persisted by the View toggle
         :content-width nil          ; CSS-px clientWidth of .vv-content, mirrored by ONE debounced
                                     ; ResizeObserver (views/content-width-ref); nil until the first
                                     ; measure — drives the width-adaptive diff default (ADR-0043)

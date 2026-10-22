@@ -82,6 +82,8 @@
    :palette/files {:id :palette/files :title "Find file" :category "Search" :dispatch [:palette/open {:source :file}]}
    ;; ---- View ----
    :sidebar/toggle {:id :sidebar/toggle :title "Toggle sidebar" :category "View" :dispatch [:sidebar/toggle]}
+   :view/preview-strip-toggle {:id :view/preview-strip-toggle :title "Show Preview Strip" :category "View"
+                               :dispatch [:view/preview-strip-toggle]}
    ;; Preview↔Source view toggle — flips the shown file between its rendered preview and its source (facet-aware;
    ;; self-gates: a no-op when there is no other facet to switch to, e.g. a lone PDF).
    :view/toggle-source         {:id :view/toggle-source :title "Toggle preview / source" :category "View" :dispatch [:tab/toggle-source]}

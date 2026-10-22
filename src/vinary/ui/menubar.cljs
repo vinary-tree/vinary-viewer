@@ -32,6 +32,7 @@
             {:label "Quit"      :access-key "q" :accel "Ctrl+Q" :event [:app/quit]}]}
    {:label "View" :access-key "v"
     :items [{:label "Toggle Sidebar" :access-key "s" :accel "Ctrl+B" :event [:sidebar/toggle]}
+            {:label "Show Preview Strip" :check-toggle :preview-strip :event [:view/preview-strip-toggle]}
             :sep
             {:label "View Source"    :access-key "v" :event [:tab/toggle-source]}
             {:label "Find…"          :access-key "n" :accel "Ctrl+F" :event [:find/toggle]}
@@ -162,6 +163,7 @@
      :slides? (slides/slides-view? db)
      :presenting? (slides/presenting? db)
      :slide-notes? (slides/presenter-view? db)
+     :preview-strip? (not= false (get-in db [:ui :preview-strip-visible?]))
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
@@ -184,8 +186,10 @@
   "Realize a dynamic item label from the menu ctx. The item keeps a STATIC default :label (raw-`menus`
    readers and tests stay sane) and a static :event — only its displayed name flips."
   [ctx item]
-  (let [item (if (= :slide-notes (:check-toggle item))
-               (assoc item :checked? (boolean (:slide-notes? ctx))) item)]
+  (let [item (case (:check-toggle item)
+               :slide-notes (assoc item :checked? (boolean (:slide-notes? ctx)))
+               :preview-strip (assoc item :checked? (boolean (:preview-strip? ctx)))
+               item)]
     (case (when (map? item) (:dyn-label item))
     :diff-collapse-toggle
     (assoc item :label (if (:diff-all-collapsed? ctx) "Expand All Files" "Collapse All Files"))

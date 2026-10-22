@@ -39,7 +39,7 @@
 
 ;; ---- one region in a box ----------------------------------------------------------------------------------------
 
-(defn- region-box
+(defn region-box
   "A box showing one region of a page (vinary.renderer.pdf-region): `request` {:doc :page :rect :text? :text-layer},
    shown again when it changes and rendered again, forced, when `gen` — the slides view's document generation — does
    (a live refresh replaced the document in place). `attrs` are the box's own attributes; `ratio` the region's
@@ -212,6 +212,7 @@
               _        @(rf/subscribe [:doc/deck])        ; the deck re-derived (notes settled, a refresh)
               invert?  @(rf/subscribe [:pdf/invert?])
               console? @(rf/subscribe [:slides/console?])
+              previews-visible? @(rf/subscribe [:ui/preview-strip-visible?])
               blank    @(rf/subscribe [:slides/audience-blank])
               {:keys [doc sizes current doc-gen side notes-model producer text-layer] d :deck pref :notes}
               (pdf-cache/slides-snapshot)]
@@ -234,7 +235,8 @@
                                          :role "complementary" :aria-label "Speaker notes and slide previews"
                                          :data-joined (when-not console? "true")
                                          :data-has-region (when (seq regions) "true")
-                                         :class (when invert? "vv-pdf-invert")}
+                                         :class (str (when invert? "vv-pdf-invert ")
+                                                     (when (and console? (not previews-visible?)) "vv-preview-hidden"))}
                (when console?
                  [:div.vv-presenter-strip
                   [:span.vv-presenter-position
@@ -243,6 +245,11 @@
                   (when blank
                     [:span.vv-presenter-blank {:data-blank (name blank) :role "status"}
                      (str "Audience: " (name blank))])
+                  [:button.vv-preview-collapse {:type "button"
+                                                :title (if previews-visible? "Collapse Preview Strip" "Show Preview Strip")
+                                                :aria-label (if previews-visible? "Collapse Preview Strip" "Show Preview Strip")
+                                                :on-click #(rf/dispatch [:view/preview-strip-toggle])}
+                   (if previews-visible? "›" "‹")]
                   [link-status]])
                [:section.vv-presenter-notes {:aria-label "Speaker notes" :on-click on-notes-click}
                 [:div.vv-presenter-notes-body
@@ -259,11 +266,11 @@
                    [:p.vv-presenter-empty (if (or deck-notes? any-text?)
                                             "No notes on this slide"
                                             "This deck has no speaker notes")])]]
-               (when console?
+               (when (and console? previews-visible?)
                  [vertical-strip/strip
                   {:items previews :current page
                    :class "vv-presenter-previews" :item-class "vv-presenter-preview"
-                   :aria-label "Slide previews"
+                   :aria-label "Preview Strip — slides"
                    :item-attrs (fn [item] {:data-page (:id item)})
                    :ratio (let [{:keys [w h]} slide-rect] (if (pos? w) (/ h w) 0.5625))
                    :on-select #(rf/dispatch [:slides/preview-pick (:id %)])

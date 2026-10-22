@@ -82,6 +82,8 @@
   :slides
   {"space"     :slides/next
    "S-space"   :slides/prev
+   "n"         :slides/next             ; Vim normal's n search binding takes priority over this layer
+   "p"         :slides/prev
    "backspace" :slides/backspace           ; deletes a typed digit, else the previous slide
    "enter"     :slides/enter               ; goes to the typed slide, else the next one
    "S-right"   :slides/next-frame          ; a frame = all the overlay pages of one Beamer slide

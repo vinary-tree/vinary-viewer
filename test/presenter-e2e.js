@@ -6,8 +6,8 @@
 // harness boots dist/main/main.js, so the real vinary.main.presenter claims a real window, the real
 // vinary.main.slides-link orders the moves, and each window's real slide engine shows them. It proves:
 //   1. Shift+S opens a second live, painting window that presents the deck, while the first shows the presenter
-//      console with the slide's notes — notes the audience window does not show: centred notes on the right and a
-//      left strip of slide-step previews centred on the current step; the audience window hides its chrome, and the
+//      console with the slide's notes — notes the audience window does not show: centred notes on the left and a
+//      scrollable right Preview Strip with the active step outlined; the audience window hides its chrome, and the
 //      presenter window keeps its menus, tabs, URI bar and bottom bar, windowed; neither shows the speaker-notes hint,
 //      which is the single-window show's (no linked show spends it, checked again after step 6);
 //   2. a flip in either window moves the other (Space in the presenter; Space and Shift+Space in the audience), and a
@@ -163,6 +163,8 @@ const state = (win) => evalIn(win, `(() => {
     previewShare: (() => { const n = document.querySelector('.vv-presenter-previews');
       const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
       return n ? n.getBoundingClientRect().width / w : null; })(),
+    previewLeft: document.querySelector('.vv-presenter-previews')?.getBoundingClientRect().left ?? null,
+    notesRight: document.querySelector('.vv-presenter-notes')?.getBoundingClientRect().right ?? null,
     notesShare: (() => { const n = document.querySelector('.vv-presenter-notes');
       const w = document.querySelector('.vv-content-wrap').getBoundingClientRect().width;
       return n ? n.getBoundingClientRect().width / w : null; })(),
@@ -252,6 +254,32 @@ async function run() {
   await until(() => evalIn(presenter, `Boolean(document.querySelector('.vv-pdf-doc.vv-pdf-slides #vv-pdf-page-1 canvas'))`),
     Boolean, 'the deck opens in the slides layout', 20000);
   const start = await until(() => state(presenter), (s) => s.page != null, 'the engine reports its page');
+  const ordinaryStrip = await until(() => evalIn(presenter, `(() => {
+    const rail = document.querySelector('.vv-preview-rail'), content = document.querySelector('.vv-content-wrap');
+    return rail && content && document.querySelector('.vv-preview-page[aria-current="step"]')
+      ? { right: rail.getBoundingClientRect().left >= content.getBoundingClientRect().right - 2,
+          count: document.querySelectorAll('.vv-preview-page').length } : null; })()`),
+  (v) => v && v.right && v.count >= 2, 'the normal slide view has a right-side Preview Strip');
+  assert.ok(ordinaryStrip.count >= 2);
+  await clickAt(presenter, '.vv-preview-page[data-page="1"]');
+  await until(() => state(presenter), (s) => s.page === 1, 'selecting a normal Preview Strip slide opens it');
+  await clickAt(presenter, '.vv-preview-page[data-page="0"]');
+  await until(() => state(presenter), (s) => s.page === 0, 'the first Preview Strip slide can be selected again');
+  await clickAt(presenter, '.vv-preview-collapse');
+  await until(() => evalIn(presenter, `Boolean(document.querySelector('.vv-preview-reopen'))
+    && !document.querySelector('.vv-preview-rail')`), Boolean, 'collapse restores the normal scrollbar');
+  await clickAt(presenter, '.vv-preview-reopen');
+  await until(() => evalIn(presenter, `Boolean(document.querySelector('.vv-preview-rail'))`),
+    Boolean, 'the Preview Strip reopens');
+  await evalIn(presenter, `document.querySelector('.vv-content').focus()`);
+  await press(presenter, 'n');
+  await until(() => state(presenter), (s) => s.page === 1, 'n advances a slide');
+  await press(presenter, 'p');
+  await until(() => state(presenter), (s) => s.page === 0, 'p returns to the previous slide');
+  await evalIn(presenter, `window.dispatchEvent(new MouseEvent('mousedown', { button: 4, bubbles: true, cancelable: true }))`);
+  await until(() => state(presenter), (s) => s.page === 1, 'mouse Forward advances a slide');
+  await evalIn(presenter, `window.dispatchEvent(new MouseEvent('mousedown', { button: 3, bubbles: true, cancelable: true }))`);
+  await until(() => state(presenter), (s) => s.page === 0, 'mouse Back returns to the previous slide');
 
   // 1. Shift+S: a second window presents the deck; the notes stay in the first
   const audience = await openLinkedShow(presenter);
@@ -269,6 +297,7 @@ async function run() {
   assert.strictEqual(consoled.covered, true, 'the console covers the content area');
   assert.ok(consoled.previewShare > 0 && consoled.previewShare < 0.4, `the preview strip is narrow (${consoled.previewShare})`);
   assert.ok(consoled.notesShare > 0.55, `the notes fill the rest (${consoled.notesShare})`);
+  assert.ok(consoled.previewLeft >= consoled.notesRight, 'the Preview Strip is to the right of the notes');
   assert.ok(consoled.previews.length >= 2 && consoled.previews.every((p, i) => p.page === i),
     'the strip begins with consecutive overlays that fit');
   assert.ok(Math.abs(consoled.previews.find((p) => p.current).top - consoled.previewTop) < 2,
@@ -276,6 +305,11 @@ async function run() {
   assert.ok(consoled.previewCanvasCount <= consoled.previews.length,
     'only visible slide previews hold canvases');
   assert.strictEqual(consoled.notesCentered, true, 'short notes are vertically centred');
+  const browsed = await evalIn(presenter, `(() => { const n = document.querySelector('.vv-presenter-previews');
+    n.scrollTop = n.scrollHeight; return { top: n.scrollTop, page: window.__vvdb().ui.slides.page }; })()`);
+  assert.ok(browsed.top > 0, 'the Preview Strip scrolls independently');
+  assert.strictEqual(browsed.page, p0, 'browsing the strip leaves the current slide unchanged');
+  await evalIn(presenter, `document.querySelector('.vv-presenter-previews').scrollTop = 0`);
   const originalSize = presenter.getBounds();
   presenter.setSize(originalSize.width, Math.max(500, originalSize.height - 180));
   await until(() => state(presenter), (s) => s.console && s.previewCenter !== consoled.previewCenter

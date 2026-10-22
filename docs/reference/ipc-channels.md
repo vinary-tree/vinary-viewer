@@ -82,6 +82,7 @@ are fire-and-forget `send`/`on`). Payloads are plain JSON-shaped data or EDN
 | `vv:http-snapshot` ⮐ | `httpSnapshot()` | none → JPEG data-URL | `web` (cached `capturePage`→`toJPEG`) | Cold-cache fallback raster: freeze the page under an overlay while the always-on-top native view hides. |
 | `vv:http-toc-goto` | `httpTocGoto(id)` | heading id string | `web` → web preload `vv:web-scroll-to` | Scroll the HTTP page to a heading. |
 | `vv:http-scroll` | `httpScroll(kind)` | kind string (`page-down`/`page-up`/`home`/`end`) | `web` → web preload `vv:web-scroll` | Forward page/edge keys to the web page when app chrome holds focus (native view visible). |
+| `vv:http-scroll-fraction` | `httpScrollFraction(fraction)` | number in [0,1] | `web` → web preload `vv:web-scroll-fraction` | Navigate a web page from its Preview Strip minimap. |
 | `vv:http-zoom` / `vv:http-zoom-set` | `httpZoom(dir)` / `httpZoomSet(f)` | direction / factor | `web` (`setZoomFactor`) | Zoom the web PAGE (the native view's own webContents), not the app chrome; reports on `vv:zoom-changed`. |
 
 ### 1.4 SSH / SFTP & connections
@@ -178,6 +179,7 @@ Each `window.vv.on*(cb)` subscription returns an unsubscribe function (see
 | `vv:http-snapshot-ready` | `onHttpSnapshotReady(cb)` | JPEG data-URL | `web-host` (`pre-snap`) | Push a fresh page raster (captured after load + on scroll-settle) so opening any overlay freezes the page instantly. |
 | `vv:web-toc` | `onWebToc(cb)` | heading vector | `[:web/toc …]` | Deliver the heading outline from the HTTP web view (relayed from its preload). |
 | `vv:web-active-heading` | `onWebActiveHeading(cb)` | heading id or nil | `[:web/active-heading …]` | Deliver the active HTTP heading (scroll-spy). |
+| `vv:web-minimap` | `onWebMinimap(cb)` | `{url,total,viewport,scroll,blocks?}` | `[:web/minimap …]` | Deliver a bounded, text-free web-page visual map and viewport position. |
 | `vv:web-key` | `onWebKey(cb)` | `{key, ctrl, shift, alt, meta}` | replayed as a synthetic `window` keydown → keymap resolver | Forward an app-global Ctrl/Cmd chord from the (separate-context) web view so the keymap runs the same command. Page editing/clipboard chords stay with the page. |
 | `vv:history-nav` | `onHistoryNav(cb)` | `"back"` or `"forward"` | history dispatch | Forward browser-like navigation from native/web surfaces. |
 
@@ -230,6 +232,8 @@ DOM and relays to main, which forwards to the app renderer where relevant.
 | `vv:web-active-heading` | web preload → main → renderer | heading id or nil | `web.cljs` relay → `[:web/active-heading …]` | Report the scroll-spy active heading. |
 | `vv:web-scroll-to` | main → web preload | heading id string | `web-preload.js` | App TOC click → scroll the page to a heading (sent by `web.cljs` on `vv:http-toc-goto`). |
 | `vv:web-scroll` | main → web preload | kind (`page-down`/`page-up`/`home`/`end`) | `web-preload.js` | App-forwarded page/edge keys when app chrome holds focus (sent by `web.cljs` on `vv:http-scroll`). |
+| `vv:web-scroll-fraction` | main → web preload | number in [0,1] | `web-preload.js` | Scroll the page to a position selected in the Preview Strip. |
+| `vv:web-minimap` | web preload → main → renderer | bounded visual block geometry and scroll metrics | `web.cljs` relay → `[:web/minimap …]` | Report page structure and its visible region without copying HTML or screenshots. |
 | `vv:password-forms` | web preload → main | `{url, origin, count, hasPassword}` | `passwords` | Report login-form presence so the app can show the key-icon badge. |
 | `vv:password-save-candidate` | web preload → main | `{url, origin, username, password}` | `passwords` | Store a submitted login candidate in main memory behind a short-lived token. |
 | `vv:password-fill` | main → web preload | `{username, password, url?}` | `web-preload.js` | Fill the selected login directly into DOM fields and fire `input`/`change`. *(Same channel name as the renderer→main `vv:password-fill` in [§1.5](#15-native-password-manager-bridge), but a distinct sender/receiver context.)* |

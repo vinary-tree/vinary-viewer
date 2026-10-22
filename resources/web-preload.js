@@ -51,6 +51,28 @@ function outline() {
 
 function reportToc() { try { refreshHeadings(); ipcRenderer.send('vv:web-toc', outline()); } catch (e) {} }
 
+// A bounded, text-free visual map for the app's Preview Strip. The isolated preload reports only geometry and
+// element kinds; the remote page receives no API and the app never retains a full-page screenshot.
+function reportMinimap() {
+  try {
+    const all = document.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,pre,table,img,blockquote');
+    const step = Math.max(1, Math.ceil(all.length / 500));
+    const blocks = [];
+    for (let i = 0; i < all.length; i += step) {
+      const el = all[i], r = el.getBoundingClientRect();
+      blocks.push({ top: window.scrollY + r.top, height: r.height,
+        width: Math.min(1, r.width / Math.max(1, window.innerWidth)), tag: el.tagName });
+    }
+    ipcRenderer.send('vv:web-minimap', { url: location.href, total: document.documentElement.scrollHeight,
+      viewport: window.innerHeight, scroll: window.scrollY, blocks: blocks });
+  } catch (e) {}
+}
+
+function reportMinimapPosition() {
+  try { ipcRenderer.send('vv:web-minimap', { url: location.href,
+    total: document.documentElement.scrollHeight, viewport: window.innerHeight, scroll: window.scrollY }); } catch (e) {}
+}
+
 // The last heading whose top is within 100px of the viewport top (mirrors the Markdown scroll-spy).
 function activeHeading() {
   const target = window.scrollY + 100;
@@ -73,13 +95,14 @@ let raf = false;
 function reportActive() {
   if (raf) return;
   raf = true;
-  requestAnimationFrame(function () { raf = false; try { ipcRenderer.send('vv:web-active-heading', activeHeading()); } catch (e) {} });
+  requestAnimationFrame(function () { raf = false; try { ipcRenderer.send('vv:web-active-heading', activeHeading()); } catch (e) {}
+    reportMinimapPosition(); });
 }
 
-window.addEventListener('DOMContentLoaded', function () { reportToc(); reportActive(); });
-window.addEventListener('load', function () { reportToc(); reportActive(); });
+window.addEventListener('DOMContentLoaded', function () { reportToc(); reportActive(); reportMinimap(); });
+window.addEventListener('load', function () { reportToc(); reportActive(); reportMinimap(); });
 window.addEventListener('scroll', reportActive, true);
-window.addEventListener('resize', function () { reportToc(); reportActive(); });
+window.addEventListener('resize', function () { reportToc(); reportActive(); reportMinimap(); });
 
 let tocTimer = null;
 function scheduleTocRefresh() {
@@ -88,12 +111,20 @@ function scheduleTocRefresh() {
     tocTimer = null;
     reportToc();
     reportActive();
+    reportMinimap();
   }, 80);
 }
 window.addEventListener('DOMContentLoaded', function () {
   if (window.MutationObserver && document.body) {
     new MutationObserver(scheduleTocRefresh).observe(document.body, { childList: true, subtree: true });
   }
+});
+
+ipcRenderer.on('vv:web-scroll-fraction', function (_event, fraction) {
+  const total = document.documentElement.scrollHeight;
+  const target = Math.max(0, Math.min(total - window.innerHeight,
+    Math.max(0, Math.min(1, Number(fraction) || 0)) * total - window.innerHeight / 2));
+  window.scrollTo({ top: target, behavior: 'smooth' });
 });
 
 // ---- Native password-manager bridge ---------------------------------------------------------------

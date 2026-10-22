@@ -1862,6 +1862,24 @@
      (update result :fx #(conj (vec (or % [])) [:vv/save-settings (pr-str settings)])))))
 
 (rf/reg-event-fx
+ :view/preview-strip-toggle
+ (fn [{:keys [db]} _]
+   (let [visible? (not= false (get-in db [:ui :preview-strip-visible?]))
+         next? (not visible?)
+         settings (assoc (get-in db [:ui :settings]) :preview-strip-visible? next?)]
+     {:db (-> db (assoc-in [:ui :preview-strip-visible?] next?)
+              (assoc-in [:ui :settings] settings))
+      :fx [[:vv/save-settings (pr-str settings)]]})))
+
+(rf/reg-event-db
+ :web/minimap
+ (fn [db [_ report]]
+   (let [prior (get-in db [:ui :web-minimap])]
+     (if (= (:url report) (:url prior))
+       (assoc-in db [:ui :web-minimap] (merge prior report))
+       (assoc-in db [:ui :web-minimap] report)))))
+
+(rf/reg-event-fx
  :sidebar/tab
  (fn [{:keys [db]} [_ tab]]
    (if (and (= tab :files) (not= :files (get-in db [:ui :sidebar-tab])))
@@ -2788,6 +2806,7 @@
      {:db (cond-> (assoc-in db [:ui :settings] settings)
             (:theme s)                      (assoc-in [:ui :theme] (:theme s))
             (contains? s :sidebar-visible?) (assoc-in [:ui :sidebar-visible?] (:sidebar-visible? s))
+            (contains? s :preview-strip-visible?) (assoc-in [:ui :preview-strip-visible?] (:preview-strip-visible? s))
             (:sidebar-width s)              (assoc-in [:ui :sidebar-width] (:sidebar-width s))
             (:pdf-fit s)                    (assoc-in [:ui :pdf :fit] (:pdf-fit s))
             (contains? s :pdf-invert?)      (assoc-in [:ui :pdf :invert?] (:pdf-invert? s))

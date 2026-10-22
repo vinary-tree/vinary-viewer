@@ -10,6 +10,7 @@
             [vinary.app.events]
             [vinary.app.subs]
             [vinary.app.commands :as commands]
+            [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.input.events]
             [vinary.input.resolver :as resolver]
             [vinary.input.fx :as input-fx]
@@ -40,10 +41,15 @@
   (let [[state accepted?] (history-input/accept @last-history-input dir (.now js/Date))]
     (reset! last-history-input state)
     (when accepted?
-      (case dir
-        "back"    (rf/dispatch [:history/back])
-        "forward" (rf/dispatch [:history/forward])
-        nil))))
+      (if (pdf-cache/slides-active?)
+        (case dir
+          "back"    (rf/dispatch [:slides/command :prev])
+          "forward" (rf/dispatch [:slides/command :next])
+          nil)
+        (case dir
+          "back"    (rf/dispatch [:history/back])
+          "forward" (rf/dispatch [:history/forward])
+          nil)))))
 
 (defn- replay-web-key!
   "Replay a chord forwarded from the (separate-context) web view as a synthetic window keydown, so the app
@@ -94,6 +100,9 @@
       (.onWebToc vv (fn [payload] (rf/dispatch [:web/toc (js->clj payload :keywordize-keys true)]))))
     (when (.-onWebActiveHeading vv)
       (.onWebActiveHeading vv (fn [id] (rf/dispatch [:web/active-heading id]))))
+    (when (.-onWebMinimap vv)
+      (.onWebMinimap vv (fn [payload]
+                          (rf/dispatch [:web/minimap (js->clj payload :keywordize-keys true)]))))
     (when (.-onHistoryNav vv)
       (.onHistoryNav vv dispatch-history-nav!))
     (when (.-onWebKey vv)   ; app-global Ctrl/Cmd chords forwarded from the web view → replay via the resolver
@@ -281,8 +290,8 @@
                        (fn [_] (sched/coalesce! ::math-selection update-math-selection!)))))
 
 (defn mouse-nav!
-  "Mouse thumb buttons: button 3 → Back, button 4 → Forward (like a browser). preventDefault on the
-   capture-phase mousedown cancels Chromium's own back/forward so it never replaces the page."
+  "Mouse thumb buttons: previous/next in a slide view, browser-style Back/Forward elsewhere. Capture-phase
+   preventDefault cancels Chromium navigation; dispatch-history-nav! deduplicates a matching native app-command."
   []
   (.addEventListener js/window "mousedown"
                      (fn [^js e]

@@ -1,5 +1,5 @@
 (ns vinary.ui.vertical-strip
-  "A bounded vertical strip of selectable, ordered previews. The geometry is independent of slide decks."
+  "A scrollable, virtualized vertical strip of selectable previews. The geometry is independent of slide decks."
   (:require [reagent.core :as r]))
 
 (def ^:private gap 8)
@@ -35,12 +35,31 @@
                 after (conj after))})))
 
 (defn strip
-  "Generic preview viewport. `items` carry stable :id values; render-item receives [item visual-height].
-   `item-attrs` may add domain-specific data attributes to each button."
+  "Generic, independently scrollable preview viewport. Only cards near the viewport are mounted. A selection
+   change reveals the current card; manually scrolling previews never changes the selection. `items` have stable
+   :id values, and render-item receives [item visual-height]."
   [{:keys [items current render-item on-select ratio aria-label item-attrs item-class class]}]
   (let [node (atom nil)
         observer (atom nil)
         size (r/atom {:width 0 :height 0})
+        scroll-top (r/atom 0)
+        last-current (atom ::unset)
+        last-size (atom nil)
+        stride (fn [width ratio] (+ gap 20 (* width (if (and (number? ratio) (pos? ratio)) ratio 0.5625))))
+        reveal! (fn [{:keys [items current ratio]}]
+                  (when-let [^js el @node]
+                    (let [n (count items)
+                          idx (or (first (keep-indexed (fn [i item] (when (= current (:id item)) i)) items)) 0)
+                          step (stride (:width @size) ratio)
+                          capacity (max 1 (int (js/Math.floor (/ (+ (:height @size) gap) step))))
+                          start (-> (- idx (quot capacity 2)) (max 0) (min (max 0 (- n capacity))))
+                          ;; Include a sliver of the previous image, beyond its caption and the inter-card gap.
+                          peek-offset (if (pos? start) (+ gap 20 peek-size) 0)
+                          total (max 0 (- (* n step) gap))
+                          target (-> (- (* start step) peek-offset) (max 0)
+                                     (min (max 0 (- total (:height @size)))))]
+                      (set! (.-scrollTop el) target)
+                      (reset! scroll-top target))))
         measure! (fn [] (when-let [^js el @node]
                           (let [next {:width (.-clientWidth el) :height (.-clientHeight el)}]
                             (when (not= next @size) (reset! size next)))))
@@ -57,24 +76,38 @@
                             (reset! observer o))))))]
     (r/create-class
      {:display-name "vv-vertical-strip"
+      :component-did-mount (fn [this] (reveal! (r/props this))
+                             (reset! last-current (:current (r/props this)))
+                             (reset! last-size @size))
+      :component-did-update (fn [this _]
+                              (let [props (r/props this)]
+                                (when (or (not= (:current props) @last-current)
+                                          (not= @size @last-size))
+                                  (reset! last-current (:current props))
+                                  (reset! last-size @size)
+                                  (reveal! props))))
       :component-will-unmount (fn [_] (set-node! nil))
       :reagent-render
       (fn [{:keys [items current render-item on-select ratio aria-label item-attrs item-class class]}]
         (let [all-items (vec items)
-              idx (or (first (keep-indexed (fn [i item] (when (= current (:id item)) i)) all-items)) 0)
-              {visible-items :items tile-height :tile-height}
-              (window (count all-items) idx (:width @size) (:height @size) ratio)]
-          [:section.vv-vertical-strip {:ref set-node! :class class :aria-label (or aria-label "Previews")}
-           (for [{:keys [index top height current? peek?]} visible-items
-                 :let [item (nth all-items index)]]
+              tile-height (- (stride (:width @size) ratio) gap)
+              step (+ tile-height gap)
+              n (count all-items)
+              first-index (-> (js/Math.floor (/ @scroll-top step)) int (- 2) (max 0))
+              last-index (min n (+ 3 (int (js/Math.ceil (/ (+ @scroll-top (:height @size)) step)))))
+              total (max 0 (- (* n step) gap))]
+          [:section.vv-vertical-strip {:ref set-node! :class class :aria-label (or aria-label "Preview Strip")
+                                       :on-scroll #(reset! scroll-top (.. % -currentTarget -scrollTop))}
+           [:div.vv-vertical-strip-track {:style {:height (str total "px")}}
+            (for [index (range first-index last-index)
+                 :let [item (nth all-items index)
+                       current? (= current (:id item))]]
              ^{:key (:id item)}
              [:button.vv-vertical-strip-item
               (merge {:type "button" :class (str item-class " "
                                               (when current? (str "vv-vertical-strip-current "
-                                                                  (when item-class (str item-class "-current "))))
-                                              (when peek? (str "vv-vertical-strip-peek "
-                                                               (when item-class (str item-class "-peek")))))
-               :style {:top (str top "px") :height (str height "px")}
+                                                                  (when item-class (str item-class "-current")))))
+               :style {:top (str (* index step) "px") :height (str tile-height "px")}
                :aria-label (:label item)
                :aria-current (when current? "step")
                :on-mouse-down #(.preventDefault %)
@@ -82,7 +115,7 @@
                               (when (contains? #{"Enter" " "} (.-key e))
                                 (.preventDefault e) (.stopPropagation e)
                                 (on-select item)))
-               :on-click #(on-select item)}
+              :on-click #(on-select item)}
                      (when item-attrs (item-attrs item)))
               (render-item item (max 1 (- tile-height 20)))
-              [:span.vv-vertical-strip-label (:label item)]])]))})))
+              [:span.vv-vertical-strip-label (:label item)]])]]))})))

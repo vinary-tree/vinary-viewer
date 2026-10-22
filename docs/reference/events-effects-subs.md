@@ -433,11 +433,13 @@ above; see [ipc-channels §2.5](./ipc-channels.md) and [features/23](../features
 | `:http/navigated` | `{:url :tab}` (`vv:http-navigated`) | The in-app web view navigated. Recorded onto the tab that **owns** the view (`tab`), not the active one — the http tab may have been left while the page loaded. A new http(s) URL different from the owner's current URI pushes a history entry on that tab (`nav/nav-tab`, which clears its facet state) and onto the web-history MRU, then the retention fx and `[:vv/save-recent …]`; an echo of the tab's own `loadURL`, a closed owner, or a non-http URL changes nothing. |
 | `:web/toc` | heading vector (`vv:web-toc`) | The in-app web view's heading outline → `[:ui :web-toc]` (read by `:doc/toc` for an http tab — the same Contents panel model). |
 | `:web/active-heading` | heading id \| nil | The web view's scroll-spy active heading → `[:ui :active-heading]`. |
+| `:web/minimap` | `{url,total,viewport,scroll,blocks?}` | Update the web page's bounded visual map and viewport for the Preview Strip. Position-only reports retain the prior geometry for the same URL. |
 | `:ui/hover-link` | href \| nil | The hovered link → `[:ui :hover-link]`, shown in the status strip. |
 | `:shell/open-path` | path | `[:vv/open-path path]` — ask the OS to reveal a local path. |
 | `:shell/open-external` | URL | `[:vv/open-external url]` — open in the system browser (About's repository link, the "Open in system browser" context-menu item, external links inside a PDF). |
 | `:clipboard/copy` | text | `[:vv/copy text]` — copy text to the OS clipboard. |
 | `:view/devtools` | — | `[:vv/devtools]` — toggle renderer devtools (View ▸ Developer Tools, `Ctrl+Shift+I`). |
+| `:view/preview-strip-toggle` | — | Toggle the right-side Preview Strip and persist `:preview-strip-visible?` in settings; collapsed mode restores the document's normal scrollbar. |
 | `:view/re-frame-10x` | — | Dev builds: flip `[:ui :re-frame-10x-open?]` → `[:devtools/re-frame-10x open?]` (View ▸ re-frame-10x, palette). |
 | `:view/re-frame-10x-hide` | — | `[:ui :re-frame-10x-open?]` ← false → `[:devtools/re-frame-10x false]` — dispatched once at renderer boot, so the panel starts hidden. |
 | `:app/quit` | — | `[:vv/quit]` — quit the application (File ▸ Quit, `Ctrl+Q`). |
@@ -869,6 +871,8 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:ui/find-context` | `:<- [:ui/active-content-path] :<- [:facet/type]` | `[path facet]` — the identity in-page find watches; a change dispatches `[:find/reset]` |
 | `:ui/active-heading` | `app-db` | active heading id \| nil |
 | `:ui/sidebar-visible?` **[input]** | `app-db` | bool |
+| `:ui/preview-strip-visible?` **[input]** | `app-db` | bool — expanded Preview Strip visibility (default true) |
+| `:web/minimap` **[input]** | `app-db` | bounded web-page visual geometry and viewport position |
 | `:ui/tree-selected` **[input]** | `app-db` | selected tree path \| nil |
 | `:ui/dir-selected` | `app-db` | highlighted directory-entry path \| nil (the *explicit* selection; the rendered highlight also consults the trail — see `nav/effective-selected`) |
 | `:ui/ctrl-held?` | `app-db` | bool — Control currently held (drives the Ctrl-hover breadcrumb URI bar) |

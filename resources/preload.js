@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('vv', {
   httpSnapshot: () => ipcRenderer.invoke('vv:http-snapshot'),
   httpTocGoto: (id) => ipcRenderer.send('vv:http-toc-goto', id),
   httpScroll: (kind) => ipcRenderer.send('vv:http-scroll', kind),   // page/edge keys → native web view (when visible)
+  httpScrollFraction: (fraction) => ipcRenderer.send('vv:http-scroll-fraction', fraction),
   openDialog: (defaultPaths) => ipcRenderer.send('vv:open-dialog', defaultPaths),
   copyText: (text) => ipcRenderer.send('vv:clipboard-write', text),
   readText: () => ipcRenderer.invoke('vv:clipboard-read'),   // Promise<string> — the system clipboard, for Paste
@@ -162,6 +163,11 @@ contextBridge.exposeInMainWorld('vv', {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('vv:web-active-heading', h);
     return () => ipcRenderer.removeListener('vv:web-active-heading', h);
+  },
+  onWebMinimap: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('vv:web-minimap', h);
+    return () => ipcRenderer.removeListener('vv:web-minimap', h);
   },
   onHistoryNav: (cb) => {
     const h = (_e, dir) => cb(dir);
