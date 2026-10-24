@@ -15,6 +15,7 @@
             [vinary.stream.flag :as stream-flag]
             [vinary.app.nav :as nav]
             [vinary.app.projects :as projects]
+            [vinary.app.preview-strip :as preview-strip]
             [vinary.app.commits :as commits]
             [vinary.git.graph :as graph]
             [vinary.git.graph-geometry :as ggeo]
@@ -1864,12 +1865,7 @@
 (rf/reg-event-fx
  :view/preview-strip-toggle
  (fn [{:keys [db]} _]
-   (let [visible? (not= false (get-in db [:ui :preview-strip-visible?]))
-         next? (not visible?)
-         settings (assoc (get-in db [:ui :settings]) :preview-strip-visible? next?)]
-     {:db (-> db (assoc-in [:ui :preview-strip-visible?] next?)
-              (assoc-in [:ui :settings] settings))
-      :fx [[:vv/save-settings (pr-str settings)]]})))
+   (preview-strip/toggle db)))
 
 (rf/reg-event-db
  :web/minimap

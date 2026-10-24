@@ -97,10 +97,18 @@ page/half-page commands. Implemented in `vinary.input.fx` (`:dom/scroll`); the
 bare-arrow / page-key capture handler is `vinary.renderer.core/key-scroll!`.
 
 **Preview Strip.** The right side of the reader shows a Preview Strip by default. PDF pages and
-slides have selectable thumbnails; other documents have a visual map with an outlined viewport.
-Scroll the strip to browse it independently, or click and drag its map to move through the
-document. The active page or viewport is brought back into view when the document position
-changes. Use View ▸ Show Preview Strip or its edge button to collapse or reopen it.
+slides have selectable thumbnails. Rendered Markdown, Org, LaTeX, office documents, diffs and
+PDF reflow show a scaled copy of the document with the same wrapping, figures and typography;
+source editors and live web pages retain their visual maps. The outline marks the main viewport.
+Scroll the strip to browse it independently, or click and drag to center the main view on that
+document location. Preview links and controls cannot activate. Continuous strips hide their
+scrollbars while remaining scrollable; page/slide strips keep theirs. Main-document navigation
+reveals the outline only when necessary, without interrupting independent strip browsing.
+Use View ▸ Show Preview Strip or its edge button to collapse or reopen it.
+Rendered documents of 5 MiB or more start with the strip collapsed and do no preview rendering
+until opened. Opening one remembers that document's choice for this window session, without
+changing the saved default for smaller documents. Previews materialize only visible blocks and
+a buffer above and below; offscreen blocks retain lightweight size placeholders.
 
 ### Slides (a PDF in the slides layout)
 

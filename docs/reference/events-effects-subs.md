@@ -439,7 +439,7 @@ above; see [ipc-channels §2.5](./ipc-channels.md) and [features/23](../features
 | `:shell/open-external` | URL | `[:vv/open-external url]` — open in the system browser (About's repository link, the "Open in system browser" context-menu item, external links inside a PDF). |
 | `:clipboard/copy` | text | `[:vv/copy text]` — copy text to the OS clipboard. |
 | `:view/devtools` | — | `[:vv/devtools]` — toggle renderer devtools (View ▸ Developer Tools, `Ctrl+Shift+I`). |
-| `:view/preview-strip-toggle` | — | Toggle the right-side Preview Strip and persist `:preview-strip-visible?` in settings; collapsed mode restores the document's normal scrollbar. |
+| `:view/preview-strip-toggle` | — | Toggle the right-side Preview Strip. Ordinary documents persist `:preview-strip-visible?`; rendered documents ≥5 MiB start collapsed and use a session-only per-path override. Collapsing unmounts the preview. |
 | `:view/re-frame-10x` | — | Dev builds: flip `[:ui :re-frame-10x-open?]` → `[:devtools/re-frame-10x open?]` (View ▸ re-frame-10x, palette). |
 | `:view/re-frame-10x-hide` | — | `[:ui :re-frame-10x-open?]` ← false → `[:devtools/re-frame-10x false]` — dispatched once at renderer boot, so the panel starts hidden. |
 | `:app/quit` | — | `[:vv/quit]` — quit the application (File ▸ Quit, `Ctrl+Q`). |
@@ -871,7 +871,8 @@ extraction subs are private to `vinary.app.subs` and auto-namespaced: `::keymaps
 | `:ui/find-context` | `:<- [:ui/active-content-path] :<- [:facet/type]` | `[path facet]` — the identity in-page find watches; a change dispatches `[:find/reset]` |
 | `:ui/active-heading` | `app-db` | active heading id \| nil |
 | `:ui/sidebar-visible?` **[input]** | `app-db` | bool |
-| `:ui/preview-strip-visible?` **[input]** | `app-db` | bool — expanded Preview Strip visibility (default true) |
+| `::preview-strip-policy` **[input]** | `app-db` | Preview visibility preference, per-path overrides and PDF reflow choice; equality isolates visibility derivation from unrelated app-state changes |
+| `:ui/preview-strip-visible?` | `::preview-strip-policy`, `:doc/active` | bool — effective Preview Strip visibility: saved default for ordinary documents; session-only opt-in for rendered documents ≥5 MiB |
 | `:web/minimap` **[input]** | `app-db` | bounded web-page visual geometry and viewport position |
 | `:ui/tree-selected` **[input]** | `app-db` | selected tree path \| nil |
 | `:ui/dir-selected` | `app-db` | highlighted directory-entry path \| nil (the *explicit* selection; the rendered highlight also consults the trail — see `nav/effective-selected`) |

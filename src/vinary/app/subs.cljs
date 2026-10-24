@@ -10,6 +10,7 @@
             [vinary.app.nav :as nav]
             [vinary.app.overlay :as overlay]
             [vinary.app.palette :as palette]
+            [vinary.app.preview-strip :as preview-strip]
             [vinary.app.tree-model :as tree-model]
             [vinary.app.uri :as uri]
             [vinary.search.config :as search-config]
@@ -30,7 +31,13 @@
 (rf/reg-sub :diff/all-collapsed? (fn [db _] (facet/diff-all-collapsed? db))) ; flips the "Collapse All Files" ↔ "Expand All Files" menu label
 (rf/reg-sub :ui/active-heading (fn [db _] (get-in db [:ui :active-heading])))
 (rf/reg-sub :ui/sidebar-visible? (fn [db _] (get-in db [:ui :sidebar-visible?])))
-(rf/reg-sub :ui/preview-strip-visible? (fn [db _] (not= false (get-in db [:ui :preview-strip-visible?]))))
+(rf/reg-sub ::preview-strip-policy
+            (fn [db _]
+              (assoc (select-keys (:ui db) [:preview-strip-visible? :preview-strip-overrides])
+                     :pdf {:reflow? (get-in db [:ui :pdf :reflow?])})))
+(rf/reg-sub :ui/preview-strip-visible?
+            :<- [::preview-strip-policy] :<- [:doc/active]
+            (fn [[policy doc] _] (preview-strip/visible-for? policy doc)))
 (rf/reg-sub :web/minimap (fn [db _] (get-in db [:ui :web-minimap])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
 (rf/reg-sub :ui/sidebar-tab    (fn [db _] (get-in db [:ui :sidebar-tab])))

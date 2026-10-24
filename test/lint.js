@@ -28,6 +28,7 @@ const jsFiles = [
   'src/vinary/main/content_service.js',
   'src/vinary/main/daemon_events.js',
   'src/vinary/renderer/find_worker.js',
+  'src/vinary/ui/document_preview.js', 'test/document-preview-e2e.js',
   'resources/public/js/pdf-loader.js',
   'src/mouse-forward-back/index.js', 'test/test-sidebar.js', 'test/lint.js',
   'test/electron-smoke.js', 'test/extensions-smoke.js', 'test/content-service-smoke.js', 'test/watch-e2e.js',

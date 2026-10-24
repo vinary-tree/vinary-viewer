@@ -113,6 +113,7 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 | `vinary.app.db` | Default app-db: UI/navigation/settings/keybinding state. Tabs/history and ephemeral UI live here; DataScript owns content. |
 | `vinary.app.ds` | DataScript content cache keyed by `:doc/path`, the `:ds/rev` bridge, and content-cache helpers (`snapshot`, `eid-for-path`, `doc-attr`, `active-doc`, retention). |
 | `vinary.app.nav` | Pure browser-tab + per-tab-history transforms over app-db. A tab is a view `{:id :uri :hist … :facet :facet-mru :diff-view :diff-collapsed …}` (see the [state schema §5](../architecture/04-state-schema-reference.md#5-tab-shape)). |
+| `vinary.app.preview-strip` | Effective Preview Strip visibility: persisted default and session-only opt-in for rendered documents of at least 5 MiB. |
 | `vinary.app.uri` | URI/path normalization and local-vs-HTTP-vs-remote predicates (`file-path`, `http?`, `remote?`, `dirname`, `segments`). |
 | `vinary.app.facet` | The document-FACET model: a facet is `{:path :type}` (`:preview` or `:source`) over a document's collocated group (`:doc/siblings` — an authored source plus its compiled PDF). The single source of truth for the toolbar's `[Preview ▾ \| Source ▾]` combo: which files each button offers, in what order, which is active, what a click activates. Pure core + thin DataScript/app-db glue. |
 | `vinary.app.zoom` | Pure context-aware zoom helpers (`context` → `:pdf`/`:web`/`:window`, `percent`, `presets`) shared by the zoom events and the `:view/zoom-percent` sub. |
@@ -251,7 +252,9 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.refresh-note` | The non-fatal live-refresh banner (ADR-0045 / ADR-0046): the last good version stays on screen; Retry / dismiss. |
 | `vinary.ui.slides-hud` | What floats over the slides layout in `.vv-content-wrap`: the "Go to 12" chip while a slide number is typed, the speaker-notes hint, and the black / white screen of a running show — never over a presenter console, whose strip shows the audience's blank instead. |
 | `vinary.ui.slides-presenter` | Joined slide-and-notes display for noted steps, with the live slide renderer retained; a linked show's presenter console uses the reusable vertical strip beside notes. |
-| `vinary.ui.preview-strip` | Right-side Preview Strip with selectable PDF/slide pages and bounded visual minimaps for continuous documents and web pages. |
+| `vinary.ui.preview-strip` | Right-side Preview Strip with selectable PDF/slide pages, faithful rendered document previews, and bounded source/web maps. |
+| `vinary.ui.document-preview` | Passive scaled document overview; owns the isolated DOM mirror and confined click/drag navigation through prepared document blocks. |
+| `vinary.ui.document_preview.js` | *(JS)* Incremental, inert Shadow DOM mirror of prepared document content; only visible blocks plus overscan are materialized. Block anchors join the main and miniature layouts, with independent browsing and viewport reveal. |
 | `vinary.ui.vertical-strip` | Reusable, scrollable and virtualized vertical preview strip with responsive sizing, selectable items, and current-item reveal. |
 | `vinary.ui.slides-overview` | The slide overview grid (ADR-0045): a focused `[data-vv-keynav]` overlay of one tile per frame — grid keys, label digits, Enter / Shift+Enter, click — drawn by `vinary.renderer.pdf-thumbs` from the mounted view's borrowed document; tiles take the shape of the page as SHOWN (a second-screen deck's slide half — the snapshot's `:side`). |
 

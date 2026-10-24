@@ -47,3 +47,9 @@
       (and (some? (:doc/html doc)) (ir-html/blank? (:doc/html doc))) :blank
       (:doc/html doc)                                    :html-doc
       :else                                              :rendering)))
+
+(defn document-preview?
+  "Routes backed by prepared document HTML; structured lists and source editors keep their maps."
+  [route kind]
+  (or (contains? #{:html-doc :office :diff :diff-split :diagram :pdf-reflow :pdf-reflow-stream} route)
+      (and (= :stream route) (contains? #{"markdown" "org" "latex"} kind))))

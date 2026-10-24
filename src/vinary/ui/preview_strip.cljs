@@ -1,14 +1,17 @@
 (ns vinary.ui.preview-strip
-  "The right-side Preview Strip: selectable PDF pages or a bounded visual map of a continuous document."
+  "The right-side Preview Strip: selectable PDF pages, rendered document overviews and source/web maps."
   (:require [reagent.core :as r]
             [re-frame.core :as rf]
             [vinary.app.uri :as uri]
             [vinary.renderer.media :as media]
             [vinary.renderer.pdf-cache :as pdf-cache]
             [vinary.renderer.scroll :as scroll]
+            [vinary.stream.flag :as stream-flag]
             [vinary.slides.deck :as deck]
             [vinary.slides.presenter :as presenter]
             [vinary.ui.slides-presenter :as slides-presenter]
+            [vinary.ui.content-route :as content-route]
+            [vinary.ui.document-preview :as document-preview]
             [vinary.ui.vertical-strip :as vertical-strip]))
 
 (def ^:private max-map-height 4800)
@@ -83,6 +86,7 @@
         raf (atom nil)
         dirty? (atom true)
         dragging? (atom false)
+        last-scroll (atom nil)
         model (r/atom {:height 0 :viewport {:top 0 :height 0} :blocks []})
         scroller (fn [] (or (.querySelector js/document ".vv-content .cm-scroller")
                             (.querySelector js/document ".vv-content")))
@@ -106,7 +110,9 @@
                                     (:blocks @model))]
                        (reset! dirty? false)
                        (reset! model {:height h :viewport viewport :blocks blocks})
-                       (reveal! (:top viewport) (:height viewport)))))
+                       (when (and (not @dragging?) (not= @last-scroll (.-scrollTop c)))
+                         (reveal! (:top viewport) (:height viewport)))
+                       (reset! last-scroll (.-scrollTop c)))))
         schedule! (fn [] (when-not @raf
                            (reset! raf (js/requestAnimationFrame
                                         (fn [] (reset! raf nil) (measure!))))))
@@ -326,12 +332,15 @@
         doc @(rf/subscribe [:doc/active])
         uri @(rf/subscribe [:ui/active-uri])
         source? @(rf/subscribe [:ui/active-view-source?])
+        route (content-route/route
+               {:doc doc :tabs @(rf/subscribe [:ui/tabs]) :uri uri :source? source?
+                :diff-view @(rf/subscribe [:ui/active-diff-view])
+                :reflow? @(rf/subscribe [:pdf/reflow?])
+                :stream-setting? (stream-flag/flag-on? (:stream? @(rf/subscribe [:ui/settings])))})
         slides @(rf/subscribe [:slides/state])
         web-map @(rf/subscribe [:web/minimap])
         snapshot (pdf-cache/slides-snapshot)
-        web? (and (not source?)
-                  (or (= "html" (:doc/kind doc))
-                      (and (string? uri) (re-find #"^https?://" uri))))
+        web? (contains? #{:html :http} route)
         web-url (if (= "html" (:doc/kind doc))
                   (if (uri/remote? (:doc/path doc))
                     (media/remote->vv-remote-url (:doc/path doc))
@@ -349,8 +358,15 @@
         [:button.vv-preview-collapse {:type "button" :title "Collapse Preview Strip"
                                       :aria-label "Collapse Preview Strip"
                                       :on-click #(rf/dispatch [:view/preview-strip-toggle])} "›"]]
-       (if (and (not source?) (= "pdf" (:doc/kind doc)) (:doc snapshot) (seq (:sizes snapshot)))
+       (cond
+         (content-route/document-preview? route (:doc/kind doc))
+         ^{:key (str "document:" (:doc/path doc) ":" (:doc/stamp doc) ":" route)}
+         [document-preview/preview
+          {:scroller #(.querySelector js/document ".vv-content")
+           :root #(.querySelector ^js % ".markdown-body")}]
+
+         (and (contains? #{:pdf :http-pdf} route) (:doc snapshot) (seq (:sizes snapshot)))
          ^{:key (str "pdf:" (:doc/path doc) ":" (:doc-gen snapshot))} [page-strip snapshot slides]
-         (if web?
-           ^{:key (str "web:" web-url)} [web-minimap web-url web-map]
-           ^{:key (str "map:" (:doc/path doc) ":" (:doc/stamp doc) ":" source?)} [minimap doc]))]))))
+
+         web? ^{:key (str "web:" web-url)} [web-minimap web-url web-map]
+         :else ^{:key (str "map:" (:doc/path doc) ":" (:doc/stamp doc) ":" source?)} [minimap doc])]))))

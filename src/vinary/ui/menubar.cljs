@@ -8,6 +8,7 @@
             [vinary.app.ds :as ds]
             [vinary.app.facet :as facet]
             [vinary.app.overlay :as overlay]
+            [vinary.app.preview-strip :as preview-strip]
             [vinary.app.slides :as slides]
             [vinary.app.uri :as uri]
             [vinary.app.zoom :as zoom]
@@ -163,7 +164,7 @@
      :slides? (slides/slides-view? db)
      :presenting? (slides/presenting? db)
      :slide-notes? (slides/presenter-view? db)
-     :preview-strip? (not= false (get-in db [:ui :preview-strip-visible?]))
+     :preview-strip? (preview-strip/visible? db)
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
@@ -499,6 +500,8 @@
         access-active? @(rf/subscribe [:ui/access-keys-active?])
         ;; the reactive render-side twin of menu-ctx-now (the keyboard path reads app-db directly)
         ctx {:pdf?  @(rf/subscribe [:view/pdf-active?])
+             :slide-notes? @(rf/subscribe [:vinary.app.subs/presenter-view?])
+             :preview-strip? @(rf/subscribe [:ui/preview-strip-visible?])
              :slides? @(rf/subscribe [:slides/view?])
              :presenting? @(rf/subscribe [:slides/presenting?])
              :diff? @(rf/subscribe [:view/diff-active?])

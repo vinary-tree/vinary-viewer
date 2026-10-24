@@ -1620,6 +1620,11 @@ async function main() {
     assert.ok(reflowedLen > 0, 'reflow view shows the extracted PDF text');
     assert.strictEqual(await evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), false,
       'reflow replaces the canvas while active (additive: the canvas returns when toggled off)');
+    await waitFor(() => evalIn(win, `(() => {
+      const root = document.querySelector('.vv-document-preview-host')?.shadowRoot;
+      return Boolean(root?.querySelector('.markdown-body')?.textContent.trim().length)
+        && !document.querySelector('.vv-preview-pages');
+    })()`), 'PDF reflow also uses the rendered document overview');
     await evalIn(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword("pdf", "reflow-toggle"))); true`);
     await waitFor(() => evalIn(win, `Boolean(document.querySelector('.vv-content .vv-pdf-doc canvas'))`), 'canvas PDF view returns after reflow off');
     console.log('[ok] PDF reflow — extracted text renders as reflowable prose; canvas returns when off');
@@ -3901,9 +3906,9 @@ async function main() {
   await waitFor(() => state.lastCopiedText === 'Copyable preview text', 'preview Ctrl+C clipboard write');
   console.log('[ok] Markdown badges, MathJax, Mermaid, and preview copy work');
   await waitFor(() => evalIn(win, `(() => { const rail = document.querySelector('.vv-preview-rail');
-    const map = rail?.querySelector('.vv-preview-minimap-canvas');
+    const map = rail?.querySelector('.vv-document-preview-host')?.shadowRoot?.querySelector('.markdown-body');
     const content = document.querySelector('.vv-content-wrap');
-    return Boolean(rail && map && map.width > 0 && rail.getBoundingClientRect().left >= content.getBoundingClientRect().right - 2);
+    return Boolean(rail && map?.textContent.length && rail.getBoundingClientRect().left >= content.getBoundingClientRect().right - 2);
   })()`), 'Markdown has a right-side visual Preview Strip');
 
   // The common IR is the UNCONDITIONAL render path (ADR-0017): the Markdown assertions above (H1, MathJax SVG,

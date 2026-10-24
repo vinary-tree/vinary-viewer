@@ -577,11 +577,16 @@ explicit.
   (`vv:http-snapshot-ready`) so the swap is instant. It is a flat JPEG — **no script, DOM, or
   interactivity** — carrying only pixels the user was already viewing, so it does **not** execute or re-host
   remote content in the renderer and does not extend this trust boundary.
-- **Preview Strip data is bounded geometry.** The web-view preload samples at most 500 element
+- **Web Preview Strip data is bounded geometry.** The web-view preload samples at most 500 element
   boxes and reports their sizes, positions, and tag names, plus the document and viewport dimensions;
   it sends no text or live DOM into the app renderer. Main relays `vv:web-minimap` only from the active
   web view. A click or drag in the app's minimap sends a numeric scroll fraction back through main,
   accepted only from the owning app renderer; the web preload clamps it to the page's scroll range.
+- **Rendered document previews reuse sanitized content.** The document overview copies the already
+  prepared renderer DOM in small batches into an inert, accessibility-hidden shadow tree. It does
+  not mount another interactive document, start another parser or stream, or accept live web DOM.
+  An outer navigation surface handles clicks; duplicate heading/SVG IDs stay isolated from the
+  main document, find, and TOC selectors. The same CSP and application-owned styles apply.
 
 ### New attack surface (extensions) — and its mitigations
 
