@@ -7,6 +7,7 @@
             [re-frame.db :as rfdb]
             [re-frame.events]
             [vinary.app.nav :as nav]
+            [vinary.app.preview-strip :as preview-strip]
             [vinary.app.slides :as slides]
             [vinary.app.slides-link :as slides-link]))
 
@@ -19,6 +20,7 @@
    :find-visible? (fn [ctx] (boolean (:find-visible? ctx)))
    :palette-open? (fn [ctx] (boolean (:palette-open? ctx)))
    :not-in-input? (fn [ctx] (not (:in-input? ctx)))
+   :preview-strip-available? (fn [ctx] (boolean (:preview-strip-available? ctx)))
    ;; ADR-0045: a PDF is shown / is shown in the slides layout (keymap AND palette contexts carry these) …
    :pdf-view?      (fn [ctx] (boolean (:pdf-view? ctx)))
    :slides-view?   (fn [ctx] (boolean (:slides-view? ctx)))
@@ -83,7 +85,7 @@
    ;; ---- View ----
    :sidebar/toggle {:id :sidebar/toggle :title "Toggle sidebar" :category "View" :dispatch [:sidebar/toggle]}
    :view/preview-strip-toggle {:id :view/preview-strip-toggle :title "Show Preview Strip" :category "View"
-                               :dispatch [:view/preview-strip-toggle]}
+                               :dispatch [:view/preview-strip-toggle] :when :preview-strip-available?}
    ;; Preview↔Source view toggle — flips the shown file between its rendered preview and its source (facet-aware;
    ;; self-gates: a no-op when there is no other facet to switch to, e.g. a lone PDF).
    :view/toggle-source         {:id :view/toggle-source :title "Toggle preview / source" :category "View" :dispatch [:tab/toggle-source]}
@@ -229,6 +231,7 @@
   (let [db @rfdb/app-db]
     (assoc (nav/base-ctx db)
            :find-visible? (get-in db [:ui :find :visible?])
+           :preview-strip-available? (preview-strip/available? db)
            :pdf-view?     (slides/pdf-shown? db)
            :slides-view?  (slides/slides-view? db)
            :presenting?   (slides/presenting? db)

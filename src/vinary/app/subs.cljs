@@ -38,6 +38,8 @@
 (rf/reg-sub :ui/preview-strip-visible?
             :<- [::preview-strip-policy] :<- [:doc/active]
             (fn [[policy doc] _] (preview-strip/visible-for? policy doc)))
+(rf/reg-sub :ui/preview-strip-available? :<- [:doc/active]
+            (fn [doc _] (preview-strip/available-for? doc)))
 (rf/reg-sub :web/minimap (fn [db _] (get-in db [:ui :web-minimap])))
 (rf/reg-sub :ui/sidebar-width  (fn [db _] (get-in db [:ui :sidebar-width])))
 (rf/reg-sub :ui/sidebar-tab    (fn [db _] (get-in db [:ui :sidebar-tab])))
@@ -144,11 +146,12 @@
  :<- [:ui/tabs] :<- [:ui/active-tab-id] :<- [:ui/active-path]
  :<- [:history/can-back?] :<- [:history/can-forward?] :<- [:ui/find]
  :<- [:view/pdf-active?] :<- [:slides/view?] :<- [:slides/presenting?] :<- [:slides/show-here?]
- :<- [:slides/swap-offered?]
- (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting? here? swap?] _]
+ :<- [:slides/swap-offered?] :<- [:ui/preview-strip-available?]
+ (fn [[tabs active-tab active-path back? fwd? find pdf? slides? presenting? here? swap? preview?] _]
    {:tabs tabs :active-tab active-tab :active-path active-path
     :can-back? back? :can-forward? fwd?
     :find-visible? (:visible? find)
+    :preview-strip-available? preview?
     ;; gate the PDF / Slides commands (ADR-0045); :slides-active? is deliberately absent — keyboard-only
     :pdf-view? pdf? :slides-view? slides? :presenting? presenting? :show-here? here? :swap-offered? swap?
     ;; the query box holds focus whenever the palette is open, so commands gated on the keyboard being

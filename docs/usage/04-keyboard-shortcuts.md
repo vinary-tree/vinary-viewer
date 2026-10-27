@@ -105,10 +105,18 @@ document location. Preview links and controls cannot activate. Continuous strips
 scrollbars while remaining scrollable; page/slide strips keep theirs. Main-document navigation
 reveals the outline only when necessary, without interrupting independent strip browsing.
 Use View ▸ Show Preview Strip or its edge button to collapse or reopen it.
+Directory and archive listings, including remote folders, have no strip or reopen button;
+the View-menu and command-palette action is hidden there. Returning to a document restores its
+previous preference. The Files sidebar can remain open alongside a document and its strip.
 Rendered documents of 5 MiB or more start with the strip collapsed and do no preview rendering
 until opened. Opening one remembers that document's choice for this window session, without
 changing the saved default for smaller documents. Previews materialize only visible blocks and
 a buffer above and below; offscreen blocks retain lightweight size placeholders.
+
+**View settings.** Show Sidebar, Show Preview Strip, Show Slide Notes, Invert PDF and Reflow Text
+use boxed indicators at the right edge of the menu: an empty box is off, a checked box is on.
+Labels align left; existing keyboard shortcuts align in a column immediately before the boxes.
+Click anywhere on the row or use the menu's existing Enter/Space activation to toggle the setting.
 
 ### Slides (a PDF in the slides layout)
 

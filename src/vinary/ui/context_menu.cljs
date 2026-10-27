@@ -6,6 +6,7 @@
             [re-frame.core :as rf]
             [clojure.string :as str]
             [vinary.ui.menu-focus :as menu-focus]
+            [vinary.ui.menu-item :as menu-item]
             [vinary.ui.preview-navigation :as preview-nav]
             [vinary.renderer.text-edit :as text-edit]))
 
@@ -177,6 +178,7 @@
          {:on-click        #(rf/dispatch [:context-menu/close])
           :on-context-menu (fn [^js e] (.preventDefault e) (rf/dispatch [:context-menu/close]))}
          [:div.vv-ctx-menu {:style        {:left (str x "px") :top (str y "px")}
+                            :class        (menu-item/layout-class items)
                             :role         "menu"
                             :tab-index    (when-not keep-focus? 0)
                             ;; keep-focus: cancel the mousedown's default focus-shift so clicking an item can't
@@ -192,14 +194,14 @@
                [:div.vv-menu-sep]
                ^{:key i}
                [:div.vv-menu-item
-                {:class (str (when (= focused i) "vv-menu-item-focused")
-                             (when (:disabled? item) " vv-menu-item-disabled"))
-                 :role "menuitem"
-                 :aria-disabled (boolean (:disabled? item))
-                 :on-mouse-enter (when-not (:disabled? item) #(reset! focus i))
-                 :on-click (when-not (:disabled? item)
-                             (if-let [action (:action item)]
-                               ;; run synchronously (within the click gesture) so the clipboard write is allowed
-                               (fn [_] (action) (rf/dispatch [:context-menu/close]))
-                               #(act! (:event item))))}
-                [:span.vv-menu-item-label (:label item)]])))]]))))
+                (merge (menu-item/attributes item)
+                       {:class (str (when (= focused i) "vv-menu-item-focused")
+                                    (when (:disabled? item) " vv-menu-item-disabled"))
+                        :aria-disabled (boolean (:disabled? item))
+                        :on-mouse-enter (when-not (:disabled? item) #(reset! focus i))
+                        :on-click (when-not (:disabled? item)
+                                    (if-let [action (:action item)]
+                                      ;; run synchronously within the click gesture for clipboard permission
+                                      (fn [_] (action) (rf/dispatch [:context-menu/close]))
+                                      #(act! (:event item))))})
+                [menu-item/content item (:label item)]])))]]))))

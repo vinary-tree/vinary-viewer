@@ -1213,10 +1213,19 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--vv-bg1
 .vv-radio-dot::before { content: "\25CB"; }            /* ○ */
 .vv-radio-dot-on::before { content: "\25CF"; }         /* ● */
 .vv-radio-dot-blank::before { content: ""; }
-.vv-menu-check { display: inline-block; width: 12px; color: var(--vv-head1); font-weight: bold; }
-.vv-menu-item[role="menuitemcheckbox"] { justify-content: flex-start; gap: 6px; }
-.vv-menu-item[role="menuitemcheckbox"] .vv-menu-item-label { flex: 1; }
-.vv-menu-item[role="menuitemcheckbox"] .vv-menu-item-accel { margin-left: 18px; }
+/* A menu with toggles reserves one trailing column for checkboxes / submenu arrows. Shortcuts
+   align before it on every row; direct-child selectors leave radio flyouts' layout independent. */
+.vv-menu-has-toggles > .vv-menu-item { display: grid;
+  grid-template-columns: minmax(max-content, 1fr) max-content 14px; gap: 0; }
+.vv-menu-has-toggles > .vv-menu-item > .vv-menu-item-label { grid-column: 1; padding-right: 24px; text-align: left; }
+.vv-menu-has-toggles > .vv-menu-item > .vv-menu-item-accel { grid-column: 2; margin-right: 8px; text-align: right; }
+.vv-menu-has-toggles > .vv-menu-item > .vv-menu-item-arrow,
+.vv-menu-has-toggles > .vv-menu-item > .vv-menu-check { grid-column: 3; justify-self: end; }
+.vv-menu-check { display: inline-block; position: relative; box-sizing: border-box;
+  width: 14px; height: 14px; border: 1px solid currentColor; border-radius: 2px; pointer-events: none; }
+.vv-menu-item[aria-checked="true"] > .vv-menu-check::after { content: ""; position: absolute;
+  left: 2px; top: 3px; width: 7px; height: 4px; border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor; transform: rotate(-45deg); }
 
 /* ----- Context menu ----- */
 .vv-ctx-overlay { position: fixed; inset: 0; z-index: 120; }

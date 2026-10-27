@@ -327,6 +327,7 @@
 
 (defn panel []
   (let [visible? @(rf/subscribe [:ui/preview-strip-visible?])
+        available? @(rf/subscribe [:ui/preview-strip-available?])
         console? @(rf/subscribe [:slides/console?])
         audience? @(rf/subscribe [:slides/chromeless?])
         doc @(rf/subscribe [:doc/active])
@@ -346,7 +347,7 @@
                     (media/remote->vv-remote-url (:doc/path doc))
                     (media/path->file-url (:doc/path doc)))
                   uri)]
-    (when (and (not console?) (not audience?)
+    (when (and available? (not console?) (not audience?)
                (or web? (:doc/kind doc) (:doc/path doc)))
       (if-not visible?
         [:button.vv-preview-reopen {:type "button" :title "Show Preview Strip"

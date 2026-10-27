@@ -46,6 +46,113 @@ async function click(win, x, y) {
   win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
   await sleep(200);
 }
+const menuRow = label => `Array.from(document.querySelectorAll('.vv-menu-dropdown > .vv-menu-item'))
+  .find(row => row.querySelector('.vv-menu-item-label')?.textContent === ${JSON.stringify(label)})`;
+const key = (win, value) => evaluate(win, `window.dispatchEvent(new KeyboardEvent('keydown',
+  { key: ${JSON.stringify(value)}, bubbles: true, cancelable: true })); true`);
+async function closeMenu(win) {
+  await key(win, 'Escape');
+  await until(() => evaluate(win, `!document.querySelector('.vv-menu-dropdown, .vv-menu-overlay')`), 'menu overlay removed');
+}
+async function viewMenu(win) {
+  await evaluate(win, `Array.from(document.querySelectorAll('.vv-menu-label')).find(n => n.textContent === 'View').click(); true`);
+  await until(() => evaluate(win, `Boolean(document.querySelector('.vv-menu-dropdown'))`), 'View menu');
+}
+async function menuLayout(win, labels) {
+  await viewMenu(win);
+  const rows = await evaluate(win, `Array.from(document.querySelectorAll('.vv-menu-dropdown > .vv-menu-item')).map(row => {
+    const label = row.querySelector('.vv-menu-item-label'), box = row.querySelector('.vv-menu-check');
+    const accel = row.querySelector('.vv-menu-item-accel'), rect = row.getBoundingClientRect();
+    return { label: label.textContent, left: label.getBoundingClientRect().left, right: rect.right,
+      shortcutRight: accel?.getBoundingClientRect().right,
+      box: box && { left: box.getBoundingClientRect().left, right: box.getBoundingClientRect().right,
+        width: box.offsetWidth, height: box.offsetHeight, border: getComputedStyle(box).borderTopWidth,
+        tick: getComputedStyle(box, '::after').content, hidden: box.getAttribute('aria-hidden') },
+      role: row.getAttribute('role'), checked: row.getAttribute('aria-checked') };
+  })`);
+  for (const label of labels) {
+    const row = rows.find(r => r.label === label);
+    assert.ok(row?.box, `${label} has a checkbox outline in either state`);
+    assert.strictEqual(row.role, 'menuitemcheckbox');
+    assert.strictEqual(row.box.hidden, 'true', 'the graphic does not duplicate the accessible state');
+    assert.strictEqual(row.box.width, 14);
+    assert.strictEqual(row.box.height, 14);
+    assert.strictEqual(row.box.border, '1px');
+    assert.ok(Math.abs(row.box.right - (row.right - 14)) < 1, 'checkbox at the right padding edge');
+    assert.strictEqual(row.box.tick !== 'none', row.checked === 'true', 'tick matches accessible state');
+  }
+  assert.ok(rows.every(r => Math.abs(r.left - rows[0].left) < 1), 'all labels share the left edge');
+  const shortcuts = rows.filter(r => r.shortcutRight != null);
+  assert.ok(shortcuts.every(r => Math.abs(r.shortcutRight - shortcuts[0].shortcutRight) < 1), 'all shortcuts share a column');
+  assert.ok(shortcuts.every(r => !r.box || Math.abs(r.box.left - r.shortcutRight - 8) < 1), '8px between shortcut and box');
+  if (process.env.VV_MENU_SHOT) fs.writeFileSync(process.env.VV_MENU_SHOT, (await win.webContents.capturePage()).toPNG());
+  await closeMenu(win);
+}
+async function toggleMenuSetting(win, label) {
+  await viewMenu(win);
+  const before = await evaluate(win, `(() => { const row = ${menuRow(label)}, b = row.querySelector('.vv-menu-check').getBoundingClientRect();
+    return { checked: row.getAttribute('aria-checked'), x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+  await click(win, before.x, before.y);
+  await until(() => evaluate(win, `!document.querySelector('.vv-menu-dropdown')`), 'toggle closes menu once');
+  await viewMenu(win);
+  assert.notStrictEqual(await evaluate(win, `${menuRow(label)}.getAttribute('aria-checked')`), before.checked, `${label} changed once`);
+  // Restore by keyboard, navigating only enabled rows as a user would.
+  const index = await evaluate(win, `Array.from(document.querySelectorAll('.vv-menu-dropdown > .vv-menu-item')).indexOf(${menuRow(label)})`);
+  await key(win, 'Home');
+  for (let i = 0; i < index; i++) await key(win, 'ArrowDown');
+  await key(win, ' ');
+  await until(() => evaluate(win, `!document.querySelector('.vv-menu-dropdown')`), 'keyboard toggle closes menu');
+  await viewMenu(win);
+  assert.strictEqual(await evaluate(win, `${menuRow(label)}.getAttribute('aria-checked')`), before.checked, `${label} restored by keyboard`);
+  await closeMenu(win);
+}
+async function browserAvailability(win) {
+  for (const expanded of [true, false]) {
+    if (!expanded) await evaluate(win, `document.querySelector('.vv-preview-collapse').click(); true`);
+    const preference = await evaluate(win, `window.__vvdb().ui['preview-strip-visible?']`);
+    await evaluate(win, `window.__vvopen(${JSON.stringify(scratch)})`);
+    await until(() => evaluate(win, `Boolean(document.querySelector('.vv-fb'))`), 'folder browser');
+    assert.ok(await evaluate(win, `!document.querySelector('.vv-preview-rail, .vv-preview-reopen, .vv-document-preview-host')`), 'file browser has no strip or handle');
+    await viewMenu(win);
+    assert.ok(await evaluate(win, `!(${menuRow('Show Preview Strip')})`), 'preview toggle absent from file-browser menu');
+    await closeMenu(win);
+    const guarded = await evaluate(win, `(() => {
+      const id = cljs.core.keyword('view', 'preview-strip-toggle');
+      const ctx = vinary.app.commands.palette_ctx();
+      const keyCtx = vinary.input.resolver.build_ctx();
+      const offered = cljs.core.clj__GT_js(vinary.app.commands.all_visible(ctx)).some(c => c.id === 'view/preview-strip-toggle');
+      const consumed = vinary.app.commands.run(id, keyCtx);
+      re_frame.core.dispatch_sync(cljs.core.vector(id));
+      return { offered, consumed, preference: window.__vvdb().ui['preview-strip-visible?'] };
+    })()`);
+    assert.deepStrictEqual(guarded, { offered: false, consumed: false, preference });
+    await evaluate(win, `window.__vvopen(${JSON.stringify(doc)})`);
+    await until(() => evaluate(win, `document.querySelector('.vv-content .markdown-body h1')?.textContent === 'Document overview'`), 'return to document');
+    await until(() => evaluate(win, `Boolean(document.querySelector(${JSON.stringify(expanded ? '.vv-document-preview-host' : '.vv-preview-reopen')}))`), 'document preference restored');
+  }
+  await evaluate(win, `document.querySelector('.vv-preview-reopen').click(); true`);
+  const archive = path.join(scratch, 'browse.tar');
+  const packed = await new Promise((resolve, reject) => {
+    const pack = require('tar-stream').pack(), chunks = [];
+    pack.on('data', chunk => chunks.push(chunk));
+    pack.on('error', reject);
+    pack.on('end', () => resolve(Buffer.concat(chunks)));
+    pack.entry({ name: 'note.md' }, '# Archived document\n\nA previewable file inside an archive.\n');
+    pack.finalize();
+  });
+  fs.writeFileSync(archive, packed);
+  const { archiveUri } = require('../src/vinary/main/content_service');
+  await evaluate(win, `window.__vvopen(${JSON.stringify(archiveUri(archive, []))})`);
+  await until(() => evaluate(win, `Boolean(document.querySelector('.vv-fb'))`), 'archive browser');
+  assert.ok(await evaluate(win, `!document.querySelector('.vv-preview-rail, .vv-preview-reopen')`), 'archive listing has no strip or handle');
+  await viewMenu(win);
+  assert.ok(await evaluate(win, `!(${menuRow('Show Preview Strip')})`), 'archive listing hides the toggle');
+  await closeMenu(win);
+  const entry = archiveUri(archive, ['note.md']);
+  await evaluate(win, `window.__vvopen(${JSON.stringify(entry)})`);
+  await until(() => evaluate(win, `document.querySelector('.vv-document-preview-host')?.shadowRoot?.querySelector('h1')?.textContent === 'Archived document'`), 'archive member supports previews');
+  console.log('[ok] File-browser exclusion across menu, palette, keyboard dispatch and direct events; preferences survive navigation');
+}
 async function clickPreview(win, selector, childSelector = null) {
   await evaluate(win, `(() => { ${elements}
     const target = mirror.querySelector(${JSON.stringify(selector)});
@@ -110,6 +217,7 @@ async function run() {
   assert.strictEqual(basic.color, basic.mainColor, 'same theme');
   assert.ok(basic.scale > 0 && basic.scale < 1);
   console.log('[ok] Actual document, figures, math and diagrams; isolated content and no scrollbar');
+  await menuLayout(win, ['Show Preview Strip', 'Show Sidebar']);
 
   // The real wheel scrolls just the strip. Mutations/resizing must not undo manual browsing.
   const before = await evaluate(win, `(() => { ${elements}
@@ -214,6 +322,23 @@ async function run() {
   await evaluate(win, `window.__vvopen(${JSON.stringify(doc)})`);
   await until(() => evaluate(win, `Boolean(document.querySelector('.vv-document-preview-host'))`), 'small document default is preserved');
   console.log('[ok] Very large documents start unmounted; opt-in leaves small-document defaults alone');
+  await browserAvailability(win);
+  win.setSize(1400, 1000);
+  await toggleMenuSetting(win, 'Show Preview Strip');
+  await toggleMenuSetting(win, 'Show Sidebar');
+  const pdf = path.join(scratch, 'menu.pdf');
+  fs.writeFileSync(pdf, require('./fixtures/pdf-gen').makeTextPdf(2));
+  await evaluate(win, `window.__vvopen(${JSON.stringify(pdf)})`);
+  await until(() => evaluate(win, `Boolean(document.querySelector('.vv-pdf-doc canvas'))`), 'PDF menu fixture');
+  for (const label of ['Invert PDF', 'Reflow Text']) await toggleMenuSetting(win, label);
+  await evaluate(win, `window.__vvslides('layout', 'slides')`);
+  await until(() => evaluate(win, `Boolean(document.querySelector('.vv-pdf-slides'))`), 'slides menu fixture');
+  await toggleMenuSetting(win, 'Show Slide Notes');
+  for (const theme of ['spacemacs-dark', 'spacemacs-light']) {
+    await evaluate(win, `re_frame.core.dispatch_sync(cljs.core.vector(cljs.core.keyword('theme', 'set'), ${JSON.stringify(theme)})); true`);
+    await menuLayout(win, ['Show Sidebar', 'Show Preview Strip', 'Show Slide Notes', 'Invert PDF', 'Reflow Text']);
+  }
+  console.log('[ok] All five boxed toggles activate with pointer/keyboard; labels, shortcuts and states align in both themes');
 }
 const timeout = setTimeout(() => { console.error('document-preview-e2e timed out'); app.exit(1); }, 120000);
 app.whenReady().then(run).then(() => {

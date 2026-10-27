@@ -15,7 +15,7 @@
             [vinary.file-type :as file-type]
             [vinary.input.keymaps-registry :as registry]
             [vinary.ui.access-keys :as access]
-            [vinary.ui.icons :as icons]
+            [vinary.ui.menu-item :as menu-item]
             [vinary.ui.menu-focus :as menu-focus]))
 
 (def ^:private themes
@@ -32,7 +32,7 @@
             {:label "Reload"    :access-key "r" :accel "Ctrl+R" :event [:tab/reload]}
             {:label "Quit"      :access-key "q" :accel "Ctrl+Q" :event [:app/quit]}]}
    {:label "View" :access-key "v"
-    :items [{:label "Toggle Sidebar" :access-key "s" :accel "Ctrl+B" :event [:sidebar/toggle]}
+    :items [{:label "Show Sidebar" :access-key "s" :accel "Ctrl+B" :check-toggle :sidebar :event [:sidebar/toggle]}
             {:label "Show Preview Strip" :check-toggle :preview-strip :event [:view/preview-strip-toggle]}
             :sep
             {:label "View Source"    :access-key "v" :event [:tab/toggle-source]}
@@ -44,9 +44,9 @@
             :sep
             ;; Fit applies to the continuous document layout only (slides fit themselves, ADR-0045)
             {:submenu "Fit" :access-key "f" :radio :sub/fit :pdf-doc-only true}
-            {:label "Invert PDF"        :access-key "t" :event [:pdf/invert-toggle] :pdf-only true}
+            {:label "Invert PDF"        :access-key "t" :check-toggle :pdf-invert :event [:pdf/invert-toggle] :pdf-only true}
             ;; w (Reflo-w), not r: r is Reset Zoom's, and two visible items must never share an access key
-            {:label "Reflow Text"       :access-key "w" :event [:pdf/reflow-toggle] :pdf-only true}
+            {:label "Reflow Text"       :access-key "w" :check-toggle :pdf-reflow :event [:pdf/reflow-toggle] :pdf-only true}
             ;; slide shows (ADR-0045) — ONE flipping layout item (realize-item turns it into "View as Document",
             ;; key m, while the slides layout shows), then the show itself and, in the slides layout, the overview.
             ;; While a show runs, End Slide Show takes the Start items' place, with Start Slide Show's key: only a
@@ -165,12 +165,17 @@
      :presenting? (slides/presenting? db)
      :slide-notes? (slides/presenter-view? db)
      :preview-strip? (preview-strip/visible? db)
+     :preview-strip-available? (preview-strip/available? db)
+     :sidebar? (get-in db [:ui :sidebar-visible?])
+     :pdf-invert? (get-in db [:ui :pdf :invert?])
+     :pdf-reflow? (get-in db [:ui :pdf :reflow?])
      :diff? (facet/diff-preview-active? db)
      :diff-all-collapsed? (facet/diff-all-collapsed? db)}))
 
 (defn- item-visible? [ctx item]
   (cond
     (not (map? item)) true                     ; :sep — kept here, tidied by clean-seps
+    (= :preview-strip (:check-toggle item)) (boolean (:preview-strip-available? ctx))
     ;; a running slide show: End Slide Show while one runs, whatever is shown; the Start items only while none does
     (:presenting-only item) (boolean (:presenting? ctx))
     (and (:hide-presenting item) (:presenting? ctx)) false
@@ -190,6 +195,9 @@
   (let [item (case (:check-toggle item)
                :slide-notes (assoc item :checked? (boolean (:slide-notes? ctx)))
                :preview-strip (assoc item :checked? (boolean (:preview-strip? ctx)))
+               :sidebar (assoc item :checked? (boolean (:sidebar? ctx)))
+               :pdf-invert (assoc item :checked? (boolean (:pdf-invert? ctx)))
+               :pdf-reflow (assoc item :checked? (boolean (:pdf-reflow? ctx)))
                item)]
     (case (when (map? item) (:dyn-label item))
     :diff-collapse-toggle
@@ -453,28 +461,24 @@
                                (rf/dispatch [:menu/focus i])
                                (rf/dispatch [:menu/submenu (:submenu item)]))}
             (access/access-attrs (:access-key item)))
-     [:span.vv-menu-item-label [access/label (:submenu item) (:access-key item) access-active?]]
-     [:span.vv-menu-item-arrow (icons/icon :submenu)]
+     [menu-item/content item [access/label (:submenu item) (:access-key item) access-active?]]
      (when (= sub-open (:submenu item))
        (submenu-dropdown (vec (remove nil? (radio-rows (:radio item)))) access-active? sub-focus))]
 
     :else
     ^{:key i}
     [:div
-     (merge (cond-> {:class          (menu-item-class "vv-menu-item" (= focus i))
-                     :role           (if (:check-toggle item) "menuitemcheckbox" "menuitem")
-                     :aria-checked   (when (:check-toggle item) (boolean (:checked? item)))
+     (merge (menu-item/attributes item)
+            (cond-> {:class          (menu-item-class "vv-menu-item" (= focus i))
                      :on-click       #(act! (:event item))
                      :on-mouse-enter #(do (rf/dispatch [:menu/focus i])
                                           (rf/dispatch [:menu/submenu nil]))}
               (:tooltip item) (assoc :title (:tooltip item)))
             (access/access-attrs (:access-key item)))
-     (when (:check-toggle item) [:span.vv-menu-check (when (:checked? item) "✓")])
-     [:span.vv-menu-item-label [access/label (:label item) (:access-key item) access-active?]]
-     (when (:accel item) [:span.vv-menu-item-accel (:accel item)])]))
+     [menu-item/content item [access/label (:label item) (:access-key item) access-active?]]]))
 
 (defn- menu-dropdown [items sub-open focus sub-focus access-active?]
-  (into [:div.vv-menu-dropdown {:role "menu"}]
+  (into [:div.vv-menu-dropdown {:role "menu" :class (menu-item/layout-class items)}]
         (map (fn [[i item]] (dropdown-item item i sub-open focus sub-focus access-active?)))
         (map-indexed vector items)))
 
@@ -502,6 +506,10 @@
         ctx {:pdf?  @(rf/subscribe [:view/pdf-active?])
              :slide-notes? @(rf/subscribe [:vinary.app.subs/presenter-view?])
              :preview-strip? @(rf/subscribe [:ui/preview-strip-visible?])
+             :preview-strip-available? @(rf/subscribe [:ui/preview-strip-available?])
+             :sidebar? @(rf/subscribe [:ui/sidebar-visible?])
+             :pdf-invert? @(rf/subscribe [:pdf/invert?])
+             :pdf-reflow? @(rf/subscribe [:pdf/reflow?])
              :slides? @(rf/subscribe [:slides/view?])
              :presenting? @(rf/subscribe [:slides/presenting?])
              :diff? @(rf/subscribe [:view/diff-active?])

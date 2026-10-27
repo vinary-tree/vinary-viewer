@@ -1453,6 +1453,8 @@ async function main() {
     await waitFor(() => evalIn(win, `(() => { const t = document.querySelector('.vv-content').textContent; return /one\\.txt/.test(t) && /two\\.txt/.test(t); })()`),
       'a remote ssh:// directory lists its entries in-pane', 12000);
     console.log('[ok] a remote ssh:// directory browses in the in-pane file list');
+    assert.ok(await evalIn(win, `!document.querySelector('.vv-preview-rail, .vv-preview-reopen')`),
+      'remote directory browsing has no Preview Strip or reopen control');
 
     // The header must FLOAT and the pane must be edge-to-edge: a top gutter on the scroller would make the
     // top:0 sticky header float below it, showing scrolled rows in the gap above. Assert the gutter is dropped

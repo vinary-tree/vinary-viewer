@@ -11,6 +11,20 @@
 (defn- labels [items] (mapv #(or (:label %) (:submenu %)) items))
 (defn- by-label [items label] (first (filter #(= label (or (:label %) (:submenu %))) items)))
 
+(deftest view-settings-are-checked-menu-items
+  (doseq [on? [true false]
+          [label toggle] [["Show Sidebar" :sidebar] ["Show Preview Strip" :preview-strip]
+                          ["Show Slide Notes" :slide-notes] ["Invert PDF" :pdf-invert]
+                          ["Reflow Text" :pdf-reflow]]]
+    (let [ctx {:pdf? true :slides? true :preview-strip-available? true
+               :sidebar? on? :preview-strip? on? :slide-notes? on? :pdf-invert? on? :pdf-reflow? on?}
+          item (by-label (view-items ctx) label)]
+      (is (= toggle (:check-toggle item)) label)
+      (is (= on? (:checked? item)) label)))
+  (is (nil? (by-label (view-items {:preview-strip-available? false}) "Show Preview Strip")))
+  (is (= "Ctrl+B" (:accel (by-label (view-items {}) "Show Sidebar"))))
+  (is (= "S" (:accel (by-label (view-items {:pdf? true :slides? true}) "Show Slide Notes")))))
+
 (def ^:private ctxs
   {:no-pdf      {:pdf? false}
    :pdf-doc     {:pdf? true :slides? false}

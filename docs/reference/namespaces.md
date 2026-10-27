@@ -113,7 +113,7 @@ are the loop; `nav`/`uri`/`zoom`/`link` are pure transforms.
 | `vinary.app.db` | Default app-db: UI/navigation/settings/keybinding state. Tabs/history and ephemeral UI live here; DataScript owns content. |
 | `vinary.app.ds` | DataScript content cache keyed by `:doc/path`, the `:ds/rev` bridge, and content-cache helpers (`snapshot`, `eid-for-path`, `doc-attr`, `active-doc`, retention). |
 | `vinary.app.nav` | Pure browser-tab + per-tab-history transforms over app-db. A tab is a view `{:id :uri :hist … :facet :facet-mru :diff-view :diff-collapsed …}` (see the [state schema §5](../architecture/04-state-schema-reference.md#5-tab-shape)). |
-| `vinary.app.preview-strip` | Effective Preview Strip visibility: persisted default and session-only opt-in for rendered documents of at least 5 MiB. |
+| `vinary.app.preview-strip` | Preview Strip availability and effective visibility: excluded from directory/archive listings; persisted default and session-only opt-in for rendered documents of at least 5 MiB. |
 | `vinary.app.uri` | URI/path normalization and local-vs-HTTP-vs-remote predicates (`file-path`, `http?`, `remote?`, `dirname`, `segments`). |
 | `vinary.app.facet` | The document-FACET model: a facet is `{:path :type}` (`:preview` or `:source`) over a document's collocated group (`:doc/siblings` — an authored source plus its compiled PDF). The single source of truth for the toolbar's `[Preview ▾ \| Source ▾]` combo: which files each button offers, in what order, which is active, what a click activates. Pure core + thin DataScript/app-db glue. |
 | `vinary.app.zoom` | Pure context-aware zoom helpers (`context` → `:pdf`/`:web`/`:window`, `percent`, `presets`) shared by the zoom events and the `:view/zoom-percent` sub. |
@@ -244,6 +244,7 @@ Reagent view components and their pure view-helpers.
 | `vinary.ui.modal` | Shared modal-dialog shell: the scrim overlay + bordered/elevated panel with a title bar. |
 | `vinary.ui.icons` | Font Awesome (Free Solid, self-hosted) icon set. |
 | `vinary.ui.access-keys` | Shared helpers for desktop-style Alt access keys in custom renderer UI. |
+| `vinary.ui.menu-item` | Shared menu-row labels, shortcuts, boxed toggle indicators and checkbox semantics for dropdown and right-click menus. |
 | `vinary.ui.platform` | Tiny renderer-side OS detection (`single-click-open?`): single-click opens on Linux, double-click on Windows/macOS. |
 | `vinary.ui.preview-context` | Pure helpers for Markdown preview context menus: term extraction and source-location formatting. |
 | `vinary.ui.preview-navigation` | Navigation events for links activated from preview surfaces (classify link/target → the right open event). |

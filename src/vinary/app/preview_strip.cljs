@@ -5,6 +5,9 @@
 
 (def large-document-bytes (* 5 1024 1024))
 
+(defn available-for? [doc]
+  (not (contains? #{"directory" "archive"} (:doc/kind doc))))
+
 (defn large-document? [doc reflow?]
   (and (or (contains? #{"markdown" "org" "latex" "office" "diff" "diagram"} (:doc/kind doc))
            (and (= "pdf" (:doc/kind doc)) reflow?))
@@ -13,9 +16,10 @@
            large-document-bytes)))
 
 (defn visible-for? [ui doc]
-  (if (large-document? doc (get-in ui [:pdf :reflow?]))
-    (true? (get-in ui [:preview-strip-overrides (:doc/path doc)]))
-    (not= false (:preview-strip-visible? ui))))
+  (and (available-for? doc)
+       (if (large-document? doc (get-in ui [:pdf :reflow?]))
+         (true? (get-in ui [:preview-strip-overrides (:doc/path doc)]))
+         (not= false (:preview-strip-visible? ui)))))
 
 (defn- active-doc [db]
   (when-let [path (facet/active-content-path db)]
@@ -23,13 +27,20 @@
 
 (defn visible? [db] (visible-for? (:ui db) (active-doc db)))
 
+(defn available? [db]
+  ;; Keyboard dispatch needs only the kind, not a pull of the document's full content.
+  (available-for? {:doc/kind (when-let [path (facet/active-content-path db)]
+                             (ds/doc-attr (ds/snapshot) path :doc/kind))}))
+
 (defn toggle-result [db doc]
-  (let [next? (not (visible-for? (:ui db) doc))]
-    (if (large-document? doc (get-in db [:ui :pdf :reflow?]))
-      {:db (assoc-in db [:ui :preview-strip-overrides (:doc/path doc)] next?)}
-      (let [settings (assoc (get-in db [:ui :settings]) :preview-strip-visible? next?)]
-        {:db (-> db (assoc-in [:ui :preview-strip-visible?] next?)
-                 (assoc-in [:ui :settings] settings))
-         :fx [[:vv/save-settings (pr-str settings)]]}))))
+  (if-not (available-for? doc)
+    {:db db}
+    (let [next? (not (visible-for? (:ui db) doc))]
+      (if (large-document? doc (get-in db [:ui :pdf :reflow?]))
+        {:db (assoc-in db [:ui :preview-strip-overrides (:doc/path doc)] next?)}
+        (let [settings (assoc (get-in db [:ui :settings]) :preview-strip-visible? next?)]
+          {:db (-> db (assoc-in [:ui :preview-strip-visible?] next?)
+                   (assoc-in [:ui :settings] settings))
+           :fx [[:vv/save-settings (pr-str settings)]]})))))
 
 (defn toggle [db] (toggle-result db (active-doc db)))

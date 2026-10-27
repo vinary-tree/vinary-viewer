@@ -12,6 +12,7 @@
             [re-frame.db :as rfdb]
             [vinary.app.nav :as nav]
             [vinary.app.commands :as commands]
+            [vinary.app.preview-strip :as preview-strip]
             [vinary.app.overlay :as overlay]
             [vinary.app.slides :as slides]
             [vinary.app.slides-link :as slides-link]
@@ -66,6 +67,7 @@
             :in-input?     in-input?
             ;; the shown document is a PDF / a PDF in the slides layout (gate the Slides commands, like the palette)
             :pdf-view?     (slides/pdf-shown? db)
+            :preview-strip-available? (preview-strip/available? db)
             :slides-view?  (slides/slides-view? db)
             :presenting?   (slides/presenting? db)
             ;; the show is shown here — its view in front, its presenter not away (ADR-0048 §8.10)
